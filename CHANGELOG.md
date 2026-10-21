@@ -104,23 +104,22 @@ integration, and on 0x153C LOG_START answers E_FPGA detail 1.
   rates: 500 kB/s through, CPU duty 52-60 % best case, 78-82 % worst case), `test_session` test_logger; eleven 1.27
   logger vectors (151 total). (46d1bb6)
 
-#### Unnumbered (provisional) - fw-d5 (protocol 1.27, row 67): the generator as a pattern, FPGA 0x153D
+#### Unnumbered (provisional) - fw-d5 / fw-nopat (protocol 1.27, row 67): the generator as a fractional square, FPGA 0x153D
 
-Branch `fw-d5`, not benched, not numbered (`PC_FW_VERSION` unchanged, still built for 0x153C until the 0x153D
-integration). Needs bitstream 0x153D: on 0x153C the generator writes go to unused codes. Commits 30fe638 (generator,
-SET_PATTERN, SET_PATTERN_TRIGGER, source 3), 4743591 (Bode on P), 4f12433 (model and bus tests), 5e5545f (vectors).
+Branches `fw-d5` and `fw-nopat`, not benched, not numbered (`PC_FW_VERSION` unchanged, still built for 0x153C until the
+0x153D integration). Needs bitstream 0x153D: on 0x153C the generator writes go to unused codes. Commits 30fe638,
+4743591 (Bode on P), 4f12433, 5e5545f (fw-d5); c7a05e3, 78fc734, 990922e (fw-nopat: the owner cut 0x153D's pattern
+generator on 2026-10-21 because it did not fit the FPGA, so SET_PATTERN, SET_PATTERN_TRIGGER and trigger source 3 never
+shipped).
 
-- The generator is the pattern generator's two-step square on the 200 MHz clock (5 ns edges, every edge within one clock
-  of ideal, the mean frequency exact to 2^-16 of a clock per period); a frequency or duty change while it runs is
-  glitch-free. The DDS writes (0x51 / 0x52) are gone. The menu, the calibration wizard (its static levels and 1 kHz),
-  the boot state and the Frequency response engine use it.
+- The generator is a fractional two-step square on the 200 MHz clock (5 ns edges, every edge within one clock of ideal,
+  the mean frequency exact to 2^-16 of a clock per period); a frequency or duty change while it runs is glitch-free and
+  taken at once (the step in progress completes). The DDS writes (0x51 / 0x52) are gone. The menu, the calibration
+  wizard (its static levels and 1 kHz), the boot state and the Frequency response engine use it.
 - SET_GEN: the raw modes are the period P16 and the high time H16 in 1/65536 of a 5 ns clock; GEN is 40 bytes with the
-  pattern status (the pending bit a host chirp paces on), the source byte, P16 and H16. GET_INFO's generator clock is
-  200 MHz; caps bit 1 is renamed GENERATOR.
-- New: SET_PATTERN 0x0217 (up to 8 steps with a marker, single / R bursts / continuous, idle level, gap, start source),
-  SET_PATTERN_TRIGGER 0x021A (the pattern's own trigger engine with the SET_TRIGGER2 vocabulary), capture trigger source
-  3 = the pattern's marker ("PAT" on the trigger button). Caps bits 24 PATTERN_GEN and 27 PATTERN_TRIGGER, features bits
-  12 and 13.
+  square's status (running, the pending bit a host chirp paces on, the step, mode active), P16 and H16. GET_INFO's
+  generator clock is 200 MHz; caps bit 1 is renamed GENERATOR. Caps bits 24 / 27 and features bits 12 / 13 and the
+  command codes 0x0217 / 0x021A are reserved.
 - Frequency response: the stimulus period is P clocks of 5 ns (P = 4 M of the DDS era), the frequency grid four times
   finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
 
@@ -1629,21 +1628,20 @@ was found (commit not identified).
   `SetDecimReq.SWAP` / `NEG_A` / `NEG_B`, the decimation result's "flags" list; the simulator drops SET_DECIM flags
   bits 0..2) (eea44e1).
 - 2026-10-21 (mcp-d6, provisional, protocol 1.27 / FPGA 0x153D, docs/plans/fpga-0x153c.md item D6; simulator only):
-  the host side of the 0x153D generation, byte-exact with fw-d4's logger and fw-d5's generator / pattern vectors.
-  **The generator is the pattern**: SET_GEN's raw modes are P16 / H16 (the period and high part in 1/65536 of a 5 ns
-  clock), GET_GEN 40 bytes with the pattern status (`pending`: a change not yet taken), gen_clock 200 MHz, caps bit 1
-  renamed GENERATOR; `scope_generator` reports the exact frequency, the period in clocks and P16 / H16 (3fea867,
-  1c5715f). **Bode on P = 4 M**: `bode.py` plans an integer period of 5 ns clocks (four times finer, even P above 4095
+  the host side of the 0x153D generation, byte-exact with fw-d4's logger and fw-d5's generator vectors.
+  **The generator is a fractional square**: SET_GEN's raw modes are P16 / H16 (the period and high part in 1/65536 of
+  a 5 ns clock), GET_GEN 40 bytes with the square's status (`pending`: a change not yet taken), gen_clock 200 MHz, caps
+  bit 1 renamed GENERATOR; `scope_generator` reports the exact frequency, the period in clocks and P16 / H16 (3fea867,
+  1c5715f, 2f940e9). **Bode on P = 4 M**: `bode.py` plans an integer period of 5 ns clocks (four times finer, even P above 4095
   at N = 16), records always coherent; `docs/bode-plan-vectors.json` version 2 (`period`), byte-identical with the
   firmware's; thru files version 2 (a version 1 file is refused: measure the thru again) (3fea867). **New tools**:
   `scope_log` / `scope_log_status` / `scope_log_stop` (the streaming logger at the 500 / 250 / 125 kS/s tiers into
-  raw files plus `log.json`, `logfile.load_log`, a summary for `scope_report`), `scope_pattern` (8-step pulse
-  patterns, the marker as trigger source `pattern`, the pattern trigger engine, `capture=true`), `scope_sweep` (a
-  host-stepped chirp, about 2,000 steps/s), `scope_set_trigger(source='pattern')`, report kinds `log` and `pattern`
-  (1c5715f). Simulator: the pattern core (one fraction accumulator, bursts, gap, marker, the pending handshake), the
-  marker trigger, the engine on the TrigQual model, the logger with `--log-stall` / `--log-ring` (3fea867, 6a69b9e).
-  The self-test's fast square is 200 MHz / 201 (an even period puts every edge at one ADC core). 14 host vectors
-  (bb2c107).
+  raw files plus `log.json`, `logfile.load_log`, a summary for `scope_report`), `scope_sweep` (a host-stepped
+  chirp, about 2,000 steps/s), report kind `log` (1c5715f). The pulse-pattern tool, the `pattern` trigger source and
+  their simulator models were removed with the owner's cut of the 0x153D pattern generator (2f940e9). Simulator: the
+  square with the pending handshake, the logger with `--log-stall` / `--log-ring` (3fea867, 6a69b9e, 2f940e9). The
+  self-test's fast square is 200 MHz / 201 (an even period puts every edge at one ADC core). 9 host vectors (bb2c107,
+  2f940e9).
 
 - 2026-10-21 (mcp-c8b): the host matches fw 0.2.104. `scope_counter`'s level follows the trigger level as the
   firmware does at boot (a volts level pins it, `level='trigger'` follows again, `level_follows_trigger` in the

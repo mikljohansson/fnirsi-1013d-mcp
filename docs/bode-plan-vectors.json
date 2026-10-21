@@ -1,7 +1,7 @@
 {
  "format": "fnirsi1013d-bode-plan",
  "version": 2,
- "notes": "mcp/src/fnirsi1013d/bode.py plan_point / plan_sweep (docs/plans/bode-design.md 3.1-3.2). f_req in Hz to 9 significant digits (sweeps: np.geomspace), period = P in 5 ns clocks (FPGA 0x153D pattern), f_mhz = round(200e9 / P), divider = N - 1 (0 = legacy 200 MSa/s), record = samples analysed, total = the even trigger total. Regenerate: python -m fnirsi1013d.bode --write-vectors ../docs/bode-plan-vectors.json",
+ "notes": "mcp/src/fnirsi1013d/bode.py plan_point / plan_sweep (docs/plans/bode-design.md 3.1-3.2). f_req in Hz to 9 significant digits (sweeps: np.geomspace), period = P in 5 ns clocks (FPGA 0x153D square), f_mhz = round(200e9 / P), divider = N - 1 (0 = legacy 200 MSa/s), record = samples analysed, total = the even trigger total. Regenerate: python -m fnirsi1013d.bode --write-vectors ../docs/bode-plan-vectors.json",
  "points": [
   {
    "f_req": 1.0,

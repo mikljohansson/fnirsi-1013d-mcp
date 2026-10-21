@@ -149,10 +149,9 @@ STATIC_PROFILE: dict[str, str] = {
     "full_scale": "about 256 codes = ~8.8 divisions; e.g. ~0.88 V at 100 mV/div [U]",
     "coupling": "DC or AC (relay)",
     "input": "1 MOhm; assume 40 V peak maximum at 1x and use a 10x probe for anything higher [U]",
-    "generator": "square wave (or an 8-step pulse pattern, scope_pattern) on the calibration pin: the two-step "
-                 "pattern on the 5 ns clock, the average frequency exact to 2^-16 of the period, every edge within 5 ns "
-                 "of its ideal time, <= 25 MHz (caps GENERATOR, PATTERN_GEN on 0x153D). No DAC, no arbitrary "
-                 "waveform. At the probe it is a ~3.1 Vpp square wave whose "
+    "generator": "square wave on the calibration pin: a fractional two-step square on the 5 ns clock, the "
+                 "average frequency exact to 2^-16 of the period, every edge within 5 ns of its ideal time, <= 25 MHz "
+                 "(caps GENERATOR). No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
                  "DC level is the USB ground, 1.24 V below the probe ground (reads -1.24 / +1.9 V): a timing reference, not "
                  "a voltage reference",
     "throughput": "~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for "
@@ -168,7 +167,7 @@ STANDING_CAVEATS = [
 
 #: T8 square-wave check (backups/t8sq_CH1.json): bench DC reads right, the calibration output does not swing 0..3.3 V
 #: fpga-gen2, fpga/al3/README.md "Changes" 2 (commit 28126aa): probe ground = VRF1 = +1.24 V over USB ground
-GEN_NOTE = ("the generator is a two-step pattern on the 200 MHz clock (FPGA 0x153D): every edge lies on the 5 ns "
+GEN_NOTE = ("the generator is a fractional two-step square on the 200 MHz clock (FPGA 0x153D): every edge lies on the 5 ns "
             "grid, within one clock of its ideal time; the period carries a 1/65536-clock fraction, so the "
             "average frequency is exact to 2^-16 / P (7.6e-11 at 1 kHz, 7.6e-7 at 10 MHz) and a change while it runs "
             "is glitch-free and phase-continuous; a single period can be 5 ns longer than the next (the fraction's "
@@ -878,7 +877,7 @@ def _trigger_stream_period(s: Scope, source: int) -> float:
 def _trigger_summary(s: Scope) -> dict[str, Any]:
     tr = s.get_trigger()
     tb = s.get_timebase()
-    src = P.TRIG_SOURCE_NAMES[tr.source] if tr.source < 4 else str(tr.source)
+    src = P.TRIG_SOURCE_NAMES[tr.source] if tr.source < len(P.TRIG_SOURCE_NAMES) else str(tr.source)
     out = {"source": src, "edge": P.EDGES[tr.edge] if tr.edge < 2 else tr.edge,
            "level_code": tr.level, "level_volts": _r6(_level_volts(s, tr.source, tr.level)),
            "mode": P.TRIG_MODES[tr.mode] if tr.mode < 3 else tr.mode,
@@ -914,9 +913,8 @@ def _gen_summary(s: Scope) -> dict[str, Any]:
     if not s.profile().has_generator:
         return {"available": False, "note": "no programmable generator in this firmware's caps (GENERATOR)"}
     g = s.get_gen()
-    out: dict[str, Any] = {"available": True, "enabled": bool(g.enable), "source": g.source_name}
-    if g.source == P.GEN_SOURCE_SQUARE:
-        out.update(frequency=_r6(g.frequency_hz), duty_percent=_r6(g.duty * 100))
+    out: dict[str, Any] = {"available": True, "enabled": bool(g.enable)}
+    out.update(frequency=_r6(g.frequency_hz), duty_percent=_r6(g.duty * 100))
     out.update(running=g.running, pending=g.pending)
     return out
 
@@ -1619,8 +1617,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         Works for scope_capture / scope_read_capture (also peak-detect records: the min / max envelope as a band),
         scope_averaged_capture, scope_decay_fit, scope_capture_segments, scope_capture_and_fft, scope_spectrum,
         scope_bode_sweep (host or device), scope_decode, scope_mask_test, scope_dvm and scope_counter results, a
-        scope_log (its summary .npz: the min .. max per bin over the whole log, the gaps marked) and scope_pattern (the
-        timing diagram with the markers).
+        scope_log (its summary .npz: the min .. max per bin over the whole log, the gaps marked).
         Files go to <home>/reports/<date>/ (FNIRSI_MCP_HOME, default ~/.fnirsi1013d). Without matplotlib (pip
         install "fnirsi1013d[plot]") there is no PNG and the page carries the numbers only. Touches no scope.
 
@@ -1884,11 +1881,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(1, title="Set the trigger and capture geometry", idempotent=True)
     async def scope_set_trigger(
-        source: Annotated[Literal["CH1", "CH2", "EXT", "pattern"] | None, Field(description="trigger channel; EXT = "
-                          "the calibration pin as a 3.3 V logic input referenced to the USB ground, not the probe "
-                          "ground (caps EXT_TRIGGER, generator off; level ignored); pattern = the marker of "
-                          "scope_pattern (protocol 1.27, caps PATTERN_GEN; edge type only, the pattern needs "
-                          "trigger_on_marker; EXT's position convention)")] = None,
+        source: Annotated[Literal["CH1", "CH2", "EXT"] | None, Field(description="trigger channel; EXT = the "
+                          "calibration pin as a 3.3 V logic input referenced to the USB ground, not the probe ground "
+                          "(caps EXT_TRIGGER, generator off; level ignored)")] = None,
         edge: Annotated[Literal["rising", "falling"] | None, Field(description="trigger edge (the edge type); for "
                         "the other types see polarity")] = None,
         type: Annotated[Literal["edge", "pulse_width", "nth_edge", "timeout", "runt", "window"] | None, Field(
@@ -1947,12 +1942,6 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             cur = s.get_trigger(cached=False)
             cav = list(notes)
             src = None if source is None else P.TRIG_SOURCE_NAMES.index(source)
-            if src == P.TRIG_SOURCE_PATTERN:
-                if not prof.has(P.Caps.PATTERN_GEN):
-                    raise ValueError("source 'pattern' needs the pattern generator (caps PATTERN_GEN, protocol 1.27 "
-                                     "on FPGA 0x153D)")
-                if (type or (cur.trigger2.type_name if cur.trigger2 is not None else "edge")) != "edge":
-                    raise ValueError("source 'pattern' (the marker) works with the edge type only: pass type='edge'")
             if src == 2 and not prof.has(P.Caps.EXT_TRIGGER):
                 raise ValueError("source 'EXT' needs the external trigger input (caps EXT_TRIGGER); this firmware's "
                                  "caps lack it. Trigger on CH2 instead.")
@@ -1965,11 +1954,6 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                  "fw 0.2.104+); this firmware has the edge trigger only")
             gen_was_on = src == 2 and prof.has_generator and bool(s.get_gen().enable)
             eff_src = cur.source if src is None else src
-            if eff_src == P.TRIG_SOURCE_PATTERN:
-                cav.append("trigger source 'pattern': the capture triggers at the start of a marked step of "
-                           "scope_pattern (trigger_on_marker=true); the marker is armed once the pretrigger has "
-                           "filled, so arm first and start the pattern after (scope_pattern(capture=true) does), or "
-                           "let a repeating / continuous pattern run")
             if eff_src == 2:
                 cav.append(EXT_NOTE)
                 if level is not None or level_code is not None:
@@ -3755,12 +3739,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         token and a summary of the physical effect; repeat the identical call with the token within 120 s. Disabling
         needs no token. Returns the actual frequency, duty and enable state.
 
-        Underneath (FPGA 0x153D, protocol 1.27) the square is a two-step pattern on the 200 MHz clock: high n_h + f_h /
+        Underneath (FPGA 0x153D, protocol 1.27) the square has two steps on the 200 MHz clock: high n_h + f_h /
         65536 clocks, low n_l + f_l / 65536 clocks with one fraction accumulator, so the average frequency is exact to
         2^-16 of the period (7.6e-11 at 1 kHz) and every edge lies within 5 ns of its ideal time; frequencies with an
         integer period (200 MHz / P) have no dither at all. A change while it runs is glitch-free and
-        phase-continuous (taken at the next step boundary). scope_pattern drives other pulse patterns on the same pin,
-        scope_sweep chirps this square.
+        phase-continuous (taken at the next step boundary). scope_sweep chirps this square.
 
         The calibration output is a frequency/duty/timing reference, not a voltage reference: a ~3.1 Vpp square wave
         referenced to the USB ground; the probe ground is VRF1, +1.24 V above it, so it reads about -1.24 / +1.9 V.
@@ -3798,252 +3781,18 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     return req
             notes = sess.ensure_control()
             g = s.set_gen(enable=enabled, freq_hz=f, duty=None if duty_percent is None else duty_percent / 100)
-            applied: dict[str, Any] = {"enabled": bool(g.enable), "source": g.source_name}
-            if g.source == P.GEN_SOURCE_SQUARE and g.p16:
+            applied: dict[str, Any] = {"enabled": bool(g.enable)}
+            if g.p16:
                 n_h, f_h, n_l, f_l = g.steps()
                 applied.update(frequency=_r6(g.frequency_hz), frequency_exact_hz=g.frequency_hz,
                                duty_percent=_r6(g.duty * 100), period_clocks=g.p16 / 65536,
                                high_clocks=n_h + f_h / 65536, low_clocks=n_l + f_l / 65536, p16=g.p16, h16=g.h16)
             cav = notes + [CAL_OUTPUT_NOTE, GEN_NOTE, "Square wave only, 3.3 V logic. Not a sine source and not a power "
                                                       "driver: buffer it before driving a MOSFET gate."]
-            if g.source == P.GEN_SOURCE_PATTERN:
-                cav.append("a scope_pattern pattern drives the pin: enabling / disabling switched the pin driver and "
-                           "kept the pattern; give a frequency or duty to go back to the square")
             return {"ok": True, "applied": applied, "caveats": cav}
         return await run("scope_generator", 3, args, go)
 
-    # ---- protocol 1.27 (FPGA 0x153D): the pattern generator, the chirp, the streaming logger ----------------
-
-    def _pattern_steps(steps: list[dict[str, Any]]) -> list[P.PatternStep]:
-        if not isinstance(steps, list) or not 1 <= len(steps) <= P.PAT_MAX_STEPS:
-            raise ValueError(f"steps: a list of 1..{P.PAT_MAX_STEPS} {{'level': 0/1, 'width': '50us', 'mark': bool}}")
-        out = []
-        for i, st in enumerate(steps):
-            if not isinstance(st, dict) or "level" not in st or not any(k in st for k in ("width", "width_us",
-                                                                                          "seconds")):
-                raise ValueError(f"step {i}: needs 'level' and 'width' (seconds or e.g. '50us')")
-            if "width" in st:
-                w = parse_quantity(st["width"], "s")
-            elif "width_us" in st:
-                w = float(st["width_us"]) * 1e-6
-            else:
-                w = float(st["seconds"])
-            lv = int(st["level"])
-            if lv not in (0, 1):
-                raise ValueError(f"step {i}: level 0 or 1 (the pin is a logic output)")
-            out.append(P.PatternStep.from_seconds(w, lv, bool(st.get("mark", False))))
-        return out
-
-    def _pattern_trigger_args(s: Scope, trig: dict[str, Any]) -> dict[str, Any]:
-        """The scope_set_trigger vocabulary for the pattern trigger engine: source, type, polarity / edge, level
-        (volts) or level_code, width (pulse_width / timeout), n and idle (nth_edge); seconds become samples of the
-        engine's stream (one ring word on CH1 / CH2, 5 ns on EXT)."""
-        allowed = {"source", "type", "polarity", "edge", "level", "level_code", "width", "longer", "n", "idle"}
-        bad = set(trig) - allowed
-        if bad:
-            raise ValueError(f"trigger: unknown keys {sorted(bad)}; use {sorted(allowed)}")
-        src = trig.get("source", "CH1")
-        if src not in ("CH1", "CH2", "EXT"):
-            raise ValueError("trigger source: CH1, CH2 or EXT (the pattern engine has no marker source)")
-        si = ("CH1", "CH2", "EXT").index(src)
-        tname = trig.get("type", "edge")
-        if tname not in ("edge", "pulse_width", "nth_edge", "timeout"):
-            raise ValueError("trigger type: edge, pulse_width, nth_edge or timeout")
-        tt = P.TRIG_TYPE_NAMES.index(tname)
-        pol = trig.get("polarity", trig.get("edge", None))
-        alias = {None: 0, "rising": 0, "positive": 0, "high": 0, "falling": 1, "negative": 1, "low": 1}
-        if pol not in alias:
-            raise ValueError(f"trigger polarity {pol!r}")
-        per = _trigger_stream_period(s, si)
-
-        def samples(name: str, v: Any, lo: int) -> int:
-            n_ = int(round(parse_quantity(v, "s") / per))
-            if not lo <= n_ <= P.TRIG2_MAX_N:
-                raise ValueError(f"trigger {name} is {n_} samples of {fmt_si(per, 's')}: not in {lo}..{P.TRIG2_MAX_N}")
-            return n_
-        n_ = 0
-        h = 0
-        if tt in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT):
-            if "width" not in trig:
-                raise ValueError(f"trigger type {tname} needs width")
-            n_ = samples("width", trig["width"], 1)
-        elif tt == P.TRIG_NTH_EDGE:
-            n_ = int(trig.get("n", 1))
-            if "idle" in trig:
-                h = samples("idle", trig["idle"], 0)
-        code = trig.get("level_code")
-        if "level" in trig and si <= 1:
-            cfg = s.get_channel(si, cached=False)
-            code = int(min(255, max(0, round(s.scale(si, cfg).raw_a_for_volts(parse_quantity(trig["level"], "V"))))))
-        return {"type": tt, "polarity": alias[pol], "longer": bool(trig.get("longer", False)), "source": si, "n": n_,
-                "h": h, "level": 128 if code is None else int(code), "stream_sample_s": per}
-
-    def _pattern_timing(resp: P.PatternResp, gap_s: float, bursts: int) -> dict[str, np.ndarray]:
-        """A step diagram of the pattern as the FPGA runs it (one fraction accumulator, cleared per burst): ``t`` the
-        segment starts plus the end, ``level`` per segment (len(t) - 1), ``marks`` the marker times, over up to
-        ``bursts`` bursts from a start at t = 0."""
-        clk = 1.0 / P.PAT_CLOCK_HZ
-        idle = 1 if resp.header.flags & P.PAT_F_IDLE_HIGH else 0
-        seg_t: list[float] = []
-        seg_l: list[int] = []
-        marks: list[float] = []
-        t0 = 0.0
-        for b in range(bursts):
-            acc = 0
-            for st in resp.steps:
-                ts = t0 + (acc >> 16) * clk
-                seg_t.append(ts)
-                seg_l.append(st.level)
-                if st.mark:
-                    marks.append(ts)
-                acc += st.d16
-            t0 += (acc >> 16) * clk
-            if b + 1 < bursts and gap_s > 0:
-                seg_t.append(t0)
-                seg_l.append(idle)
-                t0 += round(gap_s / 5e-9) * clk
-        seg_t.append(t0)
-        seg_l.append(idle)
-        seg_t.append(t0 + max(gap_s, 0.1 * t0))
-        return {"t": np.array(seg_t), "level": np.array(seg_l, np.int8), "marks": np.array(marks)}
-
-    @register(3, title="Pulse pattern on the calibration pin", destructive=True, open_world=True)
-    async def scope_pattern(
-        steps: Annotated[list[dict[str, Any]], Field(description="1..8 steps [{'level': 1, 'width': '50us', 'mark': "
-                         "true}, {'level': 0, 'width': '950us'}]: logic level, duration (seconds or with a unit; 10 ns "
-                         "to 21 s, 1/65536 of 5 ns resolution), mark = this step's start is the marker")],
-        mode: Annotated[Literal["single", "repeat", "continuous", "off"], Field(
-            description="single: one burst per start; repeat: `repeat` bursts with `gap` between them; continuous: "
-                        "runs until changed (starts at once); off: the pin idles (no token needed)")] = "repeat",
-        repeat: Annotated[int, Field(ge=1, le=65536, description="bursts per start in mode 'repeat'")] = 1,
-        gap: Annotated[float | str, Field(description="pause between bursts (seconds), 0 .. 4.29 s, 5 ns steps")] = 0,
-        idle_level: Annotated[int, Field(ge=0, le=1, description="the pin's level between bursts and when off")] = 0,
-        trigger_on_marker: Annotated[bool, Field(description="the marked steps' starts are the capture trigger "
-                                                             "source 'pattern' (scope_set_trigger(source='pattern'))")
-                                     ] = True,
-        start: Annotated[Literal["mcu", "trigger", "both"], Field(
-            description="what starts a burst: 'mcu' = now (this call), 'trigger' = the pattern trigger engine's event "
-                        "(`trigger`), 'both'")] = "mcu",
-        trigger: Annotated[dict[str, Any] | None, Field(
-            description="the pattern trigger engine (start 'trigger' / 'both'), the scope_set_trigger vocabulary: "
-                        "{'source': 'CH2', 'type': 'nth_edge', 'polarity': 'rising', 'n': 3, 'idle': '100us', "
-                        "'level': 0.5} (types edge / pulse_width (width, longer) / nth_edge (n, idle) / timeout "
-                        "(width); source CH1 / CH2 / EXT)")] = None,
-        rearm: Annotated[bool, Field(description="the engine re-arms after each burst (false: one shot)")] = True,
-        capture: Annotated[bool, Field(description="arm a host capture first, then start the pattern, and return the "
-                                                   "capture (with trigger_on_marker and scope_set_trigger(source="
-                                                   "'pattern') it triggers on the marker)")] = False,
-        capture_channels: Annotated[list[str] | None, Field(description="channels of the capture")] = None,
-        timeout_s: Annotated[float, Field(gt=0, le=60, description="capture: wait this long for the trigger")] = 2.0,
-        drive_pin: Annotated[bool, Field(description="false: run the pattern (marker, engine) without driving the "
-                                                     "pin, so the post stays the EXT input")] = True,
-        confirm_token: Annotated[str | None, Field(description="token from the confirmation response")] = None,
-    ) -> dict[str, Any]:
-        """Drive a pulse pattern on the calibration pin (protocol 1.27, FPGA 0x153D, caps PATTERN_GEN): up to 8
-        steps of logic level and duration, bursts, repeats and gaps, a marker that can trigger the capture, and an own
-        trigger engine that starts bursts on a CH1 / CH2 / EXT event without the host in the loop (caps
-        PATTERN_TRIGGER). The metal-detector use: the pattern is the TX drive, the capture triggers on its marker
-        with the pretrigger set to see the RX decay after the pulse.
-
-        Every edge lies on the 5 ns grid within one clock of its ideal time (one fraction accumulator per pattern),
-        the pin is 3.3 V logic (about -1.23 / +1.87 V on the post against the probe ground), not a power driver.
-        The first call returns a token and a summary (it drives the pin; mode 'off' needs none). It replaces the
-        generator's square; scope_generator gives the square back. Returns the pattern as written, the burst length,
-        the status, a timing diagram (.npz for scope_report) and with capture=true the capture."""
-        args = {"steps": steps, "mode": mode, "repeat": repeat, "gap": gap, "idle_level": idle_level,
-                "trigger_on_marker": trigger_on_marker, "start": start, "trigger": trigger, "rearm": rearm,
-                "capture": capture, "capture_channels": capture_channels, "timeout_s": timeout_s,
-                "drive_pin": drive_pin}
-
-        def go() -> dict[str, Any]:
-            s = sess.get_scope()
-            if not s.profile().has(P.Caps.PATTERN_GEN):
-                raise ToolError("scope_pattern needs the pattern generator (caps PATTERN_GEN, protocol 1.27 on FPGA "
-                                "0x153D)")
-            st = _pattern_steps(steps)
-            gap_s = parse_quantity(gap, "s")
-            if not 0 <= gap_s <= 4.29:
-                raise ValueError("gap: 0 .. 4.29 s")
-            if mode == "continuous" and start == "trigger":
-                raise ValueError("a continuous pattern runs as soon as it is written: start 'trigger' needs mode "
-                                 "'single' or 'repeat'")
-            if start != "mcu" and trigger is None:
-                raise ValueError(f"start {start!r} needs `trigger` (the pattern trigger engine's event)")
-            if trigger is not None and not s.profile().has(P.Caps.PATTERN_TRIGGER):
-                raise ToolError("the pattern trigger engine needs caps PATTERN_TRIGGER (FPGA 0x153D)")
-            burst_s = P.pattern_burst16(st) / 65536 / P.PAT_CLOCK_HZ
-            duty = sum(x.seconds for x in st if x.level) / burst_s
-            if mode != "off" and drive_pin:
-                desc = ", ".join(f"{'H' if x.level else 'L'} {fmt_si(x.seconds, 's')}{' (mark)' if x.mark else ''}"
-                                 for x in st)
-                when = {"mcu": "starting now", "trigger": f"started by the trigger engine on {trigger}",
-                        "both": "starting now and on the trigger engine's events"}[start]
-                summary = (f"calibration pin will output a 3.3 V logic pulse pattern [{desc}] ({fmt_si(burst_s, 's')} "
-                           f"per burst, {duty * 100:.1f} % high), mode {mode}"
-                           f"{f' x {repeat}' if mode == 'repeat' else ''}, {when}. If the pin is wired into the "
-                           "detector, this switches real coil current.")
-                if duty * 100 > cfg.gen_max_duty:
-                    raise ValueError(f"the pattern is {duty * 100:.1f} % high, above the ceiling {cfg.gen_max_duty}% "
-                                     "(FNIRSI_MCP_GEN_MAX_DUTY, protects a TX stage driven from the pin)")
-                req = sess.confirm("scope_pattern", args, confirm_token, summary)
-                if req is not None:
-                    return req
-            notes = sess.ensure_control()
-            cav = list(notes)
-            if drive_pin and mode != "off" and s.get_trigger(cached=False).source == P.TRIG_SOURCE_EXT:
-                raise ToolError("scope_pattern: the calibration pin is the EXT trigger input now; set the trigger "
-                                "source to CH1, CH2 or 'pattern' first, or drive_pin=false")
-            eng = None
-            if trigger is not None:
-                ta = _pattern_trigger_args(s, trigger)
-                per = ta.pop("stream_sample_s")
-                pt = s.set_pattern_trigger(**ta, armed=True, rearm=rearm)
-                eng = {"armed": bool(pt.armed), "rearm": bool(pt.rearm), "own_engine": pt.own_engine,
-                       "trigger": pt.trigger2.describe(), "stream_sample_s": per}
-                if not pt.own_engine:
-                    cav.append("this bitstream routes one trigger qualifier to the capture or the pattern (the "
-                               "shared fallback): both cannot use two different qualified types at once")
-            src_i = P.PAT_START_NAMES.index(start)
-            m_i = {"off": P.PAT_OFF, "single": P.PAT_SINGLE, "repeat": P.PAT_REPEAT,
-                   "continuous": P.PAT_CONTINUOUS}[mode]
-            start_now = mode != "off" and start in ("mcu", "both") and not capture
-            r = s.set_pattern(st, mode=m_i, repeat=repeat, gap_s=gap_s, idle_level=idle_level,
-                              marker_trigger=trigger_on_marker, start_source=src_i, start=start_now,
-                              hiz=not drive_pin)
-            out: dict[str, Any] = {"ok": True, "applied": r.to_dict(), "engine": eng}
-            if capture:
-                chans = _channels_arg(capture_channels, ["CH1"])
-                s.arm()
-                if mode != "off" and start in ("mcu", "both"):
-                    r = s.set_pattern(st, mode=m_i, repeat=repeat, gap_s=gap_s, idle_level=idle_level,
-                                      marker_trigger=trigger_on_marker, start_source=src_i, start=True,
-                                      hiz=not drive_pin)
-                    out["applied"] = r.to_dict()
-                stw = s.wait(timeout_s)
-                if stw.acq_state != P.AcqState.DONE:
-                    s.stop()
-                    cav.append(f"no trigger within {timeout_s} s: with source 'pattern' the capture needs "
-                               "trigger_on_marker=true and a marked step; check scope_set_trigger")
-                    out["capture"] = None
-                else:
-                    cap = s.read_capture(chans, st=stw)
-                    res = _capture_result(sess, cap, "peak" if cap.peak else "capture")
-                    cav += res.pop("caveats", [])
-                    out["capture"] = res
-            nb = 1 if mode == "single" else (min(repeat, 3) if mode == "repeat" else 3)
-            arrays = _pattern_timing(r, gap_s, nb)
-            out["timing_file"] = sess.save_npz("pattern", arrays, {"kind": "pattern", "args": args,
-                                                                  "pattern": r.to_dict(), "caveats": cav})
-            if s.get_trigger(cached=False).source == P.TRIG_SOURCE_PATTERN and not trigger_on_marker:
-                cav.append("the capture trigger source is 'pattern' but this pattern's marker is not a trigger "
-                           "source (trigger_on_marker=false): the capture never triggers on it")
-            cav += [CAL_OUTPUT_NOTE, GEN_NOTE]
-            if mode != "off":
-                cav.append("the generator's square is replaced; scope_generator(enabled=true, frequency=...) gives it "
-                           "back")
-            out["caveats"] = cav
-            return out
-        return await run("scope_pattern", 3 if mode != "off" else 1, args, go)
+    # ---- protocol 1.27 (FPGA 0x153D): the chirp, the streaming logger -----------------------------------------
 
     @register(3, title="Chirp / stepped sweep of the generator", destructive=True, open_world=True)
     async def scope_sweep(
@@ -4149,7 +3898,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         A long run on the shared scope: its screen is frozen ('Logging to the host'), every acquisition tool answers
         'logging: LOG_STOP first' meanwhile, and a change at the scope ends the log with a caveat. A gap (the scope's
         MCU or the host fell behind) is never garbage: the samples before and after are exact, the gap is listed
-        with its sample index and length. Set up channels, ranges and the generator / pattern before the log."""
+        with its sample index and length. Set up channels, ranges and the generator before the log."""
         args = {"rate": rate, "channels": channels, "bits": bits, "filter": filter, "duration": duration}
 
         def go() -> dict[str, Any]:

@@ -1,8 +1,8 @@
 """Protocol 1.27 (FPGA 0x153D, docs/plans/fpga-0x153c.md sections 6-7, item D6): the streaming logger (LOG_START /
-LOG_READ / LOG_STOP), the generator as the two-step pattern (SET_GEN P16 / H16, GET_GEN 40 bytes, the pending
-handshake), the pattern generator (SET_PATTERN) with its marker as trigger source 3, the pattern trigger engine
-(SET_PATTERN_TRIGGER), READ_BODE rows on P. Byte layouts as agreed with fw-d4 / fw-d5 (2026-10-21); the simulator's
-models of all of them."""
+LOG_READ / LOG_STOP), the generator as the fractional two-step square (SET_GEN P16 / H16, GET_GEN 40 bytes, the
+pending handshake), READ_BODE rows on P. Byte layouts as agreed with fw-d4 / fw-d5 (2026-10-21); the pattern
+generator, its trigger engine and trigger source 3 were cut (owner 2026-10-21, fw-nopat): their codes are unknown
+and source 3 is refused. The simulator's models of all of them."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 from fnirsi1013d import protocol as P
 from fnirsi1013d.scope import Scope
-from fnirsi1013d.simulator import PatternState, parse_signal
+from fnirsi1013d.simulator import parse_signal
 from fnirsi1013d.transport import DeviceError
 
 
@@ -27,18 +27,16 @@ def gen_sim(sim_factory, ch2: str = "zero", **kw):
 
 def test_constants_caps_and_sizes():
     assert P.PROTO_MINOR == 27 and P.FW_FPGA_VERSION == 0x153D and P.GEN_CLOCK_HZ == 200_000_000
-    assert (P.Cmd.LOG_START, P.Cmd.LOG_READ, P.Cmd.LOG_STOP, P.Cmd.SET_PATTERN, P.Cmd.SET_PATTERN_TRIGGER) == \
-        (0x0214, 0x0215, 0x0216, 0x0217, 0x021A)
-    assert not any(c == 0x0218 for c in P.Cmd)  # no SET_SWEEP: chirps are host-stepped SET_GEN writes
-    assert (P.Caps.GENERATOR, P.Caps.LOGGER, P.Caps.PATTERN_GEN, P.Caps.PATTERN_TRIGGER) == \
-        (1 << 1, 1 << 23, 1 << 24, 1 << 27)
-    assert (P.Features.LOGGER, P.Features.PATTERN, P.Features.PATTERN_TRIGGER) == (0x800, 0x1000, 0x2000)
-    assert P.AcqState.LOGGING == 5 and P.TRIG_SOURCE_PATTERN == 3
+    assert (P.Cmd.LOG_START, P.Cmd.LOG_READ, P.Cmd.LOG_STOP) == (0x0214, 0x0215, 0x0216)
+    # no SET_SWEEP (chirps are host-stepped SET_GEN writes); 0x0217 / 0x021A were the cut SET_PATTERN(_TRIGGER)
+    assert not any(c in (0x0217, 0x0218, 0x021A) for c in P.Cmd)
+    assert (P.Caps.GENERATOR, P.Caps.LOGGER) == (1 << 1, 1 << 23)
+    assert not any(c & ((1 << 24) | (1 << 27)) for c in P.Caps)  # reserved: PATTERN_GEN / PATTERN_TRIGGER, cut
+    assert P.Features.LOGGER == 0x800 and not any(f & 0x3000 for f in P.Features)
+    assert P.AcqState.LOGGING == 5 and P.TRIG_SOURCE_NAMES == ("CH1", "CH2", "EXT")
     assert (P.Gen.size(), P.SetGenReq.size(), P.LogStartReq.size(), P.LogResp.size(), P.LogReadReq.size(),
-            P.LogChunkHeader.size(), P.PatternHeader.size(), P.PatternStep.size(), P.BodeRow.size()) == \
-        (40, 20, 16, 48, 8, 16, 12, 8, 20)
-    assert len(P.PatternTriggerReq().pack()) == 28 and len(P.PatternTriggerResp().pack()) == 32
-    assert P.REQUEST_SIZES[P.Cmd.SET_PATTERN] == 12 and P.REQUEST_SIZES[P.Cmd.LOG_START] == 16
+            P.LogChunkHeader.size(), P.BodeRow.size()) == (40, 20, 16, 48, 8, 16, 20)
+    assert P.REQUEST_SIZES[P.Cmd.LOG_START] == 16
     for c in (P.Cmd.LOG_START, P.Cmd.LOG_READ, P.Cmd.LOG_STOP):
         assert P.CMD_CAP[c] == P.Caps.LOGGER
     assert P.CMD_CAP[P.Cmd.SET_GEN] == P.Caps.GENERATOR
@@ -53,43 +51,17 @@ def test_set_gen_raw_modes_and_gen_layout():
     # duty_mode 0: the u32 duty and the reserved u32 of protocol 1.0-1.26 (bytes unchanged)
     old = P.SetGenReq(P.SetGenReq.M_DUTY, 0, 0, 0, 0, 2500).pack()
     assert struct.unpack_from("<II", old, 12) == (2500, 0)
-    g = P.Gen(1, P.PAT_ST_RUNNING | P.PAT_ST_PENDING | 1, 7, 1_000_000, 5000, P.PAT_ST3_ACTIVE, 0,
+    g = P.Gen(1, P.GEN_ST_RUNNING | P.GEN_ST_PENDING | P.GEN_ST_STEP, 1_000_000, 5000, P.GEN_ST3_ACTIVE,
               200_000 << 16, 100_000 << 16)
     b = g.pack()
-    assert len(b) == 40 and b[0] == 1 and b[1] == 0xA1 and struct.unpack_from("<H", b, 2) == (7,)
-    assert b[4:12] == bytes(8) and struct.unpack_from("<QHBB", b, 12) == (1_000_000, 5000, 1, 0)
+    assert len(b) == 40 and b[0] == 1 and b[1] == 0xA1 and b[2:12] == bytes(10)
+    assert struct.unpack_from("<QHBB", b, 12) == (1_000_000, 5000, 1, 0)
     assert struct.unpack_from("<QQ", b, 24) == (200_000 << 16, 100_000 << 16)
     g2 = P.Gen.unpack(b)
     assert g2 == g and g2.pending and g2.running and g2.frequency_hz == 1000.0 and g2.duty == 0.5
     assert g2.steps() == (100_000, 0, 100_000, 0)
     old24 = P.Gen.unpack(b[:24])  # a 1.26 answer: the tail reads 0, the mHz / bp fields still give f and duty
     assert old24.p16 == 0 and old24.frequency_hz == 1000.0
-
-
-def test_pattern_layouts():
-    steps = [P.PatternStep.from_seconds(50e-6, 1, True), P.PatternStep.from_seconds(950.0025e-6, 0)]
-    assert (steps[0].duration, steps[0].fraction, steps[0].flags) == (10_000, 0, 3)
-    assert steps[1].duration == 190_000 and steps[1].fraction == 32768  # half a clock
-    req = P.SetPatternReq(P.PatternHeader(P.PAT_REPEAT, P.PAT_F_MARKER_TRIGGER | P.PAT_START_BOTH << 6, 10, 1000, 0,
-                                          1, 1), steps)
-    b = req.pack()
-    assert len(b) == 12 + 16
-    assert b[:12] == bytes((2, 0x88)) + struct.pack("<HIBBBB", 10, 1000, 2, 1, 1, 0)
-    assert b[12:20] == bytes((3, 0)) + struct.pack("<HI", 0, 10_000)
-    assert b[20:28] == bytes((0, 0)) + struct.pack("<HI", 32768, 190_000)
-    back = P.SetPatternReq.unpack(b)
-    assert back.header.n == 2 and back.steps == steps and back.header.start_source == P.PAT_START_BOTH
-    resp = P.PatternResp(back.header, P.PAT_ST_RUNNING | 1, P.PAT_ST3_ACTIVE, 3, P.pattern_burst16(steps), steps)
-    rb = resp.pack()
-    assert len(rb) == 24 + 16 and rb[12:24] == struct.pack("<BBHQ", 0x81, 1, 3, (200_000 << 16) + 32768)
-    assert P.PatternResp.unpack(rb).to_dict()["burst_s"] == pytest.approx(1.0000025e-3)
-    t2 = P.Trigger2(P.TRIG_NTH_EDGE, 0, 0, 1, 3, 0, 140, 0, 0, 0)
-    pt = P.PatternTriggerReq(t2, 1, 0).pack()
-    assert pt == t2.pack() + bytes((1, 0, 0, 0))
-    pr = P.PatternTriggerResp(t2, 1, 1, P.PTRIG_ST_OWN | P.PTRIG_ST_EVENT | 2, 2).pack()
-    assert pr[24:] == bytes((1, 1, 0, 0, 0xC2, 0)) + struct.pack("<H", 2)
-    with pytest.raises(ValueError):
-        P.PatternStep.from_seconds(5e-9, 1)  # one clock: shorter than 2
 
 
 def test_logger_layouts_and_tiers():
@@ -148,35 +120,20 @@ def test_logger_structs_match_the_firmware_vectors():
 #: fw-d5's vectors (branch fw-d5 bda4607, docs/protocol-vectors.json section 5i)
 FW_D5 = {
     "req_set_gen_p16_h16": "06000101ce0ca40d030000006706d28601000000",
-    "resp_gen_1_27": "0120000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000",
-    "req_set_pattern_pulse_train": "02080a00000000000201010003000000102700000000000030e60200",
-    "resp_set_pattern": "02080a000000000002010100800100000000400d0300000003000000102700000000000030e60200",
-    "req_set_pattern_trigger_nth_ch2": "0200000103000000e80300008c000000000000000000000001010000",
-    "resp_set_pattern_trigger": "0200000103000000e80300008c000000000000000000000001010000a2000200",
-    "req_set_trigger2_marker": "000000030000000000000000800000000000000000000000",
+    "resp_gen_1_27": "01a1000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000",
 }
 
 
-def test_generator_and_pattern_structs_match_the_firmware_vectors():
+def test_generator_structs_match_the_firmware_vectors():
     v = {k: bytes.fromhex(x) for k, x in FW_D5.items()}
     p16 = P.gen_p16(999_500)
     h16 = P.gen_h16(p16, 5000)
     assert (p16, h16) == (13113756878, 6556878439)
     r = P.SetGenReq(P.SetGenReq.M_FREQ | P.SetGenReq.M_DUTY, 0, 1, 1, p16, h16)
     assert r.pack() == v["req_set_gen_p16_h16"]
-    g = P.Gen(1, P.PAT_ST_PENDING, 0, P.gen_freq_mhz(p16), P.gen_duty_bp(h16, p16), P.PAT_ST3_ACTIVE,
-              P.GEN_SOURCE_SQUARE, p16, h16)
+    g = P.Gen(1, P.GEN_ST_RUNNING | P.GEN_ST_PENDING | P.GEN_ST_STEP, P.gen_freq_mhz(p16), P.gen_duty_bp(h16, p16),
+              P.GEN_ST3_ACTIVE, p16, h16)
     assert g.pack() == v["resp_gen_1_27"] and P.Gen.unpack(v["resp_gen_1_27"]).pending
-    steps = [P.PatternStep.from_seconds(50e-6, 1, True), P.PatternStep.from_seconds(950e-6, 0)]
-    hdr = P.PatternHeader(P.PAT_REPEAT, P.PAT_F_MARKER_TRIGGER, 10, 0, 2, 1, 1)
-    assert P.SetPatternReq(hdr, steps).pack() == v["req_set_pattern_pulse_train"]
-    resp = P.PatternResp(hdr, P.PAT_ST_RUNNING, P.PAT_ST3_ACTIVE, 0, P.pattern_burst16(steps), steps)
-    assert resp.pack() == v["resp_set_pattern"] and P.PatternResp.unpack(v["resp_set_pattern"]) == resp
-    t2 = P.Trigger2(P.TRIG_NTH_EDGE, 0, 0, P.TRIG_SOURCE_CH2, 3, 1000, 140, 0, 0, 0)
-    assert P.PatternTriggerReq(t2, 1, 1).pack() == v["req_set_pattern_trigger_nth_ch2"]
-    pr = P.PatternTriggerResp(t2, 1, 1, P.PTRIG_ST_OWN | P.STATUS34_COUNTING | P.TRIG_NTH_EDGE, 2)
-    assert pr.pack() == v["resp_set_pattern_trigger"]
-    assert P.Trigger2(source=P.TRIG_SOURCE_PATTERN).pack() == v["req_set_trigger2_marker"]
 
 
 def test_simulator_answers_the_firmware_vectors(sim_factory):
@@ -186,49 +143,27 @@ def test_simulator_answers_the_firmware_vectors(sim_factory):
     with Scope.connect(srv.url) as s:
         s.set_gen(enable=True)
         g = P.Gen.unpack(s.t.request(P.Cmd.SET_GEN, v["req_set_gen_p16_h16"]).payload)
-        assert g.pack()[2:] == v["resp_gen_1_27"][2:] and g.pending  # byte 1: the step in progress may differ
-        r = s.t.request(P.Cmd.SET_PATTERN_TRIGGER, v["req_set_pattern_trigger_nth_ch2"]).payload
-        assert r == v["resp_set_pattern_trigger"]
-        r = s.t.request(P.Cmd.SET_PATTERN, v["req_set_pattern_pulse_train"]).payload
-        assert r[:12] + r[13:] == v["resp_set_pattern"][:12] + v["resp_set_pattern"][13:]  # 12: the step now
-        assert s.t.request(P.Cmd.SET_TRIGGER2, v["req_set_trigger2_marker"]).payload[28:] == \
-            v["req_set_trigger2_marker"]
-
-
-# --- the pattern model (contract 7.2)----------------------------------------------------------------------------
-
-
-def test_pattern_model_fraction_accumulator():
-    """3.5 + 2.25 clock steps (the fpga-spec prototype): one accumulator puts every edge within one clock of its
-    ideal time and the mean period is exact; a burst restarts the accumulator."""
-    pat = PatternState(P.PAT_CONTINUOUS, 0, 1, 0, ((1, 1, 3 * 65536 + 32768), (0, 0, 2 * 65536 + 16384)))
-    c = np.arange(0, 6000)
-    lv = pat.levels(c)
-    rise = np.flatnonzero(np.diff(lv) == 1) + 1
-    ideal = np.round(rise / 5.75) * 5.75
-    assert np.max(np.abs(rise - ideal)) <= 1.0
-    assert (rise[-1] - rise[0]) / (len(rise) - 1) == pytest.approx(5.75, abs=0.01)
-    marks = pat.mark_clocks(0, 6000)
-    assert np.array_equal(marks[1:], rise[:len(marks) - 1]) and marks[0] == 0
-    burst = PatternState(P.PAT_REPEAT, 0, 3, 10, ((1, 0, 3 * 65536 + 32768), (0, 0, 2 * 65536 + 16384)))
-    lv = burst.levels(np.arange(-5, 60))
-    assert lv[:5].tolist() == [0] * 5 and burst.train_clocks() == 3 * (5 + 10) - 10
-    assert np.array_equal(burst.levels(np.arange(0, 5)), burst.levels(np.arange(15, 20)))  # accumulator cleared
-    assert burst.state_at(16)[:2] == (True, False) and burst.state_at(7)[1] is True and burst.state_at(99)[0] is False
+        # byte 1: the step in progress and the pending bit (2-3 clocks after the commit) differ
+        assert g.pack()[2:] == v["resp_gen_1_27"][2:] and g.running
+        for code in (0x0217, 0x021A):  # the cut SET_PATTERN / SET_PATTERN_TRIGGER: unknown, as in the firmware
+            with pytest.raises(DeviceError) as e:
+                s.t.request(code, bytes(28))
+            assert e.value.status == P.Status.E_UNKNOWN_CMD
 
 
 # --- the simulator through the client -------------------------------------------------------------------------
 
 
-def test_generator_on_the_pattern_and_the_pending_handshake(sim_factory):
+def test_generator_square_and_the_pending_handshake(sim_factory):
     srv = gen_sim(sim_factory)
     with Scope.connect(srv.url) as s:
-        assert s.info.caps & P.Caps.PATTERN_GEN and s.info.gen_clock_hz == 200_000_000
+        assert s.info.caps & P.Caps.GENERATOR and not s.info.caps & ((1 << 24) | (1 << 27))
+        assert s.info.gen_clock_hz == 200_000_000
         g = s.set_gen(enable=True, freq_hz=999.5, duty=0.5)
-        assert g.source == P.GEN_SOURCE_SQUARE and g.freq_mhz_actual == 999_500 and g.p16 == P.gen_p16(999_500)
+        assert g.freq_mhz_actual == 999_500 and g.p16 == P.gen_p16(999_500)
         assert g.frequency_hz == pytest.approx(999.5, rel=1e-10) and g.running
-        g = s.set_gen(freq_hz=1000.0)  # a change while it runs: pending until the next step boundary
-        assert g.pending and g.steps() == (100_000, 0, 100_000, 0)
+        g = s.set_gen(freq_hz=1000.0)  # a change while it runs: taken within 3 clocks (fpga-d3's RTL)
+        assert g.steps() == (100_000, 0, 100_000, 0)
         g, polls = s.wait_gen_taken()
         assert not g.pending and polls >= 1
         p16, h16 = P.gen_period_p16(201)
@@ -241,91 +176,6 @@ def test_generator_on_the_pattern_and_the_pending_handshake(sim_factory):
             assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, detail), kw
         s.set_gen(enable=False)
         assert not s.get_gen().running
-
-
-def test_set_pattern_refusals(sim_factory):
-    srv = gen_sim(sim_factory)
-    with Scope.connect(srv.url) as s:
-        st = [P.PatternStep.from_seconds(1e-6, 1), P.PatternStep.from_seconds(1e-6, 0)]
-        good = P.SetPatternReq(P.PatternHeader(P.PAT_SINGLE, 0, 1, 0, 2, 1, 0), st).pack()
-        cases = [(bytes((4,)) + good[1:], P.Status.E_BAD_ARG, 0), (good[:1] + bytes((0x02,)) + good[2:],
-                                                                   P.Status.E_BAD_ARG, 1),
-                 (good[:1] + bytes((0xC0,)) + good[2:], P.Status.E_BAD_ARG, 1),
-                 (bytes((3, 0x40)) + good[2:], P.Status.E_BAD_ARG, 1),  # mode 3 with the engine as the only start
-                 (good[:8] + bytes((9,)) + good[9:], P.Status.E_BAD_ARG, 8),
-                 (good[:9] + bytes((2,)) + good[10:], P.Status.E_BAD_ARG, 9),
-                 (bytes((0, 0)) + good[2:10] + bytes((1,)) + good[11:], P.Status.E_BAD_ARG, 10),
-                 (good[:12] + bytes((4,)) + good[13:], P.Status.E_BAD_ARG, 12),
-                 (good[:20] + bytes((0, 0, 0, 0, 1, 0, 0, 0)), P.Status.E_BAD_ARG, 24),
-                 (good[:-8], P.Status.E_BAD_LEN, 0)]
-        for payload, status, detail in cases:
-            with pytest.raises(DeviceError) as e:
-                s.t.request(P.Cmd.SET_PATTERN, payload)
-            assert (e.value.status, e.value.detail) == (status, detail), payload.hex()
-        s.set_trigger(source=2)  # EXT: the pin is the input, a driven pattern is refused, a hi-Z one runs
-        with pytest.raises(DeviceError) as e:
-            s.set_pattern(st, mode="single")
-        assert (e.value.status, e.value.detail) == (P.Status.E_STATE, 0)
-        r = s.set_pattern(st, mode="continuous", hiz=True, marker_trigger=True)
-        assert r.running and s.get_gen().enable == 0 and s.get_gen().source == P.GEN_SOURCE_PATTERN
-        with pytest.raises(DeviceError) as e:  # the marker is an edge source
-            s.set_trigger2(type="pulse_width", n=10, source=3)
-        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, P.TRIG2_D_SOURCE)
-
-
-def test_marker_trigger_captures_the_pulse(sim_factory):
-    """The contract's TX case: arm on the marker (source 3), then start a 50 us pulse every 1 ms: the capture shows
-    the pulse at the pretrigger point, the GEN status counts the bursts."""
-    srv = gen_sim(sim_factory)
-    with Scope.connect(srv.url) as s:
-        s.set_channel(0, range_index=1)
-        s.set_timebase(divider=199)  # 1 MSa/s
-        s.set_trigger(source=3, edge=0, mode=1, pretrigger_samples=200, total_samples=4000)
-        steps = [P.PatternStep.from_seconds(50e-6, 1, True), P.PatternStep.from_seconds(950e-6, 0)]
-        s.set_pattern(steps, mode="repeat", repeat=10, marker_trigger=True)
-        s.arm()
-        r = s.set_pattern(steps, mode="repeat", repeat=10, marker_trigger=True, start=True)
-        assert r.burst_s == pytest.approx(1e-3)
-        st = s.wait(2.0)
-        assert st.acq_state == P.AcqState.DONE
-        cap = s.read_capture(["CH1"])
-        v = cap.channels["CH1"].volts
-        high = v > 1.5
-        first = int(np.argmax(high))
-        assert abs(first - 200) <= 2 and high[first:first + 45].all() and not high[first + 60:first + 900].any()
-        assert np.count_nonzero(np.diff(high.astype(int)) == 1) == 4  # 4 ms after the trigger: 4 pulses
-        assert s.get_gen().pat_status3 & P.PAT_ST3_MARKER
-        # the marker without SET_PATTERN's marker flag never triggers: auto mode times out
-        s.set_pattern(steps, mode="continuous", marker_trigger=False)
-        s.set_trigger(mode=0)
-        assert s.capture(["CH1"], timeout_s=2.0).auto_timeout
-
-
-def test_pattern_trigger_engine_starts_bursts(sim_factory):
-    """The engine on CH2 Nth edge 3 (a 1 kHz square) starts a 20 us pulse one word after every third edge."""
-    srv = gen_sim(sim_factory, ch2="square:freq=1kHz,amp=0.3")
-    with Scope.connect(srv.url) as s:
-        s.set_channel(0, range_index=1)
-        s.set_channel(1, range_index=4)
-        s.set_timebase(divider=199)
-        s.set_trigger(source=0, edge=0, level=150, mode=1, pretrigger_samples=1000, total_samples=12000)
-        pt = s.set_pattern_trigger(type="nth_edge", polarity="rising", source="CH2", n=3, level=128, rearm=True)
-        assert pt.own_engine and pt.armed and not pt.event_seen and pt.edges_left == 2
-        s.set_pattern([P.PatternStep.from_seconds(20e-6, 1), P.PatternStep.from_seconds(1e-6, 0)], mode="single",
-                      start_source="trigger")
-        cap = s.capture(["CH1", "CH2"], timeout_s=3)
-        hi = np.flatnonzero(np.diff((cap.channels["CH1"].volts > 1.5).astype(int)) == 1) + 1
-        e2 = np.flatnonzero(np.diff((cap.channels["CH2"].volts > 0).astype(int)) == 1) + 1
-        assert len(hi) == 4 and np.allclose(np.diff(hi) * cap.dt, 3e-3, atol=4e-6)
-        for h in hi:  # each pulse follows a CH2 rising edge within a few words
-            assert np.min(np.abs(e2 - h)) <= 4
-        pt = s.set_pattern_trigger(type="nth_edge", source="CH2", n=3, armed=False)
-        with pytest.raises(DeviceError) as e:
-            s.t.request(P.Cmd.SET_PATTERN_TRIGGER, P.PatternTriggerReq(P.Trigger2(holdoff=5), 1, 1).pack())
-        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 16)
-        with pytest.raises(DeviceError) as e:
-            s.t.request(P.Cmd.SET_PATTERN_TRIGGER, P.PatternTriggerReq(P.Trigger2(source=3), 1, 1).pack())
-        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, P.TRIG2_D_SOURCE)
 
 
 def _drain(s: Scope, ch: int, fmt: int) -> tuple[list, int]:
@@ -391,15 +241,17 @@ def test_logger_overflow_lap_and_scope_change(sim_factory):
         assert s.log_stop().state_name == "error"
 
 
-def test_trigger_source_pattern_needs_the_edge_type(sim_factory):
+def test_trigger_source_3_is_refused(sim_factory):
+    """Source 3 (the cut pattern's marker) is out of range again: SET_TRIGGER detail 0, SET_TRIGGER2 detail 3."""
     srv = gen_sim(sim_factory)
     with Scope.connect(srv.url) as s:
-        s.set_trigger2(type="pulse_width", n=10)
         with pytest.raises(DeviceError) as e:
             s.set_trigger(source=3)
         assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 0)
-        s.set_trigger2(type="edge", source=3)
-        assert s.get_trigger(cached=False).source == 3
+        with pytest.raises(DeviceError) as e:
+            s.set_trigger2(type="edge", source=3)
+        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, P.TRIG2_D_SOURCE)
+        assert s.get_trigger(cached=False).source == 0
 
 
 def test_logger_state_refusals_and_idempotent_stop(sim_factory):

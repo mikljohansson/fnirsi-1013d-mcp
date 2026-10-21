@@ -46,10 +46,9 @@ def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):
 
 
 def _gen_config(g: P.Gen) -> P.Gen:
-    """GET_GEN without the live 0x39 bits (the step, the gap, a commit still pending, the bursts done, the marker
-    seen): they move with the wall clock, so a before / after snapshot compares the configuration only."""
-    return dataclasses.replace(g, pat_status=g.pat_status & P.PAT_ST_RUNNING, bursts=0,
-                               pat_status3=g.pat_status3 & P.PAT_ST3_ACTIVE)
+    """GET_GEN without the live 0x39 bits (the step, a commit still pending): they move with the wall clock, so a
+    before / after snapshot compares the configuration only."""
+    return dataclasses.replace(g, status=g.status & P.GEN_ST_RUNNING)
 
 
 def _state(s):

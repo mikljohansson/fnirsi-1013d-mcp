@@ -326,10 +326,9 @@ typedef struct
   uint8_t    tb_raw_sr;
   uint32_t   tb_divider;
 
-  //Generator state set by SET_GEN / SET_PATTERN (1.27, fw-d5: the two-step square as P16 / H16, 1/65536 of a 5 ns clock)
+  //Generator state set by SET_GEN (1.27, fw-d5: the two-step square as P16 / H16, 1/65536 of a 5 ns clock)
   uint8_t    gen_valid;
   uint8_t    gen_enable;
-  uint8_t    gen_src;           //0 the generator's square, 1 a SET_PATTERN pattern (GEN byte 23)
   uint8_t    gen_duty_raw;      //1: the duty is gen_h16 as given (duty_mode 1), 0: gen_duty_bp of the period
   uint16_t   gen_duty_bp;
   uint64_t   gen_p16;
@@ -338,11 +337,8 @@ typedef struct
   uint8_t    gen_ui_pct;
   uint32_t   gen_ui_hz;
 
-  //D5 pattern (fw-d5)
   uint8_t    ctx;               //the dispatch context of the running request (PC_CTX_*)
-  uint8_t    pat_st[4];         //0x39 as last read
-  uint8_t    ptrig_st[3];       //0x42 as last read
-  pc_hw_pattern pat;            //the latest SET_PATTERN
+  uint8_t    gen_st[2];         //0x39 bytes 0 and 3 (the square's status) as last read
 
   //Deferred request (WAIT)
   uint8_t    def_active;
@@ -429,7 +425,7 @@ int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a
                                   //went away, and the frozen screen must not stay frozen
 #define PC_STATE_LOGGING  9       //D4 logger: E_STATE detail of a command refused while logging
 #define PC_STATE_LOG_VIEW 10      //D4 logger: E_STATE detail of LOG_START outside the Scope view
-#define PC_GEN_LEN        40      //24 up to 1.26; 1.27 (fw-d5): 0x39 status, source, P16, H16 (docs/protocol.md row 67)
+#define PC_GEN_LEN        40      //24 up to 1.26; 1.27 (fw-d5): 0x39 status, P16, H16 (docs/protocol.md row 67)
 #define PC_COUNTER_LEN    24      //1.26 (fw-c7): GET_COUNTER: flags, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz
 #define PC_HEALTH_LEN     128     //96 in 1.16-1.18, 104 in 1.19-1.23, 124 in 1.24 (layout 2); layout 3: 124 built-for word,
                                   //126 fpga_flags, 127 0

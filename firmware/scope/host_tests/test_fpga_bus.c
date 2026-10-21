@@ -22,12 +22,11 @@
 //     once-per-pass 0x35 read (17 strobes) and the values it derives from the model's synthetic square waves at every
 //     gate, the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the trigger level
 //     followed into 0x62, a host configuration applied by the next pass, the trigger source followed through 0x15.
-//   - fw-d5 (0x153D, protocol 1.27, firmware/AGENTS.md section 75): the generator as a two-step pattern (gen_pat.c: the
-//     P16 / H16 formulas at many frequencies and duties, exact mean period, every edge within one 5 ns clock of its ideal
-//     time on the model's pattern engine), the double-buffered frequency change (glitch-free, the prefetch take, the
-//     pending bit, a commit lost to a second one), bursts / repeat / gap / continuous, two starts edge for edge, the
-//     marker as capture trigger source 3, the pattern trigger engine's registers through the shared byte builder, its
-//     event, the bus cost of one chirp step (18 strobes).
+//   - fw-d5 (0x153D, protocol 1.27, firmware/AGENTS.md sections 75 and 79): the generator as a fractional two-step square
+//     (gen_pat.c: the P16 / H16 formulas at many frequencies and duties, exact mean period, every edge within one 5 ns
+//     clock of its ideal time on the model's square), the double-buffered frequency change (glitch-free, taken at once
+//     with the step in progress completing, two commits in one step), the bus cost of one chirp step (18 strobes), the
+//     0x39 status, entries other than 0 / 1 and the cut pattern registers ignored by the model (fpga-d3's RTL d60a0ad).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "test_util.h"
@@ -1239,9 +1238,9 @@ static void test_counter(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//D5 pattern (fw-d5, 0x153D)
+//The generator (fw-d5, 0x153D; the square only since fw-nopat)
 
-#define PAT_VER  0x153D
+#define GEN_VER  0x153D
 
 //The contract's formulas: P16 within half a unit of 2^16 x 2e11 / f, the back conversion, the split, at many points
 static void test_gen_formulas(void)
@@ -1342,7 +1341,7 @@ static void test_gen_formulas(void)
 }
 
 //Run the model for ns (in slices the u32 advance takes)
-static void pat_advance(uint64_t ns)
+static void gen_advance(uint64_t ns)
 {
   while(ns)
   {
@@ -1356,16 +1355,16 @@ static void pat_advance(uint64_t ns)
 //The edges logged since index from: every rising edge k at start + k P, every falling one H later, in 1/65536 clock;
 //the actual edge is the ideal one rounded up to the clock (Bresenham): -65536 < actual - ideal <= 0 after the shift.
 //Returns the worst |actual - ideal| in 1/65536 clock, -1 on a wrong level sequence; *periods the complete periods seen
-static int64_t pat_check_square(uint32_t from, uint64_t p16, uint64_t h16, uint32_t *periods, int64_t *mean_err16)
+static int64_t gen_check_square(uint32_t from, uint64_t p16, uint64_t h16, uint32_t *periods, int64_t *mean_err16)
 {
-  uint64_t start = fm.pat_edge[from % FM_PAT_EDGES] >> 1;
-  uint32_t i, n = fm.pat_nedge - from, rises = 0;
+  uint64_t start = fm.gen_edge[from % FM_GEN_EDGES] >> 1;
+  uint32_t i, n = fm.gen_nedge - from, rises = 0;
   int64_t  worst = 0;
   uint64_t last_rise = start;
 
   for(i = 0; i < n; i++)
   {
-    uint64_t e = fm.pat_edge[(from + i) % FM_PAT_EDGES];
+    uint64_t e = fm.gen_edge[(from + i) % FM_GEN_EDGES];
     uint8_t  level = (uint8_t)(e & 1);
     uint64_t k = i / 2;
     __int128 ideal = (__int128)((start << 16) + k * p16 + ((i & 1) ? h16 : 0));
@@ -1392,23 +1391,23 @@ static int64_t pat_check_square(uint32_t from, uint64_t p16, uint64_t h16, uint3
   return worst;
 }
 
-//The square on the model: the firmware's sequence (fpga_pat_square + 0x50), then about `periods` periods
-static void pat_square_case(uint64_t f_mhz, uint32_t bp, uint32_t periods, uint32_t seed)
+//The square on the model: the firmware's sequence (fpga_gen_square + 0x50), then about `periods` periods
+static void gen_square_case(uint64_t f_mhz, uint32_t bp, uint32_t periods, uint32_t seed)
 {
   uint64_t  p16 = gp_p16_from_mhz(f_mhz), h16 = gp_h16_from_bp(p16, bp);
   gp_square sq;
   uint32_t  from, seen = 0;
   int64_t   worst, mean = 0;
 
-  fm_reset(PAT_VER, 199999, seed);
+  fm_reset(GEN_VER, 199999, seed);
   T_EQ(gp_split(p16, h16, &sq), 0);
-  from = fm.pat_nedge;                                      //the start's rising edge is the next one logged
-  fpga_pat_square(&sq);
-  fpga_pat_drive(1);
-  T_EQ(fm.pat_run, 1); T_EQ(fm.pat_drive, 1);
-  pat_advance((uint64_t)periods * p16 * 5 / 65536 + 1000);
+  from = fm.gen_nedge;                                      //the start's rising edge is the next one logged
+  fpga_gen_square(&sq);
+  fpga_gen_drive(1);
+  T_EQ(fm.gen_run, 1); T_EQ(fm.gen_drive, 1);
+  gen_advance((uint64_t)periods * p16 * 5 / 65536 + 1000);
 
-  worst = pat_check_square(from, p16, h16, &seen, &mean);
+  worst = gen_check_square(from, p16, h16, &seen, &mean);
   T_TRUE(worst >= 0);
   T_TRUE(worst < 65536);                                    //every edge within one clock of its ideal time
   T_TRUE(seen + 2 >= periods);
@@ -1423,86 +1422,85 @@ static void test_gen_square(void)
 {
   uint32_t s0;
 
-  pat_square_case(1000000, 5000, 1000, 1);                  //1 kHz, the wizard's: no fraction
-  pat_square_case(999500, 5000, 1000, 2);                   //999.5 Hz: a fractional period
-  pat_square_case(10000000, 2500, 1000, 3);                 //10 kHz 25 %
-  pat_square_case(123456000, 2500, 1500, 4);                //123.456 kHz 25 %
-  pat_square_case(1000000000, 5000, 1500, 5);               //1 MHz
-  pat_square_case(3333333333ull, 3333, 1500, 6);            //3.33 MHz 33 %: fractions in both steps
-  pat_square_case(10000000000ull, 5000, 1500, 7);           //10 MHz
-  pat_square_case(47123, 7000, 200, 8);                     //47.123 Hz 70 %
+  gen_square_case(1000000, 5000, 1000, 1);                  //1 kHz, the wizard's: no fraction
+  gen_square_case(999500, 5000, 1000, 2);                   //999.5 Hz: a fractional period
+  gen_square_case(10000000, 2500, 1000, 3);                 //10 kHz 25 %
+  gen_square_case(123456000, 2500, 1500, 4);                //123.456 kHz 25 %
+  gen_square_case(1000000000, 5000, 1500, 5);               //1 MHz
+  gen_square_case(3333333333ull, 3333, 1500, 6);            //3.33 MHz 33 %: fractions in both steps
+  gen_square_case(10000000000ull, 5000, 1500, 7);           //10 MHz
+  gen_square_case(47123, 7000, 200, 8);                     //47.123 Hz 70 %
 
   //The firmware's first enable: 0x6D = 0, 0x6C x 2, 0x6D = 0x33 (continuous, start, commit); a running square changes
   //with 0x6C x 2 and 0x6D = 0x23: 18 strobes, 5.4 us at 0.3 us a strobe
-  fm_reset(PAT_VER, 199999, 9);
+  fm_reset(GEN_VER, 199999, 9);
   {
     gp_square a = { 100000, 100000, 0, 0 }, b = { 50000, 50000, 0, 0 };
 
-    fpga_pat_square(&a);
+    fpga_gen_square(&a);
     T_EQ(fm.ntrace, 4);
     T_EQ(fm.trace[0].cmd, 0x6D); T_EQ(fm.trace[0].value, 0);
     T_EQ(fm.trace[1].cmd, 0x6C); T_EQ(fm.trace[2].cmd, 0x6C);
     T_EQ(fm.trace[3].cmd, 0x6D); T_EQ(fm.trace[3].value, 0x33);
-    T_EQ(fm.pat_act[0].dur, 100000); T_EQ(fm.pat_act[0].flags, 0x20); T_EQ(fm.pat_act[1].flags, 0x80);
+    T_EQ(fm.gen_act[0].dur, 100000); T_EQ(fm.gen_act[0].flags, 0x20); T_EQ(fm.gen_act[1].flags, 0);
     s0 = fm.strobes;
-    fpga_pat_square(&b);
+    fpga_gen_square(&b);
     T_EQ(fm.strobes - s0, 18);
     T_EQ(fm.trace[6].cmd, 0x6D); T_EQ(fm.trace[6].value, 0x23);
-    T_EQ(fm.pat_starts, 1);                                 //no restart
+    T_EQ(fm.gen_starts, 1);                                 //no restart
   }
 
   //The static levels (the wizard's gain step, UI 0 / 100 %): mode 0 at the idle level, the pin driven
-  fpga_pat_level(1);
-  fpga_pat_drive(1);
-  T_EQ(fm.pat_run, 0); T_EQ(fm_pin(), 1);
-  fpga_pat_level(0);
+  fpga_gen_level(1);
+  fpga_gen_drive(1);
+  T_EQ(fm.gen_run, 0); T_EQ(fm_pin(), 1);
+  fpga_gen_level(0);
   T_EQ(fm_pin(), 0);
-  fpga_pat_drive(0);
+  fpga_gen_drive(0);
   T_EQ(fm_pin(), 2);
 
   //From a level back to the square: a fresh start (0x6D = 0 first)
   {
     gp_square a = { 10, 10, 0, 0 };
 
-    fpga_pat_square(&a);
-    T_EQ(fm.pat_run, 1); T_EQ(fm.pat_starts, 2);
+    fpga_gen_square(&a);
+    T_EQ(fm.gen_run, 1); T_EQ(fm.gen_starts, 2);
   }
 }
 
-//The double buffer: a frequency change while the square runs is glitch-free (every step a complete old or new one),
-//taken at the prefetch boundary (commit during step k: old k, k + 1 and k + 2, new from k + 3), the pending bit set until
-//then; the accumulator is not cleared (phase-continuous); a second commit before the take overwrites the first
+//The double buffer (fpga-d3's RTL): a frequency change while the square runs is glitch-free (every step a complete old
+//or new one), taken at once (pending for 2 clocks: clear by the next bus read), the step in progress completing with its
+//old length and every step from its boundary new; the accumulator is not cleared (phase-continuous); two commits within
+//one step: the second wins at the boundary
 static void test_gen_change(void)
 {
   gp_square a, b, c;
   uint64_t  pa = gp_p16_from_mhz(999500), pb = gp_p16_from_mhz(1234567), pc = gp_p16_from_mhz(2000000);
-  uint8_t   st[4];
   uint32_t  from, i, bad = 0, news = 0, first_new = 0;
   uint64_t  t_commit;
+  uint8_t   st[2];
 
   (void)gp_split(pa, gp_h16_from_bp(pa, 5000), &a);
   (void)gp_split(pb, gp_h16_from_bp(pb, 2500), &b);
   (void)gp_split(pc, gp_h16_from_bp(pc, 5000), &c);
 
-  fm_reset(PAT_VER, 199999, 21);
-  fpga_pat_square(&a);
-  fpga_pat_drive(1);
-  pat_advance(10000000);                                    //10 ms: about 10 periods
-  from = fm.pat_nedge;
+  fm_reset(GEN_VER, 199999, 21);
+  fpga_gen_square(&a);
+  fpga_gen_drive(1);
+  gen_advance(10000000);                                    //10 ms: about 10 periods
+  from = fm.gen_nedge;
   t_commit = fm_clk();
-  fpga_pat_square(&b);
+  fpga_gen_square(&b);
 
-  fpga_pat_status(st);
-  T_EQ(st[0] & 0xA0, 0xA0);                                 //running, pending
-  T_EQ(fm.pat_acc != 0 || 1, 1);
-  pat_advance(20000000);
-  fpga_pat_status(st);
-  T_EQ(st[0] & 0x20, 0);                                    //taken
+  fpga_gen_status(st);
+  T_EQ(st[0] & 0xA0, 0x80);                                 //running, the commit already taken
+  T_EQ(st[1], 1);                                           //mode 3
+  gen_advance(20000000);
 
-  for(i = from; i + 1 < fm.pat_nedge; i++)
+  for(i = from; i + 1 < fm.gen_nedge; i++)
   {
-    uint64_t d = (fm.pat_edge[(i + 1) % FM_PAT_EDGES] >> 1) - (fm.pat_edge[i % FM_PAT_EDGES] >> 1);
-    uint8_t  lvl = (uint8_t)(fm.pat_edge[i % FM_PAT_EDGES] & 1);
+    uint64_t d = (fm.gen_edge[(i + 1) % FM_GEN_EDGES] >> 1) - (fm.gen_edge[i % FM_GEN_EDGES] >> 1);
+    uint8_t  lvl = (uint8_t)(fm.gen_edge[i % FM_GEN_EDGES] & 1);
     uint32_t na = lvl ? a.n_h : a.n_l, nb = lvl ? b.n_h : b.n_l;
     int      is_a = (d == na) || (d == na + 1), is_b = (d == nb) || (d == nb + 1);
 
@@ -1522,255 +1520,86 @@ static void test_gen_change(void)
 
   T_EQ(bad, 0);
   T_TRUE(news > 10);
-  //The step running at the commit and the two prefetched ones are old: the first new step is the third complete edge
-  //interval after the commit (k + 1, k + 2 old, k + 3 new)
-  T_EQ(first_new, 3);
-  T_TRUE((fm.pat_edge[from % FM_PAT_EDGES] >> 1) >= t_commit);
+  //The step running at the commit completes old; the first complete edge interval after it (step k + 1) is new
+  T_EQ(first_new, 1);
+  T_TRUE((fm.gen_edge[from % FM_GEN_EDGES] >> 1) >= t_commit);
 
-  //A commit lost to a second commit before the take: B never runs
-  fm_reset(PAT_VER, 199999, 22);
+  //Two commits within one step: B is taken, C replaces it before the boundary, so B never runs
+  fm_reset(GEN_VER, 199999, 22);
   {
     gp_square slow = { 200000000, 200000000, 0, 0 };       //1 s steps
 
-    fpga_pat_square(&slow);
-    fpga_pat_drive(1);
-    pat_advance(1000000);
-    fpga_pat_square(&b);                                    //pending
-    fpga_pat_square(&c);                                    //overwrites the shadow
-    T_EQ(fm.pat_sh[0].dur, c.n_h);
-    from = fm.pat_nedge;
-    pat_advance(4500000000ull);                             //the slow step, its prefetched one, then C
-    for(i = from; i + 1 < fm.pat_nedge; i++)
+    fpga_gen_square(&slow);
+    fpga_gen_drive(1);
+    gen_advance(1000000);
+    fpga_gen_square(&b);                                    //taken at once
+    fpga_gen_square(&c);                                    //taken at once over it
+    T_EQ(fm.gen_sh[0].dur, c.n_h);
+    from = fm.gen_nedge;
+    gen_advance(4500000000ull);                             //the slow step completes, then C
+    for(i = from; i + 1 < fm.gen_nedge; i++)
     {
-      uint64_t d = (fm.pat_edge[(i + 1) % FM_PAT_EDGES] >> 1) - (fm.pat_edge[i % FM_PAT_EDGES] >> 1);
-      uint8_t  lvl = (uint8_t)(fm.pat_edge[i % FM_PAT_EDGES] & 1);
+      uint64_t d = (fm.gen_edge[(i + 1) % FM_GEN_EDGES] >> 1) - (fm.gen_edge[i % FM_GEN_EDGES] >> 1);
+      uint8_t  lvl = (uint8_t)(fm.gen_edge[i % FM_GEN_EDGES] & 1);
 
       if((d == (lvl ? b.n_h : b.n_l)) || (d == (lvl ? b.n_h : b.n_l) + 1))
         bad++;
     }
     T_EQ(bad, 0);
-    T_TRUE(fm.pat_nedge - from > 100);
+    T_TRUE(fm.gen_nedge - from > 100);
   }
 }
 
-//Bursts: mode 2 R = 3 with a gap, mode 1, two starts identical edge for edge, mode 0 stops at once, the bursts counter
-static void test_pattern_bursts(void)
+//The 0x39 status (bytes 0 and 3: running, pending, the step bit, mode active; 5 strobes) through high and low; the stop.
+//Entries other than 0 / 1 and the cut pattern registers (0x6E, 0x6F, 0x76..0x7D) change nothing on the model, as on
+//fpga-d3's RTL
+static void test_gen_status(void)
 {
-  fpga_pat_cfg c;
-  uint8_t      st[4];
-  uint64_t     rel[2][16];
-  uint32_t     k, i, from;
+  gp_square sq = { 1000, 3000, 0, 0 };                      //5 us high, 15 us low
+  uint32_t  s0;
+  uint8_t   st[2];
 
-  memset(&c, 0, sizeof(c));
-  c.mode = FPGA_PAT_REPEAT;
-  c.n    = 3;
-  c.r    = 3;
-  c.gap  = 1000;
-  c.step[0].flags = FPGA_PAT_S_LEVEL; c.step[0].dur = 100; c.step[0].frac = 0x4000;   //100.25
-  c.step[1].flags = 0;                c.step[1].dur = 50;  c.step[1].frac = 0x8000;   //50.5
-  c.step[2].flags = FPGA_PAT_S_LEVEL; c.step[2].dur = 20;  c.step[2].frac = 0xC000;   //20.75
-
-  fm_reset(PAT_VER, 199999, 31);
-  fpga_pat_drive(1);
-  from = fm.pat_nedge;
-  fpga_pat_load(&c, 1, 1);
-  T_EQ(fm.pat_run, 1); T_EQ(fm.pat_r, 3); T_EQ(fm.pat_gap, 1000);
-  T_EQ(fm.pat_act[2].flags, 0xA0);                           //level + end on the last step
-  pat_advance(20000);                                         //4000 clocks: all three bursts
-  fpga_pat_status(st);
-  T_EQ(st[0] & 0x80, 0); T_EQ(st[1], 0); T_EQ(st[2], 3); T_EQ(st[3] & 1, 1);
-  T_EQ(fm_pin(), 0);
-  //Per burst: rise, fall, rise (steps 0, 1, 2), then the idle low at the end: 4 edges, 3 bursts
-  T_EQ(fm.pat_nedge - from, 12);
-  {
-    uint64_t b0 = fm.pat_edge[from % FM_PAT_EDGES] >> 1, b1 = fm.pat_edge[(from + 4) % FM_PAT_EDGES] >> 1;
-    uint64_t end0 = fm.pat_edge[(from + 3) % FM_PAT_EDGES] >> 1;
-
-    //A burst lasts 171.5 clocks on average (171 or 172), the gap 1000, the accumulator carries across bursts
-    T_TRUE((end0 - b0 == 171) || (end0 - b0 == 172));
-    T_EQ(b1 - end0, 1000);
-  }
-
-  //Mode 1 started twice: the accumulator is cleared at each start, so the two bursts are identical edge for edge
-  c.mode = FPGA_PAT_SINGLE;
-  for(k = 0; k < 2; k++)
-  {
-    from = fm.pat_nedge;
-    fpga_pat_load(&c, 0, 1);
-    pat_advance(5000);
-    T_EQ(fm.pat_nedge - from, 4);
-    for(i = 0; i < 4; i++)
-      rel[k][i] = (fm.pat_edge[(from + i) % FM_PAT_EDGES] >> 1) - (fm.pat_edge[from % FM_PAT_EDGES] >> 1);
-  }
-  T_MEM(rel[0], rel[1], 4 * sizeof(uint64_t));
-
-  //Continuous with a gap; mode 0 stops at once at the idle level (high here)
-  c.mode = FPGA_PAT_CONT;
-  c.ctl  = FPGA_PAT_CTL_IDLE;
-  fpga_pat_load(&c, 0, 0);                                    //a mode-3 write starts an idle engine
-  T_EQ(fm.pat_run, 1);
-  pat_advance(100000);
-  fpga_pat_status(st);
-  T_TRUE(((st[1] << 8) | st[2]) >= 15);
-  fpga_pat_ctl(FPGA_PAT_CTL_IDLE);
-  pat_advance(100);
-  T_EQ(fm.pat_run, 0); T_EQ(fm_pin(), 1);
-
-  //Index 8 and above are ignored; entries 2..7 take effect at once (no shadow)
-  {
-    fpga_pat_step s = { FPGA_PAT_S_LEVEL, 0, 77 };
-
-    fpga_pat_step_write(8, &s);
-    fpga_pat_step_write(5, &s);
-    T_EQ(fm.pat_act[5].dur, 77);
-  }
-}
-
-//The marker: 0x15 = 3 and 0x6D bit 3 trigger the capture at the next write clock edge; without bit 3 the marker is seen
-//(0x39 byte 3 bit 1) but triggers nothing; 0x01 = 1 clears the seen bit
-static void test_pattern_marker(void)
-{
-  fpga_pat_cfg c;
-  fpga_arm_cfg a;
-  uint8_t      st[4];
-  uint64_t     t_rel = 0;
-  int          k;
-
-  memset(&c, 0, sizeof(c));
-  c.mode = FPGA_PAT_SINGLE;
-  c.n    = 2;
-  c.step[0].flags = FPGA_PAT_S_LEVEL | FPGA_PAT_S_MARK; c.step[0].dur = 10000;   //50 us pulse, marker at its start
-  c.step[1].flags = 0;                                  c.step[1].dur = 190000;
-
-  memset(&a, 0, sizeof(a));
-  a.pre_words   = 100;
-  a.total_words = 1000;
-  a.max_polls   = 100000;
-
-  for(k = 0; k < 2; k++)
-  {
-    fm_reset(PAT_VER, 99, 41 + k);                           //1 us words
-    fm.capture = 1;
-    fm.trig_at = -1;
-    fm.reg_1a  = 1;
-    fpga_write_cmd(0x15);
-    fpga_write_byte(0x03);
-    c.ctl = k ? FPGA_PAT_CTL_MARKTRIG : 0;
-    T_EQ(fpga_arm_reset(&a), 0);
-    t_rel = fm_clk();
-    fm_advance_ns(200000);                                   //the pretrigger fills
-    fpga_pat_load(&c, 1, 1);
-    fm_advance_ns(2000000);
-    fpga_pat_status(st);
-    T_EQ(st[3] & 0x02, 0x02);                                 //marker seen
-    T_EQ(fm.pat_markers, 1);
-    T_EQ(fm.triggered, (uint8_t)k);
-
-    if(k)
-    {
-      //At the write clock edge after the marker: the word written then is the trigger word
-      uint64_t mk = fm.pat_edge[(fm.pat_nedge - 2) % FM_PAT_EDGES] >> 1;   //the pulse's rising edge = the marker
-      int64_t  w  = (int64_t)((mk - t_rel) / 200);             //the word being written at the marker (1 us words)
-
-      T_TRUE(fm.trig_word >= 100);
-      T_TRUE(((int64_t)fm.trig_word >= w - 1) && ((int64_t)fm.trig_word <= w + 2));
-    }
-
-    fpga_write_cmd(0x01);
-    fpga_write_byte(0x01);
-    fpga_pat_status(st);
-    T_EQ(st[3] & 0x02, 0);
-    fpga_write_cmd(0x01);
-    fpga_write_byte(0x00);
-  }
-}
-
-//The pattern trigger engine: the shared byte builder with the pattern's code table (0x76 .. 0x7C), 0x7D around it; the
-//event starts a burst (start source 1), a one shot disarms, re-arm keeps it; 0x42; the capture's table unchanged
-static void test_ptrig(void)
-{
-  fpga_ptrig_cfg p;
-  fpga_pat_cfg   c;
-  uint8_t        st[3];
-  uint32_t       s0;
-
-  fm_reset(PAT_VER, 199, 51);
-
-  memset(&p, 0, sizeof(p));
-  p.source = 1; p.polarity = 1; p.level = 140; p.level16 = 140 << 8;
-  p.x.type = FPGA_TRIG_NTH; p.x.n = 3; p.x.h = 1000;
-  p.armed = 1; p.rearm = 0;
+  fm_reset(GEN_VER, 199999, 23);
+  fpga_gen_status(st);
+  T_EQ(st[0], 0); T_EQ(st[1], 0);
+  fpga_gen_square(&sq);
+  fpga_gen_drive(1);
+  fm_advance_ns(1000);
   s0 = fm.strobes;
-  fpga_ptrig_write(&p);
-  T_EQ(fm.ntrace, 9);
-  T_EQ(fm.trace[0].cmd, 0x7D); T_EQ(fm.trace[0].value, 0);
-  T_EQ(fm.trace[1].cmd, 0x76); T_EQ(fm.trace[1].value, 1);
-  T_EQ(fm.trace[2].cmd, 0x77); T_EQ(fm.trace[2].value, 1);
-  T_EQ(fm.trace[3].cmd, 0x78); T_EQ(fm.trace[3].value, 140);
-  T_EQ(fm.trace[4].cmd, 0x79); T_EQ(fm.trace[4].value, 140 << 8);
-  T_EQ(fm.trace[5].cmd, 0x7A); T_EQ(fm.trace[5].value, FPGA_TRIG_NTH);
-  T_EQ(fm.trace[6].cmd, 0x7B); T_EQ(fm.trace[6].value, 3);
-  T_EQ(fm.trace[7].cmd, 0x7C); T_EQ(fm.trace[7].value, 1000);
-  T_EQ(fm.trace[8].cmd, 0x7D); T_EQ(fm.trace[8].value, 0x05);
-  T_EQ(fm.strobes - s0, 2 + 2 * 4 + 1 + 2 + 4 + 4 + 2);
-  T_EQ(fm.ptrig[0], 1); T_EQ(fm.ptrig_n, 3); T_EQ(fm.ptrig_h, 1000); T_EQ(fm.ptrig[7], 0x01);
+  fpga_gen_status(st);
+  T_EQ(fm.strobes - s0, 5);
+  T_EQ(st[0], 0x80); T_EQ(st[1], 1);                        //running, entry 0 (high), the commit taken by the start
+  T_EQ(fm_pin(), 1);
+  fm_advance_ns(10000);
+  fpga_gen_status(st);
+  T_EQ(st[0], 0x81);                                        //entry 1 (low)
+  T_EQ(fm_pin(), 0);
 
-  //The edge type writes no N / H; the capture's table writes 0x5E only for the edge (fpga_trig_arm unchanged)
-  fm.ntrace = 0;
-  p.x.type = FPGA_TRIG_EDGE; p.x.n = 0; p.x.h = 0; p.rearm = 1;
-  fpga_ptrig_write(&p);
-  T_EQ(fm.ntrace, 7); T_EQ(fm.trace[5].cmd, 0x7A); T_EQ(fm.trace[6].cmd, 0x7D); T_EQ(fm.trace[6].value, 0x07);
-  fm.ntrace = 0;
-  fpga_trig_arm();
-  T_EQ(fm.ntrace, 1); T_EQ(fm.trace[0].cmd, 0x5E);
+  //Index 2 and above, 0x6E, 0x6F and the engine's 0x76..0x7D: ignored
+  {
+    fpga_gen_step s = { FPGA_GEN_S_LEVEL, 0, 77 };
+    uint8_t c;
 
-  //0x42: own engine, the type, EXT
-  fpga_ptrig_status(st);
-  T_EQ(st[0], 0x80);
+    fpga_gen_step_write(2, &s);
+    fpga_gen_step_write(8, &s);
+    for(c = 0x76; c <= 0x7D; c++)
+    {
+      fpga_write_cmd(c);
+      fpga_write_byte(0xFF);
+    }
+    fpga_write_cmd(0x6F);
+    fpga_write_byte(0xFF);
+    fpga_write_cmd(0x6E);
+    fpga_write_byte(0xFF);
+    T_EQ(fm.gen_act[0].dur, 1000); T_EQ(fm.gen_act[1].dur, 3000); T_EQ(fm.gen_sh[0].dur, 1000);
+    T_EQ(fm.gen_run, 1); T_EQ(fm.gen_starts, 1);
+  }
 
-  //A burst started by the engine's event (start source 1), re-arm keeps the engine armed
-  memset(&c, 0, sizeof(c));
-  c.mode = FPGA_PAT_SINGLE;
-  c.ctl  = 0x40;
-  c.n    = 1;
-  c.step[0].flags = FPGA_PAT_S_LEVEL; c.step[0].dur = 4000;
-  fpga_pat_drive(1);
-  fpga_pat_load(&c, 1, 0);
-  T_EQ(fm.pat_run, 0);
-  fm_ptrig_event();
-  T_EQ(fm.pat_run, 1); T_EQ(fm.ptrig[7] & 1, 1);
-  fpga_ptrig_status(st);
-  T_EQ(st[0] & 0x40, 0x40);                                   //event seen
-  fm_advance_ns(30000);
-  T_EQ(fm.pat_run, 0);
-
-  //One shot: the event disarms; a later event starts nothing; 0x7D clears the event flag
-  p.rearm = 0;
-  fpga_ptrig_write(&p);
-  fpga_ptrig_status(st);
-  T_EQ(st[0] & 0x40, 0);
-  fm_ptrig_event();
-  T_EQ(fm.pat_run, 1); T_EQ(fm.ptrig[7] & 1, 0);
-  fm_advance_ns(30000);
-  fm_ptrig_event();
-  T_EQ(fm.pat_run, 0); T_EQ(fm.pat_starts, 2);
-
-  //The MCU start is ignored with start source 1 (the engine only)
-  fpga_pat_ctl((uint8_t)(FPGA_PAT_SINGLE | 0x40 | FPGA_PAT_CTL_START));
-  T_EQ(fm.pat_run, 0);
-
-  //The routed fallback reads 0 in bit 7; the route bit is 0x7D bit 3
-  fm.ptrig_shared = 1;
-  fpga_ptrig_status(st);
-  T_EQ(st[0] & 0x80, 0);
-  p.route = 1; p.armed = 1;
-  fpga_ptrig_write(&p);
-  T_EQ(fm.ptrig[7], 0x09);
-
-  //The 16-bit level alone (the decimation changed)
-  fm.ntrace = 0;
-  fpga_ptrig_level16(0x1234);
-  T_EQ(fm.ntrace, 1); T_EQ(fm.trace[0].cmd, 0x79); T_EQ(fm.ptrig_l16, 0x1234);
+  //Off: mode 0 at the low idle level, the status reads 0
+  fpga_gen_level(0);
+  fpga_gen_status(st);
+  T_EQ(st[0], 0); T_EQ(st[1], 0);
+  T_EQ(fm_pin(), 0);
 }
 
 int main(void)
@@ -1791,8 +1620,6 @@ int main(void)
   test_gen_formulas();
   test_gen_square();
   test_gen_change();
-  test_pattern_bursts();
-  test_pattern_marker();
-  test_ptrig();
+  test_gen_status();
   return t_report("test_fpga_bus");
 }

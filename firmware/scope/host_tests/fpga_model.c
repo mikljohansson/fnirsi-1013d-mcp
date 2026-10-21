@@ -130,16 +130,8 @@ static void fm_capture_edge(void)
       for(l=0;l<4;l++)
         fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
 
-    //The trigger compares the word written on this edge (after the pretrigger words, as sampling_half_way); D5: a marker
-    //(0x15 = 3, 0x6D bit 3) is taken at the next edge, the EXT apply path
-    if(!fm.triggered && (fm.n >= pre) && fm.pat_marker_trig && (fm.reg_15 == 3))
-    {
-      fm.pat_marker_trig = 0;
-      fm.triggered = 1;
-      fm.trig_word = fm.n;
-      fm.taddr     = (uint16_t)(fm.n % fm.ring);
-    }
-    else if(!fm.triggered && (fm.reg_15 != 3) && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at) && (fm.n >= pre))
+    //The trigger compares the word written on this edge (after the pretrigger words, as sampling_half_way)
+    if(!fm.triggered && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at) && (fm.n >= pre))
     {
       if(fm_holdoff_running())
         fm.ho_blocked++;                                 //0x153C: trigger_check_enable masked by the hold-off
@@ -320,9 +312,9 @@ void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//D5 pattern: the pattern generator (fpga_model.h header)
+//The generator's square (fw-d5, the RTL cut to the square by fpga-d3, d60a0ad; fpga_model.h header)
 
-static int fm_pat_has(void)
+static int fm_gen_has(void)
 {
   return fm.version >= 0x153D;
 }
@@ -334,124 +326,76 @@ uint64_t fm_clk(void)
 
 int fm_pin(void)
 {
-  return fm.pat_drive ? fm.pat_level : 2;
+  return fm.gen_drive ? fm.gen_level : 2;
 }
 
-static void fm_pat_set_level(uint8_t level, uint64_t clk)
+static void fm_gen_set_level(uint8_t level, uint64_t clk)
 {
-  if(level != fm.pat_level)
+  if(level != fm.gen_level)
   {
-    fm.pat_edge[fm.pat_nedge % FM_PAT_EDGES] = (clk << 1) | level;
-    fm.pat_nedge++;
+    fm.gen_edge[fm.gen_nedge % FM_GEN_EDGES] = (clk << 1) | level;
+    fm.gen_nedge++;
   }
 
-  fm.pat_level = level;
+  fm.gen_level = level;
 }
 
-static uint8_t fm_pat_idle(void)
+static uint8_t fm_gen_idle(void)
 {
-  return (uint8_t)((fm.pat_ctl >> 2) & 1);
+  return (uint8_t)((fm.gen_ctl >> 2) & 1);
 }
 
-//The step after index k (whose entry is e): 0 after an end step (or entry 7)
-static uint8_t fm_pat_after(uint8_t k, uint8_t eflags)
+//The shadows become the active pair (the commit taken)
+static void fm_gen_take(void)
 {
-  return ((eflags & 0x80) || (k == 7)) ? 0 : (uint8_t)(k + 1);
+  fm.gen_act[0]  = fm.gen_sh[0];
+  fm.gen_act[1]  = fm.gen_sh[1];
+  fm.gen_pending = 0;
 }
 
-static void fm_pat_take_pending(void)
+//Begin step idx at clock clk (a pending commit is taken at the boundary first): n + the carry of acc + f clocks
+static void fm_gen_begin(uint8_t idx, uint64_t clk)
 {
-  if(fm.pat_pending)
+  uint32_t sum, dur;
+
+  if(fm.gen_pending)
+    fm_gen_take();
+
+  sum = (uint32_t)fm.gen_acc + fm.gen_act[idx].frac;
+  dur = fm.gen_act[idx].dur + (sum >> 16);
+  fm.gen_acc     = (uint16_t)sum;
+  fm.gen_step    = idx;
+  fm.gen_end_clk = clk + dur;
+  fm_gen_set_level((uint8_t)((fm.gen_act[idx].flags >> 5) & 1), clk);
+}
+
+//A start: the pending shadows are taken first, so step 0 is new; the accumulator cleared
+static void fm_gen_start(uint64_t clk)
+{
+  fm.gen_acc = 0;
+  fm.gen_run = 1;
+  fm.gen_starts++;
+  fm_gen_begin(0, clk);
+}
+
+static void fm_gen_stop(uint64_t clk)
+{
+  fm.gen_run = 0;
+  fm.gen_step = 0;
+  fm_gen_set_level(fm_gen_idle(), clk);
+}
+
+//Run the square up to clock clk (every boundary at or before it); the pending bit of a commit taken at once clears
+//2 clocks after it
+static void fm_gen_run(uint64_t clk)
+{
+  while(fm.gen_run && (fm.gen_end_clk <= clk))
+    fm_gen_begin((uint8_t)(fm.gen_step ^ 1), fm.gen_end_clk);
+
+  if(fm.gen_pending && fm.gen_take_clk && (clk >= fm.gen_take_clk))
   {
-    fm.pat_act[0]  = fm.pat_sh[0];
-    fm.pat_act[1]  = fm.pat_sh[1];
-    fm.pat_pending = 0;
-  }
-}
-
-//Begin the first queued step at clock clk; then take a pending commit and queue the step after the second one. The
-//engine prefetches two steps (fpga-d2, after the first 0x153D build): a commit during step k is taken at the boundary
-//into k + 1 (pending clears there), k + 1 and k + 2 run the old entries, k + 3 the new
-static void fm_pat_begin(uint64_t clk)
-{
-  uint32_t sum = (uint32_t)fm.pat_acc + fm.pat_q.frac;
-  uint32_t dur = fm.pat_q.dur + (sum >> 16);
-  uint8_t  idx = fm.pat_q_idx;
-
-  fm.pat_acc     = (uint16_t)sum;
-  fm.pat_step    = idx;
-  fm.pat_in_gap  = 0;
-  fm.pat_end_clk = clk + dur;
-  fm_pat_set_level((uint8_t)((fm.pat_q.flags >> 5) & 1), clk);
-
-  if(fm.pat_q.flags & 0x40)
-  {
-    fm.pat_marker_seen = 1;
-    fm.pat_markers++;
-
-    if((fm.reg_15 == 3) && (fm.pat_ctl & 0x08))
-      fm.pat_marker_trig = 1;
-  }
-
-  fm_pat_take_pending();
-  fm.pat_q      = fm.pat_q2;
-  fm.pat_q_idx  = fm.pat_q2_idx;
-  fm.pat_q2_idx = fm_pat_after(fm.pat_q_idx, fm.pat_q.flags);
-  fm.pat_q2     = fm.pat_act[fm.pat_q2_idx];
-}
-
-//A start: the pending shadows are taken first, so every step is new from step 0
-static void fm_pat_start(uint64_t clk)
-{
-  fm_pat_take_pending();
-  fm.pat_acc    = 0;
-  fm.pat_bursts = 0;
-  fm.pat_run    = 1;
-  fm.pat_starts++;
-  fm.pat_q_idx  = 0;
-  fm.pat_q      = fm.pat_act[0];
-  fm.pat_q2_idx = fm_pat_after(0, fm.pat_q.flags);
-  fm.pat_q2     = fm.pat_act[fm.pat_q2_idx];
-  fm_pat_begin(clk);
-}
-
-static void fm_pat_stop(uint64_t clk)
-{
-  fm.pat_run    = 0;
-  fm.pat_in_gap = 0;
-  fm_pat_set_level(fm_pat_idle(), clk);
-}
-
-//Run the pattern up to clock clk (every boundary at or before it)
-static void fm_pat_run(uint64_t clk)
-{
-  while(fm.pat_run && (fm.pat_end_clk <= clk))
-  {
-    uint64_t b = fm.pat_end_clk;
-
-    if(!fm.pat_in_gap && (fm.pat_q_idx == 0))
-    {
-      //The burst ended
-      uint32_t r = fm.pat_r ? fm.pat_r : 65536;
-
-      fm.pat_bursts++;
-
-      if((fm.pat_mode == 1) || ((fm.pat_mode == 2) && (fm.pat_bursts >= r)) || (fm.pat_mode == 0))
-      {
-        fm_pat_stop(b);
-        break;
-      }
-
-      if(fm.pat_gap)
-      {
-        fm.pat_in_gap  = 1;
-        fm.pat_end_clk = b + fm.pat_gap;
-        fm_pat_set_level(fm_pat_idle(), b);
-        continue;
-      }
-    }
-
-    fm_pat_begin(b);
+    fm_gen_take();
+    fm.gen_take_clk = 0;
   }
 }
 
@@ -464,43 +408,24 @@ static void fm_time(uint64_t ps)
   while(fm.next_edge_ps <= end)
   {
     fm.t_ps = fm.next_edge_ps;
-    fm_pat_run(fm.t_ps / 5000);
+    fm_gen_run(fm.t_ps / 5000);
     fm_edge();
     fm.next_edge_ps += fm_period_ps();
   }
 
   fm.t_ps = end;
-  fm_pat_run(fm.t_ps / 5000);
+  fm_gen_run(fm.t_ps / 5000);
 }
 
-//The pattern trigger engine's event (the test stands in for the qualifier): a burst start when 0x6D bits 7..6 allow it
-//and the engine is armed; the event flag; a one-shot engine disarms
-void fm_ptrig_event(void)
-{
-  uint8_t src = (uint8_t)(fm.pat_ctl >> 6);
-
-  if(!fm_pat_has() || !(fm.ptrig[7] & 1))
-    return;
-
-  fm.ptrig_event = 1;
-  fm.ptrig_events++;
-
-  if(((src == 1) || (src == 2)) && fm.pat_mode && !fm.pat_run)
-    fm_pat_start(fm_clk() + 6);                             //30 ns after the event clock (fpga-d2, tb_pattern)
-
-  if(!(fm.ptrig[7] & 2))
-    fm.ptrig[7] &= (uint8_t)~1;
-}
-
-static void fm_pat_write(uint8_t cmd)
+static void fm_gen_write(uint8_t cmd)
 {
   uint8_t *b = fm.buf;
   uint64_t now = fm_clk();
 
-  if(!fm_pat_has())
+  if(!fm_gen_has())
     return;
 
-  fm_pat_run(now);
+  fm_gen_run(now);
 
   switch(cmd)
   {
@@ -508,65 +433,52 @@ static void fm_pat_write(uint8_t cmd)
     {
       uint8_t idx = b[0] & 0x1F;
 
+      //Entries 0 (high) and 1 (low) only, double-buffered; bits 7 / 6 of byte 0 and other indices are ignored
       if(idx < 2)
       {
-        fm.pat_sh[idx].flags = b[0] & 0xE0;
-        fm.pat_sh[idx].dur   = ((uint32_t)b[1] << 24) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 8) | b[4];
-        fm.pat_sh[idx].frac  = (uint16_t)((b[5] << 8) | b[6]);
-      }
-      else if(idx < 8)
-      {
-        fm.pat_act[idx].flags = b[0] & 0xE0;
-        fm.pat_act[idx].dur   = ((uint32_t)b[1] << 24) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 8) | b[4];
-        fm.pat_act[idx].frac  = (uint16_t)((b[5] << 8) | b[6]);
+        fm.gen_sh[idx].flags = b[0] & 0x20;
+        fm.gen_sh[idx].dur   = ((uint32_t)b[1] << 24) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 8) | b[4];
+        fm.gen_sh[idx].frac  = (uint16_t)((b[5] << 8) | b[6]);
       }
       break;
     }
 
     case 0x6D:
     {
-      uint8_t v = b[0], mode = v & 3, src = (uint8_t)(v >> 6);
+      uint8_t v = b[0];
 
-      fm.pat_mode = mode;
-      fm.pat_ctl  = v & 0xCC;
+      //Mode 3 runs (a write while idle starts it 8 clocks after the strobe; ignored while running), any other mode
+      //is off at once at the idle level (bit 2). The commit: taken 2 clocks after the write when the step in progress
+      //has at least 3 clocks left (that step completes with its old length, every step from its boundary is new),
+      //else at that boundary; the accumulator is not cleared
+      fm.gen_mode = v & 3;
+      fm.gen_ctl  = v & 0x04;
 
       if(v & 0x20)
-        fm.pat_pending = 1;
-
-      if(mode == 0)
       {
-        if(fm.pat_run)
-          fm_pat_stop(now + 1);
-        else
-          fm_pat_set_level(fm_pat_idle(), now + 1);
+        if(fm.gen_pending && fm.gen_take_clk)
+          fm_gen_take();                                       //an earlier commit, still in its 2 clocks, first
+
+        fm.gen_pending  = 1;
+        fm.gen_take_clk = (fm.gen_run && (fm.gen_end_clk >= now + 3)) ? now + 2 : 0;
       }
-      else if(!fm.pat_run && ((mode == 3) || ((v & 0x10) && (src != 1))))
-        fm_pat_start(now + 8);                                //step 0 40..45 ns after the strobe (fpga-d2, tb_pattern)
-      else if(!fm.pat_run)
-        fm_pat_set_level(fm_pat_idle(), now + 1);
+
+      if(fm.gen_mode != 3)
+      {
+        if(fm.gen_run)
+          fm_gen_stop(now + 1);
+        else
+          fm_gen_set_level(fm_gen_idle(), now + 1);
+      }
+      else if(!fm.gen_run)
+        fm_gen_start(now + 8);                                //step 0 40..45 ns after the strobe (fpga-d2, tb_pattern)
       break;
     }
 
-    case 0x6E: fm.pat_r   = (uint16_t)((b[0] << 8) | b[1]); break;
-    case 0x6F: fm.pat_gap = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | b[3]; break;
-    case 0x50: fm.pat_drive = b[3] & 1; break;
-
-    case 0x76: case 0x77: case 0x78: case 0x7A:
-      fm.ptrig[cmd - 0x76] = b[0];
-      break;
-
-    case 0x79: fm.ptrig_l16 = (uint16_t)((b[0] << 8) | b[1]); break;
-    case 0x7B: fm.ptrig_n = ((uint32_t)b[0] << 16) | ((uint32_t)b[1] << 8) | b[2]; break;
-    case 0x7C: fm.ptrig_h = ((uint32_t)b[0] << 16) | ((uint32_t)b[1] << 8) | b[2]; break;
-
-    case 0x7D:
-      fm.ptrig[7] = b[0] & 0x0B;
-      if(b[0] & 0x04)
-        fm.ptrig_event = 0;
-      break;
+    case 0x50: fm.gen_drive = b[3] & 1; break;
   }
 }
-//D5 pattern end
+//The generator's square end
 
 //One bus strobe: 41..298 ns
 static void fm_strobe(void)
@@ -600,9 +512,7 @@ void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
   memset(&fpga_bus_wr, 0, sizeof(fpga_bus_wr));      //a fresh FPGA holds nothing the firmware wrote
   memset(&fpga_trig, 0, sizeof(fpga_trig));          //and the firmware's copy of the trigger extension is at power-on too
   memset(&fpga_cnt, 0, sizeof(fpga_cnt));            //C7 counter: the firmware's counter state too
-  memset(&fpga_pat, 0, sizeof(fpga_pat));            //D5 pattern: the firmware's copies at power-on
-  memset(&fpga_ptrig, 0, sizeof(fpga_ptrig));
-  fpga_trig_marker = 0;
+  memset(&fpga_gen, 0, sizeof(fpga_gen));            //the generator: the firmware's copy at power-on
   fm.pub_min = 255;                                  //C7: the published min reads 255 before the first gate
   fm.version = version;
   fm.divider = divider;
@@ -640,11 +550,7 @@ static uint32_t fm_len(uint8_t cmd)
     case 0x6A:                                                          return 2;   //D4 logger: reader position
     case 0x5F: case 0x60:                                               return 3;   //0x153C: u24 N, H
     case 0x0D: case 0x0E: case 0x1B: case 0x50: case 0x5C:             return 4;   //0x51 / 0x52 retired in 0x153D
-    //D5 pattern (0x153D)
-    case 0x6C:                                                          return 7;
-    case 0x6E: case 0x79:                                               return 2;
-    case 0x6F:                                                          return 4;
-    case 0x7B: case 0x7C:                                               return 3;
+    case 0x6C:                                                          return 7;   //0x153D: a square entry
     default:                                                            return 1;
   }
 }
@@ -661,12 +567,11 @@ static void fm_apply(uint8_t cmd, uint32_t v)
     fm.ntrace++;
   }
 
-  //D5 pattern: the pattern's and its engine's registers
+  //The generator's registers (0x6E, 0x6F, 0x76..0x7D of the cut pattern generator are ignored, as by the RTL)
   switch(cmd)
   {
-    case 0x50: case 0x6C: case 0x6D: case 0x6E: case 0x6F:
-    case 0x76: case 0x77: case 0x78: case 0x79: case 0x7A: case 0x7B: case 0x7C: case 0x7D:
-      fm_pat_write(cmd);
+    case 0x50: case 0x6C: case 0x6D:
+      fm_gen_write(cmd);
       break;
   }
 
@@ -677,8 +582,6 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       {
         fm.in_reset        = 1;
         fm.edges_in_reset  = 0;
-        fm.pat_marker_seen = 0;           //D5: 0x39 byte 3 bit 1 since 0x01 = 1
-        fm.pat_marker_trig = 0;
 
         //D4 logger (0x153D): the reader position and the unread count go to 0 (the lap flag stays)
         fm.reg_6a = 0;
@@ -910,36 +813,17 @@ uint8_t fpga_io_strobe_read(void)
       }
       break;
 
-    //D5 pattern: 0x39 = { running, in gap, pending, 0, step[3:0] }, u16 bursts done, { 0 x 6, marker seen, mode active }
+    //The generator: 0x39 = { running, 0, pending, 0, 0, 0, 0, step }, 0, 0, { 0 x 7, mode active (mode 3) }
     case 0x39:
-      if(fm_pat_has())
+      if(fm_gen_has())
       {
-        fm_pat_run(fm_clk());
+        fm_gen_run(fm_clk());
 
         switch(fm.nbytes++)
         {
-          case 0:  out = (uint8_t)((fm.pat_run ? 0x80 : 0) | (fm.pat_in_gap ? 0x40 : 0) | (fm.pat_pending ? 0x20 : 0) |
-                                   (fm.pat_step & 0x0F)); break;
-          case 1:  out = (uint8_t)(fm.pat_bursts >> 8); break;
-          case 2:  out = (uint8_t)fm.pat_bursts;        break;
-          default: out = (uint8_t)((fm.pat_marker_seen ? 0x02 : 0) | (fm.pat_mode ? 0x01 : 0)); break;
-        }
-      }
-      break;
-
-    //D5 pattern: 0x42 = { own engine, event seen, counting, pulse began, EXT, longer, type[1:0] }, u16 edges to count
-    case 0x42:
-      if(fm_pat_has())
-      {
-        uint8_t  type = fm.ptrig[4];
-        uint32_t n16  = fm.ptrig_n & 0xFFFF, rem = ((type & 3) == 2) ? ((n16 ? n16 : 1) - 1) : 0;
-
-        switch(fm.nbytes++)
-        {
-          case 0:  out = (uint8_t)((fm.ptrig_shared ? 0 : 0x80) | (fm.ptrig_event ? 0x40 : 0) |
-                                   ((fm.ptrig[0] == 2) ? 0x08 : 0) | ((type & 0x08) >> 1) | (type & 3)); break;
-          case 1:  out = (uint8_t)(rem >> 8); break;
-          default: out = (uint8_t)rem;        break;
+          case 0:  out = (uint8_t)((fm.gen_run ? 0x80 : 0) | (fm.gen_pending ? 0x20 : 0) | (fm.gen_step & 0x01)); break;
+          case 3:  out = (uint8_t)(fm.gen_mode == 3); break;
+          default: out = 0; break;
         }
       }
       break;

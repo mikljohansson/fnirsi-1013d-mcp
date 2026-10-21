@@ -50,10 +50,10 @@ PROTO_MAJOR = 1
 #: TRIG_TYPES), the trigger hold-off (caps HOLDOFF: 0x1B in 5 ns units), peak detect (SET_DECIM filter 4, READ_RAW
 #: layout 3, GET_CAPTURE_INFO 79 bit 1, caps PEAK_DETECT) and the hardware counter (GET_COUNTER 0x0213, caps COUNTER);
 #: 1.27 (FPGA 0x153D, provisional numbering): the streaming logger (LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216,
-#: acq_state 5 LOGGING, caps LOGGER), the pattern generator that is the generator (SET_PATTERN 0x0217, SET_GEN raw
-#: modes P16 / H16 on the 5 ns pattern clock, GET_GEN 40 bytes, caps PATTERN_GEN; the DDS is gone, GET_INFO
-#: gen_clock_hz 200 MHz), its trigger engine (SET_PATTERN_TRIGGER 0x021A, caps PATTERN_TRIGGER), trigger source 3 =
-#: the pattern marker, READ_BODE rows carry the stimulus period P in 5 ns clocks
+#: acq_state 5 LOGGING, caps LOGGER), the generator as a fractional two-step square (SET_GEN raw modes P16 / H16 on
+#: the 5 ns clock, GET_GEN 40 bytes; the DDS is gone, GET_INFO gen_clock_hz 200 MHz), READ_BODE rows carry the
+#: stimulus period P in 5 ns clocks. The pattern generator of the 1.27 drafts was cut (owner 2026-10-21, fw-nopat):
+#: 0x0217 / 0x021A are unknown commands, caps bits 24 / 27 and features bits 12 / 13 reserved, trigger source 3 gone
 PROTO_MINOR = 27
 HEADER_SIZE = 16
 CRC_SIZE = 4
@@ -121,12 +121,9 @@ class Cmd(enum.IntEnum):
     LOG_START = 0x0214
     LOG_READ = 0x0215
     LOG_STOP = 0x0216
-    #: protocol 1.27 (cap PATTERN_GEN): the pulse pattern on the calibration pin (contract 7.2, 7.4)
-    SET_PATTERN = 0x0217
+    #: 0x0217 / 0x021A reserved (SET_PATTERN / SET_PATTERN_TRIGGER of the 1.27 drafts, cut with 0x153D's patterns)
     #: protocol 1.26 (cap TRIG_TYPES): trigger type, polarity, N / H, hold-off: the 0x153C trigger qualifier
     SET_TRIGGER2 = 0x0219
-    #: protocol 1.27 (cap PATTERN_TRIGGER): the pattern generator's own trigger engine (contract 7.5)
-    SET_PATTERN_TRIGGER = 0x021A
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -223,8 +220,8 @@ class Caps(enum.IntFlag):
     """GET_INFO capability bits (section 8.2)."""
 
     PROG_TRIGGER_POS = 1 << 0
-    #: a programmable square generator on the calibration pin; since 0x153D (protocol 1.27) the two-step pattern on the
-    #: 5 ns clock (SET_GEN raw modes P16 / H16), before it Atlan4's 50 MHz DDS (was named GENERATOR_DDS)
+    #: a programmable square generator on the calibration pin; since 0x153D (protocol 1.27) the fractional two-step
+    #: square on the 5 ns clock (SET_GEN raw modes P16 / H16), before it Atlan4's 50 MHz DDS (was named GENERATOR_DDS)
     GENERATOR = 1 << 1
     HOLDOFF = 1 << 2
     EXT_TRIGGER = 1 << 3
@@ -260,13 +257,10 @@ class Caps(enum.IntFlag):
     COUNTER = 1 << 22
     #: protocol 1.27 (FPGA 0x153D): the streaming logger (0x69, 0x6A, read 0x38), LOG_START / LOG_READ / LOG_STOP
     LOGGER = 1 << 23
-    #: protocol 1.27: the 8-step pattern generator (0x6C-0x6F, read 0x39), SET_PATTERN, trigger source 3 (the marker);
-    #: also means the generator is the pattern (SET_GEN P16 / H16)
-    PATTERN_GEN = 1 << 24
+    #: bit 24 reserved (PATTERN_GEN of the 1.27 drafts, cut)
     #: protocol 1.28 (FPGA 0x153E): runt and window types, the pulse-width range (SET_TRIGGER2 types 4 / 5, RANGE)
     TRIG_RUNT_WINDOW = 1 << 26
-    #: protocol 1.27: the pattern trigger engine (0x76-0x7D, read 0x42), SET_PATTERN_TRIGGER
-    PATTERN_TRIGGER = 1 << 27
+    #: bit 27 reserved (PATTERN_TRIGGER of the 1.27 drafts, cut)
 
 
 class Features(enum.IntFlag):
@@ -287,8 +281,7 @@ class Features(enum.IntFlag):
     COUNTER = 1 << 10
     #: 0x153D (protocol 1.27)
     LOGGER = 1 << 11
-    PATTERN = 1 << 12
-    PATTERN_TRIGGER = 1 << 13
+    #: bits 12 / 13 reserved (PATTERN / PATTERN_TRIGGER of the 1.27 drafts, cut)
 
 
 def feature_names(features: int) -> list[str]:
@@ -338,8 +331,6 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.LOG_START: Caps.LOGGER,
     Cmd.LOG_READ: Caps.LOGGER,
     Cmd.LOG_STOP: Caps.LOGGER,
-    Cmd.SET_PATTERN: Caps.PATTERN_GEN,
-    Cmd.SET_PATTERN_TRIGGER: Caps.PATTERN_TRIGGER,
 }
 
 
@@ -517,7 +508,7 @@ SAMPLE_RATE_DIVIDERS = (0, 1, 3, 9, 19, 39, 99, 199, 399, 999, 1999, 3999, 9999,
 MIN_REMOTE_TIMEPERDIV_INDEX = 11
 
 BASE_CLOCK_HZ = 200_000_000
-#: the generator clock (GET_INFO gen_clock_hz): the pattern generator runs on the 200 MHz sample clock since 0x153D
+#: the generator clock (GET_INFO gen_clock_hz): the square runs on the 200 MHz sample clock since 0x153D
 GEN_CLOCK_HZ = 200_000_000
 ENTER_FEL_MAGIC = 0x4C45465F
 
@@ -1848,11 +1839,9 @@ class SetTimebaseReq(Payload):
 #: SET_TRIGGER2 / GET_TRIGGER 28 byte 0 (FPGA 0x5E bits 2..0): the trigger type
 TRIG_EDGE, TRIG_PULSE_WIDTH, TRIG_NTH_EDGE, TRIG_TIMEOUT, TRIG_RUNT, TRIG_WINDOW = 0, 1, 2, 3, 4, 5
 TRIG_TYPE_NAMES = ("edge", "pulse_width", "nth_edge", "timeout", "runt", "window")
-#: trigger source (FPGA 0x15; SET_TRIGGER / SET_TRIGGER2 / GET_TRIGGER): 3 = the pattern generator's marker since
-#: protocol 1.27 (FPGA 0x153D, caps PATTERN_GEN; the EXT apply path, so EXT's position convention; never fires while
-#: the pattern is off or its marker is not a trigger source, SET_PATTERN flags PAT_F_MARKER_TRIGGER)
-TRIG_SOURCE_CH1, TRIG_SOURCE_CH2, TRIG_SOURCE_EXT, TRIG_SOURCE_PATTERN = 0, 1, 2, 3
-TRIG_SOURCE_NAMES = ("CH1", "CH2", "EXT", "pattern")
+#: trigger source (FPGA 0x15; SET_TRIGGER / SET_TRIGGER2 / GET_TRIGGER)
+TRIG_SOURCE_CH1, TRIG_SOURCE_CH2, TRIG_SOURCE_EXT = 0, 1, 2
+TRIG_SOURCE_NAMES = ("CH1", "CH2", "EXT")
 #: polarity (0x16) names per type: index 0 = polarity 0, 1 = polarity 1
 TRIG_POLARITY_NAMES = {
     TRIG_EDGE: ("rising", "falling"),
@@ -1891,7 +1880,7 @@ class Trigger2(Payload):
 
     0 u8 type (TRIG_*; 4 runt / 5 window are 0x153E: E_BAD_ARG detail 0), 1 u8 polarity per type
     (TRIG_POLARITY_NAMES; = GET_TRIGGER ``edge``, FPGA 0x16), 2 u8 flags (TRIG2_F_LONGER, pulse width only; RANGE /
-    BOTH_CORES and other bits: detail 2), 3 u8 source (0 CH1, 1 CH2, 2 EXT, 3 the pattern marker since 1.27), 4 u32 n (pulse width / timeout: samples
+    BOTH_CORES and other bits: detail 2), 3 u8 source (0 CH1, 1 CH2, 2 EXT), 4 u32 n (pulse width / timeout: samples
     of the trigger stream 1..16777215; Nth edge: the count 1..65535; edge: 0; detail 4. The firmware converts nothing:
     a sample is one memory word on CH1 / CH2 (10 (D + 1) ns legacy, N x 5 ns with the filter or peak detect), one 5 ns
     clock on EXT), 8 u32 h (Nth edge: idle samples 0..16777215, 0 = count from the arm; other types 0; detail 8),
@@ -3042,10 +3031,12 @@ class AcquireAvgHeader(Payload):
     ch_mask: int = 0
 
 
-#: GEN byte 23: what drives the pin
-GEN_SOURCE_SQUARE = 0  # the generator's two-step square (SET_GEN, the generator menu, the Bode engines)
-GEN_SOURCE_PATTERN = 1  # a SET_PATTERN pattern (the GEN frequency / duty / P16 / H16 fields read 0)
-GEN_SOURCE_NAMES = ("generator", "pattern")
+#: GEN byte 1 = FPGA 0x39 byte 0, the square's status (protocol 1.27)
+GEN_ST_RUNNING = 0x80  # the square runs
+GEN_ST_PENDING = 0x20  # a committed change (SET_GEN, a chirp step) not yet taken at a step boundary
+GEN_ST_STEP = 0x01  # the entry running: 0 high, 1 low
+#: GEN byte 22 = FPGA 0x39 byte 3
+GEN_ST3_ACTIVE = 0x01  # mode 3 (continuous) in effect
 #: SET_GEN's frequency cap (unchanged from the DDS); the square needs n_h, n_l >= 2 clocks of 5 ns
 GEN_MAX_MHZ = 25_000_000_000
 GEN_MIN_STEP_CLOCKS = 2
@@ -3057,24 +3048,21 @@ _GEN_K = (1 << 16) * 200_000_000_000
 @dataclass
 class Gen(Payload):
     """GEN response (GET_GEN / SET_GEN): 24 bytes up to protocol 1.26 (the DDS words at 4 / 8), 40 since 1.27 (FPGA
-    0x153D: the generator is the two-step pattern on the 5 ns clock, contract 7.2 / 7.4): 0 u8 enable (0x50: the pin
-    is driven), 1 u8 the pattern status byte 0 (FPGA 0x39: PAT_ST_RUNNING, PAT_ST_GAP, PAT_ST_PENDING = a commit not
-    yet taken, step in bits 3..0), 2 u16 bursts done (0x39 1..2), 4 u32 0 and 8 u32 0 (the retired 0x51 / 0x52
-    words), 12 u64 freq_mhz_actual, 20 u16 duty_bp_actual, 22 u8 0x39 byte 3 (PAT_ST3_*), 23 u8 source
-    (GEN_SOURCE_*), 24 u64 p16 (the period in 1/65536 of a 5 ns clock), 32 u64 h16 (the high part, same unit).
-    GET_GEN reads 0x39 live (from the main loop): poll it until ``pending`` clears before the next glitch-free change
-    (the host chirp's pace)."""
+    0x153D: the generator is a fractional two-step square on the 5 ns clock, contract 7.2 / 7.4): 0 u8 enable (0x50:
+    the pin is driven), 1 u8 status (FPGA 0x39 byte 0: GEN_ST_RUNNING, GEN_ST_PENDING = a commit not yet taken,
+    GEN_ST_STEP), 2..11 0 (4 / 8 were the retired 0x51 / 0x52 words), 12 u64 freq_mhz_actual, 20 u16 duty_bp_actual,
+    22 u8 status3 (0x39 byte 3: GEN_ST3_ACTIVE), 23 u8 0, 24 u64 p16 (the period in 1/65536 of a 5 ns clock), 32 u64 h16 (the high part, same unit). GET_GEN
+    reads 0x39 live (from the main loop): poll it until ``pending`` clears before the next glitch-free change (the
+    host chirp's pace)."""
 
-    FIELDS = [("enable", "B"), ("pat_status", "B"), ("bursts", "H"), ("_r4", "8x"),
-              ("freq_mhz_actual", "Q"), ("duty_bp_actual", "H"), ("pat_status3", "B"), ("source", "B"),
+    FIELDS = [("enable", "B"), ("status", "B"), ("_r2", "10x"),
+              ("freq_mhz_actual", "Q"), ("duty_bp_actual", "H"), ("status3", "B"), ("_r23", "x"),
               ("p16", "Q"), ("h16", "Q")]
     enable: int = 0
-    pat_status: int = 0
-    bursts: int = 0
+    status: int = 0
     freq_mhz_actual: int = 0
     duty_bp_actual: int = 0
-    pat_status3: int = 0
-    source: int = GEN_SOURCE_SQUARE
+    status3: int = 0
     p16: int = 0
     h16: int = 0
 
@@ -3094,18 +3082,14 @@ class Gen(Payload):
     @property
     def pending(self) -> bool:
         """A committed change (SET_GEN, a chirp step) not yet taken at a step boundary (0x39 byte 0 bit 5)."""
-        return bool(self.pat_status & PAT_ST_PENDING)
+        return bool(self.status & GEN_ST_PENDING)
 
     @property
     def running(self) -> bool:
-        return bool(self.pat_status & PAT_ST_RUNNING)
-
-    @property
-    def source_name(self) -> str:
-        return GEN_SOURCE_NAMES[self.source] if self.source < len(GEN_SOURCE_NAMES) else str(self.source)
+        return bool(self.status & GEN_ST_RUNNING)
 
     def steps(self) -> tuple[int, int, int, int]:
-        """(n_h, f_h, n_l, f_l): the two pattern entries the firmware writes for this square."""
+        """(n_h, f_h, n_l, f_l): the two entries the firmware writes for this square."""
         return gen_steps(self.p16, self.h16)
 
 
@@ -3177,247 +3161,6 @@ def gen_period_p16(period_clocks: int) -> tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------------------------------------
-# Pattern generator (protocol 1.27, FPGA 0x153D, contract 7.2 / 7.4)
-
-PAT_MODES = ("off", "single", "repeat", "continuous")
-PAT_OFF, PAT_SINGLE, PAT_REPEAT, PAT_CONTINUOUS = 0, 1, 2, 3
-#: SET_PATTERN flags (byte 1), in FPGA 0x6D bit positions where they are 0x6D bits
-PAT_F_HIZ = 0x01  # the pattern runs but the pin is not driven (0x50 = 0): the post stays the EXT input
-PAT_F_IDLE_HIGH = 0x04  # 0x6D bit 2: the idle level between bursts and in mode 0
-PAT_F_MARKER_TRIGGER = 0x08  # 0x6D bit 3: the marker is the capture's trigger source 3
-PAT_START_SHIFT = 6  # 0x6D bits 7..6: what starts a burst
-PAT_START_MCU, PAT_START_TRIGGER, PAT_START_BOTH = 0, 1, 2
-PAT_START_NAMES = ("mcu", "trigger", "both")
-PAT_F_VALID = PAT_F_HIZ | PAT_F_IDLE_HIGH | PAT_F_MARKER_TRIGGER | (3 << PAT_START_SHIFT)
-#: step flags
-PAT_STEP_LEVEL = 0x01
-PAT_STEP_MARK = 0x02
-PAT_MAX_STEPS = 8
-PAT_MIN_CLOCKS = 2
-PAT_CLOCK_HZ = BASE_CLOCK_HZ
-#: FPGA 0x39 byte 0 (GEN byte 1, PATTERN byte 12)
-PAT_ST_RUNNING = 0x80
-PAT_ST_GAP = 0x40
-PAT_ST_PENDING = 0x20
-PAT_ST_STEP = 0x0F
-#: FPGA 0x39 byte 3 (GEN byte 22, PATTERN byte 13)
-PAT_ST3_ACTIVE = 0x01
-PAT_ST3_MARKER = 0x02  # a marker since 0x01 = 1
-PAT_HEADER_BYTES = 12
-PAT_STEP_BYTES = 8
-PAT_RESP_HEADER_BYTES = 24
-
-
-@dataclass
-class PatternStep(Payload):
-    """One SET_PATTERN step (8 bytes): u8 flags (PAT_STEP_LEVEL, PAT_STEP_MARK), u8 0, u16 fraction in 1/65536
-    clock, u32 duration in 5 ns clocks (>= 2). Average length n + f / 65536 clocks; with one fraction accumulator
-    per pattern every edge lands within one clock of its ideal time."""
-
-    FIELDS = [("flags", "B"), ("_r", "x"), ("fraction", "H"), ("duration", "I")]
-    flags: int = 0
-    fraction: int = 0
-    duration: int = PAT_MIN_CLOCKS
-
-    @property
-    def level(self) -> int:
-        return self.flags & PAT_STEP_LEVEL
-
-    @property
-    def mark(self) -> bool:
-        return bool(self.flags & PAT_STEP_MARK)
-
-    @property
-    def d16(self) -> int:
-        """The duration in 1/65536 clock."""
-        return (self.duration << 16) | self.fraction
-
-    @property
-    def seconds(self) -> float:
-        return self.d16 / 65536 / PAT_CLOCK_HZ
-
-    @classmethod
-    def from_seconds(cls, seconds: float, level: int, mark: bool = False) -> "PatternStep":
-        """A step of ``seconds`` rounded to 1/65536 of a 5 ns clock."""
-        d16 = int(round(seconds * PAT_CLOCK_HZ * 65536))
-        n, f = d16 >> 16, d16 & 0xFFFF
-        if n < PAT_MIN_CLOCKS:
-            raise ValueError(f"a step of {seconds:g} s is shorter than {PAT_MIN_CLOCKS} x 5 ns")
-        if n > 0xFFFFFFFF:
-            raise ValueError(f"a step of {seconds:g} s is longer than 2^32 - 1 clocks (21.47 s)")
-        return cls((PAT_STEP_LEVEL if level else 0) | (PAT_STEP_MARK if mark else 0), f, n)
-
-
-@dataclass
-class PatternHeader(Payload):
-    """SET_PATTERN header (12 bytes; the steps follow): 0 u8 mode (PAT_*), 1 u8 flags (PAT_F_*, start source in
-    bits 7..6), 2 u16 repeat R (bursts per start in mode 2, 0 = 65536), 4 u32 gap_ns (between bursts; the firmware
-    writes round(gap_ns / 5) clocks and echoes clocks x 5), 8 u8 n steps 1..8, 9 u8 commit (0x6D bit 5: entries 0 /
-    1 are double-buffered and taken at the next step boundary), 10 u8 start (0x6D bit 4 after the rest: the burst
-    starts now), 11 u8 0."""
-
-    FIELDS = [("mode", "B"), ("flags", "B"), ("repeat", "H"), ("gap_ns", "I"), ("n", "B"), ("commit", "B"),
-              ("start", "B"), ("_r", "x")]
-    mode: int = PAT_OFF
-    flags: int = 0
-    repeat: int = 1
-    gap_ns: int = 0
-    n: int = 0
-    commit: int = 1
-    start: int = 0
-
-    @property
-    def start_source(self) -> int:
-        return self.flags >> PAT_START_SHIFT & 3
-
-
-@dataclass
-class SetPatternReq:
-    """SET_PATTERN 0x0217 (protocol 1.27, REMOTE, cap PATTERN_GEN): the header and n 8-byte steps (12 + 8n bytes;
-    another length is E_BAD_LEN). The firmware sets ``end`` on step n - 1, writes 0x6C x n, 0x6E, 0x6F, 0x6D (with
-    the commit when asked) and the start last. E_BAD_ARG detail = the byte offset: 0 mode, 1 flags (bits 1, 4, 5 or
-    start source 3), 8 n, 9 commit, 10 start (also start = 1 with mode 0 or start source 1), 11, 12 + 8i the step's
-    flags, + 1 its reserved byte, + 4 a duration under 2 clocks. E_STATE detail 0 when a driven pattern meets the EXT
-    trigger (capture or pattern engine): EXT and the pin are one wire."""
-
-    header: PatternHeader = field(default_factory=PatternHeader)
-    steps: list[PatternStep] = field(default_factory=list)
-
-    def pack(self) -> bytes:
-        h = PatternHeader(**{**self.header.__dict__, "n": len(self.steps)})
-        return h.pack() + b"".join(s.pack() for s in self.steps)
-
-    @classmethod
-    def unpack(cls, data: bytes) -> "SetPatternReq":
-        h = PatternHeader.unpack(data[:PAT_HEADER_BYTES])
-        steps = [PatternStep.unpack(data[PAT_HEADER_BYTES + PAT_STEP_BYTES * i:PAT_HEADER_BYTES + PAT_STEP_BYTES * (i + 1)])
-                 for i in range(min(h.n, (len(data) - PAT_HEADER_BYTES) // PAT_STEP_BYTES))]
-        return cls(h, steps)
-
-
-def pattern_burst16(steps: Iterable[PatternStep]) -> int:
-    """The burst length in 1/65536 clock (the sum of the steps)."""
-    return sum(s.d16 for s in steps)
-
-
-@dataclass
-class PatternResp:
-    """PATTERN response of SET_PATTERN (24 + 8n bytes): 0..11 the header as written (gap_ns = the clocks written x
-    5), 12 u8 0x39 byte 0 (PAT_ST_*), 13 u8 0x39 byte 3 (PAT_ST3_*), 14 u16 bursts done, 16 u64 the burst length in
-    1/65536 clock, 24.. the n steps as written."""
-
-    header: PatternHeader = field(default_factory=PatternHeader)
-    status: int = 0
-    status3: int = 0
-    bursts: int = 0
-    burst16: int = 0
-    steps: list[PatternStep] = field(default_factory=list)
-
-    _TAIL: ClassVar[struct.Struct] = struct.Struct("<BBHQ")
-
-    def pack(self) -> bytes:
-        h = PatternHeader(**{**self.header.__dict__, "n": len(self.steps)})
-        return h.pack() + self._TAIL.pack(self.status, self.status3, self.bursts, self.burst16) + \
-            b"".join(s.pack() for s in self.steps)
-
-    @classmethod
-    def unpack(cls, data: bytes) -> "PatternResp":
-        data = bytes(data) + b"\0" * max(0, PAT_RESP_HEADER_BYTES - len(data))
-        h = PatternHeader.unpack(data[:PAT_HEADER_BYTES])
-        st, st3, bursts, b16 = cls._TAIL.unpack_from(data, PAT_HEADER_BYTES)
-        n = min(h.n, (len(data) - PAT_RESP_HEADER_BYTES) // PAT_STEP_BYTES)
-        steps = [PatternStep.unpack(data[PAT_RESP_HEADER_BYTES + PAT_STEP_BYTES * i:
-                                         PAT_RESP_HEADER_BYTES + PAT_STEP_BYTES * (i + 1)]) for i in range(n)]
-        return cls(h, st, st3, bursts, b16, steps)
-
-    @property
-    def burst_s(self) -> float:
-        return self.burst16 / 65536 / PAT_CLOCK_HZ
-
-    @property
-    def running(self) -> bool:
-        return bool(self.status & PAT_ST_RUNNING)
-
-    @property
-    def pending(self) -> bool:
-        return bool(self.status & PAT_ST_PENDING)
-
-    def to_dict(self) -> dict[str, Any]:
-        h = self.header
-        return {"mode": PAT_MODES[h.mode] if h.mode < 4 else h.mode, "flags": h.flags, "repeat": h.repeat or 65536,
-                "gap_ns": h.gap_ns, "start_source": PAT_START_NAMES[h.start_source] if h.start_source < 3 else
-                h.start_source, "running": self.running, "pending": self.pending,
-                "in_gap": bool(self.status & PAT_ST_GAP), "step": self.status & PAT_ST_STEP,
-                "marker_seen": bool(self.status3 & PAT_ST3_MARKER), "bursts_done": self.bursts,
-                "burst_s": self.burst_s,
-                "steps": [{"level": s.level, "mark": s.mark, "clocks": s.duration, "fraction": s.fraction,
-                           "seconds": s.seconds} for s in self.steps]}
-
-
-#: FPGA 0x42 byte 0 (PATTERN_TRIGGER byte 28): bit 7 own engine (0 = the shared fallback of contract 7.5), bit 6 an
-#: event since the arm, then the 0x34 bits (counting, pulse began, EXT, longer, type)
-PTRIG_ST_OWN = 0x80
-PTRIG_ST_EVENT = 0x40
-PTRIG_RESP_BYTES = 32
-
-
-@dataclass
-class PatternTriggerReq:
-    """SET_PATTERN_TRIGGER 0x021A (protocol 1.27, REMOTE, cap PATTERN_TRIGGER), 28 bytes: the SET_TRIGGER2 body
-    (24 bytes, the capture trigger's layout and validation; types 0..3 only, holdoff 0: detail 16; source 0 CH1, 1
-    CH2, 2 EXT) then 24 u8 armed (1 = the engine watches; writing 1 restarts it), 25 u8 rearm (1 = re-arm after each
-    burst, 0 = one shot), 26 u16 0. N and H are samples of the engine's stream (ring words on CH1 / CH2, 5 ns on
-    EXT), the level a raw 8-bit code (16-bit compare with the filter, as the capture's). In the shared fallback a
-    qualified type that differs from the capture's qualified type answers E_STATE detail 8."""
-
-    trigger2: Trigger2 = field(default_factory=Trigger2)
-    armed: int = 1
-    rearm: int = 1
-
-    _TAIL: ClassVar[struct.Struct] = struct.Struct("<BBH")
-
-    def pack(self) -> bytes:
-        return self.trigger2.pack() + self._TAIL.pack(self.armed, self.rearm, 0)
-
-    @classmethod
-    def unpack(cls, data: bytes) -> "PatternTriggerReq":
-        data = bytes(data) + b"\0" * max(0, 28 - len(data))
-        armed, rearm, _ = cls._TAIL.unpack_from(data, 24)
-        return cls(Trigger2.unpack(data[:24]), armed, rearm)
-
-
-@dataclass
-class PatternTriggerResp:
-    """PATTERN_TRIGGER response (32 bytes): the 24-byte body in effect, 24 u8 armed, 25 u8 rearm, 26 u16 0, 28 u8
-    FPGA 0x42 byte 0 (PTRIG_ST_*, then the 0x34 bits), 29 u8 0, 30 u16 0x42 bytes 1..2 (edges still to count)."""
-
-    trigger2: Trigger2 = field(default_factory=Trigger2)
-    armed: int = 0
-    rearm: int = 0
-    status: int = 0
-    edges_left: int = 0
-
-    _TAIL: ClassVar[struct.Struct] = struct.Struct("<BBHBxH")
-
-    def pack(self) -> bytes:
-        return self.trigger2.pack() + self._TAIL.pack(self.armed, self.rearm, 0, self.status, self.edges_left)
-
-    @classmethod
-    def unpack(cls, data: bytes) -> "PatternTriggerResp":
-        data = bytes(data) + b"\0" * max(0, PTRIG_RESP_BYTES - len(data))
-        armed, rearm, _, st, left = cls._TAIL.unpack_from(data, 24)
-        return cls(Trigger2.unpack(data[:24]), armed, rearm, st, left)
-
-    @property
-    def own_engine(self) -> bool:
-        return bool(self.status & PTRIG_ST_OWN)
-
-    @property
-    def event_seen(self) -> bool:
-        return bool(self.status & PTRIG_ST_EVENT)
-
-
-# ---------------------------------------------------------------------------------------------------------
 # Streaming logger (protocol 1.27, FPGA 0x153D, contract section 6)
 
 LOG_FMT_RAW8, LOG_FMT_HIGH8, LOG_FMT_WIDE16, LOG_FMT_PEAK = 0, 1, 2, 3
@@ -3447,8 +3190,8 @@ LOG_D_CHANNELS, LOG_D_RATE, LOG_D_FORMAT, LOG_D_DIVIDER = 0, 1, 2, 4
 #: E_STATE detail while logging (every other acquisition command)
 LOG_E_STATE_LOGGING = 9
 #: what a scope answers while a log runs (fw-d4, docs/protocol.md row 67): the F_BUSY set, the read-only set and the
-#: logger's LOG_READ / LOG_STOP; everything else (LOG_START, ARM, every SET_* including the generator and the pattern:
-#: set them up before the log) gets E_STATE detail LOG_E_STATE_LOGGING "logging: LOG_STOP first"
+#: logger's LOG_READ / LOG_STOP; everything else (LOG_START, ARM, every SET_* including the generator: set them up
+#: before the log) gets E_STATE detail LOG_E_STATE_LOGGING "logging: LOG_STOP first"
 LOG_ALLOWED = frozenset({
     Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.SET_REMOTE, Cmd.GET_BATTERY, Cmd.GET_LINK_STATS, Cmd.GET_BAD_FRAME,
     Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH, Cmd.GET_CAPTURE_INFO, Cmd.SD_STAGE, Cmd.READ_SCREEN, Cmd.GET_CHANNEL,
@@ -4657,7 +4400,6 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
     Cmd.CAL_PROBE: CalProbeReq.size(), Cmd.GET_COUNTER: CounterReq.size(), Cmd.SET_TRIGGER2: Trigger2.size(),
     Cmd.LOG_START: LogStartReq.size(), Cmd.LOG_READ: LogReadReq.size(), Cmd.LOG_STOP: 0,
-    Cmd.SET_PATTERN: PAT_HEADER_BYTES, Cmd.SET_PATTERN_TRIGGER: 28,
 }
 
 

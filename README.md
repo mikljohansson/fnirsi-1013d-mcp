@@ -45,7 +45,7 @@ back first, so keep that backup.
 - A first-run screen, **Diagnostics** (status tiles, a calibration page, an event log, a report saved to the card),
   viewers for saved pictures and waveforms, Settings, USB drive mode.
 
-**From your AI agent over USB** (40 tools in the default profile; raw FPGA access is off unless you enable it; no
+**From your AI agent over USB** (39 tools in the default profile; raw FPGA access is off unless you enable it; no
 remote lock-out: you and the agent change the same live settings, and the screen follows)
 - **Read**: identity, capabilities, status, settings, calibration and voltage scaling, event log, the scope's own
   spectrum, card info, health, a screenshot; a report with a plot and an HTML page of any result.
@@ -78,8 +78,8 @@ Code skills: `fnirsi-scope` (how to measure) and `fnirsi-install` (the install r
 
 Ideas, not promises ([`docs/plans/roadmap.md`](docs/plans/roadmap.md), sections 6 and 8): more trigger types (pulse
 width, Nth edge, runt, window, timeout) behind a Type row in the trigger menu; peak-detect acquisition; a streaming
-data logger (continuous filtered samples at up to about 1 MS/s into the 32 MB RAM and on to the host); a pulse pattern
-generator with a trigger output; a hardware frequency and period counter feeding the measurement cards; deeper plain
+data logger (continuous filtered samples at up to about 1 MS/s into the 32 MB RAM and on to the host); a hardware
+frequency and period counter feeding the measurement cards; deeper plain
 memory (about 24,576 samples per channel from the spare block RAM); a DVM readout, serial decode, mask testing and
 CSV export; and testers with EF2L45 and EP4CE6 units.
 

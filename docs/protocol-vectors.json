@@ -52,8 +52,6 @@
   "LOG_READ": 533,
   "LOG_STOP": 534,
   "SET_TRIGGER2": 537,
-  "SET_PATTERN": 535,
-  "SET_PATTERN_TRIGGER": 538,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
   "SD_STAGE": 1282,
@@ -8415,8 +8413,8 @@
   },
   {
    "name": "resp_gen_1_27",
-   "description": "1.27 GEN response (40 bytes): enabled, 0x39 byte 0 = 0x20 (pending: the commit is taken at the next step boundary; poll GET_GEN until bit 5 clears before the next chirp step), 0 bursts, 12 freq 999500 mHz, 20 duty 5000 bp, 22 0x39 byte 3 = 0x01 (mode active), 23 source 0 (the square), 24 P16, 32 H16",
-   "hex": "a513010101035b00000028000000750a0120000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000502708d1",
+   "description": "1.27 GEN response (40 bytes): enabled, 0x39 byte 0 = 0xA1 (running, step 1 (low), pending: the commit is taken within 3 clocks, or at the boundary of a step with less left; poll GET_GEN until bit 5 clears before the next chirp step), 2..11 0, 12 freq 999500 mHz, 20 duty 5000 bp, 22 0x39 byte 3 = 1 (mode active), 23 0, 24 P16, 32 H16",
+   "hex": "a513010101035b00000028000000750a01a1000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000085245d9",
    "frames": [
     {
      "cmd": 769,
@@ -8424,152 +8422,10 @@
      "status": 0,
      "flags": 1,
      "len": 40,
-     "payload": "0120000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000"
+     "payload": "01a1000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000"
     }
    ],
    "device_events": []
-  },
-  {
-   "name": "req_set_pattern_pulse_train",
-   "description": "1.27: a 50 us high step with the marker, 950 us low, 10 bursts (mode 2) without a gap, the marker a capture trigger source (flags bit 3; with SET_TRIGGER source 3), the pin driven, committed and started by the MCU",
-   "hex": "a513010017025c0000001c00000036ff02080a00000000000201010003000000102700000000000030e60200d4888116",
-   "frames": [
-    {
-     "cmd": 535,
-     "seq": 92,
-     "status": 0,
-     "flags": 0,
-     "len": 28,
-     "payload": "02080a00000000000201010003000000102700000000000030e60200"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 535,
-     "seq": 92,
-     "status": 0,
-     "flags": 0,
-     "len": 28,
-     "payload": "02080a00000000000201010003000000102700000000000030e60200",
-     "event": "frame"
-    }
-   ]
-  },
-  {
-   "name": "resp_set_pattern",
-   "description": "1.27 PATTERN response (24 + 8 n bytes): the header as written (gap echoed as clocks x 5 ns), 12 0x39 byte 0 = 0x80 (running, step 0), 13 0x39 byte 3 = 0x01, 14 u16 bursts done 0, 16 u64 the burst length 200000 clocks in 1/65536 clock (1 ms), 24 the steps",
-   "hex": "a513010117025d00000028000000b48602080a000000000002010100800100000000400d0300000003000000102700000000000030e60200dec9cd94",
-   "frames": [
-    {
-     "cmd": 535,
-     "seq": 93,
-     "status": 0,
-     "flags": 1,
-     "len": 40,
-     "payload": "02080a000000000002010100800100000000400d0300000003000000102700000000000030e60200"
-    }
-   ],
-   "device_events": []
-  },
-  {
-   "name": "resp_set_pattern_e_bad_arg_duration",
-   "description": "1.27 SET_PATTERN E_BAD_ARG: detail = the byte offset (here step 1's duration, 12 + 8 + 4 + 4 = 28); 0 mode, 1 flags, 8 steps, 9 commit, 10 start, 11 byte 11, 12 + 8 i step flags, + 1 byte 1, + 4 duration",
-   "hex": "a513010117025e00040016000000d3c61c006475726174696f6e203e3d203220636c6f636b73e7e0de2b",
-   "frames": [
-    {
-     "cmd": 535,
-     "seq": 94,
-     "status": 4,
-     "flags": 1,
-     "len": 22,
-     "payload": "1c006475726174696f6e203e3d203220636c6f636b73"
-    }
-   ],
-   "device_events": []
-  },
-  {
-   "name": "req_set_pattern_trigger_nth_ch2",
-   "description": "1.27: the pattern trigger engine on CH2: the 3rd rising edge after 1000 idle samples, level 140, armed, re-armed after each burst (SET_PATTERN start source 1 or 2 makes the event start a burst)",
-   "hex": "a51301001a025f0000001c00000078bf0200000103000000e80300008c000000000000000000000001010000b1675746",
-   "frames": [
-    {
-     "cmd": 538,
-     "seq": 95,
-     "status": 0,
-     "flags": 0,
-     "len": 28,
-     "payload": "0200000103000000e80300008c000000000000000000000001010000"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 538,
-     "seq": 95,
-     "status": 0,
-     "flags": 0,
-     "len": 28,
-     "payload": "0200000103000000e80300008c000000000000000000000001010000",
-     "event": "frame"
-    }
-   ]
-  },
-  {
-   "name": "resp_set_pattern_trigger",
-   "description": "1.27 SET_PATTERN_TRIGGER response (32 bytes): the body in effect, armed, re-arm, 28 0x42 byte 0 = 0xA2 (own engine, counting, type 2), 30 u16 edges still to count 2",
-   "hex": "a51301011a026000000020000000f49b0200000103000000e80300008c000000000000000000000001010000a20002007cb70376",
-   "frames": [
-    {
-     "cmd": 538,
-     "seq": 96,
-     "status": 0,
-     "flags": 1,
-     "len": 32,
-     "payload": "0200000103000000e80300008c000000000000000000000001010000a2000200"
-    }
-   ],
-   "device_events": []
-  },
-  {
-   "name": "resp_set_pattern_trigger_e_state_shared",
-   "description": "1.27 SET_PATTERN_TRIGGER E_STATE detail 8: the FPGA has the routed fallback (0x42 byte 0 bit 7 = 0) and the capture uses a different qualified trigger",
-   "hex": "a51301011a0261000800430000006b130800736861726564207472696767657220656e67696e653a207468652063617074757265207573657320616e6f74686572207175616c696669656420747269676765727ecf1e92",
-   "frames": [
-    {
-     "cmd": 538,
-     "seq": 97,
-     "status": 8,
-     "flags": 1,
-     "len": 67,
-     "payload": "0800736861726564207472696767657220656e67696e653a207468652063617074757265207573657320616e6f74686572207175616c69666965642074726967676572"
-    }
-   ],
-   "device_events": []
-  },
-  {
-   "name": "req_set_trigger2_marker",
-   "description": "1.27: capture trigger source 3 = the pattern's marker (edge type only; with SET_PATTERN flags bit 3)",
-   "hex": "a513010019026200000018000000fed4000000030000000000000000800000000000000000000000232718b8",
-   "frames": [
-    {
-     "cmd": 537,
-     "seq": 98,
-     "status": 0,
-     "flags": 0,
-     "len": 24,
-     "payload": "000000030000000000000000800000000000000000000000"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 537,
-     "seq": 98,
-     "status": 0,
-     "flags": 0,
-     "len": 24,
-     "payload": "000000030000000000000000800000000000000000000000",
-     "event": "frame"
-    }
-   ]
   },
   {
    "name": "ascii_ver",
@@ -9487,8 +9343,8 @@
   },
   {
    "name": "host_resp_get_info_1_27",
-   "description": "GET_INFO response, protocol 1.27 (80 bytes): FPGA 0x153D, gen_clock_hz 200 MHz (the pattern clock), caps add LOGGER (23), PATTERN_GEN (24), PATTERN_TRIGGER (27) = 0x9FFEC4F",
-   "hex": "a5130101020009000000500000008a15011b0002000401003d1502080020020200c2eb0b4fecff0900c2eb0bfe3f500000070600302e322e31303500000000000000000027018c0c31303133442d303030310000000000002003e0013d150000f9025683",
+   "description": "GET_INFO response, protocol 1.27 (80 bytes): FPGA 0x153D, gen_clock_hz 200 MHz (the square's clock), caps add LOGGER (23) = 0xFFEC4F",
+   "hex": "a5130101020009000000500000008a15011b0002000401003d1502080020020200c2eb0b4fecff0000c2eb0bfe3f500000070600302e322e31303500000000000000000027018c0c31303133442d303030310000000000002003e0013d150000bd43aa5e",
    "frames": [
     {
      "cmd": 2,
@@ -9496,7 +9352,7 @@
      "status": 0,
      "flags": 1,
      "len": 80,
-     "payload": "011b0002000401003d1502080020020200c2eb0b4fecff0900c2eb0bfe3f500000070600302e322e31303500000000000000000027018c0c31303133442d303030310000000000002003e0013d150000"
+     "payload": "011b0002000401003d1502080020020200c2eb0b4fecff0000c2eb0bfe3f500000070600302e322e31303500000000000000000027018c0c31303133442d303030310000000000002003e0013d150000"
     }
    ],
    "device_events": [],
@@ -9619,7 +9475,7 @@
   },
   {
    "name": "host_resp_gen_running_pending",
-   "description": "GEN (40 bytes): enabled, 0x39 byte 0 = 0xA1 (running, pending, step 1), 999500 mHz, 2500 bp, 0x39 byte 3 = 1, source 0 (the square), P16, H16",
+   "description": "GEN (40 bytes): enabled, 0x39 byte 0 = 0xA1 (running, pending, step 1), 2..11 0, 999500 mHz, 2500 bp, 22 0x39 byte 3 = 1 (mode active), 23 0, P16, H16",
    "hex": "a513010100034b00000028000000845801a1000000000000000000004c400f0000000000c4090100ce0ca40d03000000340369c300000000e367ef80",
    "frames": [
     {
@@ -9635,124 +9491,9 @@
    "source": "host"
   },
   {
-   "name": "host_req_set_pattern_double_pulse",
-   "description": "SET_PATTERN 0x0217 (12 + 4 x 8 bytes): a double pulse (10 us marked, 5.0025 us = 1000 clocks + 32768/65536, 10 us, 475 us), 100 bursts 2 ms apart, the marker a trigger source, started by the MCU now and by the engine (start source 2)",
-   "hex": "a513010017024c0000002c0000006bee0288640080841e000401010003000000d007000000000080e803000001000000d0070000000000001873010071423788",
-   "frames": [
-    {
-     "cmd": 535,
-     "seq": 76,
-     "status": 0,
-     "flags": 0,
-     "len": 44,
-     "payload": "0288640080841e000401010003000000d007000000000080e803000001000000d00700000000000018730100"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 535,
-     "seq": 76,
-     "status": 0,
-     "flags": 0,
-     "len": 44,
-     "payload": "0288640080841e000401010003000000d007000000000080e803000001000000d00700000000000018730100",
-     "event": "frame"
-    }
-   ],
-   "source": "host"
-  },
-  {
-   "name": "host_resp_pattern_double_pulse",
-   "description": "PATTERN response (24 + 4 x 8 bytes): the header, 0x39 0x80 / 0x01, 0 bursts, the burst length 100000.5 clocks in 1/65536 clock, the steps",
-   "hex": "a513010117024c0000003800000074e70288640080841e0004010100800100000080a0860100000003000000d007000000000080e803000001000000d00700000000000018730100d1c80bf1",
-   "frames": [
-    {
-     "cmd": 535,
-     "seq": 76,
-     "status": 0,
-     "flags": 1,
-     "len": 56,
-     "payload": "0288640080841e0004010100800100000080a0860100000003000000d007000000000080e803000001000000d00700000000000018730100"
-    }
-   ],
-   "device_events": [],
-   "source": "host"
-  },
-  {
-   "name": "host_req_set_pattern_trigger_ext_pulse",
-   "description": "SET_PATTERN_TRIGGER 0x021A (28 bytes): the engine on EXT, a positive pulse longer than 2000 x 5 ns = 10 us, armed, one shot (re-arm 0)",
-   "hex": "a51301001a024d0000001c0000006a0d01000102d00700000000000080000000000000000000000001000000e3684870",
-   "frames": [
-    {
-     "cmd": 538,
-     "seq": 77,
-     "status": 0,
-     "flags": 0,
-     "len": 28,
-     "payload": "01000102d00700000000000080000000000000000000000001000000"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 538,
-     "seq": 77,
-     "status": 0,
-     "flags": 0,
-     "len": 28,
-     "payload": "01000102d00700000000000080000000000000000000000001000000",
-     "event": "frame"
-    }
-   ],
-   "source": "host"
-  },
-  {
-   "name": "host_resp_pattern_trigger_ext_pulse",
-   "description": "PATTERN_TRIGGER response (32 bytes): the body, armed, one shot, 0x42 byte 0 = own engine | EXT | longer | type 1, no edges to count",
-   "hex": "a51301011a024d00000020000000f8b601000102d007000000000000800000000000000000000000010000008d0000008571dcd4",
-   "frames": [
-    {
-     "cmd": 538,
-     "seq": 77,
-     "status": 0,
-     "flags": 1,
-     "len": 32,
-     "payload": "01000102d007000000000000800000000000000000000000010000008d000000"
-    }
-   ],
-   "device_events": [],
-   "source": "host"
-  },
-  {
-   "name": "host_req_set_trigger_source_pattern",
-   "description": "SET_TRIGGER mask bit 0: source 3 = the pattern's marker (edge type, SET_PATTERN flags bit 3)",
-   "hex": "a513010005014e000000180000008de001000300000000000000000000000000000000000000000047029c1b",
-   "frames": [
-    {
-     "cmd": 261,
-     "seq": 78,
-     "status": 0,
-     "flags": 0,
-     "len": 24,
-     "payload": "010003000000000000000000000000000000000000000000"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 261,
-     "seq": 78,
-     "status": 0,
-     "flags": 0,
-     "len": 24,
-     "payload": "010003000000000000000000000000000000000000000000",
-     "event": "frame"
-    }
-   ],
-   "source": "host"
-  },
-  {
    "name": "host_resp_get_status_logging",
-   "description": "GET_STATUS (52 bytes) while logging: acq_state 5 LOGGING, the loop at 1 ms (pass_ms), features 0x3FFF (bits 11-13 LOGGER / PATTERN / PATTERN_TRIGGER)",
-   "hex": "a513010103004f00000034000000f79f02050800320000000000000000000000400d0300ffff12000000000001000300150000001500000000000000ff3f0000000000004431c974",
+   "description": "GET_STATUS (52 bytes) while logging: acq_state 5 LOGGING, the loop at 1 ms (pass_ms), features 0x0FFF (bit 11 LOGGER; 12 / 13 reserved)",
+   "hex": "a513010103004f00000034000000f79f02050800320000000000000000000000400d0300ffff12000000000001000300150000001500000000000000ff0f0000000000001694aadc",
    "frames": [
     {
      "cmd": 3,
@@ -9760,7 +9501,7 @@
      "status": 0,
      "flags": 1,
      "len": 52,
-     "payload": "02050800320000000000000000000000400d0300ffff12000000000001000300150000001500000000000000ff3f000000000000"
+     "payload": "02050800320000000000000000000000400d0300ffff12000000000001000300150000001500000000000000ff0f000000000000"
     }
    ],
    "device_events": [],

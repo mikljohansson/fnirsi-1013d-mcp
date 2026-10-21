@@ -59,10 +59,9 @@
                                         //      caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8
                                         //1.27 (provisional numbering): FPGA 0x153D streaming logger (fw-d4): LOG_START /
                                         //      LOG_READ / LOG_STOP, acq_state 5, caps bit 23, features bit 11
-                                        //1.27 (provisional numbering): FPGA 0x153D (fw-d5): the generator on the
-                                        //      pattern (SET_GEN raw modes P16 / H16, GEN 40 bytes, GET_INFO gen clock
-                                        //      200 MHz), SET_PATTERN, SET_PATTERN_TRIGGER, trigger source 3 (the
-                                        //      marker), READ_BODE row field P, caps 24 / 27, features 12 / 13
+                                        //1.27 (provisional numbering): FPGA 0x153D (fw-d5, fw-nopat): the generator
+                                        //      is the fractional two-step square (SET_GEN raw modes P16 / H16, GEN 40
+                                        //      bytes, GET_INFO gen clock 200 MHz), READ_BODE row field P
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -125,10 +124,10 @@
 #define PC_CMD_LOG_START          0x0214     //D4 logger, 1.27: start the streaming logger (FPGA 0x153D)
 #define PC_CMD_LOG_READ           0x0215     //D4 logger, 1.27: the next chunk of the log
 #define PC_CMD_LOG_STOP           0x0216     //D4 logger, 1.27: stop it, the summary
-#define PC_CMD_SET_PATTERN        0x0217     //1.27 (fw-d5): the pattern generator's table, mode, bursts, gap, start (FPGA 0x153D)
-#define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0214..0x0218
-                                             //      are the contract's LOG_*, SET_PATTERN, docs/plans/fpga-0x153c.md)
-#define PC_CMD_SET_PATTERN_TRIGGER 0x021A    //1.27 (fw-d5): the pattern trigger engine (SET_TRIGGER2 body + armed, re-arm)
+                                             //0x0217 reserved (SET_PATTERN of the 1.27 drafts, cut with 0x153D's patterns)
+#define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0214..0x0216
+                                             //      are the contract's LOG_*, docs/plans/fpga-0x153c.md)
+                                             //0x021A reserved (SET_PATTERN_TRIGGER of the 1.27 drafts, cut likewise)
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
@@ -166,7 +165,7 @@
 // GET_INFO capability bits (P-8.2)
 
 #define PC_CAP_PROG_TRIGGER_POS       (1u << 0)
-#define PC_CAP_GENERATOR              (1u << 1)    //was GENERATOR_DDS; 1.27: the two-step pattern (FPGA 0x153D)
+#define PC_CAP_GENERATOR              (1u << 1)    //was GENERATOR_DDS; 1.27: the fractional two-step square (FPGA 0x153D)
 #define PC_CAP_HOLDOFF                (1u << 2)
 #define PC_CAP_EXT_TRIGGER            (1u << 3)
 #define PC_CAP_TRIG_BOTH_CORES        (1u << 4)
@@ -190,10 +189,8 @@
                                                    //      (bit 2 HOLDOFF: 0x1B is the trigger hold-off in 5 ns units, 0x153C+)
 #define PC_CAP_COUNTER                (1u << 22)   //1.26 (fw-c7): the hardware counter 0x61 / 0x62, read 0x35; GET_COUNTER (0x153C+)
 #define PC_CAP_LOGGER                 (1u << 23)   //1.27 (D4 logger): 0x69 / 0x6A, read 0x38; LOG_START / LOG_READ / LOG_STOP (0x153D+)
-//D5 pattern
-#define PC_CAP_PATTERN_GEN            (1u << 24)   //1.27 (fw-d5): 0x6C-0x6F, read 0x39, trigger source 3; SET_PATTERN (0x153D)
-#define PC_CAP_PATTERN_TRIGGER        (1u << 27)   //1.27 (fw-d5): 0x76-0x7D, read 0x42, 0x6D bits 7..6; SET_PATTERN_TRIGGER
-//D5 pattern end
+                                                   //bits 24 and 27 reserved (PATTERN_GEN / PATTERN_TRIGGER of the 1.27
+                                                   //      drafts, cut with 0x153D's patterns, fw-nopat)
 
 //GET_STATUS bytes 44-45 / GET_DECIM bytes 32-33 (1.17): what the running bitstream has
 #define PC_FEAT_W_EXT_TRIGGER         0x0001       //0x1533+
@@ -208,10 +205,8 @@
 #define PC_FEAT_W_PEAK                0x0200       //1.26 (C6): peak detect (0x153C+); C7's COUNTER takes 0x0400
 #define PC_FEAT_W_COUNTER             0x0400       //1.26 (fw-c7): the hardware counter (0x153C+; bit 9 is C6's PEAK)
 #define PC_FEAT_W_LOGGER              0x0800       //1.27 (D4 logger): the streaming logger (0x153D+; fw-c5's numbering)
-//D5 pattern (bit 11 is fw-d4's LOGGER)
-#define PC_FEAT_W_PATTERN             0x1000       //1.27 (fw-d5): the pattern generator (0x153D)
-#define PC_FEAT_W_PATTERN_TRIGGER     0x2000       //1.27 (fw-d5): its trigger engine (0x153D)
-//D5 pattern end
+                                                   //0x1000, 0x2000 reserved (PATTERN / PATTERN_TRIGGER of the 1.27
+                                                   //      drafts, cut with 0x153D's patterns, fw-nopat)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

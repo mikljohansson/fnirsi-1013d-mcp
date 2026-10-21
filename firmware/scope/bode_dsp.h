@@ -17,7 +17,7 @@
 
 #include "types.h"
 
-#define BODE_GEN_HZ           200000000u    //pattern clock (FPGA 0x153D, fw-d5): f = 200 MHz / P, P integer clocks of 5 ns
+#define BODE_GEN_HZ           200000000u    //generator clock (FPGA 0x153D, fw-d5): f = 200 MHz / P, P integer clocks of 5 ns
 #define BODE_MAX_POINTS       200           //planned points per sweep (BODE_CTRL accepts 1..200)
 #define BODE_MAX_RECORD       8190          //samples per channel (the 16-bit layout's limit, protocol row 47)
 #define BODE_MIN_RECORD       2048
@@ -55,7 +55,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // Planner (bode-design 3.1-3.2; the host's plan_point / plan_sweep, identical integers)
 
-//fw-d5 (FPGA 0x153D, protocol 1.27): the stimulus is the pattern generator's square of an integer period P in 5 ns clocks
+//fw-d5 (FPGA 0x153D, protocol 1.27): the stimulus is the generator's square of an integer period P in 5 ns clocks
 //(fraction 0, n_h = ceil(P / 2), n_l = floor(P / 2)): f = 200 MHz / P exactly. Every plan of the DDS era maps with P = 4 M
 //(M the period in 50 MHz DDS clocks), and the grid is four times finer.
 typedef struct

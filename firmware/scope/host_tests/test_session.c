@@ -920,7 +920,7 @@ static void test_trace(void)
   T_TRUE(r.len > 2); T_MEM(r.p + 2, "start", 5);                //error text follows the detail
 }
 
-//1.27 (fw-d5, FPGA 0x153D): the generator is the pattern's two-step square; SET_GEN raw modes P16 / H16, GEN 40 bytes
+//1.27 (fw-d5, FPGA 0x153D): the generator is a fractional two-step square; SET_GEN raw modes P16 / H16, GEN 40 bytes
 static resp_t set_gen(uint8_t mask, uint8_t en, uint8_t fmode, uint8_t dmode, uint64_t freq, uint64_t duty)
 {
   uint8_t p[20];
@@ -949,26 +949,35 @@ static void test_generator(void)
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 24), 200000000u);                              //the generator clock: the pattern's 200 MHz
-  T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_GENERATOR | PC_CAP_PATTERN_GEN | PC_CAP_PATTERN_TRIGGER),
-       PC_CAP_GENERATOR | PC_CAP_PATTERN_GEN | PC_CAP_PATTERN_TRIGGER);
+  T_EQ(pc_get_u32(r.p + 24), 200000000u);                              //the generator clock: 200 MHz
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_GENERATOR, PC_CAP_GENERATOR);
+  T_EQ(pc_get_u32(r.p + 20) & ((1u << 24) | (1u << 27)), 0);          //fw-nopat: PATTERN_GEN / _TRIGGER reserved
   r = status();
-  T_EQ(pc_get_u16(r.p + 44) & (PC_FEAT_W_PATTERN | PC_FEAT_W_PATTERN_TRIGGER), PC_FEAT_W_PATTERN | PC_FEAT_W_PATTERN_TRIGGER);
+  T_EQ(pc_get_u16(r.p + 44) & 0x3000, 0);                              //features 0x1000 / 0x2000 reserved
+
+  //The cut commands: SET_PATTERN 0x0217 and SET_PATTERN_TRIGGER 0x021A are unknown
+  {
+    uint8_t p[28];
+
+    memset(p, 0, sizeof(p));
+    r = req(0x0217, p, 20);  T_EQ(r.h.status, PC_E_UNKNOWN_CMD);
+    r = req(0x021A, p, 28);  T_EQ(r.h.status, PC_E_UNKNOWN_CMD);
+  }
 
   //The UI's 1 kHz 50 %: GEN 40 bytes, P16 / H16 of the contract's formulas, the status read in the main loop
-  mock.pat_st[0] = 0x20; mock.pat_st[1] = 0; mock.pat_st[2] = 5; mock.pat_st[3] = 0x01;
+  mock.gen_st[0] = 0xA1; mock.gen_st[1] = 0x01;
   r = req(PC_CMD_GET_GEN, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_GEN_LEN); T_EQ(r.p[0], 0);
-  T_EQ(r.p[1], 0x20); T_EQ(pc_get_u16(r.p + 2), 5); T_EQ(r.p[22], 0x01); T_EQ(r.p[23], 0);
+  T_EQ(r.p[1], 0xA1); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(r.p[22], 0x01); T_EQ(r.p[23], 0);
   T_EQ(pc_get_u32(r.p + 4), 0); T_EQ(pc_get_u32(r.p + 8), 0);
   T_EQ(pc_get_u64(r.p + 12), 1000000); T_EQ(pc_get_u16(r.p + 20), 5000);
   T_EQ(pc_get_u64(r.p + 24), 13107200000ull); T_EQ(pc_get_u64(r.p + 32), 6553600000ull);
-  T_EQ(mock.pat_status_reads, 1);
+  T_EQ(mock.gen_status_reads, 1);
 
   //Inside a menu (modal context) no FPGA access: the last status read is reported
-  mock.pat_st[0] = 0;
+  mock.gen_st[0] = 0;
   r = req_ctx(PC_CMD_GET_GEN, 0, 0, PC_CTX_MODAL);
-  T_EQ(r.h.status, 0); T_EQ(r.p[1], 0x20); T_EQ(mock.pat_status_reads, 1);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], 0xA1); T_EQ(mock.gen_status_reads, 1);
 
   //10 kHz 25 %: exact, 5000 + 15000 clocks
   r = set_gen(7, 1, 0, 0, 10000000, 2500);
@@ -1021,186 +1030,20 @@ static void test_generator(void)
   r = set_gen(1, 1, 0, 0, 0, 0);
   T_EQ(r.h.status, PC_E_STATE);
   mock.trg.source = 0;
-}
 
-//D5 pattern: SET_PATTERN (1.27, fw-d5)
-static resp_t set_pattern(uint8_t mode, uint8_t flags, uint16_t rep, uint32_t gap_ns, uint8_t n, uint8_t commit,
-                          uint8_t start, const uint8_t *steps, uint32_t len)
-{
-  uint8_t p[12 + 8 * 9];
-
-  memset(p, 0, sizeof(p));
-  p[0] = mode; p[1] = flags; pc_put_u16(p + 2, rep); pc_put_u32(p + 4, gap_ns); p[8] = n; p[9] = commit; p[10] = start;
-  memcpy(p + 12, steps, 8 * 9);
-  return req(PC_CMD_SET_PATTERN, p, len ? len : 12 + 8u * n);
-}
-
-static void put_step(uint8_t *q, uint8_t flags, uint16_t frac, uint32_t dur)
-{
-  q[0] = flags; q[1] = 0; pc_put_u16(q + 2, frac); pc_put_u32(q + 4, dur);
-}
-
-static void test_pattern(void)
-{
-  uint8_t st[8 * 9];
-  resp_t  r;
-  uint32_t w;
-
-  setup(PC_FW_FPGA_VERSION);
-  memset(st, 0, sizeof(st));
-
-  //A 50 us pulse with the marker, then 949.9975 us low (fraction 0x8000), 10 bursts 1 us apart, the marker as a trigger
-  //source, started now
-  put_step(st, PC_PAT_S_LEVEL | PC_PAT_S_MARK, 0, 10000);
-  put_step(st + 8, 0, 0x8000, 189999);
-  mock.pat_st[0] = 0x80; mock.pat_st[2] = 0; mock.pat_st[3] = 0x01;
-  r = set_pattern(2, PC_PAT_F_MARKTRIG, 10, 1000, 2, 1, 1, st, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 24 + 16);
-  T_EQ(r.p[0], 2); T_EQ(r.p[1], PC_PAT_F_MARKTRIG); T_EQ(pc_get_u16(r.p + 2), 10); T_EQ(pc_get_u32(r.p + 4), 1000);
-  T_EQ(r.p[8], 2); T_EQ(r.p[9], 1); T_EQ(r.p[10], 1); T_EQ(r.p[11], 0);
-  T_EQ(r.p[12], 0x80); T_EQ(r.p[13], 0x01);
-  T_EQ(pc_get_u64(r.p + 16), (199999ull << 16) | 0x8000);             //the burst length
-  T_MEM(r.p + 24, st, 16);
-  T_EQ(mock.pat_writes, 1); T_EQ(mock.pat.mode, 2); T_EQ(mock.pat.r, 10); T_EQ(mock.pat.gap, 200); T_EQ(mock.pat.n, 2);
-  T_EQ(mock.pat.commit, 1); T_EQ(mock.pat.start, 1);
-  T_EQ(mock.pat.step[0].flags, PC_PAT_S_LEVEL | PC_PAT_S_MARK); T_EQ(mock.pat.step[0].dur, 10000);
-  T_EQ(mock.pat.step[1].frac, 0x8000); T_EQ(mock.pat.step[1].dur, 189999);
-  T_EQ(mock.gen_hw_en, 1);
-
-  //GEN: source 1, the pin driven, no square fields
-  r = req(PC_CMD_GET_GEN, 0, 0);
-  T_EQ(r.p[0], 1); T_EQ(r.p[23], 1); T_EQ(pc_get_u64(r.p + 12), 0); T_EQ(pc_get_u64(r.p + 24), 0);
-
-  //SET_GEN with the enable alone switches the pin and keeps the pattern; a frequency replaces it with the square
-  w = mock.gen_writes;
-  r = set_gen(1, 0, 0, 0, 0, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.p[23], 1); T_EQ(mock.gen_pin_writes, 1); T_EQ(mock.gen_writes, w); T_EQ(mock.gen_hw_en, 0);
-  r = set_gen(3, 1, 0, 0, 1000000, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.p[23], 0); T_EQ(mock.gen_writes, w + 1); T_EQ(mock.gen_p16, 13107200000ull);
-
-  //A gap rounds to 5 ns clocks (and comes back as written); the pin stays hi-Z with flags bit 0
-  r = set_pattern(1, PC_PAT_F_HIZ | PC_PAT_F_IDLE | 0x80, 0, 1003, 1, 1, 0, st, 0);
-  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 4), 1005); T_EQ(mock.pat.gap, 201); T_EQ(mock.gen_hw_en, 0);
-
-  //Refusals (detail = the byte offset), nothing written
-  w = mock.pat_writes;
-  r = set_pattern(4, 0, 0, 0, 1, 0, 0, st, 0);          T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
-  r = set_pattern(1, 0x02, 0, 0, 1, 0, 0, st, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
-  r = set_pattern(1, 0x10, 0, 0, 1, 0, 0, st, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
-  r = set_pattern(1, 0xC0, 0, 0, 1, 0, 0, st, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
-  r = set_pattern(3, 0x40, 0, 0, 1, 0, 0, st, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
-  r = set_pattern(1, 0, 0, 0, 0, 0, 0, st, 12);         T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
-  r = set_pattern(1, 0, 0, 0, 9, 0, 0, st, 0);          T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
-  r = set_pattern(1, 0, 0, 0, 2, 0, 0, st, 12 + 8);     T_EQ(r.h.status, PC_E_BAD_LEN);
-  r = set_pattern(1, 0, 0, 0, 1, 2, 0, st, 0);          T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 9);
-  r = set_pattern(1, 0, 0, 0, 1, 0, 2, st, 0);          T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 10);
-  r = set_pattern(0, 0, 0, 0, 1, 0, 1, st, 0);          T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 10);
-  r = set_pattern(1, 0x40, 0, 0, 1, 0, 1, st, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 10);
+  //The enable alone keeps the square (the UI's 1 kHz again): written with the pin
   {
-    uint8_t bad[8 * 9];
+    uint32_t w = mock.gen_writes;
 
-    memcpy(bad, st, sizeof(bad));
-    bad[0] = 0x04;
-    r = set_pattern(1, 0, 0, 0, 1, 0, 0, bad, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 12);
-    bad[0] = 0; bad[1] = 1;
-    r = set_pattern(1, 0, 0, 0, 1, 0, 0, bad, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 13);
-    bad[1] = 0; pc_put_u32(bad + 8 + 4, 1);
-    r = set_pattern(1, 0, 0, 0, 2, 0, 0, bad, 0);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 24);
-  }
-  {
-    uint8_t p[20];
-
-    memset(p, 0, sizeof(p)); p[0] = 1; p[8] = 1; p[11] = 1; pc_put_u32(p + 16, 10);
-    r = req(PC_CMD_SET_PATTERN, p, 20);                 T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 11);
+    r = set_gen(1, 1, 0, 0, 0, 0);
+    T_EQ(r.h.status, 0); T_EQ(mock.gen_writes, w + 1); T_EQ(mock.gen_hw_en, 1); T_EQ(mock.gen_p16, 6553600000ull);
   }
 
-  //The pin is the EXT input: a driven pattern is refused while the capture triggers on EXT, accepted hi-Z
-  mock.trg.source = 2;
-  r = set_pattern(1, 0, 0, 0, 1, 1, 1, st, 0);          T_EQ(r.h.status, PC_E_STATE);
-  T_EQ(mock.pat_writes, w);
-  r = set_pattern(1, PC_PAT_F_HIZ, 0, 0, 1, 1, 1, st, 0); T_EQ(r.h.status, 0);
-  mock.trg.source = 0;
-}
-
-//D5 pattern: SET_PATTERN_TRIGGER (1.27, fw-d5) and the marker as capture trigger source 3
-static resp_t set_ptrig(uint8_t type, uint8_t pol, uint8_t flags, uint8_t src, uint32_t n, uint32_t h, uint16_t level,
-                        uint32_t hold, uint8_t armed, uint8_t rearm, uint16_t tail)
-{
-  uint8_t p[28];
-
-  memset(p, 0, sizeof(p));
-  p[0] = type; p[1] = pol; p[2] = flags; p[3] = src;
-  pc_put_u32(p + 4, n); pc_put_u32(p + 8, h); pc_put_u16(p + 12, level); pc_put_u32(p + 16, hold);
-  p[24] = armed; p[25] = rearm; pc_put_u16(p + 26, tail);
-  return req(PC_CMD_SET_PATTERN_TRIGGER, p, 28);
-}
-
-static void test_pattern_trigger(void)
-{
-  resp_t r;
-
-  setup(PC_FW_FPGA_VERSION);
-
-  //Nth edge 3 on CH2 after 1000 idle samples, level 140, armed with re-arm
-  mock.ptrig_st[0] = 0x80 | 0x20 | 0x02; mock.ptrig_st[1] = 0; mock.ptrig_st[2] = 2;
-  r = set_ptrig(PC_TRG_T_NTH, 0, 0, 1, 3, 1000, 140, 0, 1, 1, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 32);
-  T_EQ(r.p[0], PC_TRG_T_NTH); T_EQ(r.p[1], 0); T_EQ(r.p[2], 0); T_EQ(r.p[3], 1);
-  T_EQ(pc_get_u32(r.p + 4), 3); T_EQ(pc_get_u32(r.p + 8), 1000); T_EQ(pc_get_u16(r.p + 12), 140);
-  T_EQ(pc_get_u32(r.p + 16), 0); T_EQ(r.p[24], 1); T_EQ(r.p[25], 1);
-  T_EQ(r.p[28], 0xA2); T_EQ(pc_get_u16(r.p + 30), 2);
-  T_EQ(mock.ptrig_writes, 1); T_EQ(mock.ptrig.x.type, PC_TRG_T_NTH); T_EQ(mock.ptrig.x.n, 3); T_EQ(mock.ptrig.x.h, 1000);
-  T_EQ(mock.ptrig.source, 1); T_EQ(mock.ptrig.level, 140); T_EQ(mock.ptrig.armed, 1); T_EQ(mock.ptrig.rearm, 1);
-  T_EQ(mock.ptrig.route, 0);
-  T_EQ(mock.trig_ext_writes, 0);                                       //the capture's trigger is not touched
-
-  //Refusals: SET_TRIGGER2's (the same check), the hold-off, armed / re-arm, the tail, source 3
-  r = set_ptrig(PC_TRG_T_RUNT, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
-  r = set_ptrig(PC_TRG_T_EDGE, 0, 0, 3, 0, 0, 0, 0, 1, 0, 0);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
-  r = set_ptrig(PC_TRG_T_PULSE, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
-  r = set_ptrig(PC_TRG_T_EDGE, 0, 0, 0, 0, 0, 0, 5, 1, 0, 0);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 16);
-  r = set_ptrig(PC_TRG_T_EDGE, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 24);
-  r = set_ptrig(PC_TRG_T_EDGE, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 25);
-  r = set_ptrig(PC_TRG_T_EDGE, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 26);
-  T_EQ(mock.ptrig_writes, 1);
-
-  //EXT as the engine's source while the pin is driven: refused; with the generator off accepted
-  mock.gen_en = 1;
-  r = set_ptrig(PC_TRG_T_EDGE, 1, 0, 2, 0, 0, 128, 0, 1, 0, 0); T_EQ(r.h.status, PC_E_STATE);
-  mock.gen_en = 0;
-  r = set_ptrig(PC_TRG_T_EDGE, 1, 0, 2, 0, 0, 128, 0, 1, 0, 0); T_EQ(r.h.status, 0); T_EQ(mock.ptrig.source, 2);
-
-  //The shared fallback (0x42 byte 0 bit 7 = 0): the engine is routed to the pattern; a second, different qualified
-  //trigger beside the capture's is refused (E_STATE detail 8), the same one or an edge is accepted
-  mock.ptrig_st[0] = 0;
-  mock.trig_ext.type = PC_TRG_T_PULSE; mock.trig_ext.n = 50; mock.trig_ext.flags = 0;
-  mock.trg.source = 0; mock.trg.edge = 0; mock.trg.level = 128;
-  r = set_ptrig(PC_TRG_T_PULSE, 0, 0, 0, 60, 0, 128, 0, 1, 0, 0); T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 8);
-  r = set_ptrig(PC_TRG_T_PULSE, 0, 0, 0, 50, 0, 128, 0, 1, 0, 0); T_EQ(r.h.status, 0); T_EQ(mock.ptrig.route, 1);
-  r = set_ptrig(PC_TRG_T_EDGE, 0, 0, 1, 0, 0, 90, 0, 1, 0, 0);    T_EQ(r.h.status, 0); T_EQ(mock.ptrig.route, 1);
-  r = set_ptrig(PC_TRG_T_PULSE, 0, 0, 0, 60, 0, 128, 0, 0, 0, 0); T_EQ(r.h.status, 0); T_EQ(mock.ptrig.route, 0);  //disarmed
-  mock.trig_ext.type = PC_TRG_T_EDGE; mock.trig_ext.n = 0;
-
-  //The marker as capture trigger source 3: SET_TRIGGER and SET_TRIGGER2 with the edge type; a qualified type refuses it
-  set_trigger(0x01, 3, 0, 0, 0, 0, 0, 0, 0, &r);
-  T_EQ(r.h.status, 0); T_EQ(mock.trg.source, 3); T_EQ(r.p[0], 3);
-  set_trigger2(PC_TRG_T_EDGE, 1, 0, 3, 0, 0, 128, 0, 0, &r);
-  T_EQ(r.h.status, 0); T_EQ(mock.trg.source, 3); T_EQ(r.p[31], 3);
-  set_trigger2(PC_TRG_T_PULSE, 1, 0, 3, 100, 0, 128, 0, 0, &r);
-  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
-  set_trigger2(PC_TRG_T_EDGE, 0, 0, 4, 0, 0, 128, 0, 0, &r);
-  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
-  set_trigger2(PC_TRG_T_PULSE, 1, 0, 0, 100, 0, 128, 0, 0, &r);
-  T_EQ(r.h.status, 0);
+  //fw-nopat: trigger source 3 (the cut pattern's marker) is refused by SET_TRIGGER and SET_TRIGGER2
   set_trigger(0x01, 3, 0, 0, 0, 0, 0, 0, 0, &r);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
-  set_trigger(0x01, 4, 0, 0, 0, 0, 0, 0, 0, &r);
-  T_EQ(r.h.status, PC_E_BAD_ARG);
-
-  //Source 3 leaves the pin to the pattern: SET_GEN may enable it
-  set_trigger2(PC_TRG_T_EDGE, 0, 0, 3, 0, 0, 128, 0, 0, &r);
-  r = set_gen(1, 1, 0, 0, 0, 0);
-  T_EQ(r.h.status, 0);
+  set_trigger2(PC_TRG_T_EDGE, 1, 0, 3, 0, 0, 128, 0, 0, &r);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
 }
 
 static void test_cal_battery_pattern(void)
@@ -3511,13 +3354,13 @@ static void test_seq_segments(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 27);
   r = status();
-  //features: bits 0-8 of 1.26 plus bit 9 PEAK (fw-c6) and bit 10 COUNTER (fw-c7)
-  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x3FFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
+  //features: bits 0-8 of 1.26, bit 9 PEAK (fw-c6), bit 10 COUNTER (fw-c7), bit 11 LOGGER (fw-d4); 12 / 13 reserved
+  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x0FFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
   r = status();
   T_EQ(r.p[46], 2); T_EQ(r.p[47], 6);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(pc_get_u16(r.p + 32), 0x3FFF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
+  T_EQ(pc_get_u16(r.p + 32), 0x0FFF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
 
   //Default: off; the geometry the next arm writes (legacy: 1500 / 3000 samples = 750 / 1500 words)
   r = req(PC_CMD_GET_SEQ, 0, 0);
@@ -3746,7 +3589,7 @@ static void test_capture_stages(void)
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_CAPTURE_STAGES, PC_CAP_CAPTURE_STAGES);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x3FFF);
+  T_EQ(pc_get_u16(r.p + 44), 0x0FFF);
   r = req(PC_CMD_GET_HEALTH, 0, 0);
   T_EQ(r.len, PC_HEALTH_LEN); T_EQ(r.p[0], 3);
   T_EQ(pc_get_u16(r.p + 104), CS_PO); T_EQ(r.p[106], PC_CAPF_HAS); T_EQ(pc_get_u32(r.p + 116), 0);
@@ -3791,7 +3634,7 @@ static void test_enc_check(void)
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   T_EQ(r.p[35], 0);                                             //interleave order: B first
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x3FFF);
+  T_EQ(pc_get_u16(r.p + 44), 0x0FFF);
 
   //fw 0.2.72, core order: verified (caps bit 12 clear) only when the bitstream reported convention 1 at boot
   r = req(PC_CMD_GET_INFO, 0, 0);
@@ -4655,8 +4498,6 @@ int main(void)
   test_auto_timeout_and_stop();
   test_trace();
   test_generator();
-  test_pattern();
-  test_pattern_trigger();
   test_cal_battery_pattern();
   test_busy_context();
   test_isr_context();

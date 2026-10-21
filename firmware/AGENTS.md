@@ -8,6 +8,7 @@ section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, 
 **Branch fw-d5 (2026-10-21): fw 0.2.104 + D5 (version provisional), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M; still built for 0x153C until D3; section 75.**
 **Branch fw-cruft (2026-10-21): main 703e9c9, what 0x153C dropped (version not bumped, protocol 1.27 row 67): no 0x0F writes, READ_LIVE / caps bit 9 retired, 0x53 = K alone (SET_DECIM flags bits 0..2 dropped); open: the roll mode still reads the removed 0x24 / 0x26 (section 77).**
 **Branch fw-roll (2026-10-21): main 2611de2, roll mode on the 0x153D logger stream (version not bumped, protocol unchanged): the long time bases draw corrected column means of both channels from fpga_log (roll.c, roll_view.c, pc_glue_roll_*), the 1.00o5 roll trigger kept on the columns, every arm releases the stream, host ARM / LOG_START take precedence over a rolling UI, averagecommand / fpga_average_trace_data(_long) gone, check_retired_regs covers 0x24..0x27; section 78.**
+**Branch fw-nopat (2026-10-21): main 4fd9f2f, the pattern feature cut (owner 15:55; version not bumped, protocol 1.27 row 67): SET_PATTERN / SET_PATTERN_TRIGGER, trigger source 3, the engine and 0x6E / 0x6F / 0x76-0x7D / read 0x42 gone, caps 24 / 27 and features 12 / 13 reserved, the square on fpga-d3's RTL (commit taken at once), fpga_pat_* renamed fpga_gen_*; section 79.**
 **Branch fw-small (2026-10-21): main 803d215 + three small fixes (version not bumped), protocol unchanged: the forced stop writes 0x0E = 0 before 0x1A = 0 (`fpga_force_stop`), Vmax / Vmin / Vpp / Vp from the peak bytes with Sample = Peak (`pb_extremes`), the "ADC readout fault near code 128" message without the bitstream advice; section 76.**
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (fw 0.2.104), protocol 1.26 (row 66 "Peak detect"): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (fw 0.2.104), protocol 1.26 (row 66 addition): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
@@ -6129,3 +6130,68 @@ after roll (the stream not released: 0x69 still 1).
 - Gaps (a long menu, a restart) are not marked on the trace.
 - The trigger compares column means, so a pulse much shorter than a column (2 ms at 100 ms/div) may not trigger, as with
   1.00o5's averages.
+
+## 79. fw-nopat: the pattern feature cut, the square kept (version not bumped, protocol 1.27 row 67)
+
+Branch `fw-nopat` from main 4fd9f2f. Owner decision 2026-10-21 15:55 (docs/plans/task-queue.md "Pattern feature cut"):
+0x153D did not fit, so the pattern generator (8 steps, repeat, gap, the marker and its capture source, the pattern
+trigger engine) is cut; the generator stays the fractional two-step square. Commits c7a05e3 (the removal: firmware,
+model, tests, vectors), 78fc734 (the mechanical rename fpga_pat_* -> fpga_gen_*), 990922e (the square on fpga-d3's RTL
+d60a0ad, as fpga-d3 sent it through the coordinator), then the mcp and docs commits. **Nothing benched, nothing
+flashed**; `PC_FW_VERSION` / `PC_FW_FPGA_VERSION` untouched (still 0x153C until the 0x153D integration).
+
+**Removed**: SET_PATTERN 0x0217 and SET_PATTERN_TRIGGER 0x021A (no table entry: E_UNKNOWN_CMD, the codes reserved;
+they were never in a release, so not the READ_LIVE-style NULL handler), capture trigger source 3 (SET_TRIGGER source > 2
+is E_BAD_ARG detail 0 again, SET_TRIGGER2 detail 3 "source 0..2"; GET_TRIGGER never reports 3; the "PAT" trigger button
+text; `fpga_trig_marker` and its byte in the settings fingerprint), `pc_trig2_check` (SET_TRIGGER2's checks inline
+again, as before fw-d5), `fpga_pat_load`, the 0x6E / 0x6F writes (also the square's "0x6F = 0 after a gap"), the MARK
+and END step flags, `fpga_ptrig*` with 0x76..0x7D and read 0x42, the per-engine code tables (`fpga_trig_arm` writes
+0x5E / 0x5F / 0x60 directly again, same bytes), `pc_hal_pattern_*` / `pc_hal_ptrig_*`, the session's `gen_src` /
+`pat_st` / `ptrig_st` / `pat`, pc_dec_apply's 0x79 re-write. Caps bits 24 (PATTERN_GEN) and 27 (PATTERN_TRIGGER) and
+features bits 12 (0x1000) and 13 (0x2000) are reserved (0): the features word is 0x0FFF on the built-for bitstream.
+
+**Kept, same behaviour**: the square path (`fpga_gen_square` / `_level` / `_drive` / `_ctl` / `_step_write`,
+`pc_hal_gen_write`, `gen_pat.c` with gp_split and the P16 / H16 formulas, SET_GEN with its raw modes, GEN 40 bytes, the
+Bode engine on P = 4 M, the generator menu, the wizard's static levels, the boot 1 kHz). Its bus bytes are fw-d5's
+except entry 1's byte 0 (no END bit 0x80: fpga-d3 ignores bits 7 / 6) and the 0x39 read.
+
+**fpga-d3's square (d60a0ad, by message)**: 0x6C byte 0 { -, -, level, index }, index 0 high / 1 low, others ignored;
+0x6D mode 3 continuous, 0 off (1 / 2 act as off), bit 2 idle level, bit 4 start, bit 5 commit, bits 3 / 7..6 ignored;
+0x50 bit 0 of every data byte, last wins; read 0x39 = 4 bytes { running, 0, pending, 0 x 4, step }, 0, 0, { 0 x 7, mode
+active }. A commit is taken at once when the step in progress has at least 3 clocks left (always for the firmware's
+steps of 4 and more): that step completes with its old length, every step from its boundary is new (fw-d5's model:
+new from the third boundary), PENDING for 2-3 clocks, two commits in a row take effect in order, the accumulator is not
+cleared. Start latency: step 0 8..9 clocks after the strobe (fpga-d3 to confirm from tb_square). The removed registers
+are ignored byte by byte; 0x15 = 3 acts as EXT.
+
+**GEN**: byte 1 = 0x39 byte 0 masked to running / pending / step (0xA1), byte 22 = 0x39 byte 3 bit 0 (mode active),
+bytes 2..3 (bursts) and 23 (the pattern source) reserved 0; the size stays 40. `fpga_gen_status(st[2])` reads the four
+bytes; `pc_hal_gen_status(st[2])`.
+
+**Renamed** (78fc734, mechanical): `fpga_pat_*` / `FPGA_PAT_*` / `fpga_pat_cfg` / `fpga_pat_step` / `fpga_pat` ->
+`fpga_gen_*`, and in `fpga_model.c/.h` and test_fpga_bus.c `fm.pat_*` / `fm_pat_*` / `FM_PAT_EDGES` / `PAT_VER` ->
+`gen_*`. `gen_pat.c/.h` keep their names (only the square's maths).
+
+**Tests**: `fpga_model.c` models fpga-d3's square (entries 0 / 1, mode 3 or off, the immediate take with
+`gen_take_clk`, no prefetch, the cut registers ignored); test_fpga_bus `test_gen_change` expects the first new step right
+after the commit and two commits in one step (the second wins), the new `test_gen_status` (0x39 bytes 0 / 3, five
+strobes, indices >= 2 and 0x6E / 0x6F / 0x76..0x7D ignored) replaces `test_pattern_bursts` / `test_pattern_marker` /
+`test_ptrig`; test_session `test_generator` checks the reserved caps / features bits, 0x0217 / 0x021A E_UNKNOWN_CMD,
+source 3 refused, GEN bytes 1 / 22, and the enable alone writing the square; `test_pattern` / `test_pattern_trigger`
+gone; the features word 0x0FFF. `check_retired_regs.py` adds writes 0x6E, 0x6F, 0x76..0x7D and read 0x42 (it flags 7
+lines of 4fd9f2f's fpga_bus.c). gen_vectors.py: the pattern vectors (`req_set_pattern_pulse_train`, `resp_set_pattern`,
+`resp_set_pattern_e_bad_arg_duration`, `req_set_pattern_trigger_nth_ch2`, `resp_set_pattern_trigger`,
+`resp_set_pattern_trigger_e_state_shared`, `req_set_trigger2_marker`) and the command map's SET_PATTERN /
+SET_PATTERN_TRIGGER gone; `resp_gen_1_27` has byte 1 = 0xA1 and byte 22 = 1. `make -s test` all green (test_session
+73124 / 73122, test_fpga_bus 10440), check_vectors OK (both checkers), check_retired_regs OK.
+
+**Bench (owner / coordinator, after D3's 0x153D is flashed and `PC_FW_FPGA_VERSION` moved; FEL, never without the
+backup)**: fw-d5's steps 1-4 and 7 (section 75) unchanged, with GEN byte 22 = 1 while the square runs and caps bits 24 /
+27 clear; steps 5 and 6 (patterns) are gone. Also: SET_TRIGGER source 3 answers E_BAD_ARG detail 0, 0x0217 answers
+E_UNKNOWN_CMD; a SET_GEN step on a running 1 kHz square changes the very next step (counter / phosphor: no short or long
+pulse). Regression signs: a 0x6E / 0x6F / 0x76..0x7D / 0x42 in the event log's write trace, the generator restarting on
+a frequency change.
+
+**Open**
+- fpga-d3 confirms the start latency (8..9 clocks) from tb_square; the model assumes 8.
+- fpga/al3/README.md (fpga-d3's) still describes the 0x153D pattern generator in places; the RTL agent updates it.
