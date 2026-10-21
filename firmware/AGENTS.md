@@ -5830,7 +5830,8 @@ needs 0x153D (on 0x153C its writes go to unused codes), so this lands with D3's 
 idle, or the engine's event) is a step boundary and takes pending shadows before step 0; commit + start in one byte use
 the new entries; a start or mode-3 write while running is ignored; the FPGA prefetches two steps (fpga-d2's correction after the first
 TD build), so a commit during step k gives old k, k + 1 and k + 2 and new from k + 3, pending 0 from the start of k + 1;
-step 0 of a start begins 4 clocks after the start is seen (about 35-40 ns after a 0x6D strobe, 20 ns after an event); the accumulator is cleared at a start only;
+step 0 of a start begins 40..45 ns after a 0x6D strobe (3-4 clocks of synchroniser + 5) and 30 ns after an engine event
+(fpga-d2's tb_pattern, 10462 checks); the accumulator is cleared at a start only;
 mode 0 stops at once; bursts done reset at a start; the marker needs both 0x15 = 3 and 0x6D bit 3; 0x39 byte 3 bit 1
 clears at 0x01 = 1; 0x6C index >= 8 ignored, entry 7 acts as end; 0x50's last data byte wins; one-shot engine events
 disarm, re-arm holds the qualifier in reset during the burst; 0x42 bit 7 reads 1 (own engine) unless D2's timing forces
