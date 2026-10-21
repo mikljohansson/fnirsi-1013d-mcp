@@ -30,6 +30,7 @@ CMDS = {
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
+    "SET_TRIGGER2": 0x0219,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401, "CAL_PROBE": 0x0402,
@@ -113,6 +114,10 @@ REQUESTS = [
     # appended (fw 0.2.67)
     ("CAL_PROBE", bytes([1, 0, 0, 0, 0]),
      "1.21 (provisional): the wizard's zero measurement of CH2, hardware range 0 (5 V/div), wizard readout, one range"),
+    # appended (fw-c5, protocol 1.26, FPGA 0x153C)
+    ("SET_TRIGGER2", struct.pack("<BBBBIIHHII", 1, 1, 0, 1, 1500, 0, 140, 0, 200000, 0),
+     "1.26: pulse width shorter than 1500 samples (flags 0), negative pulse (polarity 1), CH2, level 140, hold-off "
+     "200000 x 5 ns = 1 ms"),
 ]
 
 
@@ -555,6 +560,61 @@ def build():
         "stages, trained, counts read, the last read flagged a core), 107 flagged cores 0x04 (CH2 A), 108 u16[4] the "
         "last 0x36 counts CH1 A 0, CH1 B 0, CH2 A 37, CH2 B 2, 116 u32 captures read 1200, 120 u32 of those flagged 3",
         [decoded(CMDS["GET_HEALTH"], 71, hb, flags=FLAG_RESPONSE)])
+
+    # 5f. Protocol 1.26 (fw-c5, section 14 row 66): FPGA 0x153C trigger types and hold-off. SET_TRIGGER2 24 bytes: 0 u8
+    # type (0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt, 5 window refused), 1 u8 polarity, 2 u8 flags (bit 0
+    # longer; bits 1 range, 2 both cores refused), 3 u8 source, 4 u32 N, 8 u32 H, 12 u16 level (0..255), 14 u16 level2
+    # (0), 16 u32 hold-off (5 ns units), 20 u32 0. GET_TRIGGER 52 bytes = the 28 of 1.0 (12 = the hold-off) + the same
+    # 24 bytes as a SET_TRIGGER2 request that reproduces the trigger
+    p = struct.pack("<BBBBIIHHII", 2, 0, 0, 2, 3, 100000, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 72, p)
+    add("req_set_trigger2_nth_edge_ext", f, [ev_frame(CMDS["SET_TRIGGER2"], 72, p)],
+        "1.26: the 3rd rising edge on EXT after an idle time of 100000 samples (5 ns clocks on EXT: 500 us), level 128 "
+        "(unused on EXT), no hold-off", [decoded(CMDS["SET_TRIGGER2"], 72, p)])
+    p = struct.pack("<BBBBIIHHII", 1, 0, 0x01, 0, 0xFFFFFF, 0, 100, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 73, p)
+    add("req_set_trigger2_pulse_longer_max", f, [ev_frame(CMDS["SET_TRIGGER2"], 73, p)],
+        "1.26: pulse width longer than N = 16777215 (the largest u24), positive pulse, CH1, level 100",
+        [decoded(CMDS["SET_TRIGGER2"], 73, p)])
+    p = struct.pack("<BBBBIIHHII", 3, 1, 0, 0, 20000, 0, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 74, p)
+    add("req_set_trigger2_timeout", f, [ev_frame(CMDS["SET_TRIGGER2"], 74, p)],
+        "1.26: timeout: the level held low (polarity 1) for 20000 samples after a falling edge, CH1",
+        [decoded(CMDS["SET_TRIGGER2"], 74, p)])
+    p = struct.pack("<BBBBIIHHII", 0, 0, 0, 0, 0, 0, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 75, p)
+    add("req_set_trigger2_edge", f, [ev_frame(CMDS["SET_TRIGGER2"], 75, p)],
+        "1.26: back to the edge type (N and H must be 0), rising, CH1, level 128, hold-off off",
+        [decoded(CMDS["SET_TRIGGER2"], 75, p)])
+    tb = struct.pack("<BBBBIIIIHH", 1, 1, 140, 1, 2000, 16000, 200000, 16000, 1000, 8000) + bytes(4) + \
+        struct.pack("<BBBBIIHHII", 1, 1, 0, 1, 1500, 0, 140, 0, 200000, 0)
+    assert len(tb) == 52
+    f = frame(CMDS["GET_TRIGGER"], 76, tb, flags=FLAG_RESPONSE)
+    add("resp_get_trigger_1_26", f, [],
+        "1.26 GET_TRIGGER response (52 bytes): CH2 falling / negative pulse, level 140, normal, pretrigger 2000, total "
+        "16000, 12 hold-off 200000 (5 ns units), auto_timeout 16000, 1000 / 8000 words; 28..51 the SET_TRIGGER2 body: "
+        "pulse width shorter than 1500 samples, CH2, level 140, hold-off 200000 (the req_set_trigger2 request)",
+        [decoded(CMDS["GET_TRIGGER"], 76, tb, flags=FLAG_RESPONSE)])
+    st = bytes(44) + struct.pack("<HBB", 0x1FF, 0, 0) + bytes([0x10, 0x22]) + struct.pack("<H", 2)
+    f = frame(CMDS["GET_STATUS"], 77, st, flags=FLAG_RESPONSE)
+    add("resp_get_status_1_26", f, [],
+        "1.26 GET_STATUS tail (52 bytes; 0..43 zero here): 44 features 0x1FF (bit 8 TRIG_TYPES), 46 / 47 Average off, "
+        "48 FPGA 0x37 = 0x10 (hold-off running), 49 0x34 byte 0 = 0x22 (counting, type 2 Nth edge, not longer, not EXT), "
+        "50 u16 edges still to count 2",
+        [decoded(CMDS["GET_STATUS"], 77, st, flags=FLAG_RESPONSE)])
+    ci = bytes(96) + struct.pack("<BBHIII", 2, 0, 0, 3, 100000, 0)
+    f = frame(CMDS["GET_CAPTURE_INFO"], 78, ci, flags=FLAG_RESPONSE)
+    add("resp_get_capture_info_1_26", f, [],
+        "1.26 GET_CAPTURE_INFO tail (112 bytes; 0..95 as 1.17, zero here): 96 trigger type 2 (Nth edge), 97 flags 0, "
+        "98 u16 0, 100 u32 N 3, 104 u32 H 100000, 108 u32 hold-off 0",
+        [decoded(CMDS["GET_CAPTURE_INFO"], 78, ci, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 0) + b"runt / window: FPGA 0x153E"
+    f = frame(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_set_trigger2_e_bad_arg_runt", f, [],
+        "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, "
+        "then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, "
+        "14 level2)",
+        [decoded(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)])
 
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
