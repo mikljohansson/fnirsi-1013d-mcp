@@ -24,8 +24,8 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 //compared with it. A different word (older or newer) is a mismatch: the UI shows the notice screen (ui_diag.c
 //ud_build_fpga_mismatch), GET_INFO 78 / GET_HEALTH 126 bit 0 report it, and every command that would touch the
 //acquisition answers E_UNSUPPORTED detail PC_UNSUP_FPGA_MISMATCH (F_BASIC commands keep working: pc_cmds.c).
-#define PC_FW_FPGA_VERSION  0x153C
-#define PC_FW_FPGA_VERSION_TEXT "0x153C"  //the same word as text (the mismatch error's text, pc_dispatch); keep in step
+#define PC_FW_FPGA_VERSION  0x153D
+#define PC_FW_FPGA_VERSION_TEXT "0x153D"  //the same word as text (the mismatch error's text, pc_dispatch); keep in step
 #define PC_FPGA_F_MISMATCH  0x01      //GET_INFO 78 / GET_HEALTH 126 bit 0
 #define PC_UNSUP_FPGA_MISMATCH 1      //E_UNSUPPORTED detail: the running bitstream is not PC_FW_FPGA_VERSION
 
@@ -40,7 +40,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.104" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.105" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
