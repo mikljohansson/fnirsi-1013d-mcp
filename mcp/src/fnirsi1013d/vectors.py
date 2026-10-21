@@ -141,6 +141,93 @@ def build_host_vectors() -> list[dict[str, Any]]:
     v += build_host_vectors_1_3()
     v += build_host_vectors_1_25()
     v += build_host_vectors_1_26()
+    v += build_host_vectors_1_27()
+    return v
+
+
+def build_host_vectors_1_27() -> list[dict[str, Any]]:
+    """Protocol 1.27 (FPGA 0x153D, docs/plans/fpga-0x153c.md sections 6-7, item D6) frames as the host builds and
+    parses them, byte-exact with fw-d4's logger and fw-d5's generator / pattern vectors: GET_INFO with caps 23, 24, 27
+    and gen_clock 200 MHz, LOG_START / LOG_READ / the chunk with a gap / LOG, SET_GEN P16 / H16 and GEN 40 bytes,
+    SET_PATTERN / PATTERN, SET_PATTERN_TRIGGER and its answer, SET_TRIGGER source 3, GET_STATUS LOGGING, a READ_BODE
+    row on P."""
+    R = P.FLAG_RESPONSE
+    C = P.Caps
+    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR | C.HOLDOFF | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL |
+               C.READ_LAG_UNVERIFIED | C.SHARED_MODE | C.SD_SECTORS | C.DECIM | C.FIR | C.SEQ | C.ENC_CHECK |
+               C.CAPTURE_STAGES | C.TRIG_TYPES | C.PEAK_DETECT | C.COUNTER | C.LOGGER | C.PATTERN_GEN |
+               C.PATTERN_TRIGGER)  # 0x9FFEC4F
+    v = []
+    info = P.InfoResp(fpga_version=0x153D, fpga_variant=2, ring_words=8192, caps=caps, gen_clock_hz=200_000_000,
+                      max_total_samples=16382, fw_version=b"0.2.105", fw_build=0x0C8C0127, serial=b"1013D-0001",
+                      proto_minor=27, fw_fpga_version=0x153D)
+    v.append(_vec("host_resp_get_info_1_27", _f(P.Cmd.GET_INFO, 9, info.pack(), flags=R).encode(),
+                  "GET_INFO response, protocol 1.27 (80 bytes): FPGA 0x153D, gen_clock_hz 200 MHz (the pattern clock), "
+                  "caps add LOGGER (23), PATTERN_GEN (24), PATTERN_TRIGGER (27) = 0x9FFEC4F"))
+    v.append(_vec("host_req_log_start_filtered8", _f(P.Cmd.LOG_START, 70, P.LogStartReq(
+        1, P.LOG_FMT_HIGH8, 399, 60_000).pack()).encode(),
+        "LOG_START 0x0214 (16 bytes): CH1, format 1 (the filtered word's high byte), divider 399 (N 400: 500 kS/s, the "
+        "1 ch 8-bit tier), 60 s"))
+    v.append(_vec("host_req_log_read_32k", _f(P.Cmd.LOG_READ, 71, P.LogReadReq(32768).pack()).encode(),
+                  "LOG_READ 0x0215 (8 bytes): at most 32768 bytes (whole words)"))
+    lr = P.LogResp(P.LOG_RUNNING, 1, P.LOG_FMT_HIGH8, 0, 399, 60_000, 400, 500_000, 495_616, 0, 8 << 20, 1000)
+    v.append(_vec("host_resp_log_running", _f(P.Cmd.LOG_STOP, 72, lr.pack(), flags=R).encode(),
+                  "LOG (48 bytes): running, CH1, format 1, divider 399, 60000 ms, 400 clocks per sample, 500000 bytes "
+                  "produced, 495616 sent, 0 gaps, the 8 MiB ring, 1000 ms"))
+    data = bytes(range(0x40, 0x48))
+    ch = P.LogChunkHeader(12, 20_000, len(data), P.LOG_CHUNK_RUNNING | P.LOG_CHUNK_GAP | P.LOG_CHUNK_OVERFLOW,
+                          P.LOG_FMT_WIDE16)
+    v.append(_vec("host_resp_log_read_overflow", _f(P.Cmd.LOG_READ, 73, ch.pack() + data, flags=R).encode(),
+                  "LOG_READ response: chunk 12, word 20000, 8 bytes (CH1 + CH2 format 2: two words of u16 CH1, u16 "
+                  "CH2), flags 0x0B = running | gap | the gap includes words the full DDR ring dropped"))
+    p16 = P.gen_p16(999_500)
+    h16 = P.gen_h16(p16, 2500)
+    v.append(_vec("host_req_set_gen_p16_h16_25", _f(P.Cmd.SET_GEN, 74, P.SetGenReq(
+        P.SetGenReq.M_ENABLE | P.SetGenReq.M_FREQ | P.SetGenReq.M_DUTY, 1, 1, 1, p16, h16).pack()).encode(),
+        "SET_GEN (20 bytes): enable, freq_mode 1 = P16 at 4..11 (999.5 Hz: 200100.05 clocks of 5 ns), duty_mode 1 = "
+        "H16 at 12..19 (25 %)"))
+    g = P.Gen(1, P.PAT_ST_RUNNING | P.PAT_ST_PENDING | 1, 0, P.gen_freq_mhz(p16), P.gen_duty_bp(h16, p16),
+              P.PAT_ST3_ACTIVE, P.GEN_SOURCE_SQUARE, p16, h16)
+    v.append(_vec("host_resp_gen_running_pending", _f(P.Cmd.GET_GEN, 75, g.pack(), flags=R).encode(),
+                  "GEN (40 bytes): enabled, 0x39 byte 0 = 0xA1 (running, pending, step 1), 999500 mHz, 2500 bp, "
+                  "0x39 byte 3 = 1, source 0 (the square), P16, H16"))
+    steps = [P.PatternStep.from_seconds(10e-6, 1, True), P.PatternStep.from_seconds(5.0025e-6, 0),
+             P.PatternStep.from_seconds(10e-6, 1), P.PatternStep.from_seconds(475e-6, 0)]
+    hdr = P.PatternHeader(P.PAT_REPEAT, P.PAT_F_MARKER_TRIGGER | P.PAT_START_BOTH << P.PAT_START_SHIFT, 100, 2_000_000,
+                          4, 1, 1)
+    v.append(_vec("host_req_set_pattern_double_pulse", _f(P.Cmd.SET_PATTERN, 76, P.SetPatternReq(
+        hdr, steps).pack()).encode(),
+        "SET_PATTERN 0x0217 (12 + 4 x 8 bytes): a double pulse (10 us marked, 5.0025 us = 1000 clocks + 32768/65536, "
+        "10 us, 475 us), 100 bursts 2 ms apart, the marker a trigger source, started by the MCU now and by the engine "
+        "(start source 2)"))
+    pr = P.PatternResp(hdr, P.PAT_ST_RUNNING, P.PAT_ST3_ACTIVE, 0, P.pattern_burst16(steps), steps)
+    v.append(_vec("host_resp_pattern_double_pulse", _f(P.Cmd.SET_PATTERN, 76, pr.pack(), flags=R).encode(),
+                  "PATTERN response (24 + 4 x 8 bytes): the header, 0x39 0x80 / 0x01, 0 bursts, the burst length "
+                  "100000.5 clocks in 1/65536 clock, the steps"))
+    t2 = P.Trigger2(P.TRIG_PULSE_WIDTH, 0, P.TRIG2_F_LONGER, P.TRIG_SOURCE_EXT, 2000, 0, 128, 0, 0, 0)
+    v.append(_vec("host_req_set_pattern_trigger_ext_pulse", _f(P.Cmd.SET_PATTERN_TRIGGER, 77, P.PatternTriggerReq(
+        t2, 1, 0).pack()).encode(),
+        "SET_PATTERN_TRIGGER 0x021A (28 bytes): the engine on EXT, a positive pulse longer than 2000 x 5 ns = 10 us, "
+        "armed, one shot (re-arm 0)"))
+    ptr = P.PatternTriggerResp(t2, 1, 0, P.PTRIG_ST_OWN | P.STATUS34_EXT | P.STATUS34_LONGER | P.TRIG_PULSE_WIDTH, 0)
+    v.append(_vec("host_resp_pattern_trigger_ext_pulse", _f(P.Cmd.SET_PATTERN_TRIGGER, 77, ptr.pack(),
+                                                            flags=R).encode(),
+                  "PATTERN_TRIGGER response (32 bytes): the body, armed, one shot, 0x42 byte 0 = own engine | EXT | "
+                  "longer | type 1, no edges to count"))
+    v.append(_vec("host_req_set_trigger_source_pattern", _f(P.Cmd.SET_TRIGGER, 78, P.SetTriggerReq(
+        P.SetTriggerReq.M_SOURCE, P.TRIG_SOURCE_PATTERN).pack()).encode(),
+        "SET_TRIGGER mask bit 0: source 3 = the pattern's marker (edge type, SET_PATTERN flags bit 3)"))
+    st = P.StatusResp(control=2, acq_state=P.AcqState.LOGGING, flags=0x08, capture_id=50, uptime_ms=200000,
+                      battery_level=18, pass_ms=1, pass_max_ms=3, settings_seq=21, capture_settings_seq=21,
+                      run_state=0, capture_origin=0, features=0x3FFF)
+    v.append(_vec("host_resp_get_status_logging", _f(P.Cmd.GET_STATUS, 79, st.pack(), flags=R).encode(),
+                  "GET_STATUS (52 bytes) while logging: acq_state 5 LOGGING, the loop at 1 ms (pass_ms), features 0x3FFF "
+                  "(bits 11-13 LOGGER / PATTERN / PATTERN_TRIGGER)"))
+    row = P.BodeRow(200, 100_000_000, -301, -4500, -900, -1201, 2, 3, 0)
+    hdr_b = P.BodeHeader(sweep_id=3, state=2, planned=1, measured=1, current=-1)
+    v.append(_vec("host_resp_read_bode_period", _f(P.Cmd.READ_BODE, 80, hdr_b.pack() + row.pack(), flags=R).encode(),
+                  "READ_BODE (1.27): the header and one row, u32 at 0 = P = 200 clocks of 5 ns (1 MHz exactly), f "
+                  "100000000 cHz, -3.01 dB, -45.00 deg"))
     return v
 
 
