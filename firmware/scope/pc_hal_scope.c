@@ -1861,12 +1861,13 @@ void pc_glue_roll_label(void)
     return;
 
   display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
-  display_fill_rounded_rect(ACQ_MENU_XPOS + 8, ACQ_MENU_YPOS + 163, 90, 40, 3);
+  display_fill_rounded_rect(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0), ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H, 3);
   display_set_font(&font_2);
   display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
-  //fw 0.2.40 (owner): the label only, the colour shows the state, as the Average box ("Average" / "mode")
-  display_text(ACQ_MENU_XPOS + 41, ACQ_MENU_YPOS + 168, "Roll");
-  display_text(ACQ_MENU_XPOS + 38, ACQ_MENU_YPOS + 182, "mode");
+  //fw 0.2.40 (owner): the label only, the colour shows the state, as the Average box ("Average" / "mode"); fw-acqui:
+  //centred as the row's other boxes (pc_acq_box)
+  display_text(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0) + (UI_ACQ_BOX_W - ui_text_width(&font_2, "Roll")) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE1_Y, "Roll");
+  display_text(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0) + (UI_ACQ_BOX_W - ui_text_width(&font_2, "mode")) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE2_Y, "mode");
   displaydata.fg_color = fg;
   displaydata.font     = font;
 }

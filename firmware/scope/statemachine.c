@@ -2557,47 +2557,34 @@ void handle_acquisition_menu_touch(void)
       //Check if touch within the menu field
       if((xtouch >= ACQ_MENU_XPOS) && (xtouch <= ACQ_MENU_XPOS + ACQ_MENU_WIDTH) && (ytouch >= ACQ_MENU_YPOS) && (ytouch <= ACQ_MENU_YPOS + ACQ_MENU_HEIGHT))
       {
-        //Check on acquisition frequency being set
-        if((ytouch >= ACQ_MENU_YPOS + 32) && (ytouch <= ACQ_MENU_YPOS + 149) && (xtouch >= ACQ_MENU_XPOS) && (xtouch <= ACQ_MENU_XPOS + 304))
+        //Check on acquisition frequency being set (fw-acqui: the five-column grid, ui_ctrl.h UI_ACQ_GRID_*; the hit area
+        //is the drawn cell)
+        if(ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_RATE_Y, UI_ACQ_RATE_N) >= 0)
         {
           //Check if in run state. Changing this setting is only allowed when running or single mode trigger
           if((scopesettings.runstate)||(scopesettings.triggermode == 1))
-          {//------------------ acquisition_speed_texts start ------------------
-            //Check on the different bounding boxes for the separate settings
-            for(i=0;i<((sizeof(acquisition_speed_texts) / sizeof(int8 *))-11);i++)//7
-            {
-              //Calculate the coordinates for this setting
-              x = ((i & 3) * 72) + 10 + ACQ_MENU_XPOS;
-              y = ((i >> 2) * 23) + 33 + ACQ_MENU_YPOS;
+          {
+            i = ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_RATE_Y, UI_ACQ_RATE_N);
 
-              //Check if touch within this bounding box
-              if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
-              {
-                //Set the new speed
-                scopesettings.samplerate = i;
+            //Set the new speed
+            scopesettings.samplerate = i;
 
-                //Set the FPGA sample rate setting without changing the current time per div setting
-                //This way the sampling is actually done with the set speed, but the display stays at the set time per div
-                fpga_set_sample_rate(i);
+            //Set the FPGA sample rate setting without changing the current time per div setting
+            //This way the sampling is actually done with the set speed, but the display stays at the set time per div
+            fpga_set_sample_rate(i);
 
-                //fw 0.2.64: unless the time/div no longer fits the record at this rate: then the nearest one that does,
-                //with a notice at the top of the plot (acq_view.c)
-                acq_view_fit(1);
+            //fw 0.2.64: unless the time/div no longer fits the record at this rate: then the nearest one that does,
+            //with a notice at the top of the plot (acq_view.c)
+            acq_view_fit(1);
 
-                //Display the new setting
-                scope_acquisition_speed_select();
+            //Display the new setting
+            scope_acquisition_speed_select();
 
-                //Update the viable time per div settings
-                scope_acquisition_timeperdiv_select();
+            //Update the viable time per div settings
+            scope_acquisition_timeperdiv_select();
 
-                //Update the top menu bar display
-                scope_acqusition_settings(0);
-                
-                //Flag conversion in progres
-                //scopesettings.display_data_done = 0;
-                break;
-              }
-            }
+            //Update the top menu bar display
+            scope_acqusition_settings(0);
           }
         }
         //======================================================================
@@ -2645,37 +2632,28 @@ void handle_acquisition_menu_touch(void)
         }
         //======================================================================
         //Check on time per div being set
-        else if((ytouch >= ACQ_MENU_YPOS + 240) && (ytouch <= ACQ_MENU_YPOS + 380) && (xtouch >= ACQ_MENU_XPOS) && (xtouch <= ACQ_MENU_XPOS + 304))
+        else if(ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_TB_Y, UI_ACQ_TB_N) >= 0)
         {
-          //Check on the different bounding boxes for the separate settings
-          for(i=0;i<((sizeof(time_div_texts) / sizeof(int8 *))-11);i++)//9   
+          //fw-acqui: the five-column grid, cell i is time/div 34 - i (menu.c scope_acquisition_timeperdiv_select).
+          //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the path the
+          //snap after a rate change takes too; fw 0.2.64: a grey, not viable, time/div cannot be chosen). fw 0.2.76:
+          //running or in Single, the ladder's rate for it comes with it (docs/ui-guidelines.md section 2, "Time/div
+          //drives the sample rate")
+          i = ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_TB_Y, UI_ACQ_TB_N);
+
+          int r = acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i);
+
+          if(r)
           {
-            //Calculate the coordinates for this setting
-            x = ((i & 3) * 72) + 10 + ACQ_MENU_XPOS;
-            y = ((i >> 2) * 23) + 241 + ACQ_MENU_YPOS;  //191
-
-            //Check if touch within this bounding box (fw 0.2.64: a grey, not viable, time/div cannot be chosen)
-            if((xtouch >= x) && (xtouch <= x + 68) && (ytouch >= y) && (ytouch <= y + 20))
+            if(r == ACQ_SET_RATE)
             {
-              //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the
-              //path the snap after a rate change takes too). fw 0.2.76: running or in Single, the ladder's rate for it
-              //comes with it (docs/ui-guidelines.md section 2, "Time/div drives the sample rate")
-              int r = acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i);
-
-              if(!r)
-                break;
-
-              if(r == ACQ_SET_RATE)
-              {
-                fpga_set_sample_rate(scopesettings.samplerate);
-                scope_acquisition_speed_select();
-              }
-
-              //Display the new setting
-              scope_acquisition_timeperdiv_select();
-              scope_acqusition_settings(0);
-              break;
+              fpga_set_sample_rate(scopesettings.samplerate);
+              scope_acquisition_speed_select();
             }
+
+            //Display the new setting
+            scope_acquisition_timeperdiv_select();
+            scope_acqusition_settings(0);
           }
         }
         //====================================================================== 

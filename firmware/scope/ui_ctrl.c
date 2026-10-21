@@ -211,6 +211,18 @@ int ui_acq_box_at(uint32 x, uint32 y)
   return -1;
 }
 
+int ui_acq_grid_at(uint32 x, uint32 y, uint32 y0, uint32 n)
+{
+  uint32 i;
+
+  for(i = 0; i < n; i++)
+    if((x >= UI_ACQ_GRID_X(i)) && (x < UI_ACQ_GRID_X(i) + UI_ACQ_GRID_W) &&
+       (y >= y0 + UI_ACQ_GRID_DY(i)) && (y < y0 + UI_ACQ_GRID_DY(i) + UI_ACQ_GRID_H))
+      return (int)i;
+
+  return -1;
+}
+
 uint16 ui_word_ui(int grid, int spec_view, int peak)
 {
   return (uint16)(0xC700 | (peak ? 8 : 0) | ((spec_view & 3) << 1) | (grid ? 1 : 0));
