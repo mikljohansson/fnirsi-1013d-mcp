@@ -317,14 +317,23 @@ typedef struct
   uint8_t    tb_raw_sr;
   uint32_t   tb_divider;
 
-  //Generator values set by SET_GEN (raw DDS words)
+  //Generator state set by SET_GEN / SET_PATTERN (1.27, fw-d5: the two-step square as P16 / H16, 1/65536 of a 5 ns clock)
   uint8_t    gen_valid;
   uint8_t    gen_enable;
-  uint32_t   gen_phase;
-  uint32_t   gen_thr;
-  uint8_t    gen_ui_en;         //UI copy right after SET_GEN: a UI change of it drops the raw values
+  uint8_t    gen_src;           //0 the generator's square, 1 a SET_PATTERN pattern (GEN byte 23)
+  uint8_t    gen_duty_raw;      //1: the duty is gen_h16 as given (duty_mode 1), 0: gen_duty_bp of the period
+  uint16_t   gen_duty_bp;
+  uint64_t   gen_p16;
+  uint64_t   gen_h16;
+  uint8_t    gen_ui_en;         //UI copy right after SET_GEN: a UI change of it drops the host's values
   uint8_t    gen_ui_pct;
   uint32_t   gen_ui_hz;
+
+  //D5 pattern (fw-d5)
+  uint8_t    ctx;               //the dispatch context of the running request (PC_CTX_*)
+  uint8_t    pat_st[4];         //0x39 as last read
+  uint8_t    ptrig_st[3];       //0x42 as last read
+  pc_hw_pattern pat;            //the latest SET_PATTERN
 
   //Deferred request (WAIT)
   uint8_t    def_active;
@@ -404,6 +413,7 @@ int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a
 #define PC_STATUS_LEN     52      //48 in 1.17-1.25; 1.26: 48 u8 0x37, 49 u8 0x34 byte 0, 50 u16 edges still to count
 #define PC_TRIGGER_LEN    52      //28 up to 1.25; 1.26: 28.. the SET_TRIGGER2 body that reproduces the trigger
 #define PC_CAPTURE_INFO_LEN 112   //96 in 1.17-1.25; 1.26: 96 type, 97 flags, 98 u16 0, 100 u32 N, 104 u32 H, 108 u32 hold-off
+#define PC_GEN_LEN        40      //24 up to 1.26; 1.27 (fw-d5): 0x39 status, source, P16, H16 (docs/protocol.md row 67)
 #define PC_COUNTER_LEN    24      //1.26 (fw-c7): GET_COUNTER: flags, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz
 #define PC_HEALTH_LEN     128     //96 in 1.16-1.18, 104 in 1.19-1.23, 124 in 1.24 (layout 2); layout 3: 124 built-for word,
                                   //126 fpga_flags, 127 0
@@ -418,10 +428,6 @@ int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, ui
 void     pc_variant_init(uint16_t version, pc_variant *v);    //the fixed geometry and caps; mismatch from the word read
 void     pc_variant_core_order(pc_variant *v);               //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
 int      pc_decim_has(void);                                 //PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES: what pc_decim_config gets
-uint32_t pc_gen_phase_from_mhz(uint64_t freq_mhz);
-uint64_t pc_gen_mhz_from_phase(uint32_t phase_inc);
-uint32_t pc_gen_thr_from_bp(uint32_t duty_bp);
-uint16_t pc_gen_bp_from_thr(uint32_t threshold);
 uint32_t pc_ring_mod(int64_t addr, uint32_t ring_words);
 void     pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern);
 

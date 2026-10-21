@@ -9,6 +9,7 @@
 #include "mock_hal.h"
 #include "pc_cmds.h"
 #include "cap_stage.h"
+#include "gen_pat.h"
 
 mock_state mock;
 mock_resp  mock_resps[MOCK_MAX_RESP];
@@ -116,6 +117,7 @@ void mock_reset(uint16_t fpga_version)
   mock.trg.total      = 3000;
 
   mock.gen_en = 0; mock.gen_hz = 1000; mock.gen_duty = 50;
+  mock.ptrig_st[0] = 0x80;                     //D5: the own pattern trigger engine
   mock.batt_level = 17; mock.batt_charging = 1; mock.batt_raw = 50;
   mock.ui_samples = 3000; mock.ui_pre = 1500; mock.ui_sw = 1502;
   mock.ui_run = 1; mock.last_run_set = -1; mock.indicator = -1;
@@ -272,16 +274,43 @@ void pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct)
   *enable = mock.gen_en; *freq_hz = mock.gen_hz; *duty_pct = mock.gen_duty;
 }
 
-void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
+void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
 {
   mock.under_screen += mock.ui_screen;
-  mock.gen_phase = phase_inc; mock.gen_thr = threshold; mock.gen_hw_en = enable; mock.gen_writes++; mock.fpga_ops++;
+  mock.gen_hw_en = enable; mock.fpga_ops++;
 
-  //UI copy, rounded as pc_hal_scope.c does
-  mock.gen_en   = enable;
-  mock.gen_hz   = (uint32_t)(((uint64_t)phase_inc * 50000000ull + 0x80000000ull) >> 32);
-  mock.gen_duty = (uint8_t)(((uint64_t)threshold * 100 + 0x7FFFFFFFull) / 0xFFFFFFFFull);
+  if(p16)
+  {
+    mock.gen_p16 = p16; mock.gen_h16 = h16; mock.gen_writes++;
+    mock.gen_hz   = (uint32_t)((gp_mhz_from_p16(p16) + 500) / 1000);    //UI copy, rounded as pc_hal_scope.c does
+    mock.gen_duty = (uint8_t)((gp_bp_from_h16(p16, h16) + 50) / 100);
+  }
+  else
+    mock.gen_pin_writes++;
+
+  mock.gen_en = enable;
 }
+
+//D5 pattern (fw-d5)
+void pc_hal_pattern_write(const pc_hw_pattern *p)
+{
+  mock.under_screen += mock.ui_screen;
+  mock.fpga_ops++;
+  mock.pat = *p;
+  mock.pat_writes++;
+  mock.gen_hw_en = (uint8_t)((p->mode != 0) && !(p->flags & PC_PAT_F_HIZ));
+  mock.gen_en    = mock.gen_hw_en;                                    //the UI's switch follows the pin
+}
+void pc_hal_pattern_status(uint8_t st[4]) { mock.fpga_ops++; mock.pat_status_reads++; memcpy(st, mock.pat_st, 4); }
+void pc_hal_ptrig_read(pc_hw_ptrig *p) { *p = mock.ptrig; }
+void pc_hal_ptrig_write(const pc_hw_ptrig *p)
+{
+  mock.under_screen += mock.ui_screen;
+  mock.fpga_ops++;
+  mock.ptrig = *p;
+  mock.ptrig_writes++;
+}
+void pc_hal_ptrig_status(uint8_t st[3]) { mock.fpga_ops++; memcpy(st, mock.ptrig_st, 3); }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

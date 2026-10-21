@@ -78,8 +78,17 @@ typedef struct
   pc_hw_trigger  trg;
   uint8_t        gen_en, gen_duty;
   uint32_t       gen_hz;
-  uint32_t       gen_phase, gen_thr, gen_writes;
+  uint64_t       gen_p16, gen_h16;   //1.27 (fw-d5): the square written (0 / 0: none yet)
+  uint32_t       gen_writes, gen_pin_writes;
   uint8_t        gen_hw_en;
+  //D5 pattern
+  pc_hw_pattern  pat;
+  uint32_t       pat_writes;
+  uint8_t        pat_st[4];          //0x39 as the mock answers it
+  uint32_t       pat_status_reads;
+  pc_hw_ptrig    ptrig;
+  uint32_t       ptrig_writes;
+  uint8_t        ptrig_st[3];        //0x42 (byte 0 bit 7: own engine)
 
   //Trace
   uint8_t  trace[2][16384];
