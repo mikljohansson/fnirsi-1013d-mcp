@@ -32,6 +32,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.103 + fw-c6 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26, row 66 "Peak detect", provisional)
+
+- **Peak detect** on FPGA 0x153C (`docs/plans/fpga-0x153c.md` section 4, item C6): **SET_DECIM filter 4** sets Sample Peak
+  (the Filter's K / FIR kept behind it for the way back; the FIR flag with it is E_BAD_ARG 1), filter 0..3 sets Normal. The
+  record is the 16-bit geometry with each word = { max, min } of the window's raw codes (N = 2 (floor(D / 2) + 1) samples at
+  200 MSa/s); the firmware writes 0x53 = 1, 0x54 = 0, 0x56 = 2 and the trigger level as raw << 8. At 200 MSa/s and for
+  totals over 8190 the record stays legacy (GET_DECIM why 2 / 3), as with the filter.
+- **The bytes**: the mode byte reads 0x81, the shift byte (GET_DECIM 3 / 25 / 27, GET_CAPTURE_INFO 69, READ_TRACE 31) carries
+  bit 7 peak active and bit 6 peak written (0xC0), GET_DECIM 0 = 4, GET_CAPTURE_INFO 79 bit 1 = peak and bit 0 = 16-bit
+  (now for single captures too); **READ_RAW layout 3** = per channel the minima then the maxima (layout 2 on a peak record
+  and layout 3 on any other record are E_BAD_ARG 2); READ_TRACE's 8-bit trace is the corrected midpoint, WIDE the pairs.
+  Caps bit 21 PEAK_DETECT, features bit 9. Matches mcp-c8's host vectors byte for byte.
+- The two raw bytes go through one 8-bit correction, the mean of the two cores' gains and offsets in the full clock class
+  (the ADCs run at full rate under peak detect); a word is overloaded when either byte is 0 or 255; Average is not applied
+  while Sample is Peak and SET_SEQ averaging with peak on is E_STATE 7 (GET_SEQ fit 9, ARM E_STATE 3). The ACQ Sample row
+  and the Scope view's bars are a separate item (`docs/plans/ui-rows.md` section 3).
+- Host tests: `test_fpga_bus` test_peak (the bus model writes { max, min } words of synthetic windows), `test_session`
+  test_peak_math / test_peak_protocol, `test_seq`; vectors: three refusals and the `decim_peak` maths section (134 total).
+
 #### 0.2.103 + ui-type (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 unchanged)
 
 - **Trigger type in the trigger menu** (`docs/plans/ui-rows.md` section 2; FPGA 0x153C): a sixth row "Trigger" / "type"
