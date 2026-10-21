@@ -39,12 +39,20 @@
 //     restarts the gate without publishing, a same-value write does not. CH1 / CH2 see edges only when the low code is
 //     below level - hysteresis and the high code at or above the level. The mixed-age transient of a 0x0D / 0x53 write
 //     is not modelled (the firmware's rule is what the tests check).
+//   - D4 logger (0x153D, fw-d4; docs/plans/fpga-0x153c.md sections 2.1, 2.2, 6.1): 0x69 bit 0 stream (the capture after
+//     the release writes one word per write clock edge for ever, no trigger, no stop; words carry their index as in the
+//     capture model, or the peak pairs), bit 1 clears the lap flag; 0x6A the reader position (the next word to read);
+//     fpga-d1's detector: occ = (W - 0x6A) mod 8192 at a 0x6A write, +1 per word up to 8192, a word written at 8192 sets
+//     the lap flag; 0x01 = 1 zeroes 0x6A and occ, not the flag; read 0x38 = the 8-byte snapshot at the command byte
+//     ({ streaming, lap, 0, W[12:8] }, W[7:0], u32 words since the release, u16 occ). With 0x69 = 0 the capture
+//     returns to the normal rules (auto with 0x0E = 0: the writes stop at the next edge). Older versions read 0. strobe_ns != 0
+//     makes every strobe take exactly that long (the drain cost test runs at the measured 0.30 / 0.35 us per byte).
 //   - D5 pattern (fw-d5, 0x153D; docs/plans/fpga-0x153c.md 2.1, 2.2, 7.2, 7.5 and fpga-d2's RTL semantics): the pattern
 //     generator on the 5 ns clock grid, event-driven per step: 0x6C entries (0 and 1 double-buffered: a write goes to
-//     the shadow, 0x6D bit 5 commit makes them pending; the engine prefetches one step ahead, so the step that starts at
-//     the first boundary after a commit still runs the old values and the take happens there: a commit during step k
-//     gives old k and k + 1, new from k + 2, pending 0 from the start of k + 1; a start takes the pending shadows before
-//     step 0), one 16-bit fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only),
+//     the shadow, 0x6D bit 5 commit makes them pending; the engine prefetches two steps ahead (fpga-d2 after the first
+//     build), so a commit during step k is taken at the boundary into k + 1 (pending 0 from there) and gives old k,
+//     k + 1 and k + 2, new from k + 3; a start takes the pending shadows before step 0, which begins 4 clocks after the
+//     start is seen: about 35 ns after a 0x6D strobe, 20 ns after an engine event), one 16-bit fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only),
 //     bursts (mode 1 one, mode 2 R with R - 1 gaps, mode 3 continuous with a gap after each), the idle level, mode 0
 //     stopping at once, a start bit or a mode-3 write starting an idle engine (ignored while it runs), 0x6E R (0 =
 //     65536), 0x6F gap, 0x50 the pin driver, the marker (the first clock of a mark step: 0x39 byte 3 bit 1 until 0x01 = 1;
@@ -137,6 +145,15 @@ typedef struct
   uint8_t  snap[16];                //the 0x35 snapshot
   uint8_t  snap_seq;                //m_seq: the sequence number of the previous snapshot
 
+  //D4 logger (0x153D)
+  uint8_t  reg_69;                  //bit 0 stream
+  uint16_t reg_6a;                  //reader position
+  uint8_t  lap;
+  uint32_t occ;                     //unread words 0..8192 (fpga-d1's detector)
+  uint32_t laps_seen;               //lap flag set events
+  uint8_t  log_snap[8];             //the 0x38 snapshot
+  uint32_t strobe_ns;               //0: random 41..298 ns per strobe
+  //D4 logger end
   //D5 pattern (fw-d5, 0x153D): fpga_model.h header
   uint8_t  buf[16];                 //data bytes of the command in progress (0x6C has 7)
   struct
@@ -144,7 +161,7 @@ typedef struct
     uint8_t  flags;                 //0x6C byte 0 bits 7..5: end, mark, level
     uint32_t dur;
     uint16_t frac;
-  } pat_act[8], pat_sh[2], pat_q;   //active entries, the shadows of 0 and 1, the prefetched next step
+  } pat_act[8], pat_sh[2], pat_q, pat_q2;   //active entries, the shadows of 0 and 1, the two prefetched steps
   uint8_t  pat_pending;             //0x39 byte 0 bit 5
   uint8_t  pat_mode, pat_ctl;       //0x6D bits 1..0 and the rest as written
   uint16_t pat_r;                   //0x6E
@@ -152,7 +169,7 @@ typedef struct
   uint8_t  pat_drive;               //0x50 bit 0
   uint8_t  pat_run, pat_in_gap;     //running, in the gap between bursts
   uint8_t  pat_step;                //the step running
-  uint8_t  pat_q_idx;               //the prefetched step's index
+  uint8_t  pat_q_idx, pat_q2_idx;   //the prefetched steps' indices
   uint8_t  pat_level;               //the pattern's level (the idle level when not running)
   uint16_t pat_acc;                 //the fraction accumulator
   uint64_t pat_end_clk;             //the running step (or gap) ends at this clock
@@ -187,6 +204,7 @@ uint8_t fm_raw_sample(uint32_t ch, uint64_t j);                        //synthet
 void    fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx); //{ max, min } of word w's window
 void fm_fill(uint32_t salt);                //distinct bytes per word and lane
 void fm_advance_ns(uint32_t ns);            //idle time (e.g. the capture after the release)
+void fm_advance_ps(uint64_t ps);            //D4 logger: the same in ps
 int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the first matching write at or after from, -1
 //fw-c7: the counter's stream on source src (0 CH1, 1 CH2, 2 EXT): a square wave of period_ns / high_ns (multiples of
 //5 ns) starting at phase_ns, codes lo / hi; period 0 = a constant low level

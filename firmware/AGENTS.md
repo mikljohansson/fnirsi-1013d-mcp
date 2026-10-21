@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-d4 (2026-10-21): fw 0.2.104 + D4 (version provisional), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built-for word still 0x153C; section 74.**
 **Branch fw-d5 (2026-10-21): fw 0.2.104 + D5 (version provisional), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M; still built for 0x153C until D3; section 75.**
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (fw 0.2.104), protocol 1.26 (row 66 "Peak detect"): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (fw 0.2.104), protocol 1.26 (row 66 addition): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
@@ -5669,6 +5670,114 @@ bars on a Normal record (a stale `pc_dec_raw_peak`), Average running with Peak.
   trace (the brief); a peak record's min / max per channel are in `pc_dec_raw` for a later card source.
 - The pass-time line's colour and the note's are literal 0xA0A0A0 in pc_hal_scope.c (no palette name for it).
 
+## 74. fw-d4: streaming logger (fw 0.2.104 + D4, version provisional, protocol 1.27, row 67 provisional)
+
+Branch `fw-d4` (worktree) from main 55e5f6b (fw 0.2.104, protocol 1.26). Brief: item **D4** of `docs/plans/fpga-0x153c.md`
+section 10 (firmware logger) against the contract's sections 2.1, 2.2 and 6, written in parallel with fpga-d1 (the RTL) and
+mcp-d6 (the host). Commits: ff3a1cb (pc_logring, fpga_log, fpga_model stream, test_log), 2101a2c (pc_cmds, pc_hal, the log
+loop, the linker section, mock, test_session), 46d1bb6 (vectors), then the docs. **Nothing benched, nothing flashed**: the
+firmware needs the 0x153D bitstream (D3); `PC_FW_FPGA_VERSION` stays 0x153C on the branch (the 0x153D integration bumps it),
+so on today's unit LOG_START answers E_FPGA detail 1 (0x38 bit 7 clear). The coordinator numbers the version.
+
+**Agreed with the parallel agents (2026-10-21)**
+- **fpga-d1** (RTL as built, tb_stream.v): 0x6A is the NEXT word to read; a proper full detector (unread count `occ` set to
+  (W - R) mod 8192 at a 0x6A write, +1 per write up to 8192; a write at 8192 sets lap; never on an empty ring); 0x01 = 1
+  zeroes the reader, occ and the counter but not lap; W == counter mod 8192 at every snapshot; arm with 0x1A = 0 and
+  0x0E = 0 so that 0x69 = 0 stops the writes at the next edge (the tail can be drained); 0x57 must be 0. My first proposal
+  (0x6A = the last word consumed, for a literal "write lands on R" detector) was dropped for this.
+- **mcp-d6**: the byte layouts of row 67 are theirs (LOG_START 16 bytes with E_BAD_ARG details 0 channels / 1 rate / 2
+  format / 4 divider, the 48-byte LOG, LOG_READ returning at once, the 16-byte chunk header with the FPGA word counter, whole
+  words per word CH1 then CH2). Mine on top: chunk flags bit 3 (the gap includes a full DDR ring), LOG flags bit 1, ENDED
+  on every read after the end, E_STATE 9 while logging, E_STATE 10 outside the Scope view.
+
+**What was built**
+- `pc_logring.c/.h` (pure): the DDR ring of whole words with segments at gaps (a chunk never crosses one, so its counter is
+  exact; 64 unread segments at most, an append needing a 65th is refused like a full ring); `pc_logring_wptr` /
+  `_commit` (the producer), `_read` (the consumer).
+- `fpga_log.c/.h` (host-buildable against fpga_bus.h): `fpga_log_start` (0x69 = 1, 0x57 = 0, 0x1A = 0, `fpga_arm_reset`
+  with 0x0E = 0, 0x38, base, 0x6A, 0x69 = 3; -1 no ready, -2 no stream), `fpga_log_drain` (a step: snapshot, a chunk of up
+  to 2048 words read lane by lane straight into the ring at stride = bytes per word, a second snapshot that keeps or drops
+  it, 0x6A; the duration limit), `fpga_log_stop` (0x69 = 0, the tail for STOPPED), the gap (counter check at 8176 words
+  OR the lap flag: skip to the newest word, 0x69 = 3, PC_LOG_CF_GAP / _HOST on the next chunk).
+- `pc_cmds.c` (`//D4 logger` blocks): `h_log_start` / `h_log_read` / `h_log_stop`, `pc_log_body` (LOG), `pc_log_service`
+  (every poll: acq_state follows the log's end; MAIN: the host watchdog, PC_LOG_HOST_MS 10 s, and the link-lost flag set in
+  `pc_link_service` on a reset or DTR drop), the dispatch gate (E_STATE `PC_STATE_LOGGING` 9 for everything outside F_BUSY
+  / F_MODAL and LOG_READ / LOG_STOP), caps `PC_CAP_LOGGER` (23), features `PC_FEAT_W_LOGGER` 0x0800, `PC_PROTO_MINOR` 27.
+- `pc_hal.h` / `pc_hal_scope.c` (`//D4 logger`): `pc_hal_log_start` (the UI auto time-out dropped, 0x0D, `pc_dec_apply`,
+  the sequencer off, `fpga_log_start`), `_stop`, `_info`, `_read`; `pc_log_loop` (drain + `pc_poll` MAIN per iteration,
+  `pc_log_notice` every 500 ms, the UI's 0x0D restored and "Log ended" queued in `acq_view`'s slot 1 at the end), called at
+  the end of `pc_glue_poll_main`.
+- `fnirsi_1013d.ld`: `.logring (NOLOAD)` after `.bss`, ALIGN(4096), with LOGRING_START / _END and two asserts (below the
+  restart record at 0x81A00000; at least 8 MiB). The image grew 9 KiB (800256 -> 809472 bytes); the ring is not in it and
+  start.s does not clear it.
+- Host tests: `fpga_model.c` (`//D4 logger`: 0x69 / 0x6A, the occ detector, the 0x38 snapshot at the command byte, 0x01 = 1
+  zeroing, the stream in `fm_capture_edge`, `strobe_ns` for a fixed strobe time, `fm_advance_ps`), `test_log.c` (new: 344
+  checks), `test_session.c` `test_logger`, mock_hal's `mock_log` (pc_logring under the mock; `mock_log_feed`), test_diag's
+  report string (1.27). `make -s test` green; check_vectors OK (151 vectors), `fnirsi1013d.vectors --check` OK.
+
+**Decided and why**
+- **The log loop owns the main loop** (no UI pass while logging): the FPGA ring holds 16.4 ms at the fastest tier and a UI
+  pass takes 15-40 ms, so the UI cannot run between drains; the screen stays alive as the notice line with the running
+  time, megabytes and gaps (the brief's "plain text line in the notice slot"). No new control: a person ends a log through
+  the host, and the firmware ends it when the host is gone (DTR drop, link reset, 10 s without LOG_READ) so the screen is
+  never frozen for good.
+- **One rate rule**, 400 x bytes per sample x channels <= sample clocks (= 500 kB/s): the four tiers of the contract are
+  all 500 kB/s, so one inequality is exact for each and needs no table.
+- **The 32-bit counter decides, the lap flag confirms**: a chunk is kept only if the second snapshot's counter is at most
+  8176 words ahead of its first word (16 words of margin for the write pipeline) and lap is clear. Robust to either detector
+  definition; the cost is one 0x38 read per step (the next step reuses it).
+- **A gap skips to the newest word** rather than salvaging the words still valid in the FPGA ring: simpler, and a gap is
+  already a loss the host reports; it also clears the backlog that caused it.
+- **A full DDR ring drops the newest data** (the drain stops; the FPGA laps; the gap says DDR) rather than overwriting the
+  oldest unread: single producer / single consumer, no reader moves, and the host sees exactly where the hole is.
+- **LOG_READ returns at once** (mcp-d6's choice; the contract said wait up to 100 ms): no deferred request, so GET_STATUS
+  and LOG_STOP are never blocked behind it; the host paces itself (the cost model assumes a 1 ms turnaround).
+- **LOG_READ needs MAIN** (not F_BUSY): the drain writes the ring in the main loop; after the end it is answered at the UI
+  pass rate (8 MiB in about 4 s of 64 KiB reads).
+- **LOG_START needs the Scope view** (display mode 0 or 4; E_STATE 10): the Spectrum and the Frequency response run their
+  own captures in their passes and the notice slot is the Scope view's.
+- **8 MiB DDR ring**: 16.8 s of 500 kB/s (the stalls seen on the bench), the contract's proposal, a power of two, and 9.5
+  MiB of the 17.5 MiB free stay for image / .bss growth.
+
+**Deviations from the contract**: LOG_READ returns at once (above); the header's 4..7 is the FPGA word counter as the
+contract names it, not a sample index (format 0 has two samples per word: sample = word x 2); E_BAD_ARG details are the
+mcp's numbering (0 channels, 1 rate, 2 format / filter, 4 divider), not byte offsets; features bit 11 (fw-c5's shift by
+three; the contract's bit 8); the UI is not frozen "behind the REMOTE banner" (there is none since 1.3) but shows the notice
+line; the formats are checked against the SET_DECIM setting (the contract's "the filter fits the format") strictly: format
+0 needs the filter off.
+
+**Bench (coordinator; FEL load after D3's 0x153D is flashed, never without the backup; contract 9.2 check 8)**
+1. `#VER` proto=1.27; GET_INFO caps bit 23; GET_STATUS 44 bit 11. On 0x153C (today): LOG_START 1 / 0 / 399 answers E_FPGA
+   detail 1 and GET_STATUS 1 stays 0.
+2. The post at 1 kHz on CH1, SET_DECIM 0, LOG_START CH1 format 0 divider 399 for 10 s: the screen shows "Logging to the
+   host: ..." counting up, LOG_READ pumped by the host in 64 KiB reads: 5,000,000 bytes (2,500,000 words), no gap flag, the
+   square wave continuous across chunk boundaries (1 kHz = 500 samples per period), the counters consecutive; the LOG at
+   the end state 2, 0 gaps; the screen "Log ended: 10 s, 4.7 MB" then the normal Scope view in STOP.
+3. The same at each tier: CH1 format 2 divider 799 (CIC2), CH1 + CH2 format 0 divider 799, CH1 + CH2 format 2 divider 1599,
+   CH1 format 3 divider 799 (Sample Peak): no gap over 60 s; GET_STATUS `pass_ms` (the loop's iteration) and the host's
+   achieved rate recorded in hardware-status.
+4. Overflow: CH1 format 0 divider 399 (500 kB/s) with the host reading slowly but steadily (LOG_READ max_bytes 1024
+   every 10 ms, 100 kB/s): no gap for about 21 s (the 8 MiB ring filling), then gaps with flags 0x0A (gap | DDR), the
+   counter jumping, the data between them continuous; LOG flags 3. A 9 s pause of all reads gives no gap; 10 s without a
+   LOG_READ stops the log with state 4 (the watchdog); pulling the cable stops it at once (DTR / link reset).
+5. LOG_STOP mid-log: state 3, the tail read (bytes produced = the counter at the stop x bytes per word), LOG_READ drains
+   the rest with ENDED on the last chunk.
+6. While logging: SET_CHANNEL / ARM answer E_STATE 9; GET_STATUS acq_state 5; READ_SCREEN shows the notice line; GET_HEALTH
+   answers.
+7. Rate refusals: LOG_START 1 / 0 / 398 E_BAD_ARG detail 1 with the hint text.
+Regression signs: a gap at a tier rate with the host reading (the drain cost higher than modelled: record `pass_ms`), data
+discontinuous without a gap flag (the 0x6A / counter alignment: base != 0 or W != counter mod 8192), the screen not
+returning after a log (the loop's exit), the UI's time base wrong after a log (the 0x0D restore).
+
+**Open**
+- The 0x153D integration (D3 + the coordinator): `PC_FW_FPGA_VERSION` 0x153D, then bench as above.
+- fw-d5 (pattern generator) edits the same `pc_cmds.c` dispatch table, caps / features lines and `fpga_model.c`'s
+  `fm_apply` / `fm_len` / read switch: my additions are in `//D4 logger` blocks; test_session's features word is 0xFFF with
+  bit 11 (fw-d5's PATTERN bits add to it), proto minor 27 in five places of test_session and one of test_diag.
+- mcp-d6: chunk flag bit 3 and LOG flags bit 1 (mine), ENDED on every later read, E_STATE 9 / 10; the host's caveat for a
+  gap (the counter jump x word clocks x 5 ns of missing time).
+- The device could show the log on the screen (a strip of the last chunk) later; out of scope (MCP-only feature).
+
 ## 75. fw-d5: generator as a pattern, pattern generator and its trigger (fw 0.2.104 + D5, version provisional, protocol 1.27, row 67)
 
 Branch `fw-d5` (worktree) from main 55e5f6b (fw 0.2.104, protocol 1.26). Brief: item **D5** of `docs/plans/fpga-0x153c.md`
@@ -5719,8 +5828,9 @@ needs 0x153D (on 0x153C its writes go to unused codes), so this lands with D3's 
 
 **Agreed with fpga-d2 (the RTL semantics the model and the firmware assume)**: a start (0x6D bit 4, a mode-3 write while
 idle, or the engine's event) is a step boundary and takes pending shadows before step 0; commit + start in one byte use
-the new entries; a start or mode-3 write while running is ignored; the FPGA prefetches one step, so a commit during step k
-gives old k and k + 1 and new from k + 2, pending 0 from the start of k + 1; the accumulator is cleared at a start only;
+the new entries; a start or mode-3 write while running is ignored; the FPGA prefetches two steps (fpga-d2's correction after the first
+TD build), so a commit during step k gives old k, k + 1 and k + 2 and new from k + 3, pending 0 from the start of k + 1;
+step 0 of a start begins 4 clocks after the start is seen (about 35-40 ns after a 0x6D strobe, 20 ns after an event); the accumulator is cleared at a start only;
 mode 0 stops at once; bursts done reset at a start; the marker needs both 0x15 = 3 and 0x6D bit 3; 0x39 byte 3 bit 1
 clears at 0x01 = 1; 0x6C index >= 8 ignored, entry 7 acts as end; 0x50's last data byte wins; one-shot engine events
 disarm, re-arm holds the qualifier in reset during the burst; 0x42 bit 7 reads 1 (own engine) unless D2's timing forces

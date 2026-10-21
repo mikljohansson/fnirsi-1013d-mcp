@@ -545,6 +545,61 @@ source change restarts the gate, a same-value write and a level change do not. T
   screen, the mismatch refusal), `test_ui.c` `test_counter_cards` (the card rule and the texts), the 1.26 counter
   vectors in `docs/protocol-vectors.json`.
 
+### Streaming logger (FPGA 0x153D, fw-d4, protocol 1.27 row 67)
+
+Contract `docs/plans/fpga-0x153c.md` section 6 (item D4), register semantics as fpga-d1 built them (tb_stream.v): 0x69 bit 0
+stream (the capture never stops or triggers), bit 1 clear the lap flag; 0x6A the next ring word the MCU reads; read 0x38 = 8
+bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread count (0..8192); a word written while
+8192 are unread sets the lap flag; 0x01 = 1 zeroes the reader, the count and the counter, not the flag.
+
+- **Rates** (the contract's documented specification, owner 2026-10-20 22:38): sample rate x bytes per sample x channels
+  <= 500,000 B/s: 500 kS/s for one 8-bit channel (format 0 legacy or 1 the filtered word's high byte), 250 kS/s for one
+  16-bit (format 2) or peak (3) channel or two 8-bit channels, 125 kS/s for two 16-bit channels. LOG_START refuses more
+  (E_BAD_ARG detail 1 with the tiers as the hint). The format must match the SET_DECIM setting at the divider (0: filter
+  off; 1 / 2: a filter; 3: peak).
+- **The log loop** (`pc_hal_scope.c` `pc_log_loop`, entered from `pc_glue_poll_main` after the MAIN poll that ran
+  LOG_START): one drain step (`fpga_log_drain`) and one MAIN poll per iteration until the log ends; no UI pass runs (the
+  FPGA ring holds 16.4 ms at 500 kwords/s, a UI pass takes 15-40 ms). The Scope view stays frozen, its notice slot reads
+  "Logging to the host: 12 s, 6.0 MB, 1 gap" (redrawn every 500 ms); at the end the UI's 0x0D is written back and "Log
+  ended: ..." shows as the slot's notice. While logging every command outside the F_BUSY and read-only sets and
+  LOG_READ / LOG_STOP answers E_STATE detail 9 (`pc_dispatch`); acq_state reads 5. The person at the scope cannot stop a
+  log on the screen (no new control, decided): the host does (LOG_STOP), or the firmware when the host is gone (a link
+  reset or DTR drop, or no LOG_READ for 10 s: state 4).
+- **Start** (`fpga_log_start`): 0x0D = divider, the filter / peak registers through `pc_dec_apply` (settled), the
+  sequencer off (`pc_seq_hw_pre_reset` and 0x57 = 0), 0x69 = 1, 0x1A = 0, the sampling reset with 0x0B = 0x0C = 0x0E = 0,
+  a 0x38 snapshot (bit 7 clear: no stream, E_FPGA detail 1; base = (W - count) mod 8192), 0x6A = base, 0x69 = 3.
+- **Drain step**: up to 2048 words from the next unread one, one pass per lane as READ_RAW (0x1F, the read command, the
+  dummy strobe; `fpga_read_lane`) straight into the DDR ring at the word's byte offset, then a second 0x38: the chunk is
+  kept when the lap flag is clear and the counter is at most 8176 words ahead of the chunk's first word, else it is a gap;
+  then 0x6A. Per step one 0x38 read (9 strobes), 5 + n strobes per lane, the 0x6A write (3). Wire layout per word: the
+  enabled channels CH1, CH2; format 0 core B then core A (0x21, 0x20), 1 the high byte (0x21), 2 u16 little-endian (0x20,
+  0x21), 3 min then max (0x20, 0x21); CH2 + 2.
+- **Gaps** (the overflow): the words between the last one read and the counter are lost, the drain resumes at the newest
+  word (0x6A, 0x69 = 3 clears the flag), the next chunk carries the gap flag and its counter jumps; the log continues. A
+  full DDR ring stops the drain (the words wait in the FPGA ring); if the host does not read in time the FPGA ring laps
+  and that gap also carries the DDR flag (bit 3).
+- **DDR ring** (`pc_logring.c`, host-buildable): **8 MiB** in the NOLOAD section `.logring` right after `.bss` (fnirsi_1013d.ld;
+  not in the image, not cleared at boot; 0x80882000..0x81082000 on the GCC 10 build of 2101a2c, 9.5 MiB below the
+  restart record section at 0x81A00000, which the linker asserts). Why 8 MiB: every tier produces the same 500 kB/s, so
+  the ring rides out 16.8 s of host stall (Windows transport stalls of several seconds were seen on the bench,
+  hardware-status 2026-10-17), the contract's proposal, a power of two (masking), and it leaves 9.5 MiB of growth room for
+  image and `.bss` (17.5 MiB were free). Whole words only, segments at gaps (64 unread at most), so every chunk is
+  contiguous and its counter exact. Readable after the end until the next LOG_START.
+- **Duration**: the drain never reads past ceil(duration_ms x 200,000 / word clocks) words and ends there (state 2).
+  LOG_STOP writes 0x69 = 0; the FPGA stops writing at the next write clock edge (auto mode, 0x0E = 0) and the tail is
+  read into the ring (state 3).
+- **Cost** (`host_tests/test_log.c` against `fpga_model.c`'s stream; strobes at the measured 0.30 / 0.35 us per bus byte,
+  the USB side as CPU time at 0.43 / 1.0 us per byte in 512-byte packets between drain steps, a 25 ns per byte build,
+  a 1 ms host turnaround per LOG_READ): every tier delivers 500 kB/s for 2 s without a gap at the worst case; CPU duty
+  52-60 % best, 78-82 % worst (the contract's per-byte sum: 0.73 .. 1.35 us per byte = 37-68 %, plus the per-chunk
+  overheads). Twice the 1 ch 8-bit tier (1 MS/s) with a 256 KiB ring falls behind and logs gaps with the DDR flag,
+  every delivered byte right.
+- **Host tests**: `test_log` (above, plus every format and channel mask byte for byte, the DDR wrap, a 40 ms stall's gap,
+  a lap flag with nothing lost, the DDR-full gap, the duration limit, the start's write order, a leftover lap flag, the
+  0x153C refusal, the bounded ready wait, the tail after a stop), `test_session` `test_logger` (caps, features, every
+  refusal and tier boundary, the 48-byte LOG and a gap chunk byte for byte, the E_STATE 9 gate and what still answers,
+  ENDED, the host watchdog and DTR drop), the 1.27 vectors.
+
 ### The generator as a pattern, the pattern generator, the chirp (FPGA 0x153D, fw-d5, protocol 1.27 row 67)
 
 Bitstream 0x153D (fpga-d2; contract `docs/plans/fpga-0x153c.md` sections 7.2-7.5) removes Atlan4's DDS (0x51 / 0x52): the
@@ -560,7 +615,8 @@ pattern. The firmware on this branch is still built for 0x153C (`PC_FW_FPGA_VERS
   fraction accumulator: a step lasts n + the carry of acc + f, so the mean is exact and every edge lands within one 5 ns
   clock of its ideal time; it is cleared at a start only (two bursts are identical edge for edge). Entries 0 and 1 are
   double-buffered: a write goes to a shadow, the commit makes them pending, and the FPGA takes them at a step boundary
-  (it prefetches one step: a commit during step k applies from step k + 2; a start takes them before step 0). Read 0x39:
+  (it prefetches two steps: a commit during step k is taken at the boundary into k + 1 and applies from step k + 3; a
+  start takes them before step 0). Read 0x39:
   { running, in gap, pending, step }, bursts done, { marker seen, mode active }.
 - **The generator** (`gen_pat.c`, host-buildable; `fpga_control.c` `fpga_set_generator_freq` / `_duty` /
   `fpga_on_off_generator`): the contract's integer formulas P16 = (2^16 x 2e11 + f / 2) / f (f in mHz), H16 = (P16 x d +

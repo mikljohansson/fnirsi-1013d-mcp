@@ -12,11 +12,11 @@ CFLAGS  := -std=c99 -O2 -g -Wall -Wextra -Werror -Wno-unused-function -I$(SRC) -
 VECTORS := ../../../docs/protocol-vectors.json
 
 PROTO_SRCS := $(SRC)/pc_protocol.c
-CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/adc_cal.c $(SRC)/acal_track.c $(SRC)/pc_ident.c $(SRC)/pc_report.c $(SRC)/pc_life.c mock_hal.c
+CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/adc_cal.c $(SRC)/acal_track.c $(SRC)/pc_ident.c $(SRC)/pc_report.c $(SRC)/pc_life.c $(SRC)/pc_logring.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h $(SRC)/gen_pat.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log
 
 $(OUT):
 	mkdir -p $@
@@ -73,7 +73,7 @@ $(OUT)/test_ui_diag: test_ui_diag.c test_util.h $(UI_DIAG_SRCS) $(SRC)/ui_diag.h
 	$(CC) $(CFLAGS) -o $@ test_ui_diag.c $(UI_DIAG_SRCS)
 # fw 0.2.52 diagnostics: life record, provenance trailer, image identity (pure parts); --layouts prints the packed
 # layouts for check_vectors.py (diag_layouts)
-DIAG_SRCS := $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c
+DIAG_SRCS := $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c $(SRC)/pc_logring.c
 $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_diag.c $(DIAG_SRCS)
 
@@ -126,6 +126,12 @@ $(OUT)/test_bode_sweep: test_bode_sweep.c test_util.h $(BODE_SRCS) $(SRC)/bode_s
 # zaklad.v's MCU interface (fpga_model.c)
 $(OUT)/test_fpga_bus: test_fpga_bus.c test_util.h fpga_model.c fpga_model.h $(SRC)/fpga_bus.c $(SRC)/fpga_bus.h $(SRC)/fpga_counter.c $(SRC)/fpga_counter.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h $(SRC)/gen_pat.c $(SRC)/gen_pat.h | $(OUT)
 	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_fpga_bus.c fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/pc_decim.c $(SRC)/gen_pat.c
+
+# D4 logger (fw-d4): the DDR ring (pc_logring.c) and the drain (fpga_log.c) against the model's 0x153D stream, with the
+# drain cost at the contract's rates
+LOG_SRCS := fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/fpga_log.c $(SRC)/pc_logring.c
+$(OUT)/test_log: test_log.c test_util.h $(LOG_SRCS) fpga_model.h $(SRC)/fpga_bus.h $(SRC)/fpga_log.h $(SRC)/pc_logring.h | $(OUT)
+	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_log.c $(LOG_SRCS)
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
@@ -183,6 +189,7 @@ test: all
 	$(OUT)/test_spec_zoom
 	$(OUT)/test_trig_ui
 	$(OUT)/test_peak_bars
+	$(OUT)/test_log
 	$(OUT)/test_seq
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu

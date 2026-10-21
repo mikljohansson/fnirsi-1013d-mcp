@@ -1428,7 +1428,7 @@ static void test_gen_square(void)
 }
 
 //The double buffer: a frequency change while the square runs is glitch-free (every step a complete old or new one),
-//taken at the prefetch boundary (commit during step k: old k and k + 1, new from k + 2), the pending bit set until
+//taken at the prefetch boundary (commit during step k: old k, k + 1 and k + 2, new from k + 3), the pending bit set until
 //then; the accumulator is not cleared (phase-continuous); a second commit before the take overwrites the first
 static void test_gen_change(void)
 {
@@ -1480,9 +1480,9 @@ static void test_gen_change(void)
 
   T_EQ(bad, 0);
   T_TRUE(news > 10);
-  //The step running at the commit and the prefetched one are old: the first new step is the second or third edge
-  //interval after the commit
-  T_TRUE((first_new >= 1) && (first_new <= 3));
+  //The step running at the commit and the two prefetched ones are old: the first new step is the third complete edge
+  //interval after the commit (k + 1, k + 2 old, k + 3 new)
+  T_EQ(first_new, 3);
   T_TRUE((fm.pat_edge[from % FM_PAT_EDGES] >> 1) >= t_commit);
 
   //A commit lost to a second commit before the take: B never runs

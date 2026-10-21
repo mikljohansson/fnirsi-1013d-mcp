@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            27    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            27   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -57,6 +57,8 @@
                                         //1.26 (provisional numbering): FPGA 0x153C trigger types and hold-off (fw-c5):
                                         //      SET_TRIGGER2, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112,
                                         //      caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8
+                                        //1.27 (provisional numbering): FPGA 0x153D streaming logger (fw-d4): LOG_START /
+                                        //      LOG_READ / LOG_STOP, acq_state 5, caps bit 23, features bit 11
                                         //1.27 (provisional numbering): FPGA 0x153D (fw-d5): the generator on the
                                         //      pattern (SET_GEN raw modes P16 / H16, GEN 40 bytes, GET_INFO gen clock
                                         //      200 MHz), SET_PATTERN, SET_PATTERN_TRIGGER, trigger source 3 (the
@@ -120,6 +122,9 @@
 #define PC_CMD_BODE_CTRL          0x0211     //1.20: on-device Bode sweep: settings, run / stop, thru calibration
 #define PC_CMD_READ_BODE          0x0212     //1.20: the Bode table of the latest sweep
 #define PC_CMD_GET_COUNTER        0x0213     //1.26 (fw-c7): the 0x153C hardware counter's result, or its configuration (what = 1)
+#define PC_CMD_LOG_START          0x0214     //D4 logger, 1.27: start the streaming logger (FPGA 0x153D)
+#define PC_CMD_LOG_READ           0x0215     //D4 logger, 1.27: the next chunk of the log
+#define PC_CMD_LOG_STOP           0x0216     //D4 logger, 1.27: stop it, the summary
 #define PC_CMD_SET_PATTERN        0x0217     //1.27 (fw-d5): the pattern generator's table, mode, bursts, gap, start (FPGA 0x153D)
 #define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0214..0x0218
                                              //      are the contract's LOG_*, SET_PATTERN, docs/plans/fpga-0x153c.md)
@@ -184,6 +189,7 @@
 #define PC_CAP_PEAK_DETECT            (1u << 21)   //1.26 (C6): peak detect 0x56 bit 1; SET_DECIM filter 4, READ_RAW layout 3 (0x153C+)
                                                    //      (bit 2 HOLDOFF: 0x1B is the trigger hold-off in 5 ns units, 0x153C+)
 #define PC_CAP_COUNTER                (1u << 22)   //1.26 (fw-c7): the hardware counter 0x61 / 0x62, read 0x35; GET_COUNTER (0x153C+)
+#define PC_CAP_LOGGER                 (1u << 23)   //1.27 (D4 logger): 0x69 / 0x6A, read 0x38; LOG_START / LOG_READ / LOG_STOP (0x153D+)
 //D5 pattern
 #define PC_CAP_PATTERN_GEN            (1u << 24)   //1.27 (fw-d5): 0x6C-0x6F, read 0x39, trigger source 3; SET_PATTERN (0x153D)
 #define PC_CAP_PATTERN_TRIGGER        (1u << 27)   //1.27 (fw-d5): 0x76-0x7D, read 0x42, 0x6D bits 7..6; SET_PATTERN_TRIGGER
@@ -201,6 +207,7 @@
 #define PC_FEAT_W_TRIG_TYPES          0x0100       //1.26: trigger types and hold-off (0x153C+; the contract's bit 5 was taken)
 #define PC_FEAT_W_PEAK                0x0200       //1.26 (C6): peak detect (0x153C+); C7's COUNTER takes 0x0400
 #define PC_FEAT_W_COUNTER             0x0400       //1.26 (fw-c7): the hardware counter (0x153C+; bit 9 is C6's PEAK)
+#define PC_FEAT_W_LOGGER              0x0800       //1.27 (D4 logger): the streaming logger (0x153D+; fw-c5's numbering)
 //D5 pattern (bit 11 is fw-d4's LOGGER)
 #define PC_FEAT_W_PATTERN             0x1000       //1.27 (fw-d5): the pattern generator (0x153D)
 #define PC_FEAT_W_PATTERN_TRIGGER     0x2000       //1.27 (fw-d5): its trigger engine (0x153D)

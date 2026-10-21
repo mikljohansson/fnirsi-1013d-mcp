@@ -86,6 +86,36 @@ static void fm_capture_edge(void)
   if(!fm.released)
     return;
 
+  //D4 logger: stream mode writes for ever, no trigger, no stop; the lap flag when a word lands on 0x6A
+  if((fm.version >= 0x153D) && (fm.reg_69 & 1) && fm.we)
+  {
+    uint32_t w = fm.n % fm.ring, l;
+
+    if(fm_peak_on())
+    {
+      fm_peak_word(0, fm.n, &fm.mem[w][0], &fm.mem[w][1]);
+      fm_peak_word(1, fm.n, &fm.mem[w][2], &fm.mem[w][3]);
+    }
+    else
+      for(l=0;l<4;l++)
+        fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
+
+    //fpga-d1's detector: the unread count saturates at 8192; a write at 8192 overwrote the oldest unread word
+    if(fm.occ >= 8192)
+    {
+      if(!fm.lap)
+        fm.laps_seen++;
+      fm.lap = 1;
+    }
+    else
+      fm.occ++;
+
+    fm.n++;
+    fm.e++;
+    return;
+  }
+  //D4 logger end
+
   if(fm.we)
   {
     uint32_t w = fm.n % fm.ring, l;
@@ -323,10 +353,10 @@ static uint8_t fm_pat_idle(void)
   return (uint8_t)((fm.pat_ctl >> 2) & 1);
 }
 
-//The step after index k: 0 after an end step (or entry 7)
-static uint8_t fm_pat_next_idx(uint8_t k)
+//The step after index k (whose entry is e): 0 after an end step (or entry 7)
+static uint8_t fm_pat_after(uint8_t k, uint8_t eflags)
 {
-  return ((fm.pat_act[k].flags & 0x80) || (k == 7)) ? 0 : (uint8_t)(k + 1);
+  return ((eflags & 0x80) || (k == 7)) ? 0 : (uint8_t)(k + 1);
 }
 
 static void fm_pat_take_pending(void)
@@ -339,7 +369,9 @@ static void fm_pat_take_pending(void)
   }
 }
 
-//Begin the prefetched step at clock clk; then take a pending commit and prefetch the next one
+//Begin the first queued step at clock clk; then take a pending commit and queue the step after the second one. The
+//engine prefetches two steps (fpga-d2, after the first 0x153D build): a commit during step k is taken at the boundary
+//into k + 1 (pending clears there), k + 1 and k + 2 run the old entries, k + 3 the new
 static void fm_pat_begin(uint64_t clk)
 {
   uint32_t sum = (uint32_t)fm.pat_acc + fm.pat_q.frac;
@@ -362,10 +394,13 @@ static void fm_pat_begin(uint64_t clk)
   }
 
   fm_pat_take_pending();
-  fm.pat_q_idx = fm_pat_next_idx(idx);
-  fm.pat_q     = fm.pat_act[fm.pat_q_idx];
+  fm.pat_q      = fm.pat_q2;
+  fm.pat_q_idx  = fm.pat_q2_idx;
+  fm.pat_q2_idx = fm_pat_after(fm.pat_q_idx, fm.pat_q.flags);
+  fm.pat_q2     = fm.pat_act[fm.pat_q2_idx];
 }
 
+//A start: the pending shadows are taken first, so every step is new from step 0
 static void fm_pat_start(uint64_t clk)
 {
   fm_pat_take_pending();
@@ -375,6 +410,8 @@ static void fm_pat_start(uint64_t clk)
   fm.pat_starts++;
   fm.pat_q_idx  = 0;
   fm.pat_q      = fm.pat_act[0];
+  fm.pat_q2_idx = fm_pat_after(0, fm.pat_q.flags);
+  fm.pat_q2     = fm.pat_act[fm.pat_q2_idx];
   fm_pat_begin(clk);
 }
 
@@ -449,7 +486,7 @@ void fm_ptrig_event(void)
   fm.ptrig_events++;
 
   if(((src == 1) || (src == 2)) && fm.pat_mode && !fm.pat_run)
-    fm_pat_start(fm_clk() + 1);
+    fm_pat_start(fm_clk() + 4);                             //20 ns after the event clock (fpga-d2)
 
   if(!(fm.ptrig[7] & 2))
     fm.ptrig[7] &= (uint8_t)~1;
@@ -504,7 +541,7 @@ static void fm_pat_write(uint8_t cmd)
           fm_pat_set_level(fm_pat_idle(), now + 1);
       }
       else if(!fm.pat_run && ((mode == 3) || ((v & 0x10) && (src != 1))))
-        fm_pat_start(now + 1);
+        fm_pat_start(now + 7);                                //step 0 about 35-40 ns after the strobe (fpga-d2)
       else if(!fm.pat_run)
         fm_pat_set_level(fm_pat_idle(), now + 1);
       break;
@@ -535,12 +572,26 @@ static void fm_pat_write(uint8_t cmd)
 static void fm_strobe(void)
 {
   fm.strobes++;
+
+  //D4 logger: a fixed strobe time for the drain cost test
+  if(fm.strobe_ns)
+  {
+    fm_time((uint64_t)fm.strobe_ns * 1000);
+    return;
+  }
+
   fm_time((uint64_t)(41000 + fm_rnd() % 257001));
 }
 
 void fm_advance_ns(uint32_t ns)
 {
   fm_time((uint64_t)ns * 1000);
+}
+
+//D4 logger: idle time in ps (the drain cost test's packet and build times)
+void fm_advance_ps(uint64_t ps)
+{
+  fm_time(ps);
 }
 
 void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
@@ -586,6 +637,7 @@ static uint32_t fm_len(uint8_t cmd)
   {
     case 0x0B: case 0x0C: case 0x1F: case 0x38: case 0x58: case 0x5A:  return 2;
     case 0x62:                                                          return 2;   //C7 counter: level, hysteresis
+    case 0x6A:                                                          return 2;   //D4 logger: reader position
     case 0x5F: case 0x60:                                               return 3;   //0x153C: u24 N, H
     case 0x0D: case 0x0E: case 0x1B: case 0x50: case 0x5C:             return 4;   //0x51 / 0x52 retired in 0x153D
     //D5 pattern (0x153D)
@@ -627,6 +679,10 @@ static void fm_apply(uint8_t cmd, uint32_t v)
         fm.edges_in_reset  = 0;
         fm.pat_marker_seen = 0;           //D5: 0x39 byte 3 bit 1 since 0x01 = 1
         fm.pat_marker_trig = 0;
+
+        //D4 logger (0x153D): the reader position and the unread count go to 0 (the lap flag stays)
+        fm.reg_6a = 0;
+        fm.occ    = 0;
 
         //0x153C: a pending 0x66 request makes this reset clear the hold-off timer (one-shot)
         if(fm.ho_clr_req)
@@ -687,6 +743,25 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       }
       break;
 
+    //D4 logger (0x153D): stream, lap clear, reader position
+    case 0x69:
+      if(fm.version >= 0x153D)
+      {
+        fm.reg_69 = (uint8_t)(v & 1);
+        if(v & 2)
+          fm.lap = 0;
+      }
+      break;
+
+    case 0x6A:
+      if(fm.version >= 0x153D)
+      {
+        fm.reg_6a = (uint16_t)(v & 0x1FFF);
+        fm.occ    = ((fm.released ? fm.n : 0) - fm.reg_6a) & 0x1FFF;
+      }
+      break;
+    //D4 logger end
+
     case 0x62:
       if(fm.version >= 0x153C)
       {
@@ -710,6 +785,19 @@ void fpga_write_cmd(uint8_t command)
   //C7 counter: the snapshot is taken at the 0x35 command byte
   if((command == 0x35) && (fm.version >= 0x153C))
     fm_cnt_snapshot();
+
+  //D4 logger: the 0x38 snapshot at the command byte
+  if((command == 0x38) && (fm.version >= 0x153D))
+  {
+    uint32_t w = fm.released ? (fm.n % fm.ring) : 0, c = fm.released ? fm.n : 0;
+    uint32_t av = fm.occ;
+    uint8_t *b = fm.log_snap;
+
+    b[0] = (uint8_t)(((fm.reg_69 & 1) ? 0x80 : 0) | (fm.lap ? 0x40 : 0) | ((w >> 8) & 0x1F));
+    b[1] = (uint8_t)w;
+    b[2] = (uint8_t)(c >> 24); b[3] = (uint8_t)(c >> 16); b[4] = (uint8_t)(c >> 8); b[5] = (uint8_t)c;
+    b[6] = (uint8_t)(av >> 8); b[7] = (uint8_t)av;
+  }
 }
 
 void fpga_write_byte(uint8_t data)
@@ -808,6 +896,15 @@ uint8_t fpga_io_strobe_read(void)
           out = (uint8_t)((fm_dec_on() ? 0x80 : 0) | ((fm.reg_56 & 1) ? 0x40 : 0) | (fir ? 0x20 : 0) | (fm.reg_53 & 0x07));
         else
           out = (uint8_t)((fm_peak_on() ? 0xC0 : 0) | (fm.reg_54 & 0x3F));
+      }
+      break;
+
+    //D4 logger: the 8 bytes of the 0x38 snapshot
+    case 0x38:
+      if(fm.version >= 0x153D)
+      {
+        out = fm.log_snap[(fm.nbytes < 8) ? fm.nbytes : 7];
+        fm.nbytes++;
       }
       break;
 

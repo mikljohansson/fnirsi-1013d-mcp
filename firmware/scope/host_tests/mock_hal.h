@@ -182,6 +182,24 @@ int  mock_ui_modal_pass(void *session);
 void mock_tx_release(void);
 void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors);   //eGON header + valid checksum
 
+//D4 logger: the mock's log (mock_hal.c), reset by mock_reset
+#include "pc_logring.h"
+#include "fpga_log.h"
+typedef struct
+{
+  int          start_rc;          //what pc_hal_log_start answers (0, -1, -2)
+  uint32_t     starts, stops, reads;
+  uint8_t      state, ch_mask, format, flags, stop_state;
+  uint32_t     divider, gaps, ms0, ms1;
+  uint64_t     limit, next;
+  pc_decim_cfg dc;
+  pc_logring   ring;
+} mock_log_state;
+extern mock_log_state mock_log;
+void mock_log_reset(void);
+//Append words (bytes (w * 7 + k) & 0xFF) after skipping skip words (a gap: the counter jumps, PC_LOG_CF_GAP)
+void mock_log_feed(uint32_t words, uint64_t skip, uint8_t flags);
+
 //Captured responses (most recent last)
 #define MOCK_MAX_RESP 32
 typedef struct
