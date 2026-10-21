@@ -6237,3 +6237,38 @@ Regression signs: the mismatch notice on 0x153D (the constant), LOG state 4 at o
   returned (the wizard's screen is gone). Both are older one-bitstream leftovers, not 0x153D checks; left for a cruft pass.
 - `docs/guide/install.md` / `agent-runbook.md` / `first-run.md` name 0x153B as the release's bitstream (the last release
   text); they move with the 0.3.0 release notes, not here.
+
+## 82. fw-diag: the mismatch notice after Diagnostics (fw 0.2.105, protocol unchanged)
+
+Branch `fw-diag` from main 8f17c9d (fw 0.2.105). Brief: the owner's 17:4x bench entry (0.2.104 FEL-loaded on 0x153B: the
+notice, Diagnostics, Back, then no response to touch; power cycle). Found by reading the code; nothing benched.
+
+**Cause.** The notice (`ui_fpga_mismatch_pass`, ui_diag_view.c) and Diagnostics share one `ud_pg` (the page on the screen
+and its hit areas). UD_ID_DIAG opened Diagnostics without asking for a rebuild; Diagnostics' Back (`ud_close`) copies the
+notice's picture back from displaybuffer2, but `ud_pg` still held the Diagnostics Status page, and the notice rebuilds
+only on `fm_redraw`. On a mismatch that page has Report (x 164..360, y 420..464), the tabs and Back at the top and no
+Calibrate, so the centres of Diagnostics (x 124), Settings (400) and USB drive (676) hit nothing: no press, no redraw, the
+screen looked hung. A tap on the Report area or the top row would have redrawn the notice. Settings and USB drive set
+`fm_redraw` on return and were fine. The host cannot close Diagnostics on a mismatch (pc_dispatch refuses every non-basic
+command before `pc_hal_ui_leave_screen`), so Back is the only way out of it.
+
+**Second fault on the same screen.** `pc_glue_ui_service` ran `acal_live_service` (the calibration class probe) under the
+notice: on a calibrated unit with a quiet (empty) trace buffer it arms conversions every 30 s through `fpga_arm_reset`'s
+unbounded ready wait and the `fpga_done_conversion` poll. On a bitstream the firmware is not built for that wait has no
+guaranteed end. Not proven to be the owner's hang (the notice answered before Diagnostics), but it broke the rule that
+nothing acquires while mismatched.
+
+**Fix (f08b5b1).** UD_ID_DIAG sets `fm_redraw` when it opens Diagnostics, so the first notice pass after Back builds the
+page and its hit areas again. `acal_live_service`'s gate adds `!pc_glue_fpga_mismatch()`. Checked: the other FPGA waits
+(`fpga_do_conversion` callers, `fpga_arm_reset`, `fpga_log`) are reachable only from the scope pass, the wizard and volts
+calibration (hidden on a mismatch), roll mode or the host arms (E_UNSUPPORTED); Settings' Restore writes registers but
+waits on nothing; USB drive's loop waits on the touch only.
+
+**Host test.** None: ui_diag_view.c (display, touch, buffers) is not built in host_tests; `ud_build_fpga_mismatch` and
+`ud_hit` are (test_ui_diag), the pass's state is not.
+
+**Bench (owner; FEL load of a 0.2.105 image on a bitstream other than 0x153D, e.g. the unit's 0x153B; nothing flashed)**
+1. The notice shows. Diagnostics, then Back: the notice; tap the centre of Settings: Settings opens; Back: the notice.
+2. USB drive, Exit: the notice. Diagnostics, Calibration tab, Log tab, Back: the notice, its three buttons answer.
+3. Leave the notice up for 2 minutes, then tap each button: it answers every time (the probe no longer runs).
+4. While on the notice the MCP still gets GET_INFO (76 = 0x153D, 78 = 1) and ARM answers E_UNSUPPORTED detail 1.
