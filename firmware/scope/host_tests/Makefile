@@ -12,7 +12,7 @@ CFLAGS  := -std=c99 -O2 -g -Wall -Wextra -Werror -Wno-unused-function -I$(SRC) -
 VECTORS := ../../../docs/protocol-vectors.json
 
 PROTO_SRCS := $(SRC)/pc_protocol.c
-CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/adc_cal.c $(SRC)/acal_track.c $(SRC)/pc_ident.c $(SRC)/pc_report.c $(SRC)/pc_life.c mock_hal.c
+CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/adc_cal.c $(SRC)/acal_track.c $(SRC)/pc_ident.c $(SRC)/pc_report.c $(SRC)/pc_life.c $(SRC)/pc_logring.c mock_hal.c
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
@@ -73,7 +73,7 @@ $(OUT)/test_ui_diag: test_ui_diag.c test_util.h $(UI_DIAG_SRCS) $(SRC)/ui_diag.h
 	$(CC) $(CFLAGS) -o $@ test_ui_diag.c $(UI_DIAG_SRCS)
 # fw 0.2.52 diagnostics: life record, provenance trailer, image identity (pure parts); --layouts prints the packed
 # layouts for check_vectors.py (diag_layouts)
-DIAG_SRCS := $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c
+DIAG_SRCS := $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c $(SRC)/pc_logring.c
 $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_diag.c $(DIAG_SRCS)
 

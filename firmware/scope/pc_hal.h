@@ -476,4 +476,33 @@ void     pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst);
 int      pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail);
 uint32_t pc_hal_bode_read(uint32_t first, uint32_t max_rows, uint8_t *resp);
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger (fw-d4, FPGA 0x153D, protocol 1.27 row 67; fpga_log.h, pc_logring.h). The scope keeps one log: the FPGA side
+//(fpga_log) and the DDR ring of PC_LOG_RING_BYTES in the `.logring` section (fnirsi_1013d.ld). While it runs, the main loop
+//is the log loop (pc_hal_scope.c): drain steps and MAIN polls, the Scope view frozen with a "Logging to the host" line.
+#define PC_LOG_RING_BYTES (8u << 20)     //8 MiB: 16.8 s of the 500 kB/s every tier produces (host stalls)
+
+typedef struct
+{
+  uint8_t  state;               //FPGA_LOG_IDLE .. _ERROR (fpga_log.h): 0 idle, 1 running, 2 ended, 3 stopped, 4 error
+  uint8_t  ch_mask;
+  uint8_t  format;
+  uint8_t  flags;               //FPGA_LOG_FL_*: bit 0 a gap, bit 1 a gap because the DDR ring was full
+  uint64_t produced;            //bytes into the DDR ring since the start
+  uint64_t sent;                //bytes taken by LOG_READ
+  uint32_t gaps;
+  uint32_t ring_bytes;
+  uint32_t ms;                  //since the start, frozen at the end
+} pc_hw_log;
+
+//[FPGA][UI] 0x0D = divider, the decimation registers of dc (settled), the UI's conversions stopped, the stream armed
+//(fpga_log_start) for limit words (0 = until stopped). 0 running, -1 the FPGA never became ready, -2 the bitstream does not
+//stream (0x38). The main loop enters the log loop after this MAIN poll
+int      pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit);
+void     pc_hal_log_stop(uint8_t state);                     //[FPGA] FPGA_LOG_STOPPED (the tail is read) or _ERROR
+void     pc_hal_log_info(pc_hw_log *l);                      //memory, any context
+//MAIN (the drain shares the ring): up to max bytes, whole words, of the oldest unread segment; *word = the FPGA word
+//counter of the first word, *flags = PC_LOG_CF_GAP / _HOST on a segment's first chunk. Returns the bytes
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags);
+
 #endif /* PC_HAL_H */
