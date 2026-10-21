@@ -24,8 +24,9 @@ def test_variant_identity(sim_factory):
     srv = sim_factory(variant="al3")
     with Scope.connect(srv.url) as s:
         i = s.info
-        assert (i.fpga_version, i.ring_words, i.max_total_samples, i.min_total_samples) == (0x153B, 8192, 16382, 80)
-        assert (i.fw_fpga_version, i.fpga_mismatch) == (0x153B, False)
+        assert (i.fpga_version, i.ring_words, i.max_total_samples, i.min_total_samples) == \
+            (P.FW_FPGA_VERSION, 8192, 16382, 80)
+        assert (i.fw_fpga_version, i.fpga_mismatch) == (P.FW_FPGA_VERSION, False)
         p = s.profile()
         assert p.variant == "al3" and p.programmable and p.has_generator and p.mismatch_caveat() is None
     with pytest.raises(ValueError, match="one bitstream"):
@@ -41,6 +42,11 @@ def test_trigger_validation_al3(sim_factory):
             with pytest.raises(DeviceError) as e:
                 s.set_trigger(**kw)
             assert e.value.status == P.Status.E_BAD_ARG and e.value.detail == bit
+        assert s.set_trigger(holdoff=5).holdoff == 5  # 1.26: caps HOLDOFF, 0x1B is a trigger hold-off
+    finally:
+        s.close()
+    s = Scope.connect(sim_factory(caps_clear=int(P.Caps.HOLDOFF)).url)
+    try:
         with pytest.raises(DeviceError) as e:
             s.set_trigger(holdoff=5)
         assert e.value.status == P.Status.E_UNSUPPORTED
@@ -156,7 +162,7 @@ def test_debug_fpga_stale_first_byte(sim_factory):
     try:
         data = s.debug_fpga([(P.DBG_WRITE_CMD, 0x06), (P.DBG_READ_DATA, 2), (P.DBG_WRITE_CMD, 0x1F),
                              (P.DBG_WRITE_DATA, b"\x00\xc8"), (P.DBG_WRITE_CMD, 0x20), (P.DBG_READ_DATA, 4)])
-        assert data[:2] == b"\x15\x3b"
+        assert data[:2] == P.FW_FPGA_VERSION.to_bytes(2, "big")
         assert data[2] == 61 and list(data[3:]) == [61, 62, 63]  # stale (+1) then mem[201..]
     finally:
         s.close()

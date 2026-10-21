@@ -47,6 +47,8 @@ KINDS = {
     "mask": ("Mask", "scope_mask_test"),
     "mask_test": ("Mask test", "scope_mask_test"),
     "dvm": ("DVM readings", "scope_dvm"),
+    "peak": ("Peak-detect capture", "scope_capture"),
+    "counter": ("Hardware counter", "scope_counter"),
 }
 #: series colours (validated categorical palette slots 1-2; channel identity is also named in the legend)
 COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#6250d6")
@@ -205,11 +207,39 @@ def _rows(r: Result) -> tuple[list[dict[str, Any]], list[str]]:
     a, m = r.arrays, r.meta
     dt = m.get("dt")
     summ: list[str] = []
-    if r.kind == "capture":
+    if r.kind in ("capture", "peak"):
         rows = [_stats_row(c, a[f"{c}_volts"], dt, a.get(f"{c}_clipped")) for c in _channels(a, "_volts")]
+        if r.kind == "peak":
+            for row in rows:
+                c = row["channel"]
+                if f"{c}_min_volts" in a and f"{c}_max_volts" in a:
+                    lo, hi = np.asarray(a[f"{c}_min_volts"], np.float64), np.asarray(a[f"{c}_max_volts"], np.float64)
+                    row["envelope min"] = _si(float(lo.min()), "V")
+                    row["envelope max"] = _si(float(hi.max()), "V")
+                    row["mean width"] = _si(float(np.mean(hi - lo)), "V")
+            d = m.get("decimation") or {}
+            summ.append(f"peak detect: each sample is the min and max of {d.get('n', '?')} raw 200 MSa/s samples; "
+                        "the table's mean / rms are of the midpoint")
         if dt:
             summ.append(f"{a['t'].size} samples at {_si(1 / dt, 'Sa/s')}, capture {m.get('capture_id', '?')}"
                         f"{', triggered' if m.get('triggered') else ', untriggered (auto)'}")
+        return rows, summ
+    if r.kind == "counter":
+        f = np.asarray(a.get("frequency_hz", []), np.float64)
+        rows = []
+        for i in range(f.size):
+            row = {"reading": i + 1, "frequency": _si(float(f[i]), "Hz", 7),
+                   "period": _si(float(a["period_s"][i]), "s", 6), "+width": _si(float(a["width_s"][i]), "s", 5),
+                   "duty": f"{100 * float(a['duty'][i]):.3f} %" if math.isfinite(float(a["duty"][i])) else "-"}
+            if "vmin" in a:
+                row["Vmin"] = _si(float(a["vmin"][i]), "V")
+                row["Vmax"] = _si(float(a["vmax"][i]), "V")
+            rows.append(row)
+        summ.append(f"{m.get('source', '?')} over a {_si(m.get('gate_s'), 's')} gate, {f.size} reading(s); "
+                    f"{m.get('resolution', '')}")
+        if f.size > 1 and np.isfinite(f).any():
+            summ.append(f"frequency mean {_si(float(np.nanmean(f)), 'Hz', 7)}, spread "
+                        f"{_si(float(np.nanmax(f) - np.nanmin(f)), 'Hz', 3)}")
         return rows, summ
     if r.kind == "averaged_capture":
         rows = [_stats_row(c, a[f"{c}_mean"], dt) for c in _channels(a, "_mean")]
@@ -405,10 +435,10 @@ def _plot(r: Result, title: str) -> bytes:
                              else None)
     ax = axes[0] if two else axes
     ax.set_title(title, loc="left", fontsize=10.5, color="#0b0b0b")
-    if r.kind in ("capture", "averaged_capture", "segments", "decode", "mask", "mask_test"):
+    if r.kind in ("capture", "peak", "averaged_capture", "segments", "decode", "mask", "mask_test"):
         t, unit = _time_axis(np.asarray(a["t"], np.float64))
-        suffix = {"capture": "_volts", "averaged_capture": "_mean", "segments": "_volts", "decode": "_volts",
-                  "mask": "_volts", "mask_test": "_volts"}[r.kind]
+        suffix = {"capture": "_volts", "peak": "_volts", "averaged_capture": "_mean", "segments": "_volts",
+                  "decode": "_volts", "mask": "_volts", "mask_test": "_volts"}[r.kind]
         if r.kind in ("mask", "mask_test"):
             up, lo = np.asarray(a["upper"], np.float64), np.asarray(a["lower"], np.float64)
             ax.fill_between(t[: up.size], lo, up, color=COLOURS[2], alpha=0.22, linewidth=0, label="mask")
@@ -438,6 +468,12 @@ def _plot(r: Result, title: str) -> bytes:
                     ax.plot(tt, v[k], color=col, alpha=max(0.08, 1.0 / min(n, 64) ** 0.5), linewidth=0.9,
                             label=f"{c} ({n} segments)" if k == 0 else None)
                 continue
+            if r.kind == "peak" and f"{c}_min_volts" in a and f"{c}_max_volts" in a:
+                lo, hi = a[f"{c}_min_volts"], a[f"{c}_max_volts"]
+                ax.fill_between(t[: v.size], lo, hi, color=col, alpha=0.35, linewidth=0, label=f"{c} min .. max")
+                ax.plot(t[: v.size], hi, color=col, linewidth=0.6)
+                ax.plot(t[: v.size], lo, color=col, linewidth=0.6)
+                continue
             ax.plot(t[: v.size], v, color=col, label=c)
             std = a.get(f"{c}_std")
             if std is not None:
@@ -449,6 +485,17 @@ def _plot(r: Result, title: str) -> bytes:
                 ax.plot(t[idx], v[idx], "x", color="#e34948", markersize=4, label=f"{c} clipped")
         ax.set_xlabel(f"time ({unit})")
         ax.set_ylabel("volts at the probe tip")
+    elif r.kind == "counter":
+        tc = np.asarray(a["capture_t_s"], np.float64)
+        f = np.asarray(a["frequency_hz"], np.float64)
+        ax.plot(tc, f, "o-", color=COLOURS[0], markersize=4, linewidth=0.9, label=f"{m.get('source', '')} frequency")
+        if "vmin" in a:
+            ax2 = ax.twinx()
+            ax2.fill_between(tc, a["vmin"], a["vmax"], color=COLOURS[1], alpha=0.15, linewidth=0, label="Vmin .. Vmax")
+            ax2.set_ylabel("volts at the probe tip")
+            ax2.spines["right"].set_visible(True)
+        ax.set_xlabel("gate time (s since the first reading)")
+        ax.set_ylabel("frequency (Hz)")
     elif r.kind == "dvm":
         tc = np.asarray(a["capture_t_s"], np.float64)
         for i, c in enumerate(_channels(a, "_mean")):

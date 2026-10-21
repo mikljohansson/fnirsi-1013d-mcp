@@ -276,6 +276,23 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-c8 (Opus, dispatched 04:32, done 06:1x, merged 06:2x as the commit after c432354): protocol 1.26 on the host; Trigger2
+  byte-identical to fw-c5; peak detect and GET_COUNTER wire formats from the contract (sent to fw-c6 / fw-c7 to match:
+  SET_DECIM filter 4, shift-byte bits 7/6, mode 0x81, READ_RAW layout 3 = minima then maxima per channel, GET_CAPTURE_INFO
+  79 bits 1/0, E_STATE 7; GET_COUNTER 0x0213 request 8 B with what = configure, response 24 B with level / hysteresis /
+  freq_mHz); tools scope_set_trigger types, scope_counter (tier 0 read / 1 configure), scope_capture(peak=true),
+  report kinds; simulator TrigQual port, hold-off, peak records, counter; 131 vectors; fw-one leftovers done; 520 tests.
+- fw-c6 / fw-c7 / ui-type (Opus, dispatched 05:12-05:13, branches of the same names): C6 firmware peak detect (SET_DECIM
+  mode 4, READ_RAW layout 3, the refusals, fpga_model, features bit 9, caps bit 21), C7 firmware counter (boot 0x61/0x62,
+  the once-per-pass 0x35 reader, the cards' sources, GET_COUNTER / SET_COUNTER, features bit 10, caps bit 22), the trigger
+  menu's Type row per docs/plans/ui-rows.md (rows, glyphs, ladder, snap notices queued, hints, persistence 0xA000). C6 and
+  C7 share pc_cmds.c / fpga_model.c in delimited blocks; the ACQ Sample row follows C6.
+- fw-c5 (Opus, dispatched 04:32, done 05:10, merged 05:11 as c432354): built for 0x153C, protocol 1.26 row 66: SET_TRIGGER2
+  0x0219 24 B (type, polarity, flags LONGER, source, N u32, H u32, level, level2 = 0, hold-off u32 in 5 ns, reserved),
+  GET_TRIGGER 52 B (old 28 + the body in effect), GET_STATUS 52 B (0x37, 0x34 byte 0, edges to count), GET_CAPTURE_INFO
+  112 B; caps bits 2 and 20, features bit 8 (the contract's 5/6/7 were taken); the arm window writes 0x5E/0x5F/0x60 on
+  every arm, 0x1B/0x66 only on a definition; host tests green, 115 vectors OK; gcc10 bde3ee77 (not pinned: the unit shows
+  the mismatch notice until 0x153C is flashed). mcp-c8 told the exact bytes 05:12.
 - fw-c5 (Opus, dispatched 04:32, branch fw-c5): 0x153C item C5, firmware trigger types + hold-off: PC_FW_FPGA_VERSION 0x153C,
   caps bits, SET_TRIGGER2 0x0219 / GET_TRIGGER per the contract (protocol 1.26, row 66), the arm sequence of 3.5, runt /
   window / range refused until 0x153E, fpga_model.c, host tests, vectors, docs. C6 (peak detect), C7 (counter) and the two

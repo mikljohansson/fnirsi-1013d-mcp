@@ -1465,6 +1465,19 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-21 (mcp-c8, provisional, protocol 1.26 / FPGA 0x153C, docs/plans/fpga-0x153c.md item C8): the host side
+  of the 0x153C generation. Trigger types (SET_TRIGGER2, byte-exact with fw-c5: `scope_set_trigger` gains `type`
+  edge / pulse_width / nth_edge / timeout, `polarity`, `width`, `longer`, `n`, `idle` in seconds converted to
+  trigger-stream samples, `hold_off` in 5 ns steps; runt / window refused with the 0x153E hint), GET_TRIGGER 52 /
+  GET_STATUS 52 (`trigger_status`) / GET_CAPTURE_INFO 112 bytes; peak detect from the contract (SET_DECIM 4,
+  READ_RAW layout 3, GET_CAPTURE_INFO 79 bit 1: `scope_capture(peak=true)`, `scope_set_decimation('peak')`, min /
+  max envelopes in the results and the `.npz`, averaging refused while on); the hardware counter from the contract
+  (GET_COUNTER 0x0213: `scope_counter`, tier 0 reading / tier 1 configuring, frequency, period, width, duty, min /
+  max with the gate and the resolution statement); report kinds `peak` and `counter`; the simulator's qualifier,
+  hold-off, peak and counter models; 16 host vectors; the fw-one leftovers (`Profile.mismatch_caveat()` in
+  `scope_info` / `scope_profile` / every tool's caveats, the stock-variant texts gone, `ui_averaging` off / mcu /
+  hardware with `ui_averaging_records` for both, the EXT refusal names caps EXT_TRIGGER). The firmware's C6 / C7
+  must match the peak and counter bytes (docs/mcp-tools.md names them).
 - 2026-10-20 (mcp-soft, provisional): four host-side data tools (docs/mcp-tools.md 4.3b): `scope_decode` (UART with
   auto-baud, SPI, I2C; from a saved capture, the last capture, the scope's latest or a fresh one; frames with times,
   errors, a preview, the samples-per-bit caveats; `fnirsi1013d.decode`, 64f23f4, 19d6eea), `scope_mask_test` (a

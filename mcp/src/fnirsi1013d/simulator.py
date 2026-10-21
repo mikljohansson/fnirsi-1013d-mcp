@@ -2,14 +2,16 @@
 
 It models what the host can observe through docs/protocol.md:
 
-- One FPGA bitstream (section 5.1, fw 0.2.102 / protocol 1.25): the firmware is built for AL3 0x153B
-  (``FPGA_VERSION``: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, DDS generator, EXT
+- One FPGA bitstream (section 5.1, protocol 1.25): the firmware is built for AL3 ``P.FW_FPGA_VERSION`` (0x153C
+  since protocol 1.26: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, DDS generator, EXT
   trigger, decimation filter with 16-bit samples, CIC compensation FIR, sequencer, the per-capture encode check
-  (GET_HEALTH 88..103, event 21; hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``) and the ADC capture
+  (GET_HEALTH 88..103, event 21; hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``), the ADC capture
   stages (GET_HEALTH 104..123, GET_CAL 356..363, event 23; hooks ``Device.cap_counts_next``, ``cap_stored`` +
-  ``cap_boot()``)). ``SimConfig.fpga_version`` (``--fpga-version 0x1532``) is the word the simulated FPGA reports:
-  any other value is a mismatch, flagged in GET_INFO 78 / GET_HEALTH 126, and every command outside
-  ``P.BASIC_CMDS`` answers E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153B".
+  ``cap_boot()``), and the 0x153C trigger types / hold-off (``TrigQual``, ``_search_trigger``, ``holdoff_left_s``),
+  peak detect (``_peak_samples``) and hardware counter (``counter_snapshot``) of protocol 1.26).
+  ``SimConfig.fpga_version`` (``--fpga-version 0x153B``) is the word the simulated FPGA reports: any other value is
+  a mismatch, flagged in GET_INFO 78 / GET_HEALTH 126, and every command outside ``P.BASIC_CMDS`` answers
+  E_UNSUPPORTED detail 1 with ``P.FPGA_MISMATCH_TEXT``.
 - The on-device Bode plot (protocol 1.20, BODE_CTRL / READ_BODE, display mode 5) on every bitstream with the filter
   and the generator: ``SimBode`` runs the host tool's ``bode.BodeRunner`` against this device through an in-process
   link (the firmware's bode_sweep.c is a port of it), so device and host sweeps of a ``dut_in`` / ``dut_out`` DUT
@@ -69,7 +71,7 @@ log = logging.getLogger("fnirsi1013d.sim")
 # The bitstream (fw 0.2.102, protocol 1.25: the firmware supports FW_FPGA_VERSION only; the simulated scope is an
 # AL3A10 running it unless SimConfig.fpga_version says otherwise, which models the mismatch)
 
-#: the version word the simulated firmware is built for and the geometry that goes with it (AL3 0x153B)
+#: the version word the simulated firmware is built for and the geometry that goes with it (AL3, P.FW_FPGA_VERSION)
 FPGA_VERSION = P.FW_FPGA_VERSION
 RING_WORDS = 8192
 MAX_TOTAL_SAMPLES = 16382
@@ -86,6 +88,10 @@ FIR_LATENCY_S = 250e-9
 CAP_EXTRA_LATENCY_S = 40e-9
 #: decimation model: sub-samples per output period (exact for N <= this)
 DECIM_SUBSAMPLES = 64
+#: peak-detect model (1.26): raw sample instants evaluated per window (exact for N <= this, a uniform grid above)
+PEAK_SUBSAMPLES = 1024
+#: counter model (1.26): grid points per signal period for the kinds without analytic edges (decay, dut_*)
+COUNTER_GRID = 1 << 16
 EXT_THRESHOLD_V = 1.65
 
 # ---------------------------------------------------------------------------------------------------------
@@ -410,13 +416,34 @@ class ChannelState:
 @dataclass
 class TriggerState:
     source: int = 0
+    #: FPGA 0x16: the edge, or the polarity of the 1.26 type (P.TRIG_POLARITY_NAMES)
     edge: int = 0
     level: int = 128
     mode: int = 0
     pretrigger_samples: int = 1500
     total_samples: int = 3000
+    #: FPGA 0x1B in 5 ns units: the trigger hold-off since 0x153C (caps HOLDOFF)
     holdoff: int = 0
     auto_timeout: int = 0  # 0 = firmware default
+    #: 1.26 (0x5E / 0x5F / 0x60): type P.TRIG_*, pulse width "longer", N, H (the 0x153E fields stay 0 on 1.26)
+    ttype: int = P.TRIG_EDGE
+    longer: int = 0
+    n: int = 0
+    h: int = 0
+    level2: int = 0
+    range_: int = 0
+    both_cores: int = 0
+
+    def trigger2(self) -> P.Trigger2:
+        """The GET_TRIGGER 28..51 block."""
+        flags = (P.TRIG2_F_LONGER if self.longer else 0) | (P.TRIG2_F_RANGE if self.range_ else 0) | \
+            (P.TRIG2_F_BOTH_CORES if self.both_cores else 0)
+        return P.Trigger2(self.ttype, self.edge, flags, self.source, self.n, self.h, self.level, self.level2,
+                          self.holdoff, 0)
+
+    def capture_trig2(self) -> P.CaptureTrig2:
+        """The GET_CAPTURE_INFO 96..111 block."""
+        return P.CaptureTrig2(self.ttype, self.trigger2().flags, self.n, self.h, self.holdoff)
 
 
 @dataclass
@@ -446,10 +473,12 @@ class Settings:
     #: the Filter setting as the firmware keeps it: bits 1:0 K requested, bits 2-4 P.DECIM_FLAGS, bit 5
     #: P.DECIM_SET_FIR (1.11)
     decim: int = 0
+    #: 1.26: the ACQ menu's Sample row = Peak (SET_DECIM filter 4; the Filter word above is kept for the way back)
+    peak: int = 0
 
     def copy(self) -> "Settings":
         return Settings([replace(c) for c in self.channels], self.divider, self.tpd_index, self.sr_index,
-                        replace(self.trigger), replace(self.gen), self.decim)
+                        replace(self.trigger), replace(self.gen), self.decim, self.peak)
 
 
 @dataclass
@@ -608,6 +637,198 @@ class SimCard:
                 body = self.read(sector, (length + 511) // 512)
                 h.check = P.SD_CHECK_OK if P.egon_checksum(body, length) == stored else P.SD_CHECK_BAD
         return h
+
+
+class TrigQual:
+    """The 0x153C trigger qualifier (docs/plans/fpga-0x153c.md 3.3), a Python port of ``tb_trigtypes.v``'s reference
+    model: fed the trigger stream chunk by chunk (8-bit codes, 16-bit filter outputs or the EXT level as 0 / 255), it
+    returns the index of the trigger sample, which is the edge trigger's for the qualifying edge (the first sample on
+    the far side of the level), or the qualifying sample for the timeout type.
+
+    Pulse width: a pulse of w samples on the pulse side (polarity 0 high) that began after the arm fires on its
+    trailing edge when w < N (shorter) or w > N (longer). Nth edge: the Nth edge in the counted direction since the arm;
+    with H > 0 the count restarts after more than H samples without any edge. Timeout: the sample that makes a run of
+    the held level (polarity 0 high) N + 1 samples long, counted from the edge into it or from the arm."""
+
+    def __init__(self, tr: "TriggerState", level: int):
+        self.type = tr.ttype
+        self.pol = tr.edge
+        self.longer = bool(tr.longer)
+        self.n = max(1, (tr.n & 0xFFFF) if tr.ttype == P.TRIG_NTH_EDGE else tr.n)
+        self.h = tr.h
+        self.level = level
+        self.pos = 0  # absolute index of the next sample fed
+        self.side: bool | None = None  # the previous sample at or above the level
+        self.pulse_start: int | None = None  # pulse width: where the current pulse began (None: off side / before the arm)
+        self.rem = self.n  # Nth edge: edges still to count
+        self.last_edge: int | None = None  # Nth edge: the last edge of either direction (or the arm)
+        self.run_start: int | None = None  # timeout: where the current run of the held level began
+
+    def feed(self, a: np.ndarray, prev: int | None, pos: int) -> int:
+        """``a`` = samples pos .. pos + len(a) - 1 of the stream, ``prev`` the sample before (None at the arm).
+        Returns the relative index of the trigger sample in ``a`` or -1."""
+        s = np.asarray(a).astype(np.int64) >= self.level
+        if self.side is None:  # the arm
+            self.pos = pos
+            self.side = bool(prev >= self.level) if prev is not None else bool(s[0])
+            self.last_edge = pos
+            held = self.pol == 0
+            if self.type == P.TRIG_TIMEOUT and self.side == held:
+                self.run_start = pos
+        sp = np.concatenate(([self.side], s[:-1]))
+        edges = np.flatnonzero(s != sp)
+        out = -1
+        if self.type == P.TRIG_PULSE_WIDTH:
+            out = self._pulse(s, edges)
+        elif self.type == P.TRIG_NTH_EDGE:
+            out = self._nth(s, edges)
+        elif self.type == P.TRIG_TIMEOUT:
+            out = self._timeout(s, edges)
+        self.side = bool(s[-1])
+        self.pos += len(s)
+        return out
+
+    def _pulse(self, s: np.ndarray, edges: np.ndarray) -> int:
+        pulse_side = self.pol == 0
+        for e in edges:
+            e = int(e)
+            if bool(s[e]) == pulse_side:
+                self.pulse_start = self.pos + e
+            elif self.pulse_start is not None:
+                w = self.pos + e - self.pulse_start
+                self.pulse_start = None
+                if (w > self.n) if self.longer else (w < self.n):
+                    return e
+        return -1
+
+    def _nth(self, s: np.ndarray, edges: np.ndarray) -> int:
+        counted = self.pol == 0
+        for e in edges:
+            e = int(e)
+            ea = self.pos + e
+            if self.h and self.last_edge is not None and ea - self.last_edge > self.h:
+                self.rem = self.n
+            self.last_edge = ea
+            if bool(s[e]) == counted:
+                self.rem -= 1
+                if self.rem == 0:
+                    self.rem = self.n
+                    return e
+        return -1
+
+    def _timeout(self, s: np.ndarray, edges: np.ndarray) -> int:
+        held = self.pol == 0
+        for e in edges:
+            e = int(e)
+            if self.run_start is not None and self.run_start + self.n < self.pos + e:
+                return self.run_start + self.n - self.pos
+            self.run_start = self.pos + e if bool(s[e]) == held else None
+        if self.run_start is not None and self.run_start + self.n <= self.pos + len(s) - 1:
+            return self.run_start + self.n - self.pos
+        return -1
+
+
+def signal_edges(sig: Signal, gen: "GenState", high: float, low: float
+                 ) -> tuple[float, list[float], list[float]] | None:
+    """Schmitt edges of a periodic signal within one period: (period, rising times, falling times), the comparator
+    going high at >= ``high`` volts and low below ``low``. None for a signal without a period (dc, zero) or without
+    edges at these levels. Analytic for sine / square / gate / gen / the serial kinds, a COUNTER_GRID walk for the
+    others (decay, dut_*)."""
+    k = sig.kind
+    if k in ("zero", "dc"):
+        return None
+    if k == "sine":
+        f, off, amp = sig.p("freq", 1e3), sig.p("offset", 0.0), sig.p("amp", 0.3)
+        if amp <= 0 or f <= 0:
+            return None
+        x1, x2 = (high - off) / amp, (low - off) / amp
+        if not (-1 < x1 < 1) or not (-1 < x2 < 1):
+            return None
+        period, ph = 1.0 / f, sig.p("phase", 0.0)
+        th_r = math.asin(x1)  # rising crossing of ``high`` (cos > 0 there)
+        th_f = math.pi - math.asin(x2)  # falling crossing of ``low``
+        return period, [((th_r - ph) / (2 * math.pi)) % 1.0 * period], [((th_f - ph) / (2 * math.pi)) % 1.0 * period]
+    if k in ("square", "gate", "gen"):
+        if k == "square":
+            f, off, amp = sig.p("freq", 1e3), sig.p("offset", 0.0), sig.p("amp", 0.3)
+            hi_v, lo_v, duty = off + amp, off - amp, sig.p("duty", 0.5)
+            period = 1.0 / f if f > 0 else 0.0
+        elif k == "gate":
+            hi_v, lo_v = sig.p("high", 3.3), sig.p("low", 0.0)
+            period, duty = sig.p("period", 1e-3), sig.p("width", 200e-6) / sig.p("period", 1e-3)
+        else:
+            if not gen.enable or gen.frequency_hz <= 0:
+                return None
+            hi_v, lo_v, period, duty = sig.p("high", 3.3), 0.0, 1.0 / gen.frequency_hz, gen.duty
+        if period <= 0 or not (hi_v >= high and lo_v < low) or not 0 < duty < 1:
+            return None
+        return period, [0.0], [duty * period]
+    if k in SERIAL_KINDS:
+        times, levels, period = serial_timeline(k, sig.params)
+        start = sig.p("start", 0.0)
+        r, fl = [], []
+        state = bool(levels[-1] >= high)
+        for t, v in zip(times, levels):
+            if not state and v >= high:
+                r.append((float(t) + start) % period)
+                state = True
+            elif state and v < low:
+                fl.append((float(t) + start) % period)
+                state = False
+        return (period, sorted(r), sorted(fl)) if r and fl else None
+    if k in ("decay", "dut_in", "dut_out"):
+        if k == "decay":
+            period = sig.p("period", 1e-3)
+        else:
+            if not gen.enable or gen.frequency_hz <= 0:
+                return None
+            period = 1.0 / gen.frequency_hz
+        t = np.arange(COUNTER_GRID) * (period / COUNTER_GRID)
+        v = sig.eval(t, gen)
+        r, fl = [], []
+        state = bool(v[-1] >= high)
+        for i in range(COUNTER_GRID):
+            x = float(v[i])
+            if not state and x >= high:
+                r.append(float(t[i]))
+                state = True
+            elif state and x < low:
+                fl.append(float(t[i]))
+                state = False
+        return (period, r, fl) if r and fl else None
+    return None
+
+
+def gate_count(period: float, rising: list[float], falling: list[float], t_start: float, gate: float
+               ) -> tuple[int, int, int]:
+    """The counter's E, T, W (5 ns clocks) for the rising edges of a periodic signal inside [t_start, t_start + gate]:
+    E periods from the first rising edge to the last, T clocks between them, W high clocks in them (the pulse that
+    starts at the last edge lies after it)."""
+    widths = []
+    for r in rising:
+        nxt = [f for f in falling if f > r]
+        widths.append((nxt[0] if nxt else falling[0] + period) - r)
+    first = math.inf
+    last = -math.inf
+    count = 0
+    w_sum = 0.0
+    w_last = 0.0
+    for r, w in zip(rising, widths):
+        m0 = math.ceil((t_start - r) / period - 1e-12)
+        m1 = math.floor((t_start + gate - r) / period + 1e-12)
+        if m1 < m0:
+            continue
+        n = m1 - m0 + 1
+        count += n
+        w_sum += n * w
+        if r + m0 * period < first:
+            first = r + m0 * period
+        if r + m1 * period > last:
+            last, w_last = r + m1 * period, w
+    if count < 2:
+        return 0, 0, 0
+    clk = 1.0 / P.COUNTER_CLOCK_HZ
+    return count - 1, int(round((last - first) / clk)), int(round((w_sum - w_last) / clk))
 
 
 class Deferred:
@@ -771,6 +992,19 @@ class Device:
         self.cap_flagged = 0
         self.cap_reads = self.cap_flagged_n = 0
         self.cap_counts_next: list[tuple[int, int, int, int]] = []
+        #: protocol 1.26: the trigger hold-off (0x1B) still to run at the next arm, from the latest capture's trigger
+        #: (across MCU re-arms, as the FPGA's counter; cleared by 0x66 + ARM) and the counter's configuration (the
+        #: firmware's boot values: gate 100 ms, the trigger source, level 128 / hysteresis 6) and last read sequence
+        self.holdoff_left_s = 0.0
+        #: 0x66 = 1 written (boot, SET_TRIGGER hold-off, SET_TRIGGER2): the next 0x01 = 1 clears a running hold-off
+        self.holdoff_clear_pending = True
+        #: GET_STATUS 48..51 (0x37, 0x34 byte 0, edges still to count): zeroed at ARM, read while a capture is in flight
+        self.trig_status: tuple[int, int, int] = (0, 0, 0)
+        self.counter_gate = 2
+        self.counter_source = 0
+        self.counter_level = P.COUNTER_DEFAULT_LEVEL
+        self.counter_hyst = P.COUNTER_DEFAULT_HYST
+        self.counter_seq_read: int | None = None
         self.cap_boot()
 
     # --- capabilities -------------------------------------------------------------------------------
@@ -791,7 +1025,15 @@ class Device:
             c |= P.Caps.SHARED_MODE | P.Caps.SD_SECTORS
         if self.cap_on:
             c |= P.Caps.CAPTURE_STAGES
+        if self.trig26_on:  # 1.26 (FPGA 0x153C): trigger types, the hold-off, peak detect, the counter
+            c |= P.Caps.TRIG_TYPES | P.Caps.HOLDOFF | P.Caps.PEAK_DETECT | P.Caps.COUNTER
         return int(c) & ~self.cfg.caps_clear
+
+    @property
+    def trig26_on(self) -> bool:
+        """Protocol 1.26 (FPGA 0x153C): the firmware drives the trigger qualifier, the hold-off, peak detect and the
+        counter (caps bits 2, 20-22, features bits 8-10). From the config, as ``cap_on``."""
+        return not self.cfg.legacy and (self.cfg.proto_minor is None or self.cfg.proto_minor >= 26)
 
     @property
     def mismatch(self) -> bool:
@@ -811,7 +1053,8 @@ class Device:
         """GET_STATUS 44-45 (protocol 1.17): from the bitstream, not the caps."""
         return int(P.Features.EXT_TRIGGER | P.Features.DECIM | P.Features.FIR | P.Features.SEGMENTS |
                    P.Features.HW_AVERAGE | P.Features.ENC_CHECK | P.Features.BODE |
-                   (P.Features.CAPTURE_STAGES if self.cap_on else 0))
+                   (P.Features.CAPTURE_STAGES if self.cap_on else 0) |
+                   (P.Features.TRIG_TYPES | P.Features.PEAK | P.Features.COUNTER if self.trig26_on else 0))
 
     def ui_average_state(self) -> tuple[int, int]:
         """GET_STATUS 46 / 47 (protocol 1.17, one behaviour since fw 0.2.102): the acquisition menu's Average
@@ -819,6 +1062,8 @@ class Device:
         the accumulator), 1 by the MCU (16-bit records, deeper legacy records), log2 N 0 when two records do not fit
         the 40 ms budget (single records). Off in single trigger mode (the UI averages RUN records only)."""
         if not self.ui_average or self.settings.trigger.mode == 2:
+            return 0, 0
+        if self.decim_config().peak:  # 1.26: averaging of peak words is never armed (the sums would mix max and min)
             return 0, 0
         Pw, Tw, _ = self.geometry()
         return P.ui_average_plan(Tw, Pw, self.settings.divider, bool(self.decim_config().k))
@@ -1033,8 +1278,42 @@ class Device:
         has = P.DECIM_HAS_FIR
         if self.cap_on:
             has |= P.DECIM_HAS_CAPSTAGES
-        return P.decim_config(s.decim & 3, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), s.divider,
+        k_req = P.DECIM_PEAK if s.peak and self.trig26_on else s.decim & 3
+        return P.decim_config(k_req, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), s.divider,
                               s.trigger.total_samples, has)
+
+    def _peak_samples(self, ch: int, t0: float, k0: int, n: int, settings: Settings, seed: int,
+                      dec: P.DecimConfig) -> tuple[np.ndarray, np.ndarray]:
+        """1.26 peak detect: (min, max) raw codes of words k0..k0+n-1 of one channel. Word k covers the N raw sample
+        instants (both cores, 5 ns apart) ending DECIM_LATENCY_S (+ the 0x153A capture latency) before its write at
+        t0 + k N 5 ns; the noise-free core-mean code at up to PEAK_SUBSAMPLES of them (all for N <= that, a uniform
+        grid above) plus per-instant noise (seeded per block of words, as the filter model), rounded and clipped, then
+        the window's extremes. Narrow spikes are caught as the FPGA catches them (every raw sample looked at)."""
+        N = dec.n
+        Q = min(N, PEAK_SUBSAMPLES)
+        step = N * 5e-9 / Q
+        lat = DECIM_LATENCY_S + (CAP_EXTRA_LATENCY_S if dec.cap else 0.0)
+        mn = np.empty(n, dtype=np.uint8)
+        mx = np.empty(n, dtype=np.uint8)
+        B = 256
+        sigma = math.sqrt(self.cfg.noise_lsb ** 2) if self.cfg.noise_lsb > 0 else 0.0
+        for b0 in range(k0 // B, (k0 + n - 1) // B + 1):
+            lo_k = max(k0, b0 * B)
+            hi_k = min(k0 + n, (b0 + 1) * B)
+            k = np.arange(lo_k, hi_k, dtype=np.float64)
+            t_end = t0 + k * N * 5e-9 - lat
+            t = (t_end[:, None] - (np.arange(Q)[None, ::-1] + 0.5) * step).ravel()
+            c = self._analog(ch, t, None, settings)
+            if sigma > 0:
+                nz = np.random.default_rng((seed, b0 + (3 << 40), ch)).normal(0.0, sigma, (B, Q))
+                c = c + nz[lo_k - b0 * B: hi_k - b0 * B].ravel()
+                pin = self._pinned(ch, t, settings)
+                if pin is not None:
+                    c = np.where(pin, self._analog(ch, t, None, settings), c)
+            codes = np.clip(np.rint(c), 0, 255).reshape(-1, Q)
+            mn[lo_k - k0: hi_k - k0] = codes.min(axis=1)
+            mx[lo_k - k0: hi_k - k0] = codes.max(axis=1)
+        return mn, mx
 
     def _decim_samples(self, ch: int, t0: float, k0: int, n: int, settings: Settings, seed: int,
                        dec: P.DecimConfig) -> np.ndarray:
@@ -1071,13 +1350,73 @@ class Device:
         return np.minimum(np.floor(y / (1 << dec.shift)), 65535).astype(np.uint16)
 
     def _dwords(self, t0: float, k0: int, n: int, settings: Settings, seed: int, dec: P.DecimConfig) -> np.ndarray:
-        """(4, n) ring bytes of a decimated capture: per channel low byte at core A, high byte at core B."""
+        """(4, n) ring bytes of a decimated capture: per channel low byte at core A, high byte at core B (1.26 peak
+        records: the window's minimum at core A, its maximum at core B)."""
         out = np.empty((4, n), dtype=np.uint8)
         for ch in (0, 1):
+            if dec.peak:
+                out[2 * ch], out[2 * ch + 1] = self._peak_samples(ch, t0, k0, n, settings, seed, dec)
+                continue
             v = self._decim_samples(ch, t0, k0, n, settings, seed, dec)
             out[2 * ch] = v & 0xFF
             out[2 * ch + 1] = v >> 8
         return out
+
+    def _trig_stream(self, tr: TriggerState, dec: P.DecimConfig, wide: bool, ext: bool, t0: float, dt: float,
+                     settings: Settings, seed: int) -> tuple[Callable[[int, int], np.ndarray], TriggerState]:
+        """The samples the trigger looks at (one per ring word) and the trigger state with the level in their units:
+        EXT = the pin level as 0 / 255 (level 128); filtered = the 16-bit output of the source channel with the 16-bit
+        level; peak (1.26) = the window maximum for a rising detection, the minimum for a falling one (the firmware
+        writes level << 8); legacy = core A of the source channel."""
+        src = tr.source
+        if ext:
+            tr = replace(tr, level=128)
+            return (lambda k0, n: self._ext_words(t0, k0, n, dt, settings, dec)), tr
+        if wide and dec.peak:
+            # the detect direction: the polarity, except for pulse width where the trigger is the trailing edge
+            rising = (tr.edge == 0) != (tr.ttype == P.TRIG_PULSE_WIDTH)
+
+            def peak_stream(k0: int, n: int) -> np.ndarray:
+                mn, mx = self._peak_samples(src, t0, k0, n, settings, seed, dec)
+                return mx if rising else mn
+            return peak_stream, tr
+        if wide:
+            tr = replace(tr, level=P.decim_level16(tr.level, dec.gain, dec.shift))
+            return (lambda k0, n: self._decim_samples(src, t0, k0, n, settings, seed, dec)), tr
+
+        def legacy_stream(k0: int, n: int) -> np.ndarray:
+            k = np.arange(k0, k0 + n, dtype=np.float64)
+            ta = t0 + 2 * k * dt + (dt if self.cfg.true_order == "b_first" else 0.0)
+            nz = self._noise(seed, k0, n)
+            return self._codes(src, ta, "A", settings, None if nz is None else nz[2 * src])
+        return legacy_stream, tr
+
+    def _search_trigger(self, stream: Callable[[int, int], np.ndarray], k_from: int, limit: int, tr: TriggerState,
+                        hold_from: int = 0) -> int:
+        """Word index of the trigger sample at or after max(k_from, hold_from) and before k_from + limit, or -1: the
+        edge compare (``_find_trigger``) or the 1.26 qualifier (``TrigQual``), both seeing the sample before the start
+        as ``prev``. ``hold_from`` (1.26): the trigger hold-off masks the compare until that word."""
+        start = max(k_from, hold_from)
+        if start >= k_from + limit:
+            return -1
+        prev = int(stream(start - 1, 1)[0])
+        qual = TrigQual(tr, tr.level) if tr.ttype in (P.TRIG_PULSE_WIDTH, P.TRIG_NTH_EDGE, P.TRIG_TIMEOUT) else None
+        k = start
+        step = 2048  # most captures trigger within a period: start small, then widen
+        while k < k_from + limit:
+            n = min(step, k_from + limit - k)
+            a = stream(k, n)
+            idx = qual.feed(a, prev, k) if qual is not None else self._find_trigger(a, prev, tr)
+            if idx >= 0:
+                return k + idx
+            prev = int(a[-1])
+            k += n
+            step = min(2 * step, 65536)
+        return -1
+
+    def holdoff_words(self, tr: TriggerState, wp: float) -> int:
+        """The trigger hold-off (0x1B, 5 ns units) in ring words of period ``wp``, rounded up."""
+        return math.ceil(tr.holdoff * 5e-9 / wp - 1e-9) if tr.holdoff else 0
 
     def _find_trigger(self, a: np.ndarray, prev: int | None, trig: TriggerState) -> int:
         """Index in a of the first crossing (current sample) or -1. prev: sample before a[0]."""
@@ -1129,44 +1468,23 @@ class Device:
         w0 = self.pyrng.randrange(R)
         seed = self.pyrng.randrange(1 << 62)
         tr = settings.trigger
-        src = 0 if tr.source == 0 else 2
         ext = tr.source == 2
-        if ext:  # logic level of the pin, compared at mid-scale; the edge polarity as configured
-            tr = replace(tr, level=128)
-        elif dec.k:  # 0x55: the 16-bit level, compared with the stored sample of the source channel
-            tr = replace(tr, level=P.decim_level16(tr.level, dec.gain, dec.shift))
+        trig_samples, tr = self._trig_stream(tr, dec, dec.k > 0, ext, t0, dt, settings, seed)
 
         def make_words(k0: int, n: int) -> np.ndarray:
             if dec.k:
                 return self._dwords(t0, k0, n, settings, seed, dec)
             return self._words(t0, k0, n, dt, settings, seed)
-
-        def trig_samples(k0: int, n: int) -> np.ndarray:
-            if ext:
-                return self._ext_words(t0, k0, n, dt, settings, dec)
-            if dec.k:
-                return self._decim_samples(src // 2, t0, k0, n, settings, seed, dec)
-            return self._words(t0, k0, n, dt, settings, seed)[src]
         kt = -1
         auto = tr.mode == 0
         limit = auto_to if auto else (1 << 21)
+        # 1.26: a hold-off still running from the previous capture's trigger masks the compare (the model counts it
+        # from the arm, as if the re-arm followed the DONE at once)
+        hold_from = math.ceil(self.holdoff_left_s / wp - 1e-9) if self.holdoff_left_s > 0 else 0
         if not forced:
-            chunk = 16384
-            k = Pw
-            prev = None
-            # first chunk includes the word before Pw so a crossing exactly at Pw is seen
-            while k < Pw + limit:
-                n = min(chunk, Pw + limit - k)
-                k0, nn = (k - 1 if prev is None else k), n + (1 if prev is None else 0)
-                a = trig_samples(k0, nn)
-                idx = self._find_trigger(a, prev, tr)
-                if idx >= 0:
-                    kt = (k - 1 if prev is None else k) + idx
-                    break
-                prev = int(a[-1])
-                k += n
+            kt = self._search_trigger(trig_samples, Pw, limit, tr, hold_from)
         res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw,
-                     "settings": settings.copy(), "seq": self.settings_seq, "decim": dec,
+                     "settings": settings.copy(), "seq": self.settings_seq, "decim": dec, "wp": wp,
                      "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples)}
         # did the pin toggle during the capture window (GET_CAPTURE_INFO bit 5)?
         e = self._ext_words(t0, Pw, Tw + Pw, dt, settings, dec)
@@ -1222,49 +1540,25 @@ class Device:
         t0 = self.pyrng.uniform(0.0, 10.0)
         seed = self.pyrng.randrange(1 << 62)
         tr = settings.trigger
-        src = 0 if tr.source == 0 else 2
         ext = tr.source == 2
-        if ext:
-            tr = replace(tr, level=128)
-        elif wide:
-            tr = replace(tr, level=P.decim_level16(tr.level, dec.gain, dec.shift))
+        trig_samples, tr = self._trig_stream(tr, dec, wide, ext, t0, dt, settings, seed)
 
         def make_words(k0: int, n: int) -> np.ndarray:
             return self._dwords(t0, k0, n, settings, seed, dec) if wide else self._words(t0, k0, n, dt, settings, seed)
 
-        def trig_samples(k0: int, n: int) -> np.ndarray:
-            if ext:
-                return self._ext_words(t0, k0, n, dt, settings, dec)
-            if wide:
-                return self._decim_samples(src // 2, t0, k0, n, settings, seed, dec)
-            # core A of the source channel only (as _words computes it)
-            k = np.arange(k0, k0 + n, dtype=np.float64)
-            ta = t0 + 2 * k * dt + (dt if self.cfg.true_order == "b_first" else 0.0)
-            nz = self._noise(seed, k0, n)
-            return self._codes(src // 2, ta, "A", settings, None if nz is None else nz[src])
-
         auto = tr.mode == 0
         limit = auto_to if auto else 1 << 21
+        # 1.26: the trigger hold-off (0x1B) runs from each record's trigger across the sequencer's restarts
+        thold_w = self.holdoff_words(tr, wp)
+        hold0 = math.ceil(self.holdoff_left_s / wp - 1e-9) if self.holdoff_left_s > 0 else 0
 
-        def find(k_from: int) -> int:
-            prev = int(trig_samples(k_from - 1, 1)[0])
-            k = k_from
-            step = 2048  # most runs trigger within a period: start small, then widen
-            while k < k_from + limit:
-                n = min(step, k_from + limit - k)
-                a = trig_samples(k, n)
-                idx = self._find_trigger(a, prev, tr)
-                if idx >= 0:
-                    return k + idx
-                prev = int(a[-1])
-                k += n
-                step = min(2 * step, 65536)
-            return -1
+        def find(k_from: int, hold_from: int = 0) -> int:
+            return self._search_trigger(trig_samples, k_from, limit, tr, max(hold_from, hold0))
 
         hold_w = math.ceil(P.seq_holdoff_units(sq.holdoff_ns) * 5e-9 / wp - 1e-9)
         base = {"divider": settings.divider, "Pw": Pw, "Tw": Tw, "settings": settings.copy(), "seq": self.settings_seq,
                 "decim": dec, "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples),
-                "auto_timeout": False, "trigger_addr": Pw % RING_WORDS}
+                "auto_timeout": False, "trigger_addr": Pw % RING_WORDS, "wp": wp, "thold_w": thold_w}
         if sq.mode == P.SEQ_SEGMENTS:
             return self._simulate_segments(sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide)
         return self._simulate_average(sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide)
@@ -1277,14 +1571,18 @@ class Device:
         segs: list[tuple[int, int, bool, float]] = []  # slot fill start word, trigger word, triggered, end time
         k = 0
         ends = True
+        thold_w = base.get("thold_w", 0)
+        hold_from = 0
         for _ in range(target):
-            kt = find(k + Pw)
+            kt = find(k + Pw, hold_from)
             trig = kt >= 0
             if not trig:
                 if not auto:
                     ends = False
                     break
                 kt = k + Pw + auto_to
+            else:
+                hold_from = kt + thold_w  # 1.26: no trigger accepted until the hold-off has elapsed
             end = kt - Pw + Tw + P.SEQ_TAIL
             segs.append((k, kt, trig, end * wp))
             k = end + hold_w
@@ -1428,6 +1726,8 @@ class Device:
             raise _DevErr(P.Status.E_BAD_ARG, bad[fit], P.SEQ_FIT_NAMES[fit])
         if fit in (P.SEQ_FIT_TOTAL, P.SEQ_FIT_PRE):
             raise _DevErr(P.Status.E_STATE, fit, P.SEQ_FIT_NAMES[fit] + ": SET_TRIGGER first")
+        if r.mode == P.SEQ_AVERAGE and self.decim_config().peak:  # 1.26: the sums would mix max and min
+            raise _DevErr(P.Status.E_STATE, P.SEQ_FIT_PEAK, P.SEQ_PEAK_TEXT)
         self.seq_setting = r if r.mode != P.SEQ_OFF else P.SetSeqReq()
         return self._ok(req, self.seq_state().pack())
 
@@ -1574,6 +1874,11 @@ class Device:
         self.capture_ext_edge = bool(pc.get("ext_edge", False))
         self.run = pc.get("run")
         self.run_held = self.run is not None
+        # 1.26: the trigger hold-off keeps running past the record's end, across MCU re-arms
+        tr = self.capture_settings.trigger
+        self.holdoff_left_s = 0.0
+        if tr.holdoff and pc.get("t_trigger") is not None and pc.get("t_done") is not None:
+            self.holdoff_left_s = max(0.0, tr.holdoff * 5e-9 - (pc["t_done"] - pc["t_trigger"]))
         if self.run is None and self.capture_divider == 0 and not self.capture_decim.k:
             self._enc_check(origin)
         if origin == P.CaptureOrigin.HOST:
@@ -1671,7 +1976,7 @@ class Device:
         ch = tuple((c.enable, c.range, c.coupling, c.dcoffset, c.invert, c.probe_index) for c in s.channels)
         tr = s.trigger
         return ch, s.divider, (tr.source, tr.edge, tr.level, tr.mode, tr.pretrigger_samples, tr.total_samples,
-                               tr.holdoff, tr.auto_timeout), s.decim
+                               tr.holdoff, tr.auto_timeout, tr.ttype, tr.longer, tr.n, tr.h), s.decim, s.peak
 
     def _bump_if_changed(self, before: tuple) -> None:
         if self.settings_key() != before:
@@ -1751,6 +2056,14 @@ class Device:
         self.fpga_done = False
         self.auto_timeout_flag = False
         self.run_held = False
+        if self.holdoff_clear_pending:  # 1.26: 0x66 = 1 written by SET_TRIGGER / SET_TRIGGER2: this 0x01 = 1 clears the timer
+            self.holdoff_left_s = 0.0
+            self.holdoff_clear_pending = False
+        tr0 = self.settings.trigger  # the qualifier status words (GET_STATUS 48..51) at the arm (fpga_model's reset state)
+        self.trig_status = (0, (tr0.ttype & 3) | (P.STATUS34_LONGER if tr0.longer else 0) |
+                            (P.STATUS34_EXT if tr0.source == 2 else 0) |
+                            (P.STATUS34_COUNTING if tr0.ttype != P.TRIG_EDGE and tr0.h == 0 else 0),
+                            max(0, (tr0.n & 0xFFFF) - 1) if tr0.ttype == P.TRIG_NTH_EDGE else 0)
         if self.seq_setting.mode != P.SEQ_OFF:
             self._start_run(self.settings.copy(), self.seq_setting)
         else:
@@ -1876,7 +2189,9 @@ class Device:
             capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
             run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0,
             ext_flags=self._ext_flags(now), display_mode=int(self.display_mode), features=int(self.features),
-            ui_average=self.ui_average_state()[0], ui_average_log2n=self.ui_average_state()[1])
+            ui_average=self.ui_average_state()[0], ui_average_log2n=self.ui_average_state()[1],
+            fpga_37=self.trig_status[0] | (P.STATUS37_HOLDOFF_RUNNING if self.holdoff_left_s > 0 else 0),
+            fpga_34=self.trig_status[1], edges_left=self.trig_status[2])
 
     def _ext_flags(self, now: float) -> int:
         if not self.caps & P.Caps.EXT_TRIGGER:
@@ -1887,9 +2202,12 @@ class Device:
             | (int(P.ExtFlags.EDGE_SEEN) if getattr(self, "capture_ext_edge", False) and self.ring_valid else 0)
 
     def status_bytes(self) -> bytes:
-        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 48 in 1.17."""
+        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 48 in 1.17..1.25, 52
+        since 1.26."""
         b = self.status().pack()
-        return b if self.shared else b[:32]
+        if not self.shared:
+            return b[:32]
+        return b if self.trig26_on else b[:48]
 
     @property
     def cap_on(self) -> bool:
@@ -1937,15 +2255,19 @@ class Device:
             chans.append(P.CaptureChannelInfo(cc.enable, cc.range, cc.coupling, cc.invert, cc.probe_index,
                                               cc.offset_pwm, cc.uv_per_lsb_q8, cc.zero_code_q8))
         d = self.capture_decim
-        return P.CaptureInfo(h, chans, d.status, d.shift, self.ext_shift_for(d, self.capture_divider, tr.source, pre),
-                             d.n, has_decim=True, run=self.run_info())
+        return P.CaptureInfo(h, chans, d.status, d.shift_byte if self.trig26_on else d.shift,
+                             self.ext_shift_for(d, self.capture_divider, tr.source, pre), d.n, has_decim=True,
+                             run=self.run_info(), trig2=tr.capture_trig2() if self.trig26_on else None)
 
     def run_info(self) -> P.SeqRunInfo:
-        """GET_CAPTURE_INFO 76..95 (protocol 1.17) of the latest capture."""
+        """GET_CAPTURE_INFO 76..95 (protocol 1.17) of the latest capture; since 1.26 byte 79 also says 16-bit / peak for
+        single captures."""
         r = self.run
+        d = self.capture_decim
+        wide = ((P.CAPINFO_WIDE if d.k else 0) | (P.CAPINFO_PEAK if d.peak else 0)) if self.trig26_on else 0
         if r is None:
-            return P.SeqRunInfo()
-        return P.SeqRunInfo(r["mode"], r["run_flags"], r["m"], int(r["wide"]), r["count"], r["untriggered"],
+            return P.SeqRunInfo(wide=wide)
+        return P.SeqRunInfo(r["mode"], r["run_flags"], r["m"], int(r["wide"]) | wide, r["count"], r["untriggered"],
                             r["requested"], r["n"], r["holdoff_ns"])
 
     def info(self) -> P.InfoResp:
@@ -1978,7 +2300,8 @@ class Device:
         per = 1 if self.decim_config().k else 2
         return P.Trigger(source=tr.source, edge=tr.edge, level=tr.level, mode=tr.mode,
                          pretrigger_samples=pre, total_samples=total, holdoff=tr.holdoff,
-                         auto_timeout=auto_to, pretrigger_words=pre // per, total_words=total // per)
+                         auto_timeout=auto_to, pretrigger_words=pre // per, total_words=total // per,
+                         trigger2=tr.trigger2() if self.trig26_on else None)
 
     def gen(self) -> P.Gen:
         g = self.settings.gen
@@ -2017,6 +2340,12 @@ class Device:
         capture: the converted codes round(sample x 2^S / N^K + (adc_a_comp + adc_b_comp) / 2), 0..255."""
         Pw, Tw = self.capture_geometry
         dec = self.capture_decim
+        if dec.k and dec.peak:  # 1.26: the midpoint of { max, min } through the 8-bit mean-core correction
+            w = self.build_trace16(ch).astype(np.int64)
+            mid = ((w & 0xFF) + (w >> 8)) / 2.0
+            cal = self.cal[ch]
+            tr = np.clip(np.rint(mid + (cal.adc_a_comp + cal.adc_b_comp) / 2.0), 0, 255).astype(np.uint8)
+            return tr, (1 if settings.channels[ch].invert else 0)
         if dec.k:
             out = self.build_trace16(ch).astype(np.int64)
             gain16, corr16 = self._corr16(ch, settings)
@@ -2074,7 +2403,8 @@ class Device:
             except ValueError:
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
             if not self.shared and cmd in (P.Cmd.SET_ACQ_STATE, P.Cmd.GET_CAPTURE_INFO, P.Cmd.READ_SPECTRUM,
-                                           P.Cmd.FFT_BENCH, P.Cmd.GET_DECIM, P.Cmd.SET_DECIM):
+                                           P.Cmd.FFT_BENCH, P.Cmd.GET_DECIM, P.Cmd.SET_DECIM, P.Cmd.GET_COUNTER,
+                                           P.Cmd.SET_TRIGGER2):
                 # protocol 1.2 firmware does not know the 1.3 commands
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
             if self.mismatch and cmd not in P.BASIC_CMDS:
@@ -2298,9 +2628,11 @@ class Device:
         s = self.settings
         nxt = self.decim_config()
         last = self.decim_written
-        return P.DecimState(s.decim & 3, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, nxt.shift, nxt.n, nxt.gain,
-                            s.divider, nxt.rate(s.divider), last.status if last else 0xFF, last.shift if last else 0,
-                            last.status if last else 0, last.shift if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
+        filt = P.DECIM_PEAK if s.peak and self.trig26_on else s.decim & 3
+        sb = (lambda d: d.shift_byte) if self.trig26_on else (lambda d: d.shift)  # 1.26: the peak bits in the shift byte
+        return P.DecimState(filt, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, sb(nxt), nxt.n, nxt.gain,
+                            s.divider, nxt.rate(s.divider), last.status if last else 0xFF, sb(last) if last else 0,
+                            last.status if last else 0, sb(last) if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
                             self.ext_shift_for(nxt, s.divider, s.trigger.source, s.trigger.pretrigger_samples),
                             int(self.features),
                             *self.ui_average_state())
@@ -2310,13 +2642,20 @@ class Device:
 
     def _cmd_set_decim(self, req: P.Frame) -> P.Frame:
         r = P.SetDecimReq.unpack(req.payload)
-        if r.filter > 3:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3")
+        if r.filter > P.DECIM_PEAK:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..4")
+        if r.filter == P.DECIM_PEAK and not (self.caps & P.Caps.PEAK_DETECT):
+            raise _DevErr(P.Status.E_UNSUPPORTED, 0, "peak detect needs caps PEAK_DETECT (protocol 1.26)")
         if r.flags & ~0x0F:  # bits 0-2 the swap and NEG bits, bit 3 the FIR (1.11)
             raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
         if r.filter and self.settings.trigger.total_samples > P.DECIM_MAX_TOTAL:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
-        self.settings.decim = r.filter | ((r.flags & 0x0F) << 2)
+        if r.filter == P.DECIM_PEAK:  # 1.26: the Sample row; the Filter word keeps its K for the way back
+            self.settings.peak = 1
+            self.settings.decim = (self.settings.decim & 3) | ((r.flags & 0x0F) << 2)
+        else:
+            self.settings.peak = 0
+            self.settings.decim = r.filter | ((r.flags & 0x0F) << 2)
         return self._ok(req, self.decim_state().pack())
 
     def ui_set_decim(self, filter_: int, flags: int = 0) -> None:
@@ -2598,6 +2937,7 @@ class Device:
             if r.holdoff and not (self.caps & P.Caps.HOLDOFF):
                 raise _DevErr(P.Status.E_UNSUPPORTED, 6, "hold-off not implemented by this FPGA")
             new.holdoff = r.holdoff
+            self.holdoff_clear_pending = True  # 1.26: written to 0x1B with the clear request (0x66 = 1)
         if r.mask & M.M_AUTO_TIMEOUT:
             new.auto_timeout = r.auto_timeout
         if r.mask & (M.M_PRETRIGGER | M.M_TOTAL):
@@ -2613,6 +2953,130 @@ class Device:
                                                      f"({new.total_samples - 2})")
         self.settings.trigger = new
         return self._ok(req, self.trigger().pack())
+
+    def _cmd_set_trigger2(self, req: P.Frame) -> P.Frame:
+        """SET_TRIGGER2 (protocol 1.26, row 66; pc_cmds.c h_set_trigger2): every field written, validated in byte-offset
+        order with E_BAD_ARG detail = the offset; nothing written when a field is refused."""
+        r = P.Trigger2.unpack(req.payload)
+        tr = self.settings.trigger
+        new = replace(tr)
+        E = P.Status.E_BAD_ARG
+        if r.type in (P.TRIG_RUNT, P.TRIG_WINDOW):
+            raise _DevErr(E, P.TRIG2_D_TYPE, "runt / window: FPGA 0x153E")
+        if r.type > P.TRIG_TIMEOUT:
+            raise _DevErr(E, P.TRIG2_D_TYPE, "type 0..3")
+        if r.polarity > 1:
+            raise _DevErr(E, P.TRIG2_D_POLARITY, f"polarity {r.polarity}")
+        if r.flags & (P.TRIG2_F_RANGE | P.TRIG2_F_BOTH_CORES):
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "range / both cores: FPGA 0x153E")
+        if r.flags & ~P.TRIG2_F_LONGER:
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "flags")
+        if r.flags & P.TRIG2_F_LONGER and r.type != P.TRIG_PULSE_WIDTH:
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "LONGER is for the pulse width type")
+        if r.source > 2:
+            raise _DevErr(E, P.TRIG2_D_SOURCE, f"source {r.source}")
+        if r.type in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT) and not 1 <= r.n <= P.TRIG2_MAX_N:
+            raise _DevErr(E, P.TRIG2_D_N, f"N {r.n} not in 1..{P.TRIG2_MAX_N}")
+        if r.type == P.TRIG_NTH_EDGE and not 1 <= r.n <= P.TRIG2_MAX_NTH:
+            raise _DevErr(E, P.TRIG2_D_N, f"Nth edge count {r.n} not in 1..{P.TRIG2_MAX_NTH}")
+        if r.type == P.TRIG_EDGE and r.n:
+            raise _DevErr(E, P.TRIG2_D_N, "edge: N must be 0")
+        if r.type == P.TRIG_NTH_EDGE and r.h > P.TRIG2_MAX_N:
+            raise _DevErr(E, P.TRIG2_D_H, f"H {r.h} > {P.TRIG2_MAX_N}")
+        if r.type != P.TRIG_NTH_EDGE and r.h:
+            raise _DevErr(E, P.TRIG2_D_H, "H is for the Nth edge type")
+        if r.level > 255:
+            raise _DevErr(E, P.TRIG2_D_LEVEL, f"level {r.level} > 255")
+        if r.level2:
+            raise _DevErr(E, P.TRIG2_D_LEVEL2, "level2: FPGA 0x153E")
+        if r.source == 2 and tr.source != 2:
+            self.settings.gen.enable = 0  # as SET_TRIGGER: selecting EXT switches the generator off
+        new.ttype, new.edge, new.source, new.level = r.type, r.polarity, r.source, r.level
+        new.longer = int(bool(r.flags & P.TRIG2_F_LONGER))
+        new.n, new.h, new.holdoff = r.n, r.h, r.holdoff
+        self.settings.trigger = new
+        self.holdoff_clear_pending = True  # 0x66 = 1: a new definition is a new session
+        return self._ok(req, self.trigger().pack())
+
+    def counter_snapshot(self) -> P.CounterResp:
+        """The 0x35 snapshot (protocol 1.26): the latest complete gate of the counter on its source, from the signal's
+        periodic edges through the Schmitt thresholds (``signal_edges`` / ``gate_count``), min / max from the noise-free
+        extremes plus the expected noise extreme over the gate's 200 MSa/s samples. ``new`` = the gate sequence moved
+        since the last read."""
+        gate_s = P.COUNTER_GATES[self.counter_gate]
+        src = self.counter_source
+        if src == 0:
+            src = (1, 2, 3)[min(self.settings.trigger.source, 2)]
+        flags = (P.COUNTER_F_EXT if src == 3 else 0) | (P.COUNTER_F_CH2 if src == 2 else 0)
+        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, self.counter_level,
+                             self.counter_hyst, 0)
+        if gate_s <= 0:
+            return resp
+        up = self.now() - self.t_boot
+        seq = int(up / gate_s)
+        resp.seq = seq & 0xFF
+        if self.counter_seq_read != seq:  # the model always has a complete gate behind it
+            resp.flags |= P.COUNTER_F_NEW
+        self.counter_seq_read = seq
+        t_start = max(0.0, (seq - 1) * gate_s)
+        gen = self.settings.gen
+        if src == 3:
+            sig = self.cfg.ext_signal or self.cfg.signals[1]
+            edges = signal_edges(sig, gen, EXT_THRESHOLD_V, EXT_THRESHOLD_V)
+            resp.min, resp.max = (0, 255) if edges is not None else (0, 0)
+        else:
+            ch = src - 1
+            sig = self.cfg.signals[ch]
+            cs = self.settings.channels[ch]
+            high = self._code_to_volts(ch, self.counter_level, self.settings)
+            low = self._code_to_volts(ch, self.counter_level - self.counter_hyst, self.settings)
+            dc = sig.dc if cs.coupling == 1 else 0.0
+            edges = signal_edges(sig, gen, high + dc, low + dc)
+            # min / max of the raw codes over the gate: the noise-free extremes of one period (or the level) plus the
+            # expected extreme of the noise over the gate's samples
+            period = edges[0] if edges is not None else 1e-3
+            t = t_start + np.arange(4096) * (period / 4096)
+            c = self._analog(ch, t, None, self.settings)
+            n_samples = max(2.0, gate_s * P.BASE_CLOCK_HZ)
+            ext = self.cfg.noise_lsb * math.sqrt(2 * math.log(n_samples)) if self.cfg.noise_lsb > 0 else 0.0
+            resp.min = int(np.clip(np.rint(c.min() - ext), 0, 255))
+            resp.max = int(np.clip(np.rint(c.max() + ext), 0, 255))
+        if edges is not None:
+            e, t, w = gate_count(edges[0], edges[1], edges[2], t_start, gate_s)
+            if e >= 1:
+                resp.e, resp.t, resp.w = e, t, w
+                resp.flags |= P.COUNTER_F_VALID
+                resp.freq_mhz = P.counter_freq_mhz(e, t)
+        return resp
+
+    def _code_to_volts(self, ch: int, code: float, settings: Settings) -> float:
+        """Inverse of ``_analog(core=None)``: the volts at the BNC (after the coupling) a core-mean raw code stands for."""
+        cs = settings.channels[ch]
+        cal = self.cal[ch]
+        vpl = P.uv_per_lsb_q8(cal.input_calibration[cs.range], cs.range) / 256.0 * 1e-6
+        g = self.cfg.core_gain[ch]
+        gm = (g[0][0] + g[0][1]) / 2
+        zero = self._offset_zero(ch, cs.dcoffset) + (self.raw_zero_offset(ch, 0, 0) + self.raw_zero_offset(ch, 1, 0)) / 2
+        if self.cfg.v4 is not None:
+            g_ref = (g[1][0] + g[1][1]) / 2
+            zero += self.cfg.v4[ch][3] * gm / g_ref
+        return (code - zero) * vpl / gm
+
+    def _cmd_get_counter(self, req: P.Frame) -> P.Frame:
+        r = P.CounterReq.unpack(req.payload)
+        if r.what > P.CounterReq.CONFIG:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, f"what {r.what}")
+        if r.what == P.CounterReq.CONFIG:
+            if r.gate >= len(P.COUNTER_GATES):
+                raise _DevErr(P.Status.E_BAD_ARG, 1, f"gate {r.gate}")
+            if r.source >= len(P.COUNTER_SOURCES):
+                raise _DevErr(P.Status.E_BAD_ARG, 2, f"source {r.source}")
+            if r.hysteresis > r.level:
+                raise _DevErr(P.Status.E_BAD_ARG, 4, "hysteresis > level")
+            self.counter_gate, self.counter_source = r.gate, r.source
+            self.counter_level, self.counter_hyst = r.level, r.hysteresis
+            self.counter_seq_read = None
+        return self._ok(req, self.counter_snapshot().pack())
 
     def _cmd_arm(self, req: P.Frame) -> P.Frame:
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
@@ -2710,8 +3174,12 @@ class Device:
         R = RING_WORDS
         if not 1 <= r.core_mask <= 15:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"core_mask 0x{r.core_mask:X}")
-        if r.layout > 2:
+        if r.layout > (3 if self.trig26_on else 2):
             raise _DevErr(P.Status.E_BAD_ARG, 2, f"layout {r.layout}")
+        if r.layout == P.ReadRawReq.LAYOUT_PEAK and not self.capture_decim.peak:
+            raise _DevErr(P.Status.E_BAD_ARG, 2, "layout 3 needs a peak-detect record")
+        if r.layout == P.ReadRawReq.LAYOUT_WIDE and self.capture_decim.peak:
+            raise _DevErr(P.Status.E_BAD_ARG, 2, "a peak-detect record: READ_RAW layout 3")
         if r.layout >= 1:
             for ch in (0, 1):
                 bits = (r.core_mask >> (2 * ch)) & 3
@@ -2740,6 +3208,11 @@ class Device:
                 clip[c // 2] = True
         if r.layout == 0:
             blocks = [data[c].tobytes() for c in cores]
+        elif r.layout == P.ReadRawReq.LAYOUT_PEAK:  # 1.26: count minima (the core A slot) then count maxima (core B)
+            clip = [False, False]
+            for ch in (0, 1):
+                if r.core_mask & (3 << (2 * ch)):
+                    blocks.append(data[2 * ch].tobytes() + data[2 * ch + 1].tobytes())
         elif r.layout == 2:  # 1.9: u16 little-endian per word, low byte core A, high byte core B
             clip = [False, False]
             for ch in (0, 1):
