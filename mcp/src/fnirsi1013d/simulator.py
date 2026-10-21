@@ -1005,7 +1005,8 @@ class Device:
         self.cap_counts_next: list[tuple[int, int, int, int]] = []
         #: protocol 1.26: the trigger hold-off (0x1B) still to run at the next arm, from the latest capture's trigger
         #: (across MCU re-arms, as the FPGA's counter; cleared by 0x66 + ARM) and the counter's configuration (the
-        #: firmware's boot values: gate 100 ms, the trigger source, level 128 / hysteresis 6) and last read sequence
+        #: firmware's boot values: gate 100 ms, the trigger source, level 0 = follow the trigger level, hysteresis 6)
+        #: and last read sequence
         self.holdoff_left_s = 0.0
         #: 0x66 = 1 written (boot, SET_TRIGGER hold-off, SET_TRIGGER2): the next 0x01 = 1 clears a running hold-off
         self.holdoff_clear_pending = True
@@ -1013,7 +1014,7 @@ class Device:
         self.trig_status: tuple[int, int, int] = (0, 0, 0)
         self.counter_gate = 2
         self.counter_source = 0
-        self.counter_level = P.COUNTER_DEFAULT_LEVEL
+        self.counter_level = P.COUNTER_LEVEL_FOLLOW  # as configured; counter_level_now() is the one in effect
         self.counter_hyst = P.COUNTER_DEFAULT_HYST
         self.counter_seq_read: int | None = None
         self.cap_boot()
@@ -3017,6 +3018,13 @@ class Device:
         self.holdoff_clear_pending = True  # 0x66 = 1: a new definition is a new session
         return self._ok(req, self.trigger().pack())
 
+    def counter_level_now(self) -> int:
+        """The counter's Schmitt level in effect: the configured code, or with level 0 the trigger level (fw-c7
+        pc_glue_counter_pass: scopesettings.triggerlevel clamped to 0..255, taken every main-loop pass)."""
+        if self.counter_level != P.COUNTER_LEVEL_FOLLOW:
+            return self.counter_level
+        return min(255, max(0, int(self.settings.trigger.level)))
+
     def counter_snapshot(self) -> P.CounterResp:
         """The 0x35 snapshot (protocol 1.26): the latest complete gate of the counter on its source, from the signal's
         periodic edges through the Schmitt thresholds (``signal_edges`` / ``gate_count``), min / max from the noise-free
@@ -3027,7 +3035,8 @@ class Device:
         if src == 0:
             src = (1, 2, 3)[min(self.settings.trigger.source, 2)]
         flags = (P.COUNTER_F_EXT if src == 3 else 0) | (P.COUNTER_F_CH2 if src == 2 else 0)
-        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, self.counter_level,
+        level = self.counter_level_now()
+        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, level,
                              self.counter_hyst, 0)
         if gate_s <= 0:
             return resp
@@ -3047,8 +3056,8 @@ class Device:
             ch = src - 1
             sig = self.cfg.signals[ch]
             cs = self.settings.channels[ch]
-            high = self._code_to_volts(ch, self.counter_level, self.settings)
-            low = self._code_to_volts(ch, self.counter_level - self.counter_hyst, self.settings)
+            high = self._code_to_volts(ch, level, self.settings)
+            low = self._code_to_volts(ch, level - self.counter_hyst, self.settings)
             dc = sig.dc if cs.coupling == 1 else 0.0
             edges = signal_edges(sig, gen, high + dc, low + dc)
             # min / max of the raw codes over the gate: the noise-free extremes of one period (or the level) plus the
@@ -3090,7 +3099,7 @@ class Device:
                 raise _DevErr(P.Status.E_BAD_ARG, 1, f"gate {r.gate}")
             if r.source >= len(P.COUNTER_SOURCES):
                 raise _DevErr(P.Status.E_BAD_ARG, 2, f"source {r.source}")
-            if r.hysteresis > r.level:
+            if r.level != P.COUNTER_LEVEL_FOLLOW and r.hysteresis > r.level:  # level 0 follows the trigger level
                 raise _DevErr(P.Status.E_BAD_ARG, 4, "hysteresis > level")
             self.counter_gate, self.counter_source = r.gate, r.source
             self.counter_level, self.counter_hyst = r.level, r.hysteresis

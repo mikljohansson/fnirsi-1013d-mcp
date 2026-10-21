@@ -182,8 +182,9 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   disturb one. Resolution is one 5 ns clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s); the 50 MHz crystal
   (about 1e-5, uncalibrated) is the accuracy: quote the `resolution` statement with the number. Reading is tier 0;
   `gate`, `source`, `level` (volts) and `hysteresis` configure it (tier 1) and the scope's measurement cards follow
-  (level 128 / 6 codes at boot, the trigger channel). A signal that does not cross the level by more than the
-  hysteresis gives no count: set `level` mid-swing. `vmin` / `vmax` are raw extremes over the whole gate, noise
+  (at boot the level follows the trigger level, 6 codes hysteresis, the trigger channel; a `level` in volts pins it,
+  `level='trigger'` follows again). A signal that does not cross the level by more than the hysteresis gives no
+  count: put the trigger level (or `level`) mid-swing. `vmin` / `vmax` are raw extremes over the whole gate, noise
   peaks included; a capture's min / max are a few codes narrower.
 - **Peak detect at slow time bases** (`scope_capture(peak=true)` for one capture, `scope_set_decimation(filter='peak')`
   to leave it on): below 200 MSa/s every stored sample is the min and max of its window of raw 200 MSa/s samples, so

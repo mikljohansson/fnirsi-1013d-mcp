@@ -358,6 +358,41 @@ def test_counter_on_the_simulator(sim_factory):
         s.close()
 
 
+def test_counter_level_follows_the_trigger_level(sim_factory):
+    """fw-c7: level 0 follows the UI trigger level (the boot state; hysteresis may exceed it), the response's level is
+    the one in effect; a pinned level stays until level 0; Scope.read_counter keeps the follow state across gate /
+    source changes instead of pinning the level it read back."""
+    s, srv = _scope(sim_factory, signal="square:freq=10kHz,amp=1,duty=0.2")
+    try:
+        s.set_channel(0, range_index=1)
+        s.set_trigger(source=0, level=128)
+        r = s.read_counter()
+        assert r.level == 128 and r.hysteresis == P.COUNTER_DEFAULT_HYST and r.valid and srv.device.counter_level == 0
+        s.set_trigger(level=135)  # the marker moved: the counter follows (the firmware's next pass)
+        assert s.read_counter().level == 135
+        resp = P.CounterResp.unpack(s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 0, 200).pack()).payload)
+        assert (resp.level, resp.hysteresis) == (135, 200)  # hysteresis > level is fine while following
+        r = s.read_counter(hysteresis=6)
+        assert (r.level, r.hysteresis) == (135, 6) and r.valid and s.counter_level_cfg == P.COUNTER_LEVEL_FOLLOW
+        r = s.read_counter(level=140)  # pinned
+        assert r.level == 140 and s.counter_level_cfg == 140
+        s.set_trigger(level=132)
+        assert s.read_counter().level == 140
+        r = s.read_counter(gate=3)  # a gate change keeps the pin
+        assert (r.gate, r.level) == (3, 140)
+        r = s.read_counter(level=P.COUNTER_LEVEL_FOLLOW)
+        assert r.level == 132 and r.valid
+        r = s.read_counter(gate=2, source="CH1")  # and keeps following: the level read back is not pinned
+        assert r.level == 132 and srv.device.counter_level == P.COUNTER_LEVEL_FOLLOW
+        s.set_trigger(level=130)
+        assert s.read_counter().level == 130
+        with pytest.raises(DeviceError) as e:  # a non-zero level still refuses hysteresis above it
+            s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 10, 20).pack())
+        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 4)
+    finally:
+        s.close()
+
+
 def test_peak_detect_on_the_simulator(sim_factory):
     """10 ns spikes every 1 us at 1 MSa/s: legacy sampling misses most, peak detect keeps every one; the layouts."""
     s, srv = _scope(sim_factory, signal="gate:period=1us,width=10ns,high=1,low=0", noise_lsb=0.5)
@@ -530,11 +565,14 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             assert r["duty"] == pytest.approx(0.2) and r["period_s"] == pytest.approx(100e-6) and r["valid"]
             assert r["vmax"] > r["vmin"] and r["vpp"] > 1.5 and "5 ns clock" in r["resolution"]
             assert r["gate_s"] == 0.1 and r["readings"][0]["edges"] == 1000 and Path(r["file"]).is_file()
+            assert r["level_follows_trigger"]
             r = await c.call("scope_counter", gate="1s", source="CH2", level=1.5, readings=2)
             assert r["source"] == "CH2" and len(r["readings"]) == 2 and r["frequency_hz"] == pytest.approx(10e3)
-            assert r["frequency_spread_hz"] == 0
+            assert r["frequency_spread_hz"] == 0 and not r["level_follows_trigger"]
             rep = await c.call("scope_report", source=r["file"])
             assert rep["kind"] == "counter" and rep["table"][0]["frequency"].startswith("10 kHz")
+            r = await c.call("scope_counter", level="trigger")
+            assert r["level_follows_trigger"] and r["level_code"] == srv.device.settings.trigger.level
             # peak detect through scope_capture: one shot, the Filter restored
             await c.call("scope_set_timebase", sample_rate="1MS/s")
             await c.call("scope_set_trigger", source="CH1", mode="auto", total_samples=3000)

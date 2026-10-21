@@ -2401,16 +2401,19 @@ COUNTER_F_NEW = 0x01  # a gate ended since the last read
 COUNTER_F_VALID = 0x02  # E >= 1: at least two edges in the gate
 COUNTER_F_EXT = 0x04  # the effective source is EXT
 COUNTER_F_CH2 = 0x08  # the effective source is CH2 (neither: CH1)
-#: the firmware's boot thresholds (0x62): level 128, hysteresis 6 codes (about 3 x the 2 LSB noise)
+#: the firmware's boot thresholds (0x62): level 128 until the first main-loop pass, then the UI trigger level
+#: followed (fw-c7: configured level 0), hysteresis 6 codes (about 3 x the 2 LSB noise)
 COUNTER_DEFAULT_LEVEL, COUNTER_DEFAULT_HYST = 128, 6
+#: GET_COUNTER level 0: follow the trigger level (clamped to 0..255) instead of pinning a code
+COUNTER_LEVEL_FOLLOW = 0
 
 
 @dataclass
 class CounterReq(Payload):
     """GET_COUNTER request (8 bytes): u8 what (0 read the snapshot, 1 write the configuration then read), u8 gate
-    (COUNTER_GATES index), u8 source (COUNTER_SOURCES index), u8 level (raw code, Schmitt high at >= level), u8
-    hysteresis (codes below the level for low), 3 x 0. With what = 0 the other fields are ignored. E_BAD_ARG detail
-    0 what, 1 gate, 2 source, 4 hysteresis > level."""
+    (COUNTER_GATES index), u8 source (COUNTER_SOURCES index), u8 level (raw code, Schmitt high at >= level; 0 =
+    follow the trigger level, the boot state), u8 hysteresis (codes below the level for low), 3 x 0. With what = 0
+    the other fields are ignored. E_BAD_ARG detail 0 what, 1 gate, 2 source, 4 hysteresis > a non-zero level."""
 
     FIELDS = [("what", "B"), ("gate", "B"), ("source", "B"), ("level", "B"), ("hysteresis", "B"), ("_r", "3x")]
     what: int = 0
@@ -2429,7 +2432,7 @@ class CounterResp(Payload):
     source as configured (0 = the trigger source), 4 u32 E (periods between the first and the last rising edge in
     the gate; 0 = fewer than two edges), 8 u32 T (5 ns clocks between them), 12 u32 W (high clocks in them), 16 u8
     min, 17 u8 max (the source's raw codes over the gate; 255 / 0 when no sample), 18 u8 level, 19 u8 hysteresis (the
-    thresholds in effect), 20 u32 freq_mHz (the firmware's E / (T x 5 ns) in millihertz, saturating; 0 when invalid).
+    thresholds in effect: the trigger level while following), 20 u32 freq_mHz (the firmware's E / (T x 5 ns) in millihertz, saturating; 0 when invalid).
     Derived: frequency = E / (T x 5 ns), period = T x 5 ns / E, width = W x 5 ns / E, duty = W / T; resolution one
     clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy on top."""
 
