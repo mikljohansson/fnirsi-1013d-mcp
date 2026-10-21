@@ -297,6 +297,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3 17:0x: 0x153D timing closed (commit ecdc6f0, roll h2x: the hold-off block and the logger block moved, no logic
+  change): clk_200MHz 0 errors, 4.945 ns (+0.055 ns), every other clock 0 errors; 6430 LUT (74.4 %) / 5911 reg / 7451 LE
+  (86.2 %, 1189 LEs free). 21 rolls; TD 4.6.8 has no placer seed / effort, optimize_place / optimize_route are no-ops,
+  moving a clk_200MHz always block re-rolls. Full two-seed run.sh (18 steps) running, about 4-5 h; then dist and push.
 - fw-nopat done 16:3x, merged 16:3x: SET_PATTERN 0x0217 / SET_PATTERN_TRIGGER 0x021A removed (unknown command), caps 24 / 27
   and features 12 / 13 reserved (features 0x0FFF), trigger source 3 refused, GEN 40 B with bursts / pattern source reserved,
   fpga_pat_* renamed fpga_gen_*, the model on fpga-d3's stripped square (commit taken at once), check_retired_regs lists
