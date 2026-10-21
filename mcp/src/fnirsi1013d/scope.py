@@ -761,6 +761,8 @@ class Scope:
             flags = self.get_decim().flags
             if fir is not None:
                 flags = (flags & ~P.SetDecimReq.FIR) | (P.SetDecimReq.FIR if fir else 0)
+            if f == P.DECIM_PEAK:  # fw-c6: E_BAD_ARG 1 for the FIR bit with peak (the Filter keeps its FIR)
+                flags &= ~P.SetDecimReq.FIR
         st = P.DecimState.unpack(self._req(P.Cmd.SET_DECIM, P.SetDecimReq(f, flags).pack()))
         self._trig = self._tb = None  # words and the sample period follow the filter
         return st

@@ -2650,7 +2650,8 @@ class Device:
         last = self.decim_written
         filt = P.DECIM_PEAK if s.peak and self.trig26_on else s.decim & 3
         sb = (lambda d: d.shift_byte) if self.trig26_on else (lambda d: d.shift)  # 1.26: the peak bits in the shift byte
-        return P.DecimState(filt, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, sb(nxt), nxt.n, nxt.gain,
+        flags = s.decim & (P.DECIM_FLAGS | (0 if filt == P.DECIM_PEAK else P.DECIM_SET_FIR))  # the kept FIR masked
+        return P.DecimState(filt, flags >> 2, nxt.status, sb(nxt), nxt.n, nxt.gain,
                             s.divider, nxt.rate(s.divider), last.status if last else 0xFF, sb(last) if last else 0,
                             last.status if last else 0, sb(last) if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
                             self.ext_shift_for(nxt, s.divider, s.trigger.source, s.trigger.pretrigger_samples),
@@ -2663,16 +2664,18 @@ class Device:
     def _cmd_set_decim(self, req: P.Frame) -> P.Frame:
         r = P.SetDecimReq.unpack(req.payload)
         if r.filter > P.DECIM_PEAK:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..4")
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3, 4 peak")
         if r.filter == P.DECIM_PEAK and not (self.caps & P.Caps.PEAK_DETECT):
             raise _DevErr(P.Status.E_UNSUPPORTED, 0, "peak detect needs caps PEAK_DETECT (protocol 1.26)")
         if r.flags & ~0x0F:  # bits 0-2 the swap and NEG bits, bit 3 the FIR (1.11)
             raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
+        if r.filter == P.DECIM_PEAK and r.flags & P.SetDecimReq.FIR:
+            raise _DevErr(P.Status.E_BAD_ARG, 1, "FIR with peak detect")
         if r.filter and self.settings.trigger.total_samples > P.DECIM_MAX_TOTAL:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
-        if r.filter == P.DECIM_PEAK:  # 1.26: the Sample row; the Filter word keeps its K for the way back
+        if r.filter == P.DECIM_PEAK:  # 1.26: the Sample row; the Filter word keeps its K and FIR for the way back
             self.settings.peak = 1
-            self.settings.decim = (self.settings.decim & 3) | ((r.flags & 0x0F) << 2)
+            self.settings.decim = (self.settings.decim & (3 | P.DECIM_SET_FIR)) | ((r.flags & 0x07) << 2)
         else:
             self.settings.peak = 0
             self.settings.decim = r.filter | ((r.flags & 0x0F) << 2)

@@ -462,6 +462,30 @@ def test_peak_refused_without_the_cap(sim_factory):
         s.close()
 
 
+def test_peak_with_the_fir_filter_as_the_firmware(sim_factory):
+    """fw-c6 h_set_decim: filter 4 with the FIR bit is E_BAD_ARG 1 (vector resp_set_decim_e_bad_arg_fir_peak); filter 4
+    keeps the Filter's K and FIR behind it while GET_DECIM masks the FIR bit; Scope.set_decim(4) drops the bit it
+    read back."""
+    s, srv = _scope(sim_factory)
+    try:
+        s.set_trigger(total_samples=3000, pretrigger_samples=100)
+        s.set_timebase(divider=19)
+        st = s.set_decim("cic2+fir")
+        assert st.flags & P.SetDecimReq.FIR and st.next.fir
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.SET_DECIM, P.SetDecimReq(P.DECIM_PEAK, P.SetDecimReq.FIR).pack())
+        assert (e.value.status, e.value.detail, e.value.text) == (P.Status.E_BAD_ARG, 1, "FIR with peak detect")
+        st = s.set_decim(P.DECIM_PEAK)
+        assert st.filter == P.DECIM_PEAK and not st.flags & P.SetDecimReq.FIR and st.next.peak and not st.next.fir_en
+        assert st.next_mode == 0x81 and st.next_shift == 0xC0
+        assert srv.device.settings.decim & P.DECIM_SET_FIR and srv.device.settings.decim & 3 == 2  # kept behind
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.SET_DECIM, P.SetDecimReq(5, 0).pack())
+        assert e.value.text == "filter 0..3, 4 peak"
+    finally:
+        s.close()
+
+
 def test_peak_config_matches_the_firmware_vectors():
     """docs/protocol-vectors.json "decim_peak" (gen_vectors.py from fw-c6's pc_decim.c): the configuration an arm
     writes with peak requested. At divider 0 and over 8190 samples the record stays legacy and 0x56 bit 1 is not
