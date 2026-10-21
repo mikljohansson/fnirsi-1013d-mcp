@@ -39,6 +39,19 @@
 //     restarts the gate without publishing, a same-value write does not. CH1 / CH2 see edges only when the low code is
 //     below level - hysteresis and the high code at or above the level. The mixed-age transient of a 0x0D / 0x53 write
 //     is not modelled (the firmware's rule is what the tests check).
+//   - D5 pattern (fw-d5, 0x153D; docs/plans/fpga-0x153c.md 2.1, 2.2, 7.2, 7.5 and fpga-d2's RTL semantics): the pattern
+//     generator on the 5 ns clock grid, event-driven per step: 0x6C entries (0 and 1 double-buffered: a write goes to
+//     the shadow, 0x6D bit 5 commit makes them pending; the engine prefetches one step ahead, so the step that starts at
+//     the first boundary after a commit still runs the old values and the take happens there: a commit during step k
+//     gives old k and k + 1, new from k + 2, pending 0 from the start of k + 1; a start takes the pending shadows before
+//     step 0), one 16-bit fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only),
+//     bursts (mode 1 one, mode 2 R with R - 1 gaps, mode 3 continuous with a gap after each), the idle level, mode 0
+//     stopping at once, a start bit or a mode-3 write starting an idle engine (ignored while it runs), 0x6E R (0 =
+//     65536), 0x6F gap, 0x50 the pin driver, the marker (the first clock of a mark step: 0x39 byte 3 bit 1 until 0x01 = 1;
+//     with 0x15 = 3 and 0x6D bit 3 it triggers the capture at the next write clock edge, the EXT convention), reads 0x39
+//     and 0x42; the pattern trigger engine's registers 0x76..0x7D and an event injected by the test (fm_ptrig_event:
+//     a burst start when the start source allows it, the event flag, one shot clears armed). The pin's level changes are
+//     logged (fm.pat_edge) for the period and edge-placement checks.
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -50,6 +63,7 @@
 
 #define FM_RING_MAX   8192
 #define FM_TRACE_MAX  64
+#define FM_PAT_EDGES  4096                //D5 pattern: pin level changes kept (a ring)
 
 typedef struct
 {
@@ -123,6 +137,39 @@ typedef struct
   uint8_t  snap[16];                //the 0x35 snapshot
   uint8_t  snap_seq;                //m_seq: the sequence number of the previous snapshot
 
+  //D5 pattern (fw-d5, 0x153D): fpga_model.h header
+  uint8_t  buf[16];                 //data bytes of the command in progress (0x6C has 7)
+  struct
+  {
+    uint8_t  flags;                 //0x6C byte 0 bits 7..5: end, mark, level
+    uint32_t dur;
+    uint16_t frac;
+  } pat_act[8], pat_sh[2], pat_q;   //active entries, the shadows of 0 and 1, the prefetched next step
+  uint8_t  pat_pending;             //0x39 byte 0 bit 5
+  uint8_t  pat_mode, pat_ctl;       //0x6D bits 1..0 and the rest as written
+  uint16_t pat_r;                   //0x6E
+  uint32_t pat_gap;                 //0x6F
+  uint8_t  pat_drive;               //0x50 bit 0
+  uint8_t  pat_run, pat_in_gap;     //running, in the gap between bursts
+  uint8_t  pat_step;                //the step running
+  uint8_t  pat_q_idx;               //the prefetched step's index
+  uint8_t  pat_level;               //the pattern's level (the idle level when not running)
+  uint16_t pat_acc;                 //the fraction accumulator
+  uint64_t pat_end_clk;             //the running step (or gap) ends at this clock
+  uint32_t pat_bursts;              //bursts completed since the start
+  uint8_t  pat_marker_seen;         //0x39 byte 3 bit 1
+  uint8_t  pat_marker_trig;         //a marker waits for the capture's next write clock edge
+  uint32_t pat_markers;             //markers seen (any)
+  uint32_t pat_starts;
+  uint64_t pat_edge[FM_PAT_EDGES];  //clock << 1 | level of every pin level change while running
+  uint32_t pat_nedge;
+  uint8_t  ptrig[8];                //0x76 .. 0x78, 0x7A, 0x7D (by offset from 0x76; 0x79 / 0x7B / 0x7C below)
+  uint16_t ptrig_l16;               //0x79
+  uint32_t ptrig_n, ptrig_h;        //0x7B, 0x7C
+  uint8_t  ptrig_event;             //0x42 byte 0 bit 6
+  uint8_t  ptrig_shared;            //the routed fallback: 0x42 byte 0 bit 7 reads 0
+  uint32_t ptrig_events;
+
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;
   uint32_t seed;
@@ -144,5 +191,9 @@ int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the 
 //fw-c7: the counter's stream on source src (0 CH1, 1 CH2, 2 EXT): a square wave of period_ns / high_ns (multiples of
 //5 ns) starting at phase_ns, codes lo / hi; period 0 = a constant low level
 void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase_ns, uint8_t lo, uint8_t hi);
+//D5 pattern: the clock now (5 ns), the pin (0 / 1, 2 = hi-Z), a pattern trigger engine event now
+uint64_t fm_clk(void);
+int      fm_pin(void);
+void     fm_ptrig_event(void);
 
 #endif /* FPGA_MODEL_H */
