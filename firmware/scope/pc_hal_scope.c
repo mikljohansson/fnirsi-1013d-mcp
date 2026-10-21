@@ -46,6 +46,8 @@
 #include "acq_view.h"
 #include "bode_view.h"
 #include "fpga_bus.h"
+#include "fpga_counter.h"     //C7 counter
+#include "ui_meas.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -504,6 +506,59 @@ void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
 void pc_hal_trig_status(uint8_t out[4])
 {
   fpga_trig_status(out);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//C7 counter (fw-c7, FPGA 0x153C): the state lives in fpga_counter.c; the main loop's pass (pc_glue_counter_pass) does
+//every bus access, these two are memory only
+
+void pc_hal_counter_read(pc_hw_counter *c)
+{
+  c->gate       = fpga_cnt.cfg_gate;
+  c->source     = fpga_cnt.cfg_source;
+  c->level      = fpga_cnt.level;
+  c->hyst       = fpga_cnt.hyst;
+  c->held       = fpga_cnt.held;
+  c->current    = (uint8_t)fpga_counter_current(timer0ticks);
+  c->has_period = fpga_cnt.has_period;
+  c->seq        = fpga_cnt.seq;
+  c->res_src    = fpga_cnt.res_src;
+  c->res_gate   = fpga_cnt.res_gate;
+  c->e          = fpga_cnt.e;
+  c->t          = fpga_cnt.t;
+  c->w          = fpga_cnt.w;
+  c->min        = fpga_cnt.min;
+  c->max        = fpga_cnt.max;
+}
+
+void pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst)
+{
+  fpga_counter_config(gate, source, level, hyst);
+}
+
+//Main loop, after the capture readout (fnirsi_1013d_scope.c PC_COUNTER_PASS): the 0x35 read, the rate-change rule, the
+//trigger level followed, a pending host configuration; then the measurement cards' copy (ui_meas.c). Built-for
+//bitstream only: on a mismatch the counter was never configured and nothing is read
+void pc_glue_counter_pass(void)
+{
+  ui_ms_counter u;
+  int32 lvl;
+
+  if(pc_fpga_word != PC_FW_FPGA_VERSION)
+    return;
+
+  lvl = (int16)scopesettings.triggerlevel;                 //the UI stores the unclamped level
+  lvl = (lvl < 0) ? 0 : ((lvl > 255) ? 255 : lvl);
+  fpga_counter_pass(timer0ticks, (uint8)lvl);
+
+  u.valid     = (uint8)(fpga_counter_current(timer0ticks) && fpga_cnt.has_period && (fpga_cnt.res_src != FPGA_CNT_RES_EXT));
+  u.ch        = fpga_cnt.res_src;
+  u.freq_mhz  = (fpga_cnt.freq_uhz + 500) / 1000;
+  u.period_ps = fpga_cnt.period_ps;
+  u.width_ps  = fpga_cnt.width_ps;
+  u.low_ps    = fpga_cnt.low_ps;
+  u.duty_ppm  = fpga_cnt.duty_ppm;
+  ui_ms_counter_set(&u);
 }
 
 //EXT selected: the generator drives the same pin, switch it off (UI copy and FPGA) and show it
@@ -2147,6 +2202,10 @@ void pc_glue_init(void)
     //fw-c5 (0x153C): the trigger extension at its power-on state (edge, no hold-off) and the hold-off clear request for
     //the first arm: a FEL load leaves the FPGA as the previous firmware left it (fpga_bus.h)
     fpga_trig_write(&fpga_trig, 1);
+    //C7 counter: 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source (fpga_counter.h); the timing cards take the
+    //counter's values from here on (ui_meas.c, the pass in pc_glue_counter_pass)
+    fpga_counter_boot();
+    ui_ms_counter_register();
   }
   pc_session_init(&pc_sess);
   pc_ready = 1;

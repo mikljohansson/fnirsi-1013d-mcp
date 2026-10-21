@@ -3256,12 +3256,13 @@ static void test_seq_segments(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 26);
   r = status();
-  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x1FF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
+  //features: bits 0-8 of 1.26 plus bit 10 COUNTER (fw-c7); C6's PEAK is bit 9
+  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x5FF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
   r = status();
   T_EQ(r.p[46], 2); T_EQ(r.p[47], 6);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(pc_get_u16(r.p + 32), 0x1FF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
+  T_EQ(pc_get_u16(r.p + 32), 0x5FF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
 
   //Default: off; the geometry the next arm writes (legacy: 1500 / 3000 samples = 750 / 1500 words)
   r = req(PC_CMD_GET_SEQ, 0, 0);
@@ -3490,7 +3491,7 @@ static void test_capture_stages(void)
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_CAPTURE_STAGES, PC_CAP_CAPTURE_STAGES);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x1FF);
+  T_EQ(pc_get_u16(r.p + 44), 0x5FF);
   r = req(PC_CMD_GET_HEALTH, 0, 0);
   T_EQ(r.len, PC_HEALTH_LEN); T_EQ(r.p[0], 3);
   T_EQ(pc_get_u16(r.p + 104), CS_PO); T_EQ(r.p[106], PC_CAPF_HAS); T_EQ(pc_get_u32(r.p + 116), 0);
@@ -3535,7 +3536,7 @@ static void test_enc_check(void)
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   T_EQ(r.p[35], 0);                                             //interleave order: B first
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x1FF);
+  T_EQ(pc_get_u16(r.p + 44), 0x5FF);
 
   //fw 0.2.72, core order: verified (caps bit 12 clear) only when the bitstream reported convention 1 at boot
   r = req(PC_CMD_GET_INFO, 0, 0);
@@ -3829,6 +3830,129 @@ static void test_bode(void)
   mock_bode_rows = 0;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//C7 counter (fw-c7, protocol 1.26 row 66): GET_COUNTER 0x0213 (cap COUNTER, features bit 10): the 24-byte body from
+//the HAL's held result, byte-exact with the mcp's host vector, the NEW bit per GET_COUNTER, VALID from E / current, the
+//source bits, a configuration (what = 1) handed to the HAL and echoed, the refusals with their details and no write,
+//the answer inside a modal screen (memory only), E_UNSUPPORTED on a mismatched bitstream
+
+static resp_t get_counter(uint8_t what, uint8_t gate, uint8_t src, uint8_t lvl, uint8_t hys)
+{
+  uint8_t p[8] = { what, gate, src, lvl, hys, 0, 0, 0 };
+
+  return req(PC_CMD_GET_COUNTER, p, 8);
+}
+
+static void test_counter(void)
+{
+  resp_t   r;
+  uint8_t  want[24], q[8];
+  uint16_t seq;
+  uint32_t sseq;
+
+  setup(PC_FW_FPGA_VERSION);
+
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_COUNTER, PC_CAP_COUNTER);
+  r = status();
+  T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_COUNTER, PC_FEAT_W_COUNTER);
+  sseq = pc_get_u32(r.p + 32);
+
+  //No result yet (boot): 24 bytes, no flags, the boot configuration, freq 0; an empty request reads too
+  r = req(PC_CMD_GET_COUNTER, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
+  T_EQ(r.p[0], 0); T_EQ(r.p[1], 0); T_EQ(r.p[2], 2); T_EQ(r.p[3], 0); T_EQ(pc_get_u32(r.p + 4), 0);
+  T_EQ(r.p[16], 255); T_EQ(r.p[17], 0); T_EQ(r.p[18], 128); T_EQ(r.p[19], 6); T_EQ(pc_get_u32(r.p + 20), 0);
+  r = get_counter(0, 9, 9, 9, 9);                                              //what 0: the other fields are ignored
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN); T_EQ(r.p[0], 0); T_EQ(mock.cnt_configs, 0);
+
+  //The mcp's host vector (host_resp_get_counter): seq 17, CH1, gate 2, E 1000, T 2e7, W 4e6, min 112, max 147, 128 / 6,
+  //10 kHz: NEW | VALID and the exact bytes
+  mock.cnt.held = 1; mock.cnt.current = 1; mock.cnt.has_period = 1; mock.cnt.seq = 17; mock.cnt.res_src = 0;
+  mock.cnt.res_gate = 2; mock.cnt.e = 1000; mock.cnt.t = 20000000; mock.cnt.w = 4000000; mock.cnt.min = 112; mock.cnt.max = 147;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
+  T_EQ(unhex("03110200e8030000002d310100093d007093800680969800", want, 24), 24);
+  T_MEM(r.p, want, 24);
+  //Read again: the same result is not NEW
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x02); T_EQ(pc_get_u32(r.p + 20), 10000000);
+  //A new gate: NEW again; CH2 and EXT results set their bits
+  mock.cnt.seq = 18; mock.cnt.res_src = 1;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x0B); T_EQ(r.p[1], 18);
+  mock.cnt.seq = 19; mock.cnt.res_src = 2; mock.cnt.min = 255; mock.cnt.max = 0;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x07); T_EQ(r.p[16], 255); T_EQ(r.p[17], 0);
+  //Not current (the gate off or the result stale), or no period: VALID clear and freq_mHz 0, the raw counts still given
+  mock.cnt.res_src = 0; mock.cnt.current = 0;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
+  mock.cnt.current = 1; mock.cnt.has_period = 0; mock.cnt.e = 0; mock.cnt.t = 0; mock.cnt.w = 0;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 20), 0);
+  //freq_mHz: round half up, saturating above 4294967.295 Hz (1 MHz, 30 MHz, 100 MHz)
+  mock.cnt.has_period = 1; mock.cnt.e = 100000; mock.cnt.t = 20000000; mock.cnt.w = 10000000; mock.cnt.seq = 20;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 1000000000);
+  mock.cnt.e = 3000000; mock.cnt.t = 20000000;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 0xFFFFFFFF);
+  mock.cnt.e = 3; mock.cnt.t = 10;                                             //60 MHz: saturated too
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 0xFFFFFFFF);
+  mock.cnt.e = 1; mock.cnt.t = 199999999;                                      //1.000000005 Hz -> 1000 mHz
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 1000);
+  mock.cnt.e = 7; mock.cnt.t = 60000000;                                       //23.3333... Hz -> 23333 mHz
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 23333);
+  mock.cnt.e = 7; mock.cnt.t = 20000000;                                       //70 Hz exactly
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20), 70000);
+
+  //Configuration: what 1 = the mcp's host_req_get_counter_config (gate 3, CH2, level 140, hysteresis 6): handed to the
+  //HAL, echoed; settings_seq does not move (not a capture setting)
+  r = get_counter(1, 3, 2, 140, 6);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
+  T_EQ(mock.cnt_configs, 1); T_EQ(mock.cnt_cfg[0], 3); T_EQ(mock.cnt_cfg[1], 2); T_EQ(mock.cnt_cfg[2], 140); T_EQ(mock.cnt_cfg[3], 6);
+  T_EQ(r.p[2], 3); T_EQ(r.p[3], 2); T_EQ(r.p[18], 140); T_EQ(r.p[19], 6);
+  //Level 0 = follow the trigger level again, any hysteresis: accepted
+  r = get_counter(1, 2, 0, 0, 6);
+  T_EQ(r.h.status, 0); T_EQ(mock.cnt_configs, 2); T_EQ(mock.cnt_cfg[2], 0); T_EQ(r.p[2], 2); T_EQ(r.p[3], 0);
+  r = get_counter(1, 0, 3, 0, 0);                                              //gate off on EXT
+  T_EQ(r.h.status, 0); T_EQ(mock.cnt_configs, 3); T_EQ(r.p[2], 0); T_EQ(r.p[3], 3);
+  r = status();
+  T_EQ(pc_get_u32(r.p + 32), sseq);
+
+  //Refusals: E_BAD_ARG with the field's byte offset as detail, nothing handed to the HAL
+  r = get_counter(2, 0, 0, 0, 0);     T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  r = get_counter(0xFF, 0, 0, 0, 0);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  r = get_counter(1, 4, 0, 0, 0);     T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
+  r = get_counter(1, 2, 4, 0, 0);     T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  r = get_counter(1, 2, 0, 100, 101); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  q[0] = 1;
+  r = req(PC_CMD_GET_COUNTER, q, 1);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  T_EQ(mock.cnt_configs, 3);
+
+  //Inside a modal screen: answered there (memory only), nothing closes
+  mock.ui_modal = 2;
+  mock.ui_cancels = 0;
+  ui_run_modal(PC_MODAL_MS + 5);
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_GET_COUNTER, seq, 0, 0);
+  ui_run_modal(5);
+  T_EQ(mock.ui_modal, 2); T_EQ(mock.ui_cancels, 0);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
+  mock.ui_modal = 0;
+
+  //A mismatched bitstream: the basic set only
+  setup(0x153B);
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.h.status, PC_E_UNSUPPORTED); T_EQ(pc_get_u16(r.p), PC_UNSUP_FPGA_MISMATCH);
+}
+
 int main(void)
 {
   test_diag_wire();
@@ -3876,6 +4000,7 @@ int main(void)
   test_capture_stages();
   test_decim_held_divider();
   test_bode();
+  test_counter();
   mock_clear_resps();
   return t_report("test_session");
 }

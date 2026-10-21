@@ -32,6 +32,23 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.103 + fw-c7 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 provisional, row 66 addition)
+
+- **Hardware counter** (FPGA 0x153C, item C7): the firmware configures the counter at boot (0x62 = level 128 / hysteresis 6,
+  0x61 = gate 100 ms on the trigger source) and reads its 16-byte snapshot once per screen pass (17 bus strobes, about
+  5 us). The **Freq, Period, +Width, -Width, +Duty and -Duty cards** of the trigger channel show the counter's values
+  (reciprocal counting over the gate: 5e-7 relative resolution at 100 ms, the crystal's accuracy on top) while it holds
+  a current result with at least two edges; the other channel's cards, the voltage cards, EXT and signals under the
+  thresholds keep the record's measurement. Same formats as before. The counter's level follows the trigger marker
+  (hysteresis 6 codes) unless the host pins it; a time base or filter change restarts the gate so no result mixes two
+  rates (`fpga_counter.c`, firmware/README.md "Hardware counter").
+- **GET_COUNTER (0x0213)**, cap COUNTER (bit 22), features bit 10: `what` 0 reads the held result, 1 configures (gate 0 /
+  10 ms / 100 ms / 1 s, source trigger / CH1 / CH2 / EXT, level with 0 = follow the trigger level, hysteresis) then reads;
+  24 bytes: flags (NEW, VALID, EXT, CH2), seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz. Answered
+  inside menus (no FPGA access in the handler; a configuration is written by the next pass). Byte-exact with the mcp's
+  `host_` vectors (mcp-c8).
+- Host tests: `test_fpga_bus` test_counter / test_counter_derive on the bus model's synthetic square waves,
+  `test_session` test_counter, `test_ui` test_counter_cards; six 1.26 counter vectors (137 total).
 #### 0.2.103 + ui-type (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 unchanged)
 
 - **Trigger type in the trigger menu** (`docs/plans/ui-rows.md` section 2; FPGA 0x153C): a sixth row "Trigger" / "type"

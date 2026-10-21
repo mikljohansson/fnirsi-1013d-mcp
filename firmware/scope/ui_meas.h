@@ -132,17 +132,42 @@ int32  ui_ms_noise_cdb(const int16 *cdb, uint32 first, uint32 last);
 //Card sources (roadmap section 8 item 6: an FPGA frequency / period counter). A Scope card's value comes from the
 //record statistics of its source (the live channel or a reference trace, scope_functions.c measurementfunctions)
 //unless a source is registered for its item: then a card of a live channel (CH1, CH2; never a reference trace) asks
-//that source. A source writes the card's value text for channel ch (0 CH1, 1 CH2) into text, at most UI_MS_TEXT_MAX - 1
-//characters, formatted like the others (ui_fmt.h: ui_fmt_sig4 for Freq and Period, UI_MEAS_NO_PERIOD with no signal),
-//and must not touch the FPGA bus (it runs while the screen is drawn: read latched counter values only). The driver
-//registers at start-up when the running bitstream has the counter (pc_sess.var.caps) and registers 0 otherwise; the
-//cards, the MEASURES menu and the settings do not change.
+//that source first. A source writes the card's value text for channel ch (0 CH1, 1 CH2) into text, at most
+//UI_MS_TEXT_MAX - 1 characters, formatted like the others (ui_fmt.h: four significant digits), and returns 1; it returns
+//0 (text untouched) when it has nothing for that card, and the record's measurement is shown. A source must not touch
+//the FPGA bus (it runs while the screen is drawn: read latched counter values only). The driver registers at start-up
+//on the built-for bitstream (pc_glue_init: ui_ms_counter_register) and registers nothing otherwise; the cards, the
+//MEASURES menu and the settings do not change.
 #define UI_MS_TEXT_MAX        20                    //measurementtext[20] (variables.c)
 
-typedef void (*ui_ms_source)(int ch, char *text);
+typedef int (*ui_ms_source)(int ch, char *text);
 
 void         ui_ms_set_source(int item, ui_ms_source fn);   //item: Scope list index (ui_fmt.h UI_MEAS_*); 0 = record
 ui_ms_source ui_ms_get_source(int item);
+
+//C7 counter (fw-c7, FPGA 0x153C, fpga_counter.h): the main loop's pass copies the counter's latest result here
+//(ui_ms_counter_set, memory only) and the six timing cards are its sources (ui_ms_counter_register). **The card rule**:
+//the counter follows the trigger source (one channel at a time), so a Freq, Period, +Width, -Width, +Duty or -Duty card
+//of live channel ch shows the counter's value when the counter's current result (fpga_counter_current: the gate on, the
+//result younger than three gates + 100 ms) is for that channel and has a period (E >= 1); every other card, the other
+//channel's timing cards, an EXT-source result, a result without edges (the signal under the Schmitt thresholds, or
+//slower than two edges per gate) and the reference traces keep the record-based measurement. Same formats as the
+//record's (ui_fmt_mhz / ui_fmt_ps / ui_fmt_sig4_fixed: four significant digits), so the text never changes shape.
+typedef struct
+{
+  uint8  valid;                                     //a current result with a period for channel ch
+  uint8  ch;                                        //0 CH1, 1 CH2
+  uint64 freq_mhz;                                  //frequency in mHz
+  uint64 period_ps;                                 //period, high time, low time in ps
+  uint64 width_ps;
+  uint64 low_ps;
+  uint32 duty_ppm;                                  //high time / period in ppm
+} ui_ms_counter;
+
+void ui_ms_counter_set(const ui_ms_counter *c);     //every pass (valid 0 = no current result: the record's values)
+void ui_ms_counter_register(void);                  //the six timing items' sources (boot, built-for bitstream only)
+//The card text for item (UI_MEAS_FREQ .. UI_MEAS_NDUTY) of channel ch from the copy: 1 written, 0 = use the record
+int  ui_ms_counter_text(int item, int ch, char *text);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //MEASURES menu (stock look: dark grey box, white edge, black separators, white names when chosen, grey when not;

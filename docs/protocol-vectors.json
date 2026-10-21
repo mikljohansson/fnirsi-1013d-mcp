@@ -48,6 +48,7 @@
   "READ_SEQ": 528,
   "BODE_CTRL": 529,
   "READ_BODE": 530,
+  "GET_COUNTER": 531,
   "SET_TRIGGER2": 537,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
@@ -6262,6 +6263,32 @@
    ]
   },
   {
+   "name": "req_get_counter",
+   "description": "1.26 (fw-c7): read the hardware counter's latest result (what 0; the other fields are ignored)",
+   "hex": "a513010013023600000008000000919f000000000000000069df2265",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 54,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 54,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
    "name": "resp_ping",
    "description": "PING response (spec section 13). The device parser drops frames with RESPONSE set",
    "hex": "a513010101000200000002000000b9ea6869ac2a93d8",
@@ -7087,6 +7114,106 @@
      "flags": 1,
      "len": 28,
      "payload": "000072756e74202f2077696e646f773a204650474120307831353345"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "req_get_counter_follow_trigger",
+   "description": "1.26 (fw-c7): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 = follow the UI trigger level, hysteresis 6; the configuration is written by the next main-loop pass",
+   "hex": "a513010013025000000008000000e292010200000600000002917c1b",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 80,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0102000006000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 80,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0102000006000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_get_counter_ext_10ms",
+   "description": "1.26 (fw-c7): 10 ms gate on EXT (the level and hysteresis do not apply to EXT: pinned at 128 / 0)",
+   "hex": "a51301001302510000000800000031d501010380000000007f168d38",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 81,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0101038000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 81,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0101038000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_get_counter_1_26_ch2",
+   "description": "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (the trigger level followed), hysteresis 6, freq_mHz 1000000000",
+   "hex": "a513010113025200000018000000aade0a0501001027000080841e0040420f003cc8960600ca9a3bfd119d1d",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 82,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "0a0501001027000080841e0040420f003cc8960600ca9a3b"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_counter_1_26_no_edges",
+   "description": "1.26 (fw-c7) GET_COUNTER response: a new gate with fewer than two edges (the signal under the Schmitt thresholds 60..70 against 128 / 6): NEW set, VALID clear, E = T = W = 0, freq_mHz 0; the cards keep the record's values",
+   "hex": "a5130101130253000000180000007999010902000000000000000000000000003c468006000000007c2837f3",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 83,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "010902000000000000000000000000003c46800600000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_counter_e_bad_arg_hyst",
+   "description": "1.26 (fw-c7) GET_COUNTER E_BAD_ARG: detail = the byte offset of the field (0 what, 1 gate, 2 source, 4 hysteresis > a non-zero level), then the text; nothing is configured then",
+   "hex": "a513010113025400040014000000f217040068797374657265736973203e206c6576656ca8b15b75",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 84,
+     "status": 4,
+     "flags": 1,
+     "len": 20,
+     "payload": "040068797374657265736973203e206c6576656c"
     }
    ],
    "device_events": []
