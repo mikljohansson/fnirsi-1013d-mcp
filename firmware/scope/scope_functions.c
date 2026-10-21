@@ -2791,7 +2791,17 @@ int scope_display_channel_bars(PCHANNELSETTINGS settings, int ch)
   pb_draw_cb    cb = { scope_bars_to_y, scope_bars_vline, settings };
 
   if(!pc_glue_peak_record(ch, &pairs, &n, &gain, &off))
+  {
+    //Sample Peak at 200 MSa/s: the FPGA stores every sample (no window to reduce), so the bars are the per-column min /
+    //max of the 8-bit record, the Bars trace style; Trace style is grey while Peak whatever the rate
+    if(pc_glue_sample_peak() && !scopesettings.waveviewmode)
+    {
+      scope_display_channel_peak_trace(settings);
+      return 1;
+    }
+
     return 0;
+  }
 
   pb_start(&w, pairs, n, (disp_first_sample > 0) ? (uint32)disp_first_sample : 0, (uint32)(disp_sample_step * 65536.0 + 0.5),
            gain, off, settings->invert);

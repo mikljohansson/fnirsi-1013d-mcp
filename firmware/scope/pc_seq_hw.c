@@ -158,8 +158,10 @@ int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
     return 0;
 
   //C6 peak detect: an averaging run would mix the max and min bytes of the words (docs/plans/fpga-0x153c.md section 4):
-  //Average is not applied while Sample is Peak (GET_STATUS 46 = 0; the ACQ menu greys the box, docs/plans/ui-rows.md 3.2)
-  if(!scopesettings.average_mode || scopesettings.waveviewmode || scopesettings.long_mode || c->peak ||
+  //Average is not applied while Sample is Peak (GET_STATUS 46 = 0; the ACQ menu greys the box, docs/plans/ui-rows.md 3.2).
+  //ui-sample: the setting decides, not the record: at 200 MSa/s (and over 8190 samples) Peak falls back to the 8-bit
+  //record, and the menu still says "Average not applied", so no average runs there either
+  if(!scopesettings.average_mode || scopesettings.waveviewmode || scopesettings.long_mode || c->peak || pc_glue_sample_peak() ||
      ((scopesettings.triggermode != 0) && (scopesettings.triggermode != 2)))
   {
     ui_state = 0;
