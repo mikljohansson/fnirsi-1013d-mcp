@@ -6,8 +6,8 @@
 
 Checks:
   - the plan vectors (docs/bode-plan-vectors.json): every point and sweep row, all fields
-  - 3000 random frequencies and 300 random sweeps: the C planner equals plan_point / plan_sweep (M, N, p / q, record,
-    increment, window, f in mHz)
+  - 3000 random frequencies and 300 random sweeps: the C planner equals plan_point / plan_sweep (P, N, p / q, record,
+    window, f in mHz; fw-d5, protocol 1.27: the stimulus is an integer period P of 5 ns clocks, f = 200 MHz / P)
   - log2 / exp2 helpers against math
   - measure_pair on records of the simulator's RC (8-bit quantised with noise, CIC-like 16-bit too, legacy and Hann
     points): H within 0.005 dB / 0.03 deg of the host, levels, noise, leakage, the half-record check and its verdict
@@ -68,12 +68,12 @@ class Cli:
 
 
 def host_row(pp):
-    return f"{pp.m} {pp.n} {pp.divider} {pp.phase_inc} {int(round(pp.f_actual * 1000))} {pp.p} {pp.q} {pp.record} " \
+    return f"{pp.period} {pp.n} {pp.divider} {int(round(pp.f_actual * 1000))} {pp.p} {pp.q} {pp.record} " \
            f"{pp.total_samples} {1 if pp.window == 'hann' else 0}"
 
 
 def vec_row(r):
-    return [r["m"], r["n"], r["divider"], r["phase_inc"], r["f_mhz"], r["p"], r["q"], r["record"], r["total"]]
+    return [r["period"], r["n"], r["divider"], r["f_mhz"], r["p"], r["q"], r["record"], r["total"]]
 
 
 def c_fields(line):
@@ -84,22 +84,22 @@ def test_vectors(cli, path):
     with open(path, encoding="utf-8") as f:
         v = json.load(f)
     for r in v["points"]:
-        got = c_fields(cli.plan(int(round(r["f_req"] * 1000))))[:9]
+        got = c_fields(cli.plan(int(round(r["f_req"] * 1000))))[:8]
         check(got == vec_row(r), f"vector point {r['f_req']} Hz: C {got} json {vec_row(r)}")
     for s in v["sweeps"]:
         rows = cli.sweep(int(round(s["start"] * 1000)), int(round(s["stop"] * 1000)), s["points"])
         check(len(rows) == len(s["plan"]), f"vector sweep {s['start']}-{s['stop']}/{s['points']}: {len(rows)} points, "
                                            f"json {len(s['plan'])}")
         for i, (a, r) in enumerate(zip(rows, s["plan"])):
-            check(c_fields(a)[:9] == vec_row(r), f"vector sweep {s['start']}-{s['stop']} point {i}: {a} vs {vec_row(r)}")
+            check(c_fields(a)[:8] == vec_row(r), f"vector sweep {s['start']}-{s['stop']} point {i}: {a} vs {vec_row(r)}")
 
 
 def f_mhz_tie_ok(c, h, pp):
-    """f in mHz: the host rounds a float product; the exact value inc x 97656250 / 2^23 may sit within the float error
-    of a half. Accept a 1 mHz difference only there."""
+    """f in mHz: the host rounds a float quotient; the exact value 200e9 / P may sit within the float error of a half.
+    Accept a 1 mHz difference only there."""
     if c == h:
         return True
-    exact = pp.phase_inc * 97656250 / 2 ** 23
+    exact = 200e9 / pp.period
     return abs(c - h) == 1 and abs((exact % 1) - 0.5) < 1e-5
 
 
@@ -111,7 +111,7 @@ def test_random_plans(cli, n_points=3000, n_sweeps=300):
         pp = B.plan_point(f_mhz / 1000)
         c = c_fields(cli.plan(f_mhz))
         h = c_fields(host_row(pp))
-        if c[:4] + c[5:] != h[:4] + h[5:] or not f_mhz_tie_ok(c[4], h[4], pp):
+        if c[:3] + c[4:] != h[:3] + h[4:] or not f_mhz_tie_ok(c[3], h[3], pp):
             bad += 1
             if bad < 10:
                 print(f"  plan mismatch {f_mhz} mHz: C {c} host {h}")
@@ -121,7 +121,7 @@ def test_random_plans(cli, n_points=3000, n_sweeps=300):
         a = int(round(10 ** rnd.uniform(3, 10)))
         b = int(round(10 ** rnd.uniform(3, 10)))
         n = rnd.choice([1, 2, 5, 10, 20, 37, 50, 100, 200])
-        host = [pp.m for pp in B.plan_sweep(a / 1000, b / 1000, n)]
+        host = [pp.period for pp in B.plan_sweep(a / 1000, b / 1000, n)]
         c = [c_fields(x)[0] for x in cli.sweep(a, b, n)]
         if host != c:
             bad += 1
@@ -217,7 +217,7 @@ def measure_case(cli, tmp, f, rnd, wide=False, transient=None, label=""):
     hp = B.wrap_deg(math.degrees(np.angle(ms.h)))
     d_db = k["h_mdb"] / 1000 - hd
     d_deg = ((k["h_mdeg"] / 1000 - hp) + 180) % 360 - 180
-    tag = f"{label} {f:g} Hz (M {pp.m}, N {pp.n}, {pp.window}, CH2 range {r2})"
+    tag = f"{label} {f:g} Hz (P {pp.period}, N {pp.n}, {pp.window}, CH2 range {r2})"
     check(abs(d_db) < 0.005, f"{tag}: |H| C {k['h_mdb'] / 1000:.4f} host {hd:.4f} dB")
     check(abs(d_deg) < 0.03, f"{tag}: arg H C {k['h_mdeg'] / 1000:.3f} host {hp:.3f} deg")
     check(abs(k["lvl1"] / 1000 - B.db(abs(ms.x1))) < 0.005, f"{tag}: V1 C {k['lvl1'] / 1000:.4f} host {B.db(abs(ms.x1)):.4f} dB")

@@ -35,7 +35,7 @@ static int load(const char *path, uint16 *dst, int max)
 
 static void print_plan(const bode_plan *pp)
 {
-  printf("%u %u %u %u %llu %u %u %u %u %u\n", pp->m, pp->n, bode_divider(pp), pp->phase_inc,
+  printf("%u %u %u %llu %u %u %u %u %u\n", pp->period, pp->n, bode_divider(pp),
          (unsigned long long)pp->f_mhz, pp->p, pp->q, pp->record, bode_total(pp), pp->hann);
 }
 
