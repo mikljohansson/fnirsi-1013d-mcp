@@ -32,6 +32,21 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Unnumbered (provisional) - fw-cruft (protocol 1.27, row 67): what the 0x153C bitstream dropped
+
+Branch `fw-cruft`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 77.
+
+- **No more 0x0F writes**: the UI and host arms and the done poll wrote 0x0F (`sample_read_enable`, a no-op mux on
+  every Atlan4 bitstream, removed in 0x153C); gone with `fpga_set_long_timebase` and `scopesettings.samplemode`.
+  `host_tests/check_retired_regs.py` (in `make test`) fails on a literal 0x0F / 0x3C / 0x41 FPGA write. (43e2b0a)
+- **READ_LIVE (0x0206) and caps bit 9 LIVE_READ retired** (never built): the code still answers E_UNSUPPORTED, the
+  bit is reserved; `req_read_live` left the vectors. (b10bc96)
+- **0x53 carries K alone**: the core-order swap (SET_DECIM flags bit 0) did nothing on 0x153C and made GET_DECIM's
+  status disagree with the FPGA's 0x29; SET_DECIM accepts flags bits 0..2 and drops them, GET_DECIM reports them 0.
+  (19618eb)
+- **Known regression, not fixed here**: the roll mode (100 ms/div and slower) reads the live ADC registers 0x24 / 0x26,
+  which 0x153C removed; the trace there is not valid on 0x153C (section 77 "Open").
+
 #### Unnumbered (provisional) - fw-small (protocol unchanged): three small fixes
 
 Branch `fw-small`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 76.
@@ -1588,6 +1603,11 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-21 (fw-cruft, protocol 1.27 row 67): READ_LIVE / LIVE_READ removed (`Cmd.READ_LIVE`, `Caps.LIVE_READ`,
+  `ReadLiveReq`, `Scope.read_live`; `P.RETIRED_CMDS`: the simulator answers 0x0206 E_UNSUPPORTED as the firmware does)
+  (1777a67); the 0x53 swap / falling-edge flags removed (`DECIM_SWAP`, `DECIM_NEG_A` / `_B`, `DecimConfig.flags`,
+  `SetDecimReq.SWAP` / `NEG_A` / `NEG_B`, the decimation result's "flags" list; the simulator drops SET_DECIM flags
+  bits 0..2) (eea44e1).
 - 2026-10-21 (mcp-d6, provisional, protocol 1.27 / FPGA 0x153D, docs/plans/fpga-0x153c.md item D6; simulator only):
   the host side of the 0x153D generation, byte-exact with fw-d4's logger and fw-d5's generator / pattern vectors.
   **The generator is the pattern**: SET_GEN's raw modes are P16 / H16 (the period and high part in 1/65536 of a 5 ns

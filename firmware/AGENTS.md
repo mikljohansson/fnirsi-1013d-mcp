@@ -6,6 +6,7 @@ section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SE
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-d4 (2026-10-21): fw 0.2.104 + D4 (version provisional), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built-for word still 0x153C; section 74.**
 **Branch fw-d5 (2026-10-21): fw 0.2.104 + D5 (version provisional), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M; still built for 0x153C until D3; section 75.**
+**Branch fw-cruft (2026-10-21): main 703e9c9, what 0x153C dropped (version not bumped, protocol 1.27 row 67): no 0x0F writes, READ_LIVE / caps bit 9 retired, 0x53 = K alone (SET_DECIM flags bits 0..2 dropped); open: the roll mode still reads the removed 0x24 / 0x26 (section 77).**
 **Branch fw-small (2026-10-21): main 803d215 + three small fixes (version not bumped), protocol unchanged: the forced stop writes 0x0E = 0 before 0x1A = 0 (`fpga_force_stop`), Vmax / Vmin / Vpp / Vp from the peak bytes with Sample = Peak (`pb_extremes`), the "ADC readout fault near code 128" message without the bitstream advice; section 76.**
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (fw 0.2.104), protocol 1.26 (row 66 "Peak detect"): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (fw 0.2.104), protocol 1.26 (row 66 addition): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
@@ -5956,3 +5957,62 @@ OK, `make -s gcc10` without new warnings in the touched files.
   command that ends a run (`pc_hal_seq_stop`). Rejecting FORCE on a run (E_STATE) would be a wire-visible change, so it is
   left to the coordinator.
 - ui-sample section 73's first "Open" bullet is done here.
+
+## 77. fw-cruft: what the 0x153C bitstream dropped, out of the firmware and the host (version not bumped, protocol 1.27 row 67)
+
+Branch `fw-cruft` from main 703e9c9. Commits 43e2b0a (0x0F), b10bc96 (READ_LIVE, firmware + protocol + vectors), 1777a67
+(READ_LIVE, mcp), 19618eb (0x53 swap, firmware + protocol), eea44e1 (0x53 swap, mcp), then the docs. Nothing benched;
+`PC_FW_VERSION` / `PC_FW_FPGA_VERSION` untouched. Source: fpga/al3/README.md section 15 (fpga-c4's cruft table).
+
+**1. Write 0x0F** (`sample_read_enable`: both mux arms were `i_mcu_clk`; 0x153C decodes nothing). Removed from
+`fpga_do_conversion` (0x0F = 0 / 1 by `samplemode`), `fpga_done_conversion` (0x0F = 1 at done), `fpga_set_long_timebase`
+(the only statement left: the function and its five callers' branches are gone; the callers now call
+`fpga_set_time_base` when not in long mode, as before), `pc_hal_arm` and `pc_hal_acq_finish`. `scopesettings.samplemode`
+only chose between those writes: deleted with its seven assignments (in-RAM struct only; `scope_save_setup` copies it in
+memory, nothing on the card). The model never decoded 0x0F (a length-1 traced write), so the check that it stays gone is
+`host_tests/check_retired_regs.py` in `make test`: a literal `fpga_write_cmd` / `fpga_write_u24` / `seq_w8` of 0x0F,
+0x3C or 0x41 in `firmware/scope/*.[ch]` fails it (it flags the four old writes on the pre-change `fpga_control.c`).
+docs/protocol.md ARM step 2 and the section 14 note on ARM / DONE say so.
+
+**2. READ_LIVE (0x0206) / caps bit 9 LIVE_READ**: `PC_CMD_RETIRED_0206` with a NULL handler and no cap, so the answer
+stays E_UNSUPPORTED "capability" (not E_UNKNOWN_CMD); `PC_CAP_LIVE_READ` is a reserved-bit comment. test_session: the
+caps word has bit 9 clear, 0x0206 answers E_UNSUPPORTED. gen_vectors.py keeps the request's sequence slot (a `None`
+entry) so every later `req_*` vector keeps its bytes: docs/protocol-vectors.json only loses `req_read_live` and the
+command map's READ_LIVE (both checkers OK). protocol.md: command row and caps bit 9 "(reserved)", the READ_LIVE paragraph
+gone, the 0x153A note says 0x153C drops the reads, row 67 says it (no new minor). The mcp: `P.RETIRED_CMDS = {0x0206}`
+(the simulator answers E_UNSUPPORTED), `Cmd.READ_LIVE`, `Caps.LIVE_READ`, `ReadLiveReq`, `Scope.read_live`,
+`_cmd_read_live` removed.
+
+**3. 0x53 bits 4..2 and 0x3C / 0x41.** Bits 3 / 4 were already written 0 (fw-one). Bit 2, the core-order swap, was still
+live: SET_DECIM flags bit 0 put `PC_DECIM_SWAP` into the setting and every arm wrote it to 0x53, which 0x153C ignores
+while its 0x29 reads bits 4..2 as 0, so GET_DECIM's status (bit 2) and the FPGA's 0x29 (bytes 26 / 27) disagreed. Now
+`PC_DECIM_SWAP` / `PC_DECIM_FLAGS`, `pc_decim_cfg.flags`, `pc_dec_flags` are gone, `pc_decim_mode` = K, `fpga_decim_write`
+masks the mode to bits 1..0, SET_DECIM accepts flags bits 0..2 and drops them (GET_DECIM flags = bit 3 FIR only),
+`PC_DECIM_SET_MASK` = K | SET_FIR | SET_PEAK, the Bode engine passes only its FIR bit. `fpga_model.c` reads 0x29 bits 4..2
+as 0 on 0x153C+ (README section 15: "ignored on write, 0x29 byte 0 bits 4..2 read 0"; the brief's "read back" was the
+pre-0x153C behaviour, kept for the model's older versions). Tests: test_session's decim maths without the swap, SET_DECIM
+flags 0x07 accepted and dropped for filter 2 and 4 (setting, flags byte 0, status 0x82 / 0x81); test_fpga_bus
+`fpga_decim_write(0x1E)` puts 0x02 on the bus. 0x3C / 0x41: no FPGA traffic left (fw-one deleted the commented-out
+`fpga_set_battery_level`; touchpanel.c's 0x3C / 0x41 are GT911 bytes); the check script keeps it so. mcp: the DECIM_SWAP /
+NEG constants, `DecimConfig.flags`, the SetDecimReq bits and server.py's flag names are gone, the simulator drops bits 0..2.
+
+**Tests**: `make -s test` all green (test_session 73253 / 73251, test_fpga_bus 10504), check_vectors OK (both
+checkers), check_retired_regs OK; mcp ruff clean, pytest 548 passed (Windows venv); `make -s gcc10` clean of new warnings
+(clean rebuild; the touched files show only the upstream unused-variable / implicit-declaration ones).
+
+**Bench (owner / coordinator, FEL; never without the backup)**: the 0x0F removal changes nothing the FPGA sees on
+0x153B / 0x153C. Check a UI capture and a host ARM at 200 MSa/s and 1 MSa/s (trace and edge position as before), and
+GET_DECIM after `SET_DECIM 2, flags 1`: flags byte 0, bytes 2 and 26 equal (0x82).
+
+**Open: the roll mode reads the removed live ADC registers (a 0x153C regression, found here, reported to the
+coordinator 2026-10-21; the owner decides: a logger-based roll mode for 0x153D, restore the 0x24..0x27 arms in the RTL,
+or drop roll).** Long mode (time bases 100 ms/div and slower: `scope_set_timebase` in scope_functions.c sets
+`long_mode` for `timeperdiv < 11`; menu.c's ACQ Long / Short box) runs `scope_get_long_timebase_data` (test.c 824, called
+from fnirsi_1013d_scope.c 333) and `scope_check_long_trigger` (test.c 1054). Both take every point from
+`fpga_average_trace_data` (fpga_control.c 1413; `_long` at 1457), which sends `settings->averagecommand` and strobes 10
+(100) bytes. `averagecommand` is 0x24 for CH1 and 0x26 for CH2 (scope_functions.c 5864 / 5886, variables.h 555): the live
+ADC pin reads that fpga-c4 removed (78ccaa0 dropped the `8'h24..8'h27` arms; the read now returns the stale output
+register byte). The audit missed it because it looked for READ_LIVE and literal 0x24 reads, not a command byte held in
+the channel settings. Left untouched here on the coordinator's instruction (`averagecommand` and the roll path exactly
+as they were); `check_retired_regs.py` does not list 0x24..0x27 for that reason (add them when the roll path changes).
+`scope_get_long_timebase_data1` (test.c 583) is a dead older copy with the same reads.

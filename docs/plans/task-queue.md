@@ -223,9 +223,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Flash and bench 0x153C** (fpga-c4, built 10-21: `dist/al3-0x153C.bin` `2580b090...c7f2`, flash image `07393bf5...1f77`,
   unbenched; fw 0.2.104+ is built for it). Checklist: fpga/al3/AGENTS.md "0x153C built, fpga-c4"; bench checks: contract
   9.2 items 1-7 (README section 15). Then dist `recommended`, 0x153B `supported`.
-- [ ] **0x153C follow-ups outside the FPGA**: `docs/protocol.md` still describes reads 0x24..0x27 / READ_LIVE (lines 263,
-  984) and the 0x0F arm write (887): both gone in 0x153C (0x0F is a no-op write; the firmware still writes it in
-  `pc_hal_arm` / `pc_hal_acq_finish` and `fpga_control.c`: drop it with the one-bitstream cleanup).
+- [x] **0x153C follow-ups outside the FPGA** (fw-cruft, branch `fw-cruft`, firmware/AGENTS.md section 77: the 0x0F writes
+  dropped 43e2b0a, READ_LIVE / LIVE_READ retired b10bc96 + 1777a67, the 0x53 swap bit dropped 19618eb + eea44e1; found on
+  the way: the UI roll mode still reads the removed 0x24 / 0x26, reported to the coordinator)
 - [x] **Pin and flash 0x153B** (flashed 10-20 19:31, benched good 20:40-20:49, recommended)
 - [x] **Long free-running testbench** for the decimation filter: fpga-gen4's 0x1535 work (tb/run.sh, seeds 12345/1/77, 13 FIR mutations caught; fpga/al3/README.md section 5, commit 292a596)
 - [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source
