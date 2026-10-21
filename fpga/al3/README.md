@@ -2271,6 +2271,156 @@ The generator's post at 1 kHz and 1 MHz on CH1 and on EXT: frequency within 1e-5
 samples); with the probe off the post, min / max read the noise band around 128 and E = 0 at a level outside it; a time
 base change during a 1 s gate shows the one-edge blip of "Rate changes" unless the firmware restarts the gate.
 
+### 14. Streaming logger; version 0x153D, item D1 (fpga-d1, 2026-10-21)
+
+Contract: `docs/plans/fpga-0x153c.md` sections 2.1 (0x69, 0x6A), 2.2 (0x38), 2.4 (0x0A / 0x14 / 0x18 while streaming), 6
+(the sample ring is the FIFO) and 9.1 (step 17). The pattern generator with its trigger engine (D2) is documented by its
+own agent; D3 integrates them and sets the version byte 0x3D. With 0x69 = 0 (power-on) nothing here touches the capture:
+it is cycle-identical to 0x153C (the equivalence steps of `tb/run.sh` and the normal captures of `tb_stream.v`).
+
+#### Register map
+
+| Cmd | Bytes | Bits | Meaning |
+|---|---|---|---|
+| 0x69 | 1 | 0 | **stream**: 1 = the capture never stops and never triggers (the write enable is forced on, the trigger check off); 0 (power-on) = the 0x153B rules again from the next write clock edge |
+| | | 1 | **clear lap**: 1 clears the lap flag (self-clearing, a pulse; the stream bit is written in the same byte, so 0x03 = clear with the stream on, 0x02 = clear with it off). Bits 7..2 write 0 |
+| 0x6A | 2 | 12..0 | **reader position R**: the next ring word the MCU reads (high byte first, taken as a whole on the low byte). 0x01 = 1 resets it to 0 |
+
+Read 0x38, 8 bytes, one snapshot taken when the command byte is written (copied on the 200 MHz side 15 .. 20 ns later, as
+0x35; the bytes are static for the read):
+
+| Byte | Content |
+|---|---|
+| 0 | { stream (bit 7), lap (bit 6), 0 (bit 5), W[12:8] (bits 4..0) }: the stream bit in effect; lap = a write overwrote the oldest unread word since the last clear (sticky, survives 0x01 = 1). One reserved bit: the contract's { streaming, lap, 0, 0, 0, W[12:8] } is 10 bits wide, W has 13 address bits |
+| 1 | W[7:0]: the ring address after the last word written = the next word to be written while streaming; frozen after a stop. Word 0 of a capture is ring word 0 |
+| 2..5 | u32 count, high byte first: memory words written since 0x01 = 0 (wraps at 2^32: 43 s at 100 Mwords/s, 2.4 h at 500 kwords/s). W == count mod 8192 in every snapshot (same pipeline stage) |
+| 6..7 | u16 unread: words written since the reader position, 0 .. 8192 (8192 = the ring is full, nothing lost yet; the next write sets lap). Bits 15..14 read 0 |
+
+Arm (the firmware's LOG_START, fw-d4): 0x0D / 0x53 / 0x54 / 0x56 as for a capture, 0x69 = 1, 0x57 = 0, 0x1A = 0, 0x0B =
+0x0C = 0, 0x01 = 1, the 0x05 wait, 0x0E = 0, 0x01 = 0; then 0x38, 0x6A = 0, 0x69 = 3. Drain: 0x38, then per lane 0x1F =
+R, the read command, the dummy strobe and n strobes exactly as READ_RAW (`pc_raw_core`: a new 0x1F at the ring end), then
+0x6A = R + n. After a lap: 0x6A = W of a fresh 0x38, 0x69 = 3; the words between are the gap (the count says how many).
+Stop: 0x69 = 0; in auto mode with 0x0E = 0 the write stops at the next edges, 0x0A reads 1, W and the count freeze and the
+tail [R, W) is drained as before; 0x14 then reads W (0x0B = 0x0C = 0: the 0x153B time-out address). Formats: legacy K = 0
+(two samples per word per channel, lanes 0x20 / 0x21 for CH1, 0x22 / 0x23 for CH2), 16-bit K >= 1 (0x20 / 0x21 = CH1 low /
+high byte, 0x22 / 0x23 CH2), the peak pairs of C2 likewise. Timestamps: t = count x the word period (2 (D + 1) x 5 ns
+legacy, N x 5 ns filtered), exact because the write clock is the crystal's.
+
+#### Design (`zaklad.v`, block "Streaming logger" after the counter; the two gates in the capture logic; decoder 0x69 /
+0x6A, read 0x38)
+
+- **The two gates.** `str` (0x69 bit 0) goes through a two-flop synchroniser into clk_200MHz (`str_200`) and from there
+  into one write-clock flop (`str_s`). `sampling_enable = str_s | ~(post-trigger complete | auto time-out)`, so
+  `sample_write_enable` never falls while streaming (0x0A = `~sample_write_enable` reads 0, the memory writes every
+  `swc_adv` edge, the write address and the decimator run as in any capture); `trigger_check_enable` carries `& ~str_200`
+  beside C1's `& ~ho_act` (a clk_200MHz register, off the half-cycle compare path), so neither the edge compare, the EXT
+  latch nor the qualified types can set `sampling_triggered` (0x18 reads 0). Nothing else in the capture logic changes:
+  `trigger_read_address` and `trigger_address` run along as in an untriggered auto capture, which is why 0x14 is "not
+  meaningful" while streaming but reads W after an auto-mode stop.
+- **Bookkeeping on clk_200MHz, the write clock read only through the sequencer's settled snapshot.** At `swc_rise_q`
+  (7.5 ns after a write clock rise) the block takes `adv_d & swe_d` (the sequencer's registered copies: a word was written
+  at that edge), `sample_write_address` (the address after it, kept in `p_wa` only when a write happened, so `p_wa` is
+  "the address after the last word written" at every moment, also after a stop) and `ssr_d` (that edge was a reset edge).
+  One clock later `p_wr` counts the word into `lg_cnt` and `occ`; `lg_wa <= p_wa` in the same stage, so W and the count
+  are consistent at every clock. Multicycle class: the same write-clock-to-200 MHz paths the sequencer's `sn_*` use.
+- **Reset.** A reset edge (`p_rst`, from `ssr_d` at the snapshot) zeroes `lg_cnt` and `occ`: the memory writes of the
+  0x01 = 1 window (Atlan's design writes ring word 0 on every edge of the reset) are not counted, the first edge after the
+  release writes word 0 at ring word 0 and is counted, exactly as the memory sees it. `q_rs2` (the sequencer's synchronised
+  reset) forces the reader position copy `rd_200` to 0, so the firmware starts a session without a 0x6A write.
+- **Unread count and lap** (`occ`, 14 bits). The 0x6A low byte loads `log_rd` whole and toggles `rd_t`; a three-flop
+  synchroniser on clk_200MHz copies it into `rd_200` and, one clock later (`rd_ld`), loads `occ <= p_wa - rd_200` (13-bit
+  difference, 0 .. 8191: R = W is empty). Every counted write adds one, saturating at 8192 (full: all 8192 ring words are
+  unread, nothing lost yet). A counted write that arrives with `occ` = 8192 while `str_200` sets `lap`: it overwrote ring
+  word R, the oldest unread word. The two cases a 13-bit compare cannot tell apart, "empty" and "full" (W = R in both),
+  are therefore distinct, and the firmware's natural drain to R = W never raises a false lap. A reload that coincides with
+  a write takes precedence (the firmware consumed the word that write replaces). 0x69 bit 1 toggles `lc_t`, synchronised
+  the same way, and clears `lap`; nothing else does, so a lap seen while the MCU was away is reported until the firmware
+  acknowledges it.
+- **Snapshot** (`l_*`). The read command byte 0x38 toggles `l_req` on `i_mcu_clk` (as 0x35's `m_req`); the clk_200MHz side
+  copies `lg_wa`, `lg_cnt`, `occ`, `lap`, `str_200` into `l_*` 3 .. 4 clocks after the strobe's rising edge, long before the
+  first data byte (>= 50 ns later on any MCU timing). The write command 0x38 (display brightness) takes the same snapshot,
+  harmlessly. Read cost 9 strobes (about 2.7 us); a 0x6A write 3 strobes.
+- **Independence.** The block reads `swc_rise_q`, `adv_d`, `swe_d`, `ssr_d`, `q_rs2`, `sample_write_address` and the MCU
+  bus; it writes only the two gates. The sequencer, counter, trigger types, peak detect and the readout are untouched;
+  reading 0x38 does not move `sample_read_offset`.
+
+#### Deviations from the contract (section 6.1 / 2.2), agreed with fw-d4 on 2026-10-21 (the firmware logger, merged into
+main as fw 0.2.10x / protocol 1.27, models exactly these in `host_tests/fpga_model.c`)
+
+- The lap detector is a full detector (unread count to 8192), not the literal "a write lands on the reader position":
+  the literal rule flags a false lap whenever the MCU has drained everything (R = W) and the next word arrives. The
+  contract's "W - reader modulo 8192; 8192 or more = lap" becomes bytes 6..7 = unread 0 .. 8192, the lap bit = lost.
+- 0x01 = 1 resets the reader position (the FPGA's copy), the unread count and the counter to 0; the contract named only
+  the counter. The lap flag is not reset by 0x01 = 1 (contract: 0x69 bit 1 is the only clear).
+- W is "the address after the last word written" (frozen after a stop) rather than `sample_write_address`, which runs
+  on after a stop in Atlan's design; while streaming the two are the same.
+- Byte 0 of 0x38 has one reserved bit (bit 5), see the table.
+- The stream is armed in auto mode: 0x1A = 0 and 0x0E = 0 (the time-out is ignored while streaming and makes the stop
+  immediate afterwards); the contract's arm said only "0x01 = 1 / 0 with 0x0B = 0x0C = 0".
+- 0x69 = 0 is defined: the 0x153B rules apply again from the next write clock edge (auto mode with 0x0E = 0: the write
+  stops and 0x14 = W; normal mode: runs on until a trigger). The contract left the stop to LOG_STOP's re-arm.
+
+#### Tests (`tb/tb_stream.v`, run.sh step 17, `ONLY=stream`, `STREAM_CHUNKS` chunks per tier)
+
+Simulated time about 32 ms (the keep-up tiers are the cost: 2 chunks of 1024 words at 4 us per word per tier); wall clock
+378 s / 595 s for the one-chunk smoke runs (`STREAM_CHUNKS=1`, 516 checks), about 15 min with the default two chunks on the
+shared WSL. The mirror of the write port carries data, write index and time per write; the DUT's 0x38 snapshot is checked
+against it with the counting latency applied (writes at edges E <= copy - 17.5 ns are in), W against counter mod 8192,
+unread against counter - consumed. Cases (the numbers are seed 12345; seed 4242 differs only in the strobe jitter):
+0. normal captures before any 0x69 write (K 3 + FIR D 31: an auto time-out record, a triggered one with the crossing at
+   the pretrigger, a 1.3-ring time-out record): equal to the mirror, contiguous, the newest total words; the lap flag 0
+   although the ring wrapped; 0x38 reads stream 0, lap 0, W = the address after the last word written.
+1. D 0 legacy (100 Mwords/s) and K 1 D 1 (100 Mwords/s 16-bit): never stops (20 polls of 0x0A / 0x18 all 0 with the
+   time-out 0x0E = 0 elapsed, or the 16-bit level 256 crossed in normal mode; `sample_write_enable` never falls); rate
+   2055 words in 20.5 us = 100.02 Mwords/s (exact: the expected count +-1); lap: after word R + 8191 lap 0, unread 8192;
+   after word R + 8192 lap 1; the resync (0x6A = W, 0x69 = 3) gives lap 0 and unread = the words since the snapshot.
+2. D 199 legacy (500 kwords/s = 1 MS/s), fast bus (60 ns strobes): 498.7 kwords/s measured over 200 us; 2 chunks of 1536
+   words across the ring end, every byte equal to the mirror, every word the next of the session, 107 unread at the end.
+   D 19 (5 Mwords/s): the lap at a divided rate, the resync, 2 chunks of 1024 contiguous from the resync position.
+3. The contract's tiers at the MCU's 300 ns strobe: T1 1 ch 8-bit 500 kS/s (D 399 legacy, 250.8 kwords/s measured,
+   2 x 1024 words, 2 lanes); T2 1 ch 16-bit 250 kS/s (D 799 K 3 FIR, 248.3 kwords/s, 2 x 512 words, 2 lanes); T3 2 ch
+   16-bit 125 kS/s (D 1599 K 3 FIR, 124.6 kwords/s, 2 x 256 words, 4 lanes): the reader keeps up with 50 .. 157 words
+   unread at the end, 0 mismatches, 0 wrong write indices. (The FPGA side is not the limit at any of these: the ring
+   takes 100 Mwords/s; the tiers are the MCU's bus and USB budget of the contract's 6.2.)
+4. The empty ring at D 1999 (20 us per word): 0x6A = W gives unread 0; the next write lands on R without a lap, unread 1.
+5. Stop: in auto mode 0x69 = 0 stops the write within 4 write clocks, 0x0A = 1, 0x18 = 0, W and the counter frozen over
+   50 word periods, 0x14 = W, the tail drains contiguous to the last word written and no word follows; in normal mode
+   (level 128 crossed every 45 us by the CH1 triangle, 10 polls over 200 us without a trigger) the capture triggers and
+   stops once 0x69 = 0.
+6. Restart: the lap flag set at D 0, then 0x69 = 0, a new arm at D 199 without the clear: the counter restarts (about 20
+   words after the release), the lap flag survives 0x01 = 1, 0x69 = 3 clears it, the next chunk is contiguous.
+7. Normal captures after the streaming (auto time-out and a normal-mode trigger): as in 0.
+Results: **757 checks, 0 errors, PASS on seeds 12345 and 4242**. The full `tb/run.sh` (17 steps, `REF_SRC_DIR=~/g11/refs`)
+on this source: **ALL PASS** on seed 12345 (13793 s on the shared WSL: ext 39, decim 98 + cic_model 1876, fir 163 + cic_model
+1612, long 8, seg 53 + seg_model 22 runs, trigpos 882, contract 12 = contract_0x153B.txt, encphase PASS, mcuread 70 + 26,
+adccap 2274, firstrec 38, timeout 85, trigtypes 1293, counter 115, stream 757) and seed 4242 (13414 s: 39, 98 + 1873, 165 +
+1638, 8, 53 + 22, 882, 12, encphase, 70 + 26, 2274, 38, 85, 1293, 115, 757); every equivalence phase 0 mismatches, so a
+firmware that never writes 0x69 sees 0x153C.
+
+#### Build (TD 4.6.8 SP1, `build.sh`, this branch on the merged C1 + C3 source)
+
+6208 LUT (71.9 %) / 5363 reg / 6977 LE, block RAM (48 + 2) and M18x18 (2) as before; `FPGA.bin` sha256
+`5c4b51a8099feb97f9260dac0dc91a4f161ad945345331fc38f29b74fa108083` (`~/d1/td/b2`, version byte still 0x3B). Against the
+merged C1 + C3 source this branch starts from (6079 / 5177 / 6822, fpga-c3's `~/c3/b2`) the logger costs **+129 LUT,
++186 reg, +155 LE** (the contract's estimate 150 / 90: the 32-bit counter, its snapshot copy, the 14-bit unread count, the
+13-bit reader copy and the three synchronisers are the registers). Timing: `sample_write_clock` 9.498 ns, `i_mcu_clk`
+22.3 ns, `clkc[1]` 2.434 ns, all 0 errors; `clkc[0]` 62 (the SDC artefact); **`clk_200MHz` 4 setup errors, min period
+5.383 ns (-0.383 ns)**, all four on one existing path of the counter block (C3): the 8-bit `c_mx > k_mx` compare through
+`k_hil_reg|k_lol_reg` into the clock enable of the min / max registers, a 4-level path whose nets route 6.2 ns at 72 % LUT.
+Not a logger path and not chased here (the brief: say so); the placement lottery of the 0x153A notes, as the C1 + C3 merge
+rolled -0.763 ns on the sequencer's `q_pass` adder. Build b1 (the first roll, 6217 / 5362) missed by 0.979 ns on the
+logger's own 32-bit word counter (37 endpoints in its carry chain `add30`: a 32-bit increment in one clock is 5.6 ns of
+carry on this device before placement); the counter is now two 16-bit halves with a registered carry (writes are at
+least two clocks apart, so the flag is current at every count), and b2 has no logger path among its worst 25.
+
+#### Bench checks (D3's bench, items 8 and 9 of the contract's section 9.2)
+
+1 kHz on CH1, 1 ch 8-bit filtered at 500 kS/s for 60 s: the count advances by exactly the word rate, zero laps, the
+file's frequency 1000.00 Hz; then the next tier up until a lap appears (that is the bench ceiling of the MCU, not of the
+FPGA: the FPGA writes at any rate, the tb shows 100 Mwords/s). 2 x 16-bit at 125 kS/s for 10 min while the owner opens a
+menu: E_BUSY on the host, the log continues (the FPGA does not know about menus). A stop in auto mode: 0x0A = 1 within
+two words, 0x14 = W, the tail complete.
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).
