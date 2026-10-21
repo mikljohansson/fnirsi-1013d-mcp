@@ -276,6 +276,16 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- ui-sample (Opus explicitly, dispatched 08:33, branch ui-sample): the ACQ Sample row per ui-rows.md (478 px menu, fourth box,
+  Peak greys Filter and Average with the four-line note, no box in Spectrum, grey in roll), the UI's conversion through
+  fw-c6's peak mode, the bars trace (integer step, overload from either byte, phosphor accumulates, X-Y midpoints), trace
+  style "Peak" renamed "Bars", persistence, tests, docs.
+- fw-c6 (dispatched 05:12, cut off and resumed, done 08:3x, merged 08:32 as ba6ce49): peak detect in the firmware byte-exact
+  with the host: SET_DECIM filter 4 (the Filter's K / FIR kept behind it), GET_DECIM 0x81 / 0xC0 bytes, GET_CAPTURE_INFO 79
+  bits 1/0, READ_RAW layout 3 minima then maxima, READ_TRACE 8-bit = the corrected midpoint and WIDE = the pairs, SET_SEQ
+  mode 2 E_STATE 7, totals > 8190 refused while Peak; the full-class mean-core correction; 0x53 = 1 written at a peak arm;
+  140 vectors; caps bit 21, features bit 9 (0x7FF); gcc10 41bd66ce (provisional). Note for C8: GET_CAL reports the gated
+  class at D > 0, the peak correction uses the full class.
 - fw-c7 (dispatched 05:13, cut off and resumed, done 08:1x, merged 08:19 as 4639122): the counter in the firmware:
   fpga_counter.c (boot 0x62 128/6 and 0x61 gate 100 ms source 0; one 0x35 read per pass, 17 strobes; 64-bit integer
   derivation), the rate-change rule = rewrite 0x61 (0 then value) and drop that pass's result, the level follows the
