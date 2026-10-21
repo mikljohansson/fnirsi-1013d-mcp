@@ -31,6 +31,10 @@
 //    and the trigger hold-off on 0x1B (u32, 5 ns units; Atlan4 stored it and never used it, 0x153B and before). With
 //    0x5E = 0 and 0x1B = 0 (power-on) the capture is cycle-identical to 0x153B. Write 0x34 / 0x37 (AC/DC relays)
 //    are unchanged.
+//  - 0x61, 0x62 (new writes), 0x35 (new read, 16 bytes; 0x153C): hardware counter with min / max (reciprocal frequency,
+//    period, width and duty of CH1 / CH2 / EXT over a 10 ms / 100 ms / 1 s gate, the source's raw min and max over the
+//    gate). With 0x61 = 0 (power-on) nothing runs; the counter never touches the capture. Write 0x35 (CH2 offset) is
+//    unchanged (docs/plans/fpga-0x153c.md section 5, fpga/al3/README.md section 13).
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -195,6 +199,19 @@
                     o_mcu_data <= { 3'b000, holdoff_running, trig_type[2], both_cores, trigger_core, 1'b0 };
                     //bit4 the trigger hold-off (0x1B) is running (no trigger is accepted); bit3 = 0x5E bit 2;
                     //bits 2, 1 reserved for 0x153E (both cores on, trigger core), read 0 here
+
+            8'h35: //Counter (0x153C), 16 bytes from a snapshot taken when the command byte 0x35 is written (copied on the
+                   //200 MHz side 15 .. 20 ns after the command strobe, so a gate ending during the read cannot tear it)
+                  4'h0:  o_mcu_data <= { new, 1'b0, ext, ch2, 2'b00, gate };   //new: a gate ended since the last 0x35
+                  4'h1:  o_mcu_data <= seq;                                     //sequence number of the result (8 bits)
+                  4'h2..4'h5: E[31:0]  //periods between the first and the last rising edge in the gate (0: fewer than two
+                                       //edges); 28 bits used
+                  4'h6..4'h9: T[31:0]  //5 ns clocks between those edges
+                  4'hA..4'hD: W[31:0]  //5 ns clocks high between them
+                  4'hE:  o_mcu_data <= min;   //minimum raw code of the source's pair over the gate (both cores)
+                  4'hF:  o_mcu_data <= max;   //maximum; 255 / 0 when no sample (EXT source, or before the first gate)
+                  //frequency = E / (T x 5 ns), period = T x 5 ns / E, +width = W x 5 ns / E, duty = W / T. One read per
+                  //screen pass: the command byte plus 16 data strobes.
 //---------------------------------------------------------------------------------------
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
@@ -475,5 +492,25 @@
             8'h66: //Hold-off clear request, 1 byte
                     ho_clr_req <= io_mcu_data[0];      //1: the next 0x01 = 1 also clears the hold-off timer of 0x1B
                                                        //(one-shot, consumed by that 0x01 = 1)
+
+//---------------------------------------------------------------------------------------
+// Hardware counter with min / max (0x153C, C3). Details: fpga/al3/README.md "Changes" section 13, the contract
+// docs/plans/fpga-0x153c.md section 5. Power-on: 0x61 = 0 (off), 0x62 = 0 / 0 (the firmware writes 128 / 6 at boot).
+// Source stream: EXT = the filtered pin level (one bit per 5 ns); CH1 / CH2 = the captured pair of every write clock
+// (core B then core A, T/2 apart) through a Schmitt trigger: high at code >= level, low at code < level - hysteresis
+// (hysteresis >= level: never low). 5 ns resolution at 200 MSa/s (divider 0 or any K >= 1), each sample held half a word
+// at slower legacy rates. The gate is exactly 2e6 / 2e7 / 2e8 clocks of the 200 MHz clock; from the first rising edge
+// in the gate to the last: E periods, T clocks, W high clocks, plus the pair's min and max over the whole gate (both
+// cores). Published with a sequence number at the end of every gate; a 0x61 write restarts the gate (the first result
+// one gate after it). Range: about 1 Hz (two edges in a 1 s gate) to 100 MHz; T and W are 28 bits.
+
+            8'h61: //Counter control, 1 byte
+                    cnt_gate <= io_mcu_data[1:0];      //0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s (2e6 / 2e7 / 2e8 clocks)
+                    cnt_src  <= io_mcu_data[3:2];      //0 the trigger source (0x15 as written: 2 / 3 = EXT, 1 = CH2,
+                                                       //0 = CH1), 1 CH1, 2 CH2, 3 EXT
+
+            8'h62: //Counter level and hysteresis, 2 bytes
+                  4'h0: cnt_lvl <= io_mcu_data;        //raw ADC code: high at >= level
+                  4'h1: cnt_hys <= io_mcu_data;        //low below level - hysteresis
 
 //=======================================================================================
