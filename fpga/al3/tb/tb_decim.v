@@ -417,14 +417,14 @@ module tb;
   // a record exactly D + 1 edges apart and the first word within D + 1 edges of the last reset edge, under the phase's
   // random trigger / EXT / generator settings (tb_skip.v has the directed D > 0 cases).
   reg        skip_mode = 0;
-  reg        sm_on = 0;
+  reg        sm_on = 0, sm_arm = 0;       // sm_arm: a reset edge seen since sm_on (the previous capture may still write)
   integer    sm_d = 0, sm_edge = 0, sm_last = -1, sm_rel = 0, sm_nwr = 0, sm_valbad = 0, sm_gapbad = 0, sm_firstbad = 0;
   integer    sm_caps = 0, sm_done = 0;
   always @(posedge dut.sample_write_clock) begin
     if (sm_on) begin
       if (dut.cap_rst) begin
-        sm_last = -1; sm_rel = sm_edge;
-      end else if (dut.sample_write_enable && dut.swc_adv) begin
+        sm_last = -1; sm_rel = sm_edge; sm_arm = 1;
+      end else if (sm_arm && dut.sample_write_enable && dut.swc_adv) begin
         if (dut.sample_dia !== { dut.adc2B_w, dut.adc2A_w, dut.adc1B_w, dut.adc1A_w }) sm_valbad = sm_valbad + 1;
         if (sm_last >= 0) begin
           if (sm_edge - sm_last != sm_d + 1) sm_gapbad = sm_gapbad + 1;
@@ -483,7 +483,7 @@ module tb;
           join_none
         end else
           ext_en = 0;
-        sm_on = skip_mode;
+        sm_arm = 0; sm_on = skip_mode;
         start_capture;
         wait_done(100000);                                // 0x153D: an EXT capture with the pin driven (pattern off) never
                                                           // triggers and runs to its time-out (up to 1.8 ms at divider 9)
@@ -782,9 +782,9 @@ module tb;
     skip_mode = 1;
     random_phase(12);
     skip_mode = 0;
-    $display("skip phase: %0d captures (%0d done), %0d stored words, %0d not the pair of their edge, %0d gaps other than D + 1 edges, %0d first words late",
+    $display("skip phase: %0d captures (%0d ended, the others normal mode without a trigger), %0d stored words, %0d not the pair of their edge, %0d gaps other than D + 1 edges, %0d first words late",
              sm_caps, sm_done, sm_nwr, sm_valbad, sm_gapbad, sm_firstbad);
-    check(sm_done == sm_caps && sm_nwr > 0 && sm_valbad == 0, "K = 0, D > 0 (random settings): every stored word is the captured pair of its write clock edge");
+    check(sm_nwr > 0 && sm_valbad == 0, "K = 0, D > 0 (random settings): every stored word is the captured pair of its write clock edge");
     check(sm_gapbad == 0 && sm_firstbad == 0, "K = 0, D > 0 (random settings): words D + 1 edges apart, the first within D + 1 edges of the release");
 
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");
