@@ -127,7 +127,7 @@ def test_ctrl_resp_auto_ch2_verdict():
     assert P.BodeCtrlResp.unpack(raw[:40]).captures == 0
 
 
-def test_row_flags_are_the_host_names_and_f_comes_from_m():
+def test_row_flags_are_the_host_names_and_f_comes_from_p():
     host_names = set(B.BAD_FLAGS) | {"ch1_low", "ch2_small", "spliced", "fir_off", "no_cal", "cal_range",
                                      "cal_flagged"}
     assert set(P.BODE_ROW_FLAGS) == host_names and len(P.BODE_ROW_FLAGS) == 14
@@ -137,7 +137,7 @@ def test_row_flags_are_the_host_names_and_f_comes_from_m():
     assert P.bode_flags_from_names(["spliced", "low_snr", "x"], retried=True) == 0x0200 | 0x0020 | 0x4000
     for f in (1.0, 23.9, 1234.5, 99.5e3, 1.49e6, 10e6):
         pp = B.plan_point(f)
-        row = P.BodeRow(pp.m, int(round(pp.f_actual * 100)), -301, -4500, 0, -301, 3, 4, 0x0201)
+        row = P.BodeRow(pp.period, int(round(pp.f_actual * 100)), -301, -4500, 0, -301, 3, 4, 0x0201)
         assert row.f_hz == pp.f_actual and abs(row.f_chz / 100 - row.f_hz) <= 0.005
         back = P.parse_read_bode(P.BodeHeader(planned=1).pack() + row.pack())[1][0]
         assert back == row and back.flag_names == ["ch1_clipped", "spliced"] and back.measured
@@ -225,7 +225,7 @@ def test_stop_abort_host_arm_and_errors(sim_factory):
         s.bode_ctrl(P.BODE_STOP)
         h, rows = _wait_done(s)
         assert (h.state_name, h.reason) == ("stopped", 6) and 0 < h.measured < 60 and len(rows) == 60
-        assert not rows[-1].measured and rows[-1].m and rows[0].measured
+        assert not rows[-1].measured and rows[-1].period and rows[0].measured
         res = B.result_from_device(h, rows)
         assert len(res.points) == h.measured and "stopped: stopped" in res.stopped_early
         # a host capture during a sweep ends it (reason 5)

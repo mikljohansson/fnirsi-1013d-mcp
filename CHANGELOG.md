@@ -1558,6 +1558,23 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-21 (mcp-d6, provisional, protocol 1.27 / FPGA 0x153D, docs/plans/fpga-0x153c.md item D6; simulator only):
+  the host side of the 0x153D generation, byte-exact with fw-d4's logger and fw-d5's generator / pattern vectors.
+  **The generator is the pattern**: SET_GEN's raw modes are P16 / H16 (the period and high part in 1/65536 of a 5 ns
+  clock), GET_GEN 40 bytes with the pattern status (`pending`: a change not yet taken), gen_clock 200 MHz, caps bit 1
+  renamed GENERATOR; `scope_generator` reports the exact frequency, the period in clocks and P16 / H16 (3fea867,
+  1c5715f). **Bode on P = 4 M**: `bode.py` plans an integer period of 5 ns clocks (four times finer, even P above 4095
+  at N = 16), records always coherent; `docs/bode-plan-vectors.json` version 2 (`period`), byte-identical with the
+  firmware's; thru files version 2 (a version 1 file is refused: measure the thru again) (3fea867). **New tools**:
+  `scope_log` / `scope_log_status` / `scope_log_stop` (the streaming logger at the 500 / 250 / 125 kS/s tiers into
+  raw files plus `log.json`, `logfile.load_log`, a summary for `scope_report`), `scope_pattern` (8-step pulse
+  patterns, the marker as trigger source `pattern`, the pattern trigger engine, `capture=true`), `scope_sweep` (a
+  host-stepped chirp, about 2,000 steps/s), `scope_set_trigger(source='pattern')`, report kinds `log` and `pattern`
+  (1c5715f). Simulator: the pattern core (one fraction accumulator, bursts, gap, marker, the pending handshake), the
+  marker trigger, the engine on the TrigQual model, the logger with `--log-stall` / `--log-ring` (3fea867, 6a69b9e).
+  The self-test's fast square is 200 MHz / 201 (an even period puts every edge at one ADC core). 14 host vectors
+  (bb2c107).
+
 - 2026-10-21 (mcp-c8b): the host matches fw 0.2.104. `scope_counter`'s level follows the trigger level as the
   firmware does at boot (a volts level pins it, `level='trigger'` follows again, `level_follows_trigger` in the
   result); `Scope.read_counter` no longer pins the level it read back on a gate or source change (7360b62). Peak

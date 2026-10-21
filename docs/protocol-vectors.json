@@ -9511,6 +9511,304 @@
    ],
    "device_events": [],
    "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_27",
+   "description": "GET_INFO response, protocol 1.27 (80 bytes): FPGA 0x153D, gen_clock_hz 200 MHz (the pattern clock), caps add LOGGER (23), PATTERN_GEN (24), PATTERN_TRIGGER (27) = 0x9FFEC4F",
+   "hex": "a5130101020009000000500000008a15011b0002000401003d1502080020020200c2eb0b4fecff0900c2eb0bfe3f500000070600302e322e31303500000000000000000027018c0c31303133442d303030310000000000002003e0013d150000f9025683",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 9,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "011b0002000401003d1502080020020200c2eb0b4fecff0900c2eb0bfe3f500000070600302e322e31303500000000000000000027018c0c31303133442d303030310000000000002003e0013d150000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_log_start_filtered8",
+   "description": "LOG_START 0x0214 (16 bytes): CH1, format 1 (the filtered word's high byte), divider 399 (N 400: 500 kS/s, the 1 ch 8-bit tier), 60 s",
+   "hex": "a51301001402460000001000000003ad010100008f01000060ea0000000000009f77ce5f",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 70,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010100008f01000060ea000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 70,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010100008f01000060ea000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_log_read_32k",
+   "description": "LOG_READ 0x0215 (8 bytes): at most 32768 bytes (whole words)",
+   "hex": "a513010015024700000008000000f11b00800000000000009b3534ed",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 71,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0080000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 533,
+     "seq": 71,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0080000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_log_running",
+   "description": "LOG (48 bytes): running, CH1, format 1, divider 399, 60000 ms, 400 clocks per sample, 500000 bytes produced, 495616 sent, 0 gaps, the 8 MiB ring, 1000 ms",
+   "hex": "a5130101160248000000300000009f02010101008f01000060ea00009001000020a107000000000000900700000000000000000000008000e80300000000000077db0409",
+   "frames": [
+    {
+     "cmd": 534,
+     "seq": 72,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "010101008f01000060ea00009001000020a107000000000000900700000000000000000000008000e803000000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_log_read_overflow",
+   "description": "LOG_READ response: chunk 12, word 20000, 8 bytes (CH1 + CH2 format 2: two words of u16 CH1, u16 CH2), flags 0x0B = running | gap | the gap includes words the full DDR ring dropped",
+   "hex": "a5130101150249000000180000000e460c000000204e0000080000000b0200004041424344454647dbc9303b",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 73,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "0c000000204e0000080000000b0200004041424344454647"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_gen_p16_h16_25",
+   "description": "SET_GEN (20 bytes): enable, freq_mode 1 = P16 at 4..11 (999.5 Hz: 200100.05 clocks of 5 ns), duty_mode 1 = H16 at 12..19 (25 %)",
+   "hex": "a513010001034a0000001400000080cb07010101ce0ca40d03000000340369c30000000089a55b90",
+   "frames": [
+    {
+     "cmd": 769,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 20,
+     "payload": "07010101ce0ca40d03000000340369c300000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 769,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 20,
+     "payload": "07010101ce0ca40d03000000340369c300000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_gen_running_pending",
+   "description": "GEN (40 bytes): enabled, 0x39 byte 0 = 0xA1 (running, pending, step 1), 999500 mHz, 2500 bp, 0x39 byte 3 = 1, source 0 (the square), P16, H16",
+   "hex": "a513010100034b00000028000000845801a1000000000000000000004c400f0000000000c4090100ce0ca40d03000000340369c300000000e367ef80",
+   "frames": [
+    {
+     "cmd": 768,
+     "seq": 75,
+     "status": 0,
+     "flags": 1,
+     "len": 40,
+     "payload": "01a1000000000000000000004c400f0000000000c4090100ce0ca40d03000000340369c300000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_pattern_double_pulse",
+   "description": "SET_PATTERN 0x0217 (12 + 4 x 8 bytes): a double pulse (10 us marked, 5.0025 us = 1000 clocks + 32768/65536, 10 us, 475 us), 100 bursts 2 ms apart, the marker a trigger source, started by the MCU now and by the engine (start source 2)",
+   "hex": "a513010017024c0000002c0000006bee0288640080841e000401010003000000d007000000000080e803000001000000d0070000000000001873010071423788",
+   "frames": [
+    {
+     "cmd": 535,
+     "seq": 76,
+     "status": 0,
+     "flags": 0,
+     "len": 44,
+     "payload": "0288640080841e000401010003000000d007000000000080e803000001000000d00700000000000018730100"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 535,
+     "seq": 76,
+     "status": 0,
+     "flags": 0,
+     "len": 44,
+     "payload": "0288640080841e000401010003000000d007000000000080e803000001000000d00700000000000018730100",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_pattern_double_pulse",
+   "description": "PATTERN response (24 + 4 x 8 bytes): the header, 0x39 0x80 / 0x01, 0 bursts, the burst length 100000.5 clocks in 1/65536 clock, the steps",
+   "hex": "a513010117024c0000003800000074e70288640080841e0004010100800100000080a0860100000003000000d007000000000080e803000001000000d00700000000000018730100d1c80bf1",
+   "frames": [
+    {
+     "cmd": 535,
+     "seq": 76,
+     "status": 0,
+     "flags": 1,
+     "len": 56,
+     "payload": "0288640080841e0004010100800100000080a0860100000003000000d007000000000080e803000001000000d00700000000000018730100"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_pattern_trigger_ext_pulse",
+   "description": "SET_PATTERN_TRIGGER 0x021A (28 bytes): the engine on EXT, a positive pulse longer than 2000 x 5 ns = 10 us, armed, one shot (re-arm 0)",
+   "hex": "a51301001a024d0000001c0000006a0d01000102d00700000000000080000000000000000000000001000000e3684870",
+   "frames": [
+    {
+     "cmd": 538,
+     "seq": 77,
+     "status": 0,
+     "flags": 0,
+     "len": 28,
+     "payload": "01000102d00700000000000080000000000000000000000001000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 538,
+     "seq": 77,
+     "status": 0,
+     "flags": 0,
+     "len": 28,
+     "payload": "01000102d00700000000000080000000000000000000000001000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_pattern_trigger_ext_pulse",
+   "description": "PATTERN_TRIGGER response (32 bytes): the body, armed, one shot, 0x42 byte 0 = own engine | EXT | longer | type 1, no edges to count",
+   "hex": "a51301011a024d00000020000000f8b601000102d007000000000000800000000000000000000000010000008d0000008571dcd4",
+   "frames": [
+    {
+     "cmd": 538,
+     "seq": 77,
+     "status": 0,
+     "flags": 1,
+     "len": 32,
+     "payload": "01000102d007000000000000800000000000000000000000010000008d000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger_source_pattern",
+   "description": "SET_TRIGGER mask bit 0: source 3 = the pattern's marker (edge type, SET_PATTERN flags bit 3)",
+   "hex": "a513010005014e000000180000008de001000300000000000000000000000000000000000000000047029c1b",
+   "frames": [
+    {
+     "cmd": 261,
+     "seq": 78,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "010003000000000000000000000000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 261,
+     "seq": 78,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "010003000000000000000000000000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_status_logging",
+   "description": "GET_STATUS (52 bytes) while logging: acq_state 5 LOGGING, the loop at 1 ms (pass_ms), features 0x3FFF (bits 11-13 LOGGER / PATTERN / PATTERN_TRIGGER)",
+   "hex": "a513010103004f00000034000000f79f02050800320000000000000000000000400d0300ffff12000000000001000300150000001500000000000000ff3f0000000000004431c974",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 79,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "02050800320000000000000000000000400d0300ffff12000000000001000300150000001500000000000000ff3f000000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_read_bode_period",
+   "description": "READ_BODE (1.27): the header and one row, u32 at 0 = P = 200 clocks of 5 ns (1 MHz exactly), f 100000000 cHz, -3.01 dB, -45.00 deg",
+   "hex": "a5130101120250000000340000003546030000000200000001000100ffff010000000000000000000000000000000000c800000000e1f505d3fe6cee7cfc4ffb020300005701fc6b",
+   "frames": [
+    {
+     "cmd": 530,
+     "seq": 80,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "030000000200000001000100ffff010000000000000000000000000000000000c800000000e1f505d3fe6cee7cfc4ffb02030000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
   }
  ]
 }

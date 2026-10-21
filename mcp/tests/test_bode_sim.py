@@ -66,17 +66,17 @@ def test_dut_signals_parse_eval_and_generator_off():
     s_out = parse_signal("dut_out:r=1.6k,c=10n,gain=0.97,delay=5ns")
     assert s_out.dut_params == RC and s_out.dut_h(10e3) == pytest.approx(_h(10e3))
     assert parse_signal("dut_out:l=1m,c=10n,r=30").dut_h(50e3) == pytest.approx(_h(50e3, RLC))
-    gen = GenState(1, P.gen_phase_inc(10_000_000), 1 << 31)
+    gen = GenState(1, P.gen_p16(10_000_000), P.gen_p16(10_000_000) // 2)
     t = np.arange(20000) / 200e6
     assert np.allclose(s_in.eval(t, gen), -1.24 + dut_response(t, gen.frequency_hz, 0.5, 3.1, *RC, node=0))
-    slow = GenState(1, P.gen_phase_inc(100_000), 1 << 31)  # 100 Hz: the nodes reach both levels
+    slow = GenState(1, P.gen_p16(100_000), P.gen_p16(100_000) // 2)  # 100 Hz: the nodes reach both levels
     v_in = s_in.eval(np.linspace(0, 1e-2, 2001), slow)
     assert v_in.min() == pytest.approx(-1.24, abs=0.01) and v_in.max() == pytest.approx(1.86, abs=0.01)
     assert s_in.dc == pytest.approx(0.31)
     v_out = s_out.eval(t, gen)
     ref = -1.24 + 0.97 * dut_response(t - 5e-9, gen.frequency_hz, 0.5, 3.1, *RC, node=1)
     assert np.allclose(v_out, ref)
-    off = GenState(0, gen.phase_inc, gen.duty_threshold)
+    off = GenState(0, gen.p16, gen.h16)
     assert np.all(s_out.eval(t, off) == -1.24)  # pin tri-stated: the DUT rests at its ground
     with pytest.raises(ValueError, match="dut_in"):
         parse_signal("bode:r=1")
@@ -325,7 +325,7 @@ def test_runner_refuses_without_the_filter_and_restores_ext(sim_factory):
 def test_cli_plan_only_and_sweep(sim_factory, tmp_path, capsys):
     assert B.main(["--plan-only", "--start", "1kHz", "--stop", "10kHz", "--points", "3"]) == 0
     out = capsys.readouterr().out
-    assert "50048" in out and "3 points, estimated" in out
+    assert "200192" in out and "3 points, estimated" in out
     srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
     assert B.main(["--port", srv.url, "--start", "50kHz", "--stop", "500kHz", "--points", "3"]) == 2  # no --yes
     assert B.main(["--port", srv.url, "--start", "10Hz", "--stop", "100kHz", "--points", "50",
@@ -396,7 +396,7 @@ def test_flat_record_twice_flags_the_point(sim_factory):
         clean = _run(s, plans, background=False)
 
         def hook(dev):  # the last point's capture and its retake are flat
-            if dev.settings.gen.phase_inc == plans[-1].phase_inc and not done:
+            if dev.settings.gen.p16 == plans[-1].period << 16 and not done:
                 done.append(1)
                 dev.flat_next = 2
         srv.device.on_arm = hook
