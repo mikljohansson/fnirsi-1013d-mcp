@@ -6,18 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- [ ] **ACQ Filter row: three modes** (owner decision 2026-10-21 16:29): the UI's Filter choice becomes Off, Average (= boxcar)
-  and Anti-alias (= CIC3 + FIR); every mode stays available over MCP (SET_DECIM unchanged, no FPGA change: boxcar / CIC2 /
-  CIC3 share one CIC chain, the FIR stays). When the host has set another mode (e.g. CIC2, CIC3 without FIR, boxcar + FIR)
-  the box shows that mode's own name; a press then steps through the three simplified modes only (from a host mode to the
-  next of Off / Average / Anti-alias: the mockup round decides which). Process: mockups first (docs/mockups/, the
-  ui-rows.md style) and an adversarial review per docs/ui-guidelines.md, then the firmware item (settings word migration for
-  saved CIC2 / CIC3 values, the warnings that name the Filter, the user guide, the Peak greying unchanged). Not dispatched.
-  Naming (owner 16:31: "sounds good with Hi-Res. Let's mimic what other scopes call it"): Off / Hi-Res / Anti-alias; "Average"
-  stays the ACQ record mean only. Other scopes' names for reference: Tektronix Sample / Peak Detect / Hi Res / Average,
-  Keysight Normal / Peak Detect / High Resolution / Averaging, Rigol Normal / Peak / High Res / Average. Hi-Res stays in the
-  Filter row, not as a third Sample choice: Hi-Res (boxcar) and Anti-alias (CIC3 + FIR) are two settings of the same FPGA
-  filter stage and exclude each other, so two rows would need a greying rule (owner asked 16:3x, coordinator recommendation).
+- [ ] **ACQ Filter row: three modes** (owner decisions 2026-10-21 16:29-16:38): the UI's Filter choice becomes Off, Hi-Res
+  (= boxcar) and Anti-alias (= CIC3 + FIR); "Average" stays the ACQ record mean only. Names mimic other scopes (owner 16:31):
+  Tektronix Hi Res, Keysight High Resolution, Rigol High Res. Every mode stays available over MCP (SET_DECIM unchanged, no
+  FPGA change: boxcar / CIC2 / CIC3 share one CIC chain, the FIR stays). When the host has set another mode (CIC2, CIC3
+  without FIR, boxcar + FIR, ...) the box shows that mode's own name; a press steps through the three simplified modes only.
+  Hi-Res stays in the Filter row, not as a third Sample choice: it excludes Anti-alias (same FPGA stage). No mockup round
+  (owner 16:38: "it's a simple change, just have the agent do it when it comes time"): one firmware item (settings word
+  migration for saved CIC2 / CIC3 values, the warnings that name the Filter, the user guide, the Peak greying unchanged),
+  screenshots in the handoff. Not dispatched.
 - **No 0x153E for 0.3.0** (owner decision 2026-10-21 16:15, after the walk-through of the 0x153E features): 0.3.0 ships on
   0x153D. Runt, window and the pulse-width range are dropped from the roadmap (owner: runt "rather special", window = check
   the dip or the spike separately, range "marginal"); both-core triggering stays the only later 0x153E candidate ("if we do
@@ -300,6 +297,16 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-nopat done 16:3x, merged 16:3x: SET_PATTERN 0x0217 / SET_PATTERN_TRIGGER 0x021A removed (unknown command), caps 24 / 27
+  and features 12 / 13 reserved (features 0x0FFF), trigger source 3 refused, GEN 40 B with bursts / pattern source reserved,
+  fpga_pat_* renamed fpga_gen_*, the model on fpga-d3's stripped square (commit taken at once), check_retired_regs lists
+  0x6E / 0x6F / 0x76-0x7D / read 0x42, scope_pattern and the simulator's pattern models gone (39 tools, 41 with tier 4),
+  protocol row 67 rewritten as built. Host tests green, check_vectors OK, ruff clean, 541 mcp tests, gcc10
+  2fb27064f6013bc9620f2330ce0871c247d560e2f43600e688f40ddf64d6e23b. Open: fpga/al3/README.md pattern text (fpga-d3's file).
+- fpga-d3 interim 16:3x: the stripped 0x153D builds at 6421 LUT (74.3 %) / 5911 reg / 7447 LE = 86.2 % (13.8 % free); the
+  square with the DDS removed costs +373 LUT / +274 reg / +375 LE over C4 + D1. clk_200MHz not closed: b2 -1.103 ns (q_pass),
+  rolls h1 -0.362, h2 -0.044 (q_untrig), a2 -1.240, h3 -0.682, all routing on old paths; six more positions building.
+  tb_square 14102 checks both seeds (start 7-8 clocks after the 0x6D strobe), contract 42 checks, ext 39 checks.
 - fpga-d3 interim 16:1x: origin/fpga-d2 merged and stripped to the fractional square (d60a0ad, not pushed): kept 0x6C entries
   0 / 1, 0x6D (modes 0 / 3, idle level, start, commit), 0x50, read 0x39 reduced to RUNNING / PENDING / step / mode active;
   0x6E, 0x6F, 0x76-0x7D, read 0x42 not decoded; 0x15 = 3 is EXT again. Changed semantics: a commit is taken at once when the
