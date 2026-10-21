@@ -276,6 +276,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3 interim 15:2x: C4 + D1 build b0 6048 LUT / 5637 reg / 7072 LE (82 %), clk_200MHz -0.226 ns on q_pass; four hold-off
+  re-rolls all worse (-0.53..-1.16 ns on other old paths). Projection with D2: about 7170 LUT / 6590 reg / 8310 LE = 96 % of
+  the LEs, register-bound; D2's own no-engine variant at 88 % did not close. Cut order it will put to the owner once the
+  merged build confirms it: (1) the pattern trigger engine -451 LUT / -169 reg, (2) STEPS = 4 -172 / -208, (3) outside the
+  contract: the logger's snapshot copies or the counter's min / max. Nothing cut yet; waiting for origin/fpga-d2.
 - Coordinator 15:1x: the account's session limit cut off fw-roll, fpga-d2, fpga-d3 and fpga-c4 at about 15:10 (the WSL runs
   survived). The owner switched accounts and the coordinator to Opus: Fable only for the most difficult FPGA development
   (D3 integration, later E1 / E2). fpga-d2, fpga-d3 and fw-roll resumed; fpga-c4's remaining step (the run text after the
