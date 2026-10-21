@@ -276,6 +276,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw 0.2.104 numbered 08:5x (built for 0x153C: fw-c5, fw-c6, fw-c7, ui-type, ui-sample merged; ui-sample done 08:5x, merged
+  08:57 as 2d4861f): host tests green on merged main, check_vectors OK (140); gcc10 sha256 7c640ab5fe1f9b1c75dc321c96038e7dc3fe8fb88fd9e105e81cf344351d2cbc pinned as
+  backups/fw-0.2.104_7c640ab5.bin. Needs the 0x153C bitstream on the unit (C4 pending on fpga-c2); on 0x153B it shows the
+  notice. ui-sample notes: Vmax/Vpp cards read the midpoint trace with Peak (open), at 200 MSa/s the record stays 8-bit
+  and is drawn as bars from the samples, the roll-mode note is always shown in roll.
 - ui-sample (Opus explicitly, dispatched 08:33, branch ui-sample): the ACQ Sample row per ui-rows.md (478 px menu, fourth box,
   Peak greys Filter and Average with the four-line note, no box in Spectrum, grey in roll), the UI's conversion through
   fw-c6's peak mode, the bars trace (integer step, overload from either byte, phosphor accumulates, X-Y midpoints), trace
