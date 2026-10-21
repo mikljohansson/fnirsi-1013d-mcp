@@ -113,7 +113,8 @@ void pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern)
 // the constant: AL3A10 0x153B has the programmable geometry and the DDS generator (0x1532), the EXT trigger (0x1533), the
 // decimation filter with 16-bit samples (0x1534, cmds 0x53-0x55, read 0x29), the CIC compensation FIR (0x1535, 0x56),
 // the sequencer (0x1536, cmds 0x57-0x5D, reads 0x2A-0x32), the encode self-check with the guaranteed core order (0x1538,
-// read 0x33) and the per-core capture stages (0x153A, 0x63 / 0x36). The version word read at boot decides only the
+// read 0x33), the per-core capture stages (0x153A, 0x63 / 0x36) and the trigger types with the hold-off (0x153C, cmds
+// 0x5E-0x60, 0x66, 0x1B, reads 0x34 / 0x37). The version word read at boot decides only the
 // mismatch flag; a mismatched scope answers the F_BASIC commands and refuses the rest (pc_dispatch).
 
 void pc_variant_init(uint16_t version, pc_variant *v)
@@ -126,6 +127,7 @@ void pc_variant_init(uint16_t version, pc_variant *v)
   v->caps       = PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED |          //BENCH: T3, T4
                   PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR |
                   PC_CAP_SEQ | PC_CAP_ENC_CHECK | PC_CAP_CAPTURE_STAGES |
+                  PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES |                                                 //1.26: 0x153C
                   PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
 
 #if PC_DEBUG
@@ -277,6 +279,18 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
   pc_hal_channel_read(0, &c->ch[0]);
   pc_hal_channel_read(1, &c->ch[1]);
 
+  //1.26: the trigger extension this capture was armed with
+  {
+    pc_hw_trig_ext x;
+
+    pc_hal_trig_ext_read(&x);
+    c->trig_type    = x.type;
+    c->trig_flags   = x.flags;
+    c->trig_n       = x.n;
+    c->trig_h       = x.h;
+    c->trig_holdoff = x.holdoff;
+  }
+
   //1.9: the decimation filter as written for this capture (the arm wrote it just before)
   {
     pc_decim_cfg d;
@@ -424,7 +438,7 @@ static uint16_t pc_features(const pc_session *s)
 {
   (void)s;
   return PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR | PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE |
-         PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE;
+         PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE | PC_FEAT_W_TRIG_TYPES;
 }
 
 //1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
@@ -456,7 +470,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   if(c1.overload)         flags |= 0x40;
   if(c2.overload)         flags |= 0x80;
 
-  memset(p, 0, 48);
+  memset(p, 0, PC_STATUS_LEN);
   p[0] = PC_SHARED;
   p[1] = s->acq_state;
   p[2] = flags;
@@ -482,7 +496,13 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   p[43] = pc_hal_display_mode();                //1.7: 0 scope, 1 spectrum view; 2 / 3 waterfall / density; 1.13: 4 phosphor;
                                                 //1.20: 5 Bode plot
   pc_features_body(s, p + 44);                  //1.17: features, UI Average (0 off, 1 software, 2 hardware), log2 N
-  return 48;
+  //1.26: the trigger extension status read at the last MAIN poll of a host capture in flight: 0x37 (bit 4 hold-off
+  //running, bit 3 type bit 2), 0x34 byte 0 ({ 0, 0, counting, pulse began, EXT, longer, type[1:0] }), the edges still
+  //to count (Nth edge; the bus gives the high byte first)
+  p[48] = s->trig_st[0];
+  p[49] = s->trig_st[1];
+  pc_put_u16(p + 50, (uint16_t)(((uint16_t)s->trig_st[2] << 8) | s->trig_st[3]));
+  return PC_STATUS_LEN;
 }
 
 //Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound, with the v4
@@ -610,18 +630,20 @@ static uint32_t pc_auto_timeout(pc_session *s, uint32_t total)
 
 static uint32_t pc_trigger_body(pc_session *s, uint8_t *p)
 {
-  pc_hw_trigger t;
+  pc_hw_trigger  t;
+  pc_hw_trig_ext x;
 
   pc_hal_trigger_read(&t);
+  pc_hal_trig_ext_read(&x);
 
-  memset(p, 0, 28);
+  memset(p, 0, PC_TRIGGER_LEN);
   p[0] = t.source;
   p[1] = t.edge;
   p[2] = t.level;
   p[3] = (t.ui_mode < 3) ? pc_mode_ui_to_proto[t.ui_mode] : 0;
   pc_put_u32(p + 4,  t.pretrigger);
   pc_put_u32(p + 8,  t.total);
-  pc_put_u32(p + 12, 0);
+  pc_put_u32(p + 12, x.holdoff);                //1.26: the 0x1B value, 5 ns units (always 0 up to 1.25)
   pc_put_u32(p + 16, pc_auto_timeout(s, t.total));
 
   //Ring words: one sample per word in the 16-bit layout (1.9)
@@ -632,7 +654,20 @@ static uint32_t pc_trigger_body(pc_session *s, uint8_t *p)
     pc_put_u16(p + 20, d.k ? t.pretrigger : t.pretrigger / 2);
     pc_put_u16(p + 22, d.k ? t.total : t.total / 2);
   }
-  return 28;
+
+  //1.26: bytes 28..51 are the SET_TRIGGER2 request that reproduces this trigger (type, polarity = edge, flags, source,
+  //N, H, level, level2 0, hold-off, 0)
+  p[28] = x.type;
+  p[29] = t.edge;
+  p[30] = x.flags;
+  p[31] = t.source;
+  pc_put_u32(p + 32, x.n);
+  pc_put_u32(p + 36, x.h);
+  pc_put_u16(p + 40, t.level);
+  pc_put_u16(p + 42, 0);
+  pc_put_u32(p + 44, x.holdoff);
+  pc_put_u32(p + 48, 0);
+  return PC_TRIGGER_LEN;
 }
 
 static uint32_t pc_gen_body(pc_session *s, uint8_t *p)
@@ -1234,9 +1269,6 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
     hwmask |= PC_TRG_TOTAL;
   }
 
-  if((mask & 0x40) && hold)
-    return pc_error(s, PC_E_UNSUPPORTED, 6, "holdoff");
-
   //Geometry checks on the resulting values
   if(mask & 0x30)
   {
@@ -1252,8 +1284,105 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 
   pc_hal_trigger_write(&t, hwmask);
 
+  //1.26: the hold-off (0x1B, 5 ns units; E_UNSUPPORTED up to 1.25) through the trigger extension, the type and its
+  //parameters kept; like SET_TRIGGER2 it asks for the hold-off clear at the next arm
+  if(mask & 0x40)
+  {
+    pc_hw_trig_ext x;
+
+    pc_hal_trig_ext_read(&x);
+    x.holdoff = hold;
+    pc_hal_trig_ext_write(&x);
+  }
+
   if(mask & 0x80)
     s->auto_timeout_cfg = ato;
+
+  *rl = pc_trigger_body(s, resp);
+  return PC_OK;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// SET_TRIGGER2 (1.26, fw-c5, FPGA 0x153C; docs/protocol.md row 66, docs/plans/fpga-0x153c.md section 3): the trigger
+// definition in one 24-byte request, every field written (no mask): 0 u8 type, 1 u8 polarity, 2 u8 flags, 3 u8 source,
+// 4 u32 N, 8 u32 H (N2 on 0x153E), 12 u16 level (0..255: the 8-bit code, as SET_TRIGGER), 14 u16 level2 (0x153E, 0),
+// 16 u32 hold-off (5 ns units), 20 u32 0. Nothing is converted: N and H are samples of the trigger stream. The edge
+// trigger's registers take source, polarity (0x16) and level as SET_TRIGGER writes them; the extension registers are
+// written at once and the hold-off clear is requested for the next arm (pc_hal_trig_ext_write). Response: the
+// GET_TRIGGER body. SET_TRIGGER stays for the edge type's fields, the geometry and the mode. Runt / window / range /
+// both cores (0x153E) are refused: one bitstream per firmware, no reserved behaviour.
+
+static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint8_t  type = req[0], pol = req[1], flags = req[2], src = req[3];
+  uint32_t n = pc_get_u32(req + 4), h = pc_get_u32(req + 8), hold = pc_get_u32(req + 16);
+  uint16_t level = pc_get_u16(req + 12), level2 = pc_get_u16(req + 14);
+  pc_hw_trigger  t;
+  pc_hw_trig_ext x;
+
+  (void)len;
+
+  //detail = the byte offset of the field (section 14 row 4)
+  if((type == PC_TRG_T_RUNT) || (type == PC_TRG_T_WINDOW))
+    return pc_error(s, PC_E_BAD_ARG, 0, "runt / window: FPGA 0x153E");
+
+  if(type > PC_TRG_T_TIMEOUT)
+    return pc_error(s, PC_E_BAD_ARG, 0, "type 0..3");
+
+  if(pol > 1)
+    return pc_error(s, PC_E_BAD_ARG, 1, "polarity 0..1");
+
+  if(flags & (PC_TRG_F_RANGE | PC_TRG_F_BOTH))
+    return pc_error(s, PC_E_BAD_ARG, 2, "range / both cores: FPGA 0x153E");
+
+  if(flags & ~PC_TRG_F_LONGER)
+    return pc_error(s, PC_E_BAD_ARG, 2, "flags");
+
+  if((flags & PC_TRG_F_LONGER) && (type != PC_TRG_T_PULSE))
+    return pc_error(s, PC_E_BAD_ARG, 2, "longer: pulse width only");
+
+  if(src > 2)
+    return pc_error(s, PC_E_BAD_ARG, 3, "source 0..2");
+
+  switch(type)
+  {
+    case PC_TRG_T_PULSE:
+    case PC_TRG_T_TIMEOUT:
+      if((n == 0) || (n > PC_TRG_N_MAX)) return pc_error(s, PC_E_BAD_ARG, 4, "N 1..16777215 samples");
+      if(h)                              return pc_error(s, PC_E_BAD_ARG, 8, "H: Nth edge only");
+      break;
+
+    case PC_TRG_T_NTH:
+      if((n == 0) || (n > PC_TRG_NTH_MAX)) return pc_error(s, PC_E_BAD_ARG, 4, "N 1..65535 edges");
+      if(h > PC_TRG_N_MAX)                 return pc_error(s, PC_E_BAD_ARG, 8, "H 0..16777215 samples");
+      break;
+
+    default:
+      if(n) return pc_error(s, PC_E_BAD_ARG, 4, "N: 0 for the edge type");
+      if(h) return pc_error(s, PC_E_BAD_ARG, 8, "H: 0 for the edge type");
+      break;
+  }
+
+  if(level > 255)
+    return pc_error(s, PC_E_BAD_ARG, 12, "level 0..255");
+
+  if(level2)
+    return pc_error(s, PC_E_BAD_ARG, 14, "level2: FPGA 0x153E");
+
+  //The edge trigger's registers as SET_TRIGGER writes them: 0x15, 0x16 (the polarity), 0x17 through the UI's marker
+  pc_hal_trigger_read(&t);
+  t.source = src;
+  t.edge   = pol;
+  t.level  = (uint8_t)level;
+  pc_hal_trigger_write(&t, PC_TRG_SOURCE | PC_TRG_EDGE | PC_TRG_LEVEL);
+
+  //The extension registers at once, 0x66 = 1 for the next arm
+  x.type    = type;
+  x.flags   = flags;
+  x.n       = n;
+  x.h       = h;
+  x.holdoff = hold;
+  pc_hal_trig_ext_write(&x);
 
   *rl = pc_trigger_body(s, resp);
   return PC_OK;
@@ -1379,6 +1508,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->fpga_triggered   = 0;
   s->auto_timeout_hit = 0;
   s->armed_once       = 1;
+  memset(s->trig_st, 0, sizeof(s->trig_st));                                        //1.26: read while in flight
   s->arm_ms           = pc_hal_ms();
   s->cap_pre_words    = pre_w;
   s->cap_total_words  = tot_w;
@@ -1463,7 +1593,7 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   if(s->capture_id == 0)
     return pc_error(s, PC_E_STATE, 0, "no capture");
 
-  memset(resp, 0, 96);
+  memset(resp, 0, PC_CAPTURE_INFO_LEN);
   pc_put_u32(resp,      c->capture_id);
   pc_put_u32(resp + 4,  c->seq);
   resp[8] = c->origin;
@@ -1515,7 +1645,15 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   pc_put_u32(resp + 88, c->seq_n);
   pc_put_u32(resp + 92, c->seq_holdoff_ns);
 
-  *rl = 96;
+  //1.26: the trigger extension this capture was armed with (the polarity is 22, the level 23)
+  resp[96] = c->trig_type;
+  resp[97] = c->trig_flags;
+  pc_put_u16(resp + 98, 0);
+  pc_put_u32(resp + 100, c->trig_n);
+  pc_put_u32(resp + 104, c->trig_h);
+  pc_put_u32(resp + 108, c->trig_holdoff);
+
+  *rl = PC_CAPTURE_INFO_LEN;
   return PC_OK;
 }
 
@@ -2969,6 +3107,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_TIMEBASE, 0,                            0, h_set_timebase },
   { PC_CMD_GET_TRIGGER,  F_MODAL,                      0, h_get_trigger },
   { PC_CMD_SET_TRIGGER,  0,                            0, h_set_trigger },
+  { PC_CMD_SET_TRIGGER2, 0,                            PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
   { PC_CMD_ARM,          0,                            0, h_arm },
   { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
   { PC_CMD_STOP,         F_CONTROL,                    0, h_stop },
@@ -3299,7 +3438,7 @@ static int pc_dispatch(pc_session *s, int ctx)
   {
     //The scope does not run the bitstream this firmware is built for: nothing that would configure or read the
     //acquisition runs (the notice screen says what to do); the F_BASIC commands keep the link, the diagnostics and FEL
-    st = pc_error(s, PC_E_UNSUPPORTED, PC_UNSUP_FPGA_MISMATCH, "FPGA bitstream mismatch: this firmware needs 0x153B");
+    st = pc_error(s, PC_E_UNSUPPORTED, PC_UNSUP_FPGA_MISMATCH, "FPGA bitstream mismatch: this firmware needs " PC_FW_FPGA_VERSION_TEXT);
   }
   else if((e->cap && !(s->var.caps & e->cap)) || (e->handler == 0))
   {
@@ -3442,6 +3581,10 @@ static void pc_acq_service(pc_session *s)
 
   //Only 0x0A and 0x18: no touch scan, unlike fpga_done_conversion
   pc_hal_acq_poll(&done, &trig);
+
+  //1.26: the trigger extension status (0x37, 0x34) while the capture is in flight, for GET_STATUS 48..51: 6 strobes
+  if(!done)
+    pc_hal_trig_status(s->trig_st);
 
   //Firmware auto mode: no trigger in time ends the capture now (0x1A = 0; the FPGA's sample time-out is long past).
   //0x153B latches the newest total words at a stop, so the forced record is contiguous

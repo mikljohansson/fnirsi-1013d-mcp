@@ -371,6 +371,43 @@ Gone with it (fw-one, after fw 0.2.102): the stock 0x1432 / Atlan 0x1532 / EF2 /
 per-bitstream bus contract (`fpga_bus_contract_for`; `FPGA_READ_DUMMY` is the one constant), `cs_has`, and every branch on
 the version word or on a capability bit that cannot be false on 0x153B (62 sites in 11 files). A new bitstream means a new
 firmware: change `PC_FW_FPGA_VERSION`, the bus contract constant if the readout changed, and the notice's text follows.
+fw-c5 did exactly that for 0x153C: the constant, `PC_FW_FPGA_VERSION_TEXT` (the mismatch error's text) and the caps.
+
+### Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26)
+
+Bitstream 0x153C (fpga-c1, `fpga/al3/AGENTS.md` "0x153C C1 triggers"; contract `docs/plans/fpga-0x153c.md` section 3) adds
+a trigger qualifier in front of the edge compare and gives Atlan4's dead 0x1B register its meaning. Registers: 0x5E type
+(bits 2..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and 5 window are 0x153E and act as edge) with bit 3
+"longer than N"; 0x5F u24 N; 0x60 u24 H; 0x16 the polarity per type (the UI's trigger edge); 0x1B u32 hold-off in 5 ns
+clocks (0 = off: from the trigger of a record no trigger is accepted until it elapsed, across sequencer restarts and
+re-arms; 0 written releases a running one at once); 0x66 bit 0 = 1 makes the next 0x01 = 1 clear the hold-off (one-shot);
+reads 0x34 (3 bytes: qualifier status, edges still to count) and 0x37 (hold-off running, type bit 2). Units: N and H are
+samples of the trigger stream, one memory word on CH1 / CH2 (10 (D + 1) ns legacy, N x 5 ns with the filter), one 5 ns
+clock on EXT. The trigger position is the edge type's for the qualifying edge, so 0x14 and the record arithmetic are
+unchanged; power-on (every register 0) is 0x153B behaviour.
+
+- **One copy, one writer** (`fpga_bus.c`): `fpga_trig` is what the firmware believes the FPGA holds. `fpga_trig_write`
+  (SET_TRIGGER2, SET_TRIGGER's hold-off, boot) writes 0x5E, 0x5F / 0x60 for a type other than edge, 0x1B, and 0x66 = 1
+  when asked (a new trigger definition is a new session: the next arm starts with a clean hold-off; ARMs between
+  definitions keep it running across re-arms, the FPGA's rule, which is what skips the pulses of a train). Every arm (UI
+  conversion or host ARM, `fpga_arm_reset`) re-writes 0x5E and, for a qualified type, 0x5F / 0x60 inside the sampling
+  reset window after the second 0x0B / 0x0C and before 0x0E (`fpga_trig_arm`, 2 or 10 strobes): the FPGA holds its
+  qualifier in reset until the first write clock edge after the release, so the registers apply at every rate, and a
+  FEL-loaded firmware's FPGA holds what the firmware believes. Boot (`pc_glue_init`, built-for word only) writes the
+  power-on state (edge, no hold-off) and the clear request once.
+- **Host** (`pc_cmds.c`, `docs/protocol.md` row 66): **SET_TRIGGER2 0x0219** (24 bytes: type, polarity, flags, source,
+  N, H, level, level2, hold-off, 0; no mask, every field written; the firmware converts nothing) and **GET_TRIGGER**
+  52 bytes (12 the hold-off, 28..51 the SET_TRIGGER2 body that reproduces the trigger). Runt / window / range / both
+  cores (0x153E) and out-of-range fields are E_BAD_ARG with the byte offset as detail; nothing is written then. The old
+  SET_TRIGGER keeps the edge type's fields, the geometry and the mode, and now accepts its `holdoff` (5 ns units).
+  GET_STATUS 48..51 carries 0x37 / 0x34 read at every MAIN poll while a host capture is in flight (6 strobes), GET_CAPTURE_INFO
+  96..111 the extension the capture was armed with. Caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8.
+- **Not here**: the UI's Type row (`docs/plans/ui-rows.md`, a later item, converts the menu's time to samples and
+  drives the same `fpga_trig_write`), peak detect (C6) and the counter (C7).
+- **Host tests**: `test_fpga_bus.c` `test_trig_ext` (every type's write and arm sequence against `fpga_model.c`, the
+  0x66 one-shot, the hold-off masking a trigger across a re-arm, released by 0x66 + arm, by 0x1B = 0 or by running out,
+  the status reads), `test_session.c` `test_trigger2` (the commands, the refusals, settings_seq, the status bytes, the
+  capture info), the 1.26 vectors in `docs/protocol-vectors.json`.
 
 ### Build options
 

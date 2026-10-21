@@ -48,6 +48,7 @@
   "READ_SEQ": 528,
   "BODE_CTRL": 529,
   "READ_BODE": 530,
+  "SET_TRIGGER2": 537,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
   "SD_STAGE": 1282,
@@ -6235,6 +6236,32 @@
    ]
   },
   {
+   "name": "req_set_trigger2",
+   "description": "1.26: pulse width shorter than 1500 samples (flags 0), negative pulse (polarity 1), CH2, level 140, hold-off 200000 x 5 ns = 1 ms",
+   "hex": "a51301001902350000001800000082d801010001dc050000000000008c000000400d030000000000e1ce2dde",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01010001dc050000000000008c000000400d030000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01010001dc050000000000008c000000400d030000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
    "name": "resp_ping",
    "description": "PING response (spec section 13). The device parser drops frames with RESPONSE set",
    "hex": "a513010101000200000002000000b9ea6869ac2a93d8",
@@ -6892,6 +6919,174 @@
      "flags": 1,
      "len": 124,
      "payload": "02007c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002f601f60000000000000000b0040000dc080f040000000025000200b004000003000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "req_set_trigger2_nth_edge_ext",
+   "description": "1.26: the 3rd rising edge on EXT after an idle time of 100000 samples (5 ns clocks on EXT: 500 us), level 128 (unused on EXT), no hold-off",
+   "hex": "a513010019024800000018000000ea3e0200000203000000a0860100800000000000000000000000ce76e0eb",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 72,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0200000203000000a0860100800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 72,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0200000203000000a0860100800000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_trigger2_pulse_longer_max",
+   "description": "1.26: pulse width longer than N = 16777215 (the largest u24), positive pulse, CH1, level 100",
+   "hex": "a513010019024900000018000000397901000100ffffff00000000006400000000000000000000008cce08f6",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 73,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100ffffff0000000000640000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 73,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100ffffff0000000000640000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_trigger2_timeout",
+   "description": "1.26: timeout: the level held low (polarity 1) for 20000 samples after a falling edge, CH1",
+   "hex": "a513010019024a000000180000004cb103010000204e000000000000800000000000000000000000894ce2c3",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010000204e000000000000800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010000204e000000000000800000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_trigger2_edge",
+   "description": "1.26: back to the edge type (N and H must be 0), rising, CH1, level 128, hold-off off",
+   "hex": "a513010019024b000000180000009ff6000000000000000000000000800000000000000000000000c0a506c3",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 75,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "000000000000000000000000800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 75,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "000000000000000000000000800000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_get_trigger_1_26",
+   "description": "1.26 GET_TRIGGER response (52 bytes): CH2 falling / negative pulse, level 140, normal, pretrigger 2000, total 16000, 12 hold-off 200000 (5 ns units), auto_timeout 16000, 1000 / 8000 words; 28..51 the SET_TRIGGER2 body: pulse width shorter than 1500 samples, CH2, level 140, hold-off 200000 (the req_set_trigger2 request)",
+   "hex": "a513010104014c000000340000005ba001018c01d0070000803e0000400d0300803e0000e803401f0000000001010001dc050000000000008c000000400d0300000000006647cbe2",
+   "frames": [
+    {
+     "cmd": 260,
+     "seq": 76,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "01018c01d0070000803e0000400d0300803e0000e803401f0000000001010001dc050000000000008c000000400d030000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_status_1_26",
+   "description": "1.26 GET_STATUS tail (52 bytes; 0..43 zero here): 44 features 0x1FF (bit 8 TRIG_TYPES), 46 / 47 Average off, 48 FPGA 0x37 = 0x10 (hold-off running), 49 0x34 byte 0 = 0x22 (counting, type 2 Nth edge, not longer, not EXT), 50 u16 edges still to count 2",
+   "hex": "a513010103004d0000003400000051100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff0100001022020071a5f115",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 77,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff01000010220200"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_capture_info_1_26",
+   "description": "1.26 GET_CAPTURE_INFO tail (112 bytes; 0..95 as 1.17, zero here): 96 trigger type 2 (Nth edge), 97 flags 0, 98 u16 0, 100 u32 N 3, 104 u32 H 100000, 108 u32 hold-off 0",
+   "hex": "a513010109024e00000070000000ef2e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000003000000a086010000000000cfb15761",
+   "frames": [
+    {
+     "cmd": 521,
+     "seq": 78,
+     "status": 0,
+     "flags": 1,
+     "len": 112,
+     "payload": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000003000000a086010000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_set_trigger2_e_bad_arg_runt",
+   "description": "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, 14 level2)",
+   "hex": "a513010119024f0004001c000000ebed000072756e74202f2077696e646f773a2046504741203078313533451ef7e880",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 79,
+     "status": 4,
+     "flags": 1,
+     "len": 28,
+     "payload": "000072756e74202f2077696e646f773a204650474120307831353345"
     }
    ],
    "device_events": []

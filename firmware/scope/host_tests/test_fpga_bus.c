@@ -11,7 +11,11 @@
 //     (fpga/al3/AGENTS.md "First-record saturation": S 9 / 7 armed at D 4095 saturated every word);
 //   - fw 0.2.97 (firmware/AGENTS.md section 64): records that end on the auto time-out or a forced stop on the
 //     built-for bitstream 0x153B (the model's capture logic, fpga/al3/README.md section 11): the forced stop reads the
-//     newest total words, a triggered FPGA-auto record completes; the model of 0x153A shows the fault that was fixed.
+//     newest total words, a triggered FPGA-auto record completes; the model of 0x153A shows the fault that was fixed;
+//   - fw-c5 (0x153C, protocol 1.26, firmware/AGENTS.md section 69): the trigger extension registers (fpga_trig_write,
+//     fpga_trig_arm): every type's arm sequence (0x5E, and 0x5F / 0x60 for the qualified types, inside the 0x01 = 1
+//     window after the geometry and before 0x0E), the 0x66 one-shot consumed by the next 0x01 = 1, the hold-off masking
+//     a trigger across a re-arm, released by 0x66 + arm or by 0x1B = 0, and the 0x34 / 0x37 status reads.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "test_util.h"
@@ -20,9 +24,9 @@
 #include "pc_decim.h"
 #include <string.h>
 
-//The model's bitstreams the firmware's sequences are run against: the built-for 0x153B and its predecessors with the
-//same bus (the firmware runs on 0x153B only; the older models show the faults the order and the dummy strobe answer)
-static const uint16_t versions[] = { 0x1535, 0x1537, 0x1539, 0x153A, 0x153B };
+//The model's bitstreams the firmware's sequences are run against: the built-for 0x153C and its predecessors with the
+//same bus (the firmware runs on 0x153C only; the older models show the faults the order and the dummy strobe answer)
+static const uint16_t versions[] = { 0x1535, 0x1537, 0x1539, 0x153A, 0x153B, 0x153C };
 #define NVER (sizeof(versions) / sizeof(versions[0]))
 
 //One lane read against the memory, from a start near the ring end so it wraps
@@ -607,6 +611,209 @@ static void test_timeout_records(void)
   T_TRUE(spliced_old > 0);
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// fw-c5 (0x153C): the trigger extension registers (fpga_bus.h "Trigger types and hold-off")
+
+//The arm's write trace: 0x5E (and 0x5F / 0x60 for a qualified type) once, inside the window, after the second 0x0C and
+//before 0x0E; never 0x1B or 0x66 in an arm
+static void trig_arm_trace_check(uint8_t type)
+{
+  int i01 = fm_trace_find(0x01, 1, 0), i01b = fm_trace_find(0x01, 0, 0);
+  int i0c2, i5e, i0e, i5f, i60;
+
+  T_TRUE(i01 >= 0); T_TRUE(i01b > i01);
+  i0c2 = fm_trace_find(0x0C, fm.reg_0c, (uint32_t)i01);
+  i0e  = fm_trace_find(0x0E, fm.reg_0e, (uint32_t)i01);
+  i5e  = fm_trace_find(0x5E, fm.reg_5e, 0);
+  T_TRUE(i0c2 > i01); T_TRUE(i0e > i0c2); T_TRUE(i0e < i01b);
+  T_TRUE(i5e > i0c2); T_TRUE(i5e < i0e);
+  T_EQ(fm_trace_find(0x5E, fm.reg_5e, (uint32_t)i5e + 1), -1);               //once per arm
+  T_EQ(fm_trace_find(0x1B, fm.reg_1b, 0), -1);
+  T_EQ(fm_trace_find(0x66, 1, 0), -1);
+
+  i5f = fm_trace_find(0x5F, fm.reg_5f, 0);
+  i60 = fm_trace_find(0x60, fm.reg_60, 0);
+
+  if(type == FPGA_TRIG_EDGE)
+  {
+    T_EQ(i5f, -1); T_EQ(i60, -1);                                              //the edge type writes only 0x5E
+  }
+  else
+  {
+    T_TRUE(i5f > i5e); T_TRUE(i60 > i5f); T_TRUE(i60 < i0e);                  //type, N, H, then 0x0E
+  }
+}
+
+static void test_trig_ext(void)
+{
+  static const struct { uint8_t type, longer; uint32_t n, h, holdoff; } cases[] =
+  {
+    { FPGA_TRIG_EDGE,    0, 0,        0,       0 },
+    { FPGA_TRIG_PULSE,   0, 1500,     0,       0 },             //shorter than 15 us at 100 MSa/s words
+    { FPGA_TRIG_PULSE,   1, 0xFFFFFF, 0,       200000 },        //the largest N, a 1 ms hold-off
+    { FPGA_TRIG_NTH,     0, 3,        100000,  0 },             //the third edge after a 1 ms idle time
+    { FPGA_TRIG_NTH,     0, 65535,    0,       12 },
+    { FPGA_TRIG_TIMEOUT, 0, 1,        0,       0xFFFFFFFFu },   //N = 1: the edge with one sample of context
+  };
+  fpga_trig_ext t;
+  uint32_t c, v;
+  uint8_t st[4];
+  int i5e, i5f, i60, i1b, i66;
+
+  for(v=0;v<NVER;v++)
+  {
+    for(c=0;c<sizeof(cases) / sizeof(cases[0]);c++)
+    {
+      fm_reset(versions[v], 199, 300 + c);
+      memset(&t, 0, sizeof(t));
+      t.type = cases[c].type; t.longer = cases[c].longer; t.n = cases[c].n; t.h = cases[c].h; t.holdoff = cases[c].holdoff;
+
+      //SET_TRIGGER2: the registers at once, 0x1B, and the 0x66 request
+      fm.ntrace = 0;
+      fpga_trig_write(&t, 1);
+      T_EQ(fm.reg_5e, (t.type & 7) | (t.longer ? 8 : 0));
+      T_EQ(fm.reg_1b, t.holdoff);
+      T_EQ(fm.ho_clr_req, 1);
+      T_EQ(fpga_trig.type, t.type); T_EQ(fpga_trig.n, t.n); T_EQ(fpga_trig.h, t.h); T_EQ(fpga_trig.holdoff, t.holdoff);
+      i5e = fm_trace_find(0x5E, fm.reg_5e, 0);
+      i5f = fm_trace_find(0x5F, t.n, 0);
+      i60 = fm_trace_find(0x60, t.h, 0);
+      i1b = fm_trace_find(0x1B, t.holdoff, 0);
+      i66 = fm_trace_find(0x66, 1, 0);
+      T_EQ(i5e, 0); T_TRUE(i1b > i5e); T_TRUE(i66 > i1b); T_EQ(i66, (int)fm.ntrace - 1);
+
+      if(t.type == FPGA_TRIG_EDGE)
+      {
+        T_EQ(i5f, -1); T_EQ(i60, -1); T_EQ(fm.ntrace, 3);
+      }
+      else
+      {
+        T_EQ(fm.reg_5f, t.n); T_EQ(fm.reg_60, t.h);
+        T_TRUE(i5f > i5e); T_TRUE(i60 > i5f); T_TRUE(i1b > i60); T_EQ(fm.ntrace, 5);
+      }
+
+      //A write without the clear request leaves 0x66 alone
+      fm.ho_clr_req = 0;
+      fm.ntrace = 0;
+      fpga_trig_write(&t, 0);
+      T_EQ(fm_trace_find(0x66, 1, 0), -1);
+      T_EQ(fm.ho_clr_req, 0);
+      fm.ho_clr_req = 1;
+
+      //The arm: the type registers inside the window, the one-shot consumed by the 0x01 = 1
+      fm.ntrace = 0;
+      arm_once(123, 456);
+      trig_arm_trace_check(t.type);
+      T_EQ(fm.ho_clr_req, 0);
+      T_EQ(fm.reg_5e, (t.type & 7) | (t.longer ? 8 : 0));                    //re-written with the same value
+      T_EQ(fm.reg_1b, t.holdoff);                                             //untouched by the arm
+
+      //A second arm without a new 0x66: the request stays consumed
+      fm.ntrace = 0;
+      arm_once(123, 456);
+      trig_arm_trace_check(t.type);
+      T_EQ(fm.ho_clr_req, 0);
+
+      //0x37 / 0x34 on the built-for model: type bit 2 never set here, the hold-off idle, the qualifier at its reset
+      //state (Nth edge: N - 1 edges still to count, counting when H = 0); older models answer 0
+      fpga_trig_status(st);
+      if(versions[v] >= 0x153C)
+      {
+        uint32_t n16 = t.n & 0xFFFF, rem = (t.type == FPGA_TRIG_NTH) ? ((n16 ? n16 : 1) - 1) : 0;
+
+        T_EQ(st[0], 0);
+        T_EQ(st[1], (uint8_t)(((t.type == FPGA_TRIG_NTH) && !t.h) << 5) | (t.longer ? 0x04 : 0) | (t.type & 3));
+        T_EQ(((uint32_t)st[2] << 8) | st[3], rem);
+      }
+      else
+      {
+        T_EQ(st[0], 0); T_EQ(st[1], 0); T_EQ(st[2], 0); T_EQ(st[3], 0);
+      }
+    }
+  }
+
+  //The hold-off on the capture logic (the 0x153C model, divider 0: 10 ns per word): a trigger starts it, a re-arm's
+  //trigger inside it is not taken (the FPGA auto time-out ends that record untriggered), 0x66 + arm clears it, 0x1B =
+  //0 releases it at once, and it runs out by itself; 0x37 bit 4 follows
+  {
+    static const uint32_t holdoffs[] = { 200000, 40000, 10000 };    //1 ms, 200 us, 50 us
+    uint32_t h;
+
+    for(h=0;h<3;h++)
+    {
+      uint32_t ho_ns = holdoffs[h] * 5;
+
+      to_reset(0x153C, 500 + h);
+      memset(&t, 0, sizeof(t));
+      t.holdoff = holdoffs[h];
+      fpga_trig_write(&t, 1);                                                 //clear with the first arm (a new session)
+
+      //1. the first record triggers and starts the hold-off
+      fm.trig_at = 40;
+      to_arm(10, 4 * TO_TOTAL, 0);
+      T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+      fpga_trig_status(st); T_EQ(st[0] & 0x10, 0x10);
+      T_EQ(fm.ho_blocked, 0);
+
+      //2. a re-arm at once (no 0x66): its trigger falls inside the hold-off and is not taken; the FPGA auto time-out
+      //   (0x0E = 4 x total words = 2 x 2 x 400 words, 16 us at 10 ns) ends the record untriggered
+      fm.trig_at = 40;
+      to_arm(10, 4 * TO_TOTAL, 0);
+      T_TRUE(to_wait(200)); T_EQ(to_trig(), 0);
+      T_EQ(fm.ho_blocked, 1);
+      T_EQ(to_addr(), (uint16_t)((fm.stop_n + 2 * 8192 - TO_TOTAL + 10) % 8192));   //0x153B's untriggered address
+
+      //3. 0x66 = 1 before the next arm: the hold-off is cleared by that 0x01 = 1 and the trigger is taken again
+      fpga_write_cmd(0x66); fpga_write_byte(0x01);
+      fm.trig_at = 40;
+      to_arm(10, 4 * TO_TOTAL, 0);
+      T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+      T_EQ(fm.ho_blocked, 1);
+      fpga_trig_status(st); T_EQ(st[0] & 0x10, 0x10);
+
+      //4. 0x1B = 0 releases the running hold-off at once (fpga/al3/AGENTS.md deviation 1)
+      t.holdoff = 0;
+      fpga_trig_write(&t, 0);
+      fpga_trig_status(st); T_EQ(st[0] & 0x10, 0);
+      fm.trig_at = 40;
+      to_arm(10, 4 * TO_TOTAL, 0);
+      T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+      T_EQ(fm.ho_blocked, 1);
+
+      //5. back on once the timer of step 3 has run out (the FPGA keeps counting while 0x1B = 0 masks nothing, so a
+      //   value written back inside that time would mask again): a trigger starts it, and it runs out by itself after
+      //   the hold-off time (no clear needed)
+      fm_advance_ns(ho_ns + 1000);
+      t.holdoff = holdoffs[h];
+      fpga_trig_write(&t, 0);
+      fpga_trig_status(st); T_EQ(st[0] & 0x10, 0);
+      fm.trig_at = 40;
+      to_arm(10, 4 * TO_TOTAL, 0);
+      T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+      fpga_trig_status(st); T_EQ(st[0] & 0x10, 0x10);
+      fm_advance_ns(ho_ns + 1000);
+      fpga_trig_status(st); T_EQ(st[0] & 0x10, 0);
+      fm.trig_at = 40;
+      to_arm(10, 4 * TO_TOTAL, 0);
+      T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+      T_EQ(fm.ho_blocked, 1);
+    }
+
+    //The hold-off is not a 0x153B feature: the same sequence on the 0x153B model takes every trigger
+    to_reset(0x153B, 600);
+    memset(&t, 0, sizeof(t));
+    t.holdoff = 200000;
+    fpga_trig_write(&t, 1);
+    fm.trig_at = 40;
+    to_arm(10, 4 * TO_TOTAL, 0);
+    T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+    fm.trig_at = 40;
+    to_arm(10, 4 * TO_TOTAL, 0);
+    T_TRUE(to_wait(200)); T_EQ(to_trig(), 1);
+    T_EQ(fm.ho_blocked, 0);
+  }
+}
+
 int main(void)
 {
   test_write_record();
@@ -617,5 +824,6 @@ int main(void)
   test_ready_bound();
   test_decim_write();
   test_timeout_records();
+  test_trig_ext();
   return t_report("test_fpga_bus");
 }

@@ -101,6 +101,9 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   //Inside the window as 1.00o5 ("send when the system is in reset")
   fpga_arm_geometry(c);
 
+  //0x153C: the trigger type registers, applied by the qualifier at the first write clock edge after the release
+  fpga_trig_arm();
+
   if(c->write_0e)
   {
     fpga_write_cmd(0x0E);
@@ -112,6 +115,59 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   fpga_write_byte(0x00);
   return 0;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Trigger types and hold-off (0x153C, fw-c5): fpga_bus.h
+
+fpga_trig_ext fpga_trig;
+
+static void fpga_write_u24(uint8_t cmd, uint32_t v)
+{
+  fpga_write_cmd(cmd);
+  fpga_write_byte((uint8_t)(v >> 16));
+  fpga_write_byte((uint8_t)(v >> 8));
+  fpga_write_byte((uint8_t)v);
+}
+
+void fpga_trig_arm(void)
+{
+  fpga_write_cmd(0x5E);
+  fpga_write_byte((uint8_t)((fpga_trig.type & 0x07) | (fpga_trig.longer ? 0x08 : 0x00)));
+
+  //The edge type looks at neither; the qualified types take N and H at the first write clock edge after the release
+  if(fpga_trig.type != FPGA_TRIG_EDGE)
+  {
+    fpga_write_u24(0x5F, fpga_trig.n & FPGA_TRIG_N_MAX);
+    fpga_write_u24(0x60, fpga_trig.h & FPGA_TRIG_N_MAX);
+  }
+}
+
+void fpga_trig_write(const fpga_trig_ext *t, int clear)
+{
+  fpga_trig = *t;
+  fpga_trig_arm();
+
+  fpga_write_cmd(0x1B);
+  fpga_write_int(fpga_trig.holdoff);
+
+  if(clear)
+  {
+    fpga_write_cmd(0x66);
+    fpga_write_byte(0x01);
+  }
+}
+
+void fpga_trig_status(uint8_t out[4])
+{
+  fpga_write_cmd(0x37);
+  out[0] = fpga_read_byte();
+  fpga_write_cmd(0x34);
+  out[1] = fpga_read_byte();
+  out[2] = fpga_read_byte();
+  out[3] = fpga_read_byte();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 
 fpga_bus_writes fpga_bus_wr;
 

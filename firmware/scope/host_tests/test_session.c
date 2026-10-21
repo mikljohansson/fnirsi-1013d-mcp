@@ -165,19 +165,19 @@ static void test_info(void)
   uint32_t caps;
   const uint32_t fixed = PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR |
                          PC_CAP_SEQ | PC_CAP_ENC_CHECK | PC_CAP_CAPTURE_STAGES | PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE |
-                         PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
+                         PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT | PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES;   //1.26: 0x153C
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, PC_INFO_LEN);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 25); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
-  T_EQ(pc_get_u16(r.p + 8), 0x153B); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 26); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(pc_get_u16(r.p + 8), PC_FW_FPGA_VERSION); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   caps = pc_get_u32(r.p + 20);
   //The capability word is the firmware's (PC_FW_FPGA_VERSION), never derived from the version word read
   T_EQ(caps & fixed, fixed);
   T_EQ(caps & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);                //BENCH: T3 still open
   T_EQ(caps & PC_CAP_INTERLEAVE_UNVERIFIED, 0);                                       //the mock's boot 0x33: convention 1
-  T_EQ(caps & PC_CAP_HOLDOFF, 0);
+  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE | PC_CAP_LIVE_READ), 0);   //0x153E, never built
   T_EQ(pc_get_u32(r.p + 24), 50000000); T_EQ(pc_get_u16(r.p + 28), 16382); T_EQ(pc_get_u16(r.p + 30), 80);
   T_EQ(r.p[32], 0); T_EQ(r.p[35], 0);
   T_STR((char *)r.p + 36, PC_FW_VERSION);
@@ -194,7 +194,7 @@ static void test_info(void)
   //in GET_INFO and GET_HEALTH, every acquisition and configuration command refused with one clear status, and the link,
   //the diagnostics readers, the card, the screen and FEL still answering (the notice screen on the scope says what to do)
   {
-    static const uint16_t other[] = { 0x1432, 0x1532, 0x153A, 0x153C, 0x1632, 0x9999 };
+    static const uint16_t other[] = { 0x1432, 0x1532, 0x153A, 0x153B, 0x153D, 0x1632, 0x9999 };
     uint32_t i;
 
     for(i=0;i<sizeof(other) / sizeof(other[0]);i++)
@@ -235,7 +235,7 @@ static void test_shared_basics(void)
   uint8_t p[12];
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   memset(p, 0, sizeof(p));
 
   //SET_CHANNEL writes the live UI settings at once (1.2: E_NOT_REMOTE)
@@ -264,7 +264,7 @@ static void test_shared_basics(void)
   {
     uint8_t sr[4] = { 1, 0x07, 15, 0 };
     r = req(PC_CMD_SET_REMOTE, sr, 4);
-    T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(r.p[0], PC_SHARED); T_EQ(pc_get_u16(r.p + 20), 0xFFFF); T_EQ(r.p[23], 0);
+    T_EQ(r.h.status, 0); T_EQ(r.len, PC_STATUS_LEN); T_EQ(r.p[0], PC_SHARED); T_EQ(pc_get_u16(r.p + 20), 0xFFFF); T_EQ(r.p[23], 0);
     sr[0] = 0;
     r = req(PC_CMD_SET_REMOTE, sr, 4);
     T_EQ(r.h.status, 0); T_EQ(r.p[0], PC_SHARED);
@@ -292,13 +292,13 @@ static void test_shared_basics(void)
 
 static void test_ascii_ver(void)
 {
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock_clear_resps();
   mock_rx_push((const uint8_t *)"#VER\r\n#FOO\n", 11);
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.25,fpga=0x153b");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.26,fpga=0x153c");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -307,7 +307,7 @@ static void test_channel(void)
   uint8_t p[12];
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   memset(p, 0, sizeof(p));
   p[0] = 0; p[1] = PC_CH_RANGE; p[3] = 7;
@@ -347,7 +347,7 @@ static void test_timebase(void)
   uint8_t p[8];
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   memset(p, 0, 8); pc_put_u32(p + 4, 21);
   r = req(PC_CMD_SET_TIMEBASE, p, 8);
@@ -398,7 +398,7 @@ static void test_trigger(void)
 {
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   set_trigger(0x3F, 1, 1, 140, 1, 2000, 16000, 0, 0, &r);
   T_EQ(r.h.status, 0);
@@ -414,12 +414,158 @@ static void test_trigger(void)
   set_trigger(0x10, 0, 0, 0, 0, 15999, 0, 0, 0, &r);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
   set_trigger(0x10, 0, 0, 0, 0, 15999 + 1, 0, 0, 0, &r); T_EQ(r.h.status, PC_E_BAD_ARG);   //> total - 2
   set_trigger(0x10, 0, 0, 0, 0, 15998, 0, 0, 0, &r);  T_EQ(r.h.status, 0);
-  set_trigger(0x40, 0, 0, 0, 0, 0, 0, 5, 0, &r);      T_EQ(r.h.status, PC_E_UNSUPPORTED); T_EQ(pc_get_u16(r.p), 6);
-  set_trigger(0x40, 0, 0, 0, 0, 0, 0, 0, 0, &r);      T_EQ(r.h.status, 0);
+  //1.26: the hold-off is a 0x1B value in 5 ns units (E_UNSUPPORTED detail 6 up to 1.25); each write asks for the clear
+  T_EQ(mock.trig_ext_writes, 0);
+  set_trigger(0x40, 0, 0, 0, 0, 0, 0, 5, 0, &r);      T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 12), 5);
+  T_EQ(mock.trig_ext.holdoff, 5); T_EQ(mock.trig_ext.type, 0); T_EQ(mock.trig_ext_writes, 1);
+  T_EQ(pc_get_u32(r.p + 44), 5); T_EQ(r.len, PC_TRIGGER_LEN);
+  set_trigger(0x40, 0, 0, 0, 0, 0, 0, 0, 0, &r);      T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 12), 0);
+  T_EQ(mock.trig_ext_writes, 2);
+  set_trigger(0x01, 0, 0, 0, 0, 0, 0, 0, 0, &r);      T_EQ(r.h.status, 0); T_EQ(mock.trig_ext_writes, 2);   //no hold-off bit
   set_trigger(0x08, 0, 0, 0, 3, 0, 0, 0, 0, &r);      T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
   set_trigger(0x80, 0, 0, 0, 0, 0, 0, 0, 12345, &r);  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 16), 12345);
 
   set_trigger(0x08, 0, 0, 0, 2, 0, 0, 0, 0, &r);       T_EQ(r.h.status, 0); T_EQ(mock.trg.ui_mode, 1);   //single
+}
+
+//1.26 (fw-c5, FPGA 0x153C): SET_TRIGGER2 / GET_TRIGGER, the refusals, the hold-off through both commands, the status
+//bytes of GET_STATUS and the capture's trigger definition in GET_CAPTURE_INFO (docs/protocol.md row 66)
+static void set_trigger2(uint8_t type, uint8_t pol, uint8_t flags, uint8_t src, uint32_t n, uint32_t h, uint16_t level,
+                         uint16_t level2, uint32_t hold, resp_t *out)
+{
+  uint8_t p[24];
+
+  memset(p, 0, sizeof(p));
+  p[0] = type; p[1] = pol; p[2] = flags; p[3] = src;
+  pc_put_u32(p + 4, n); pc_put_u32(p + 8, h); pc_put_u16(p + 12, level); pc_put_u16(p + 14, level2); pc_put_u32(p + 16, hold);
+  *out = req(PC_CMD_SET_TRIGGER2, p, 24);
+}
+
+static void test_trigger2(void)
+{
+  resp_t r;
+  uint32_t seq0, seq1, writes;
+
+  setup(PC_FW_FPGA_VERSION);
+
+  //Caps bits 2 and 20, features bit 8, GET_STATUS 52 bytes with the status bytes at 48..51 (zero: nothing in flight)
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES), PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES);
+  r = status();
+  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_TRIG_TYPES, PC_FEAT_W_TRIG_TYPES);
+  T_EQ(r.p[48], 0); T_EQ(r.p[49], 0); T_EQ(pc_get_u16(r.p + 50), 0);
+  seq0 = pc_get_u32(r.p + 32);
+
+  //At boot the edge type: GET_TRIGGER 52 bytes, 28..51 the SET_TRIGGER2 body that reproduces it
+  r = req(PC_CMD_GET_TRIGGER, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_TRIGGER_LEN); T_EQ(pc_get_u32(r.p + 12), 0);
+  T_EQ(r.p[28], PC_TRG_T_EDGE); T_EQ(r.p[29], r.p[1]); T_EQ(r.p[30], 0); T_EQ(r.p[31], r.p[0]);
+  T_EQ(pc_get_u32(r.p + 32), 0); T_EQ(pc_get_u32(r.p + 36), 0); T_EQ(pc_get_u16(r.p + 40), r.p[2]);
+  T_EQ(pc_get_u16(r.p + 42), 0); T_EQ(pc_get_u32(r.p + 44), 0); T_EQ(pc_get_u32(r.p + 48), 0);
+
+  //Pulse width shorter than 1500 samples, negative pulse, CH2, level 140, hold-off 200000 x 5 ns = 1 ms: the edge
+  //trigger's registers take source / polarity / level, the extension is written once (with the clear request)
+  set_trigger2(PC_TRG_T_PULSE, 1, 0, 1, 1500, 0, 140, 0, 200000, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_TRIGGER_LEN);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 1); T_EQ(r.p[2], 140); T_EQ(pc_get_u32(r.p + 12), 200000);
+  T_EQ(r.p[28], PC_TRG_T_PULSE); T_EQ(r.p[29], 1); T_EQ(r.p[30], 0); T_EQ(r.p[31], 1);
+  T_EQ(pc_get_u32(r.p + 32), 1500); T_EQ(pc_get_u32(r.p + 36), 0); T_EQ(pc_get_u16(r.p + 40), 140);
+  T_EQ(pc_get_u16(r.p + 42), 0); T_EQ(pc_get_u32(r.p + 44), 200000); T_EQ(pc_get_u32(r.p + 48), 0);
+  T_EQ(mock.trg.source, 1); T_EQ(mock.trg.edge, 1); T_EQ(mock.trg.level, 140);
+  T_EQ(mock.trig_ext.type, PC_TRG_T_PULSE); T_EQ(mock.trig_ext.flags, 0); T_EQ(mock.trig_ext.n, 1500);
+  T_EQ(mock.trig_ext.h, 0); T_EQ(mock.trig_ext.holdoff, 200000); T_EQ(mock.trig_ext_writes, 1);
+  r = req(PC_CMD_GET_TRIGGER, 0, 0);
+  T_EQ(r.p[28], PC_TRG_T_PULSE); T_EQ(pc_get_u32(r.p + 32), 1500); T_EQ(pc_get_u32(r.p + 12), 200000);
+
+  //Longer than the largest N, positive pulse, CH1 (the generator stays as it was)
+  set_trigger2(PC_TRG_T_PULSE, 0, PC_TRG_F_LONGER, 0, 0xFFFFFF, 0, 128, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.p[30], PC_TRG_F_LONGER); T_EQ(pc_get_u32(r.p + 32), 0xFFFFFF); T_EQ(mock.trig_ext_writes, 2);
+  T_EQ(mock.trig_ext.flags, PC_TRG_F_LONGER);
+
+  //The 3rd rising edge after 100000 idle samples on EXT (the generator shares the pin: switched off as SET_TRIGGER does)
+  mock.gen_en = mock.gen_hw_en = 1;
+  set_trigger2(PC_TRG_T_NTH, 0, 0, 2, 3, 100000, 128, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.p[28], PC_TRG_T_NTH); T_EQ(r.p[31], 2); T_EQ(pc_get_u32(r.p + 32), 3);
+  T_EQ(pc_get_u32(r.p + 36), 100000); T_EQ(mock.trg.source, 2); T_EQ(mock.gen_en, 0); T_EQ(mock.trig_ext_writes, 3);
+  set_trigger2(PC_TRG_T_NTH, 1, 0, 0, 65535, 0xFFFFFF, 128, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 32), 65535); T_EQ(pc_get_u32(r.p + 36), 0xFFFFFF);
+
+  //Timeout: the level held low for 20000 samples
+  set_trigger2(PC_TRG_T_TIMEOUT, 1, 0, 0, 20000, 0, 100, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.p[28], PC_TRG_T_TIMEOUT); T_EQ(r.p[29], 1); T_EQ(r.p[2], 100); T_EQ(pc_get_u32(r.p + 32), 20000);
+
+  //Back to the edge type
+  set_trigger2(PC_TRG_T_EDGE, 0, 0, 0, 0, 0, 128, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.p[28], PC_TRG_T_EDGE); T_EQ(mock.trig_ext.type, 0); T_EQ(mock.trig_ext_writes, 6);
+  writes = mock.trig_ext_writes;
+
+  //Refusals: E_BAD_ARG, detail = the byte offset of the field; nothing written
+  set_trigger2(PC_TRG_T_RUNT, 0, 0, 0, 0, 0, 128, 0, 0, &r);   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  set_trigger2(PC_TRG_T_WINDOW, 0, 0, 0, 0, 0, 128, 0, 0, &r); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  set_trigger2(6, 0, 0, 0, 0, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  set_trigger2(0xFF, 0, 0, 0, 0, 0, 128, 0, 0, &r);            T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  set_trigger2(0, 2, 0, 0, 0, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
+  set_trigger2(1, 0, PC_TRG_F_RANGE, 0, 10, 0, 128, 0, 0, &r); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  set_trigger2(1, 0, PC_TRG_F_BOTH, 0, 10, 0, 128, 0, 0, &r);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  set_trigger2(1, 0, 0x08, 0, 10, 0, 128, 0, 0, &r);           T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  set_trigger2(0, 0, PC_TRG_F_LONGER, 0, 0, 0, 128, 0, 0, &r); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  set_trigger2(2, 0, PC_TRG_F_LONGER, 0, 3, 0, 128, 0, 0, &r); T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  set_trigger2(0, 0, 0, 3, 0, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
+  set_trigger2(1, 0, 0, 0, 0, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  set_trigger2(1, 0, 0, 0, 0x1000000, 0, 128, 0, 0, &r);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  set_trigger2(1, 0, 0, 0, 10, 1, 128, 0, 0, &r);              T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
+  set_trigger2(2, 0, 0, 0, 0, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  set_trigger2(2, 0, 0, 0, 65536, 0, 128, 0, 0, &r);           T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  set_trigger2(2, 0, 0, 0, 3, 0x1000000, 128, 0, 0, &r);       T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
+  set_trigger2(3, 0, 0, 0, 0, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  set_trigger2(3, 0, 0, 0, 10, 5, 128, 0, 0, &r);              T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
+  set_trigger2(0, 0, 0, 0, 1, 0, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 4);
+  set_trigger2(0, 0, 0, 0, 0, 1, 128, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 8);
+  set_trigger2(0, 0, 0, 0, 0, 0, 256, 0, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 12);
+  set_trigger2(0, 0, 0, 0, 0, 0, 128, 1, 0, &r);               T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 14);
+  T_EQ(mock.trig_ext_writes, writes); T_EQ(mock.trig_ext.type, 0); T_EQ(mock.trg.source, 0);
+
+  //The old SET_TRIGGER: its hold-off bit writes 0x1B with the type and its parameters kept; its edge is the polarity
+  set_trigger2(PC_TRG_T_PULSE, 0, 0, 0, 10, 0, 128, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  set_trigger(0x40, 0, 0, 0, 0, 0, 0, 777, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p + 12), 777); T_EQ(r.p[28], PC_TRG_T_PULSE); T_EQ(pc_get_u32(r.p + 32), 10);
+  T_EQ(pc_get_u32(r.p + 44), 777); T_EQ(mock.trig_ext.holdoff, 777); T_EQ(mock.trig_ext.type, PC_TRG_T_PULSE);
+  T_EQ(mock.trig_ext_writes, writes + 2);
+  set_trigger(0x02, 0, 1, 0, 0, 0, 0, 0, 0, &r);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], 1); T_EQ(r.p[29], 1); T_EQ(mock.trig_ext_writes, writes + 2);
+
+  //A pure extension change (the same source / polarity / level) moves settings_seq: the fingerprint carries it
+  r = status(); seq0 = pc_get_u32(r.p + 32);
+  set_trigger2(PC_TRG_T_TIMEOUT, 1, 0, 0, 10, 0, 128, 0, 777, &r);
+  T_EQ(r.h.status, 0);
+  r = status(); seq1 = pc_get_u32(r.p + 32);
+  T_TRUE(seq1 != seq0);
+
+  //A host capture: ARM zeroes the status bytes, the MAIN polls while it is in flight read 0x37 / 0x34 into GET_STATUS,
+  //DONE's GET_CAPTURE_INFO carries the trigger definition the capture was armed with
+  set_trigger(0x38, 0, 0, 0, 1, 2000, 16000, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  mock.polls_to_trigger = 3; mock.polls_to_done = 4;
+  mock.trig_st[0] = 0x10; mock.trig_st[1] = 0x23; mock.trig_st[2] = 0x01; mock.trig_st[3] = 0x09;
+  writes = mock.trig_status_reads;
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_ARMED);
+  pc_poll(&S, PC_CTX_MAIN);
+  r = status();
+  T_EQ(r.p[48], 0x10); T_EQ(r.p[49], 0x23); T_EQ(pc_get_u16(r.p + 50), 0x0109);
+  T_TRUE(mock.trig_status_reads > writes);
+  r = wait_done(100);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_CAPTURE_INFO_LEN);
+  T_EQ(r.p[96], PC_TRG_T_TIMEOUT); T_EQ(r.p[97], 0); T_EQ(pc_get_u16(r.p + 98), 0);
+  T_EQ(pc_get_u32(r.p + 100), 10); T_EQ(pc_get_u32(r.p + 104), 0); T_EQ(pc_get_u32(r.p + 108), 777);
+  T_EQ(r.p[22], 1); T_EQ(r.p[23], 128);                                       //polarity and level as before
+  writes = mock.trig_status_reads;
+  r = status();
+  T_EQ(mock.trig_status_reads, writes);                                       //nothing in flight: no read
+  T_EQ(r.p[48], 0x10);                                                        //the last values stay readable
 }
 
 //Host single capture: ARM stops the UI, DONE builds the trace, READ_RAW reads the ring
@@ -429,7 +575,7 @@ static void test_capture_and_raw(void)
   resp_t r;
   uint32_t i, c;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   set_trigger(0x3B, 0, 0, 128, 1, 2000, 16000, 0, 0, &r);   //source edge mode pre total (level unchanged)
 
   //READ_RAW before any capture with the UI stopped
@@ -512,7 +658,7 @@ static void test_capture_and_raw(void)
 
   //GET_CAPTURE_INFO: the settings of that capture
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 96);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_CAPTURE_INFO_LEN);
   T_EQ(pc_get_u32(r.p), 1); T_EQ(r.p[8], PC_ORIGIN_HOST); T_EQ(r.p[9] & 0x13, 0x01);
   T_EQ(pc_get_u16(r.p + 10), 100); T_EQ(pc_get_u16(r.p + 12), 7292);
   T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(r.p[20], 24); T_EQ(r.p[24], 1);
@@ -542,7 +688,7 @@ static void test_capture_and_raw(void)
   }
 
   //ARM in the UI long time base mode
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.long_mode = 1;
   r = req(PC_CMD_ARM, 0, 0);
   T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 2); T_EQ(mock.arms, 0);
@@ -553,7 +699,7 @@ static void test_auto_timeout_and_stop(void)
   resp_t r;
   uint8_t w[4];
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //Auto mode with no trigger: DONE with 0x18 = 0 -> auto_timeout flag. Since fw 0.2.41 auto arms normal (the firmware
   //keeps the time-out; 0x153B reads the newest total words at the forced stop)
@@ -663,7 +809,7 @@ static void test_auto_timeout_and_stop(void)
     st[0] = 0;
     mock.ui_run = 1;
     r = req(PC_CMD_SET_ACQ_STATE, st, 4);
-    T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(mock.ui_run, 0); T_EQ(r.p[40], PC_RUN_STOP);
+    T_EQ(r.h.status, 0); T_EQ(r.len, PC_STATUS_LEN); T_EQ(mock.ui_run, 0); T_EQ(r.p[40], PC_RUN_STOP);
     st[0] = 1;
     mock.trg.ui_mode = 1;                                        //UI single trigger mode: RUN is the UI single "WAIT"
     r = req(PC_CMD_SET_ACQ_STATE, st, 4);
@@ -683,7 +829,7 @@ static void test_trace(void)
   resp_t r;
   uint32_t k;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //No capture yet: the UI's trace buffer and geometry
   memset(mock.trace[0], 0x42, 3000);
@@ -785,7 +931,7 @@ static void test_generator(void)
   T_EQ(pc_gen_bp_from_thr(0xFFFFFFFFu), 10000);
   T_EQ(pc_gen_bp_from_thr(0), 0);
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_GEN, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(r.p[0], 0);
   T_EQ(pc_get_u32(r.p + 4), 85899);                                    //UI 1000 Hz, 1.00o5 integer math
@@ -822,7 +968,7 @@ static void test_cal_battery_pattern(void)
   resp_t r;
   uint32_t i, x;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_CAL, "\1", 1);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_CAL_RESP_LEN); T_EQ(r.p[0], 1);
   T_EQ(pc_get_u16(r.p + 4 + 2 * 6), 1060); T_EQ(pc_get_u32(r.p + 20 + 4 * 6), 7600000);
@@ -1009,7 +1155,7 @@ static void test_busy_context(void)
   resp_t r;
   uint16_t seq;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //A BUSY poll answers the safe set, SET_REMOTE (a no-op now) included
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_BUSY);
@@ -1049,7 +1195,7 @@ static void test_busy_context(void)
   T_FALSE(pc_ui_yield_pending(&S));
 
   //STARTING: USB is up but the main loop has not finished its first pass
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
   T_EQ(r.p[3], PC_UI_STARTING);
@@ -1142,7 +1288,7 @@ static void test_modal_yield(void)
   uint16_t seq;
   uint32_t t, yields;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   yields = link_counter(68);
   T_EQ(yields, 0); T_EQ(link_counter(69), 0);
 
@@ -1247,7 +1393,7 @@ static void test_modal_read_only(void)
   uint16_t seq, seq2;
   uint32_t t, refused;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.ui_modal = 2;
   mock.ui_cancels = 0;
   ui_run_modal(PC_MODAL_MS + 5);
@@ -1426,13 +1572,13 @@ static void test_main_screen_leave(void)
   resp_t   r;
 
   //Diagnostics over the Spectrum analyser (display mode 1), then over the Frequency response (5)
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   diag_screen_seq(1);
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   diag_screen_seq(5);
 
   //tools/screenshots.py "frequency-response": BODE_CTRL open, then run, with Diagnostics open: it leaves first
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.ui_screen = 1;
   memset(p, 0, sizeof(p));
   p[0] = 9;
@@ -1456,11 +1602,11 @@ static void test_isr_context(void)
   uint32_t k;
 
   //The 1 ms tick poll answers the safe set at once
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req_ctx(PC_CMD_PING, "x", 1, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(r.len, 1);
   r = req_ctx(PC_CMD_GET_STATUS, 0, 0, PC_CTX_ISR);
-  T_EQ(r.h.status, 0); T_EQ(r.len, 48); T_EQ(r.p[0], PC_SHARED);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_STATUS_LEN); T_EQ(r.p[0], PC_SHARED);
 
   //...and leaves everything else for the main loop: no E_BUSY while the main loop runs (1.23: a modal UI is asked to
   //yield and E_BUSY comes only after PC_MODAL_MS + PC_YIELD_MS without a MAIN poll, test_modal_yield)
@@ -1498,7 +1644,7 @@ static void test_transport_window(void)
 {
   uint16_t s1, s2;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //One response in flight: the next request waits until the TX staging buffer is free
   mock.tx_hold = 1;
@@ -1578,7 +1724,7 @@ static void test_settings_seq(void)
   resp_t r;
   uint32_t s0, s1;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = status();
   s0 = pc_get_u32(r.p + 32);
   T_EQ(pc_get_u32(r.p + 36), PC_SEQ_INVALID);                  //no capture yet
@@ -1619,7 +1765,7 @@ static void test_ui_capture(void)
   resp_t r;
   uint32_t seq;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 0;                                   //0x18 reads 1 at the UI capture's DONE
   r = status();
   seq = pc_get_u32(r.p + 32);
@@ -1668,7 +1814,7 @@ static void test_read_raw_hold(void)
   uint16_t seq;
   int k;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   memset(p, 0, 16); p[0] = 0x01; p[1] = 1; pc_put_u32(p + 8, 8);
 
   //Finished UI capture, not yet re-armed: answered at once
@@ -1737,7 +1883,7 @@ static void test_read_raw_hold(void)
 //MCP chip: steady while DTR is up or traffic within 2 s (no pulse)
 static void test_indicator(void)
 {
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   //Off at boot: nothing to draw (the version text is there)
   mock.dtr = 0;
   pc_ui_service(&S);
@@ -1806,7 +1952,7 @@ static void test_sd(void)
   resp_t r;
   uint32_t i, crc;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SD_SECTORS, PC_CAP_SD_SECTORS);
 
@@ -1930,7 +2076,7 @@ static void test_sd_window(void)
   uint32_t off, n, w;
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.sd_sectors = MOCK_SD_MAX_SECTORS;
   mock_sd_image(750, "eGON.EXE", 1510);
   memcpy(img, mock.sd + 750 * 512, sizeof(img));
@@ -1991,11 +2137,11 @@ static void test_ext_trigger(void)
   resp_t r;
   uint8_t g[20];
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 25);
+  T_EQ(r.p[1], 26);
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -2092,7 +2238,7 @@ static void test_fast_path_no_fpga(void)
   uint8_t g[20];
   uint32_t ops, i, c, k;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_SET_REMOTE, "\1", 1);
   T_EQ(r.h.status, 0);
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -2157,7 +2303,7 @@ static void test_dtr_up_keeps_request(void)
   resp_t r;
   uint16_t seq;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   memset(p, 0, 8); pc_put_u32(p, 492);
 
   mock_clear_resps();
@@ -2202,7 +2348,7 @@ static void test_event_log(void)
 {
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req_ctx(PC_CMD_GET_EVENT_LOG, 0, 0, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 3); T_EQ(pc_get_u32(r.p + 4), 77); T_EQ(pc_get_u32(r.p + 8), mock.now);
   T_EQ(r.len, 12 + 3 * 8 + 8 + 2 * 8 + 8 + 8); T_EQ(pc_get_u32(r.p + 12), 100); T_EQ(r.p[12 + 4], 1); T_EQ(r.p[12 + 8 + 4], 2);
@@ -2246,7 +2392,7 @@ static void test_fft_bench(void)
   extern uint32_t mock_fft_bench_reps;
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //Main loop only, default 3 runs, at most 16
   r = req(PC_CMD_FFT_BENCH, 0, 0);
@@ -2273,7 +2419,7 @@ static void test_read_screen(void)
   resp_t r;
   uint32_t row, x, bad;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SCREENSHOT, PC_CAP_SCREENSHOT);
   T_EQ(pc_get_u16(r.p + 72), 800); T_EQ(pc_get_u16(r.p + 74), 480);
@@ -2338,7 +2484,7 @@ static void test_cal_probe(void)
   uint8_t p[5];
   resp_t  r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //UI running: refused, nothing measured
   mock.ui_run = 1;
@@ -2408,7 +2554,7 @@ static void test_spectrum(void)
   uint8_t p[8];
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
 
   //GET_STATUS byte 43 follows the display mode, from any poll context
   mock_display_mode = 0;
@@ -2456,7 +2602,7 @@ static void test_fw_auto_timeout(void)
   T_EQ(pc_auto_deadline_ms(3000, 19), 100);            //10 MS/s, 0.3 ms record: the 100 ms floor
   T_EQ(pc_auto_deadline_ms(3000, 199999), 6000);       //1 kS/s, 3 s record: two records
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = -1; mock.polls_to_done = -1;
   r = req(PC_CMD_ARM, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(mock.arm_normal, 1);
@@ -2498,10 +2644,10 @@ static void test_fel_reset_stall(void)
   int found;
 
   //ENTER_FEL: cap set, wrong magic refused, right magic answers OK first and jumps after the response is out
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 25);
+  T_EQ(r.p[1], 26);
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -2529,7 +2675,7 @@ static void test_fel_reset_stall(void)
   T_EQ(mock.fel_entries, 1);
 
   //TX stall watchdog: a frame that makes no progress for 2 s is dropped, the next request is served
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.tx_hold = 1;
   mock_clear_resps();
   push_frame(PC_CMD_PING, 900, "a", 1);
@@ -2544,7 +2690,7 @@ static void test_fel_reset_stall(void)
   T_EQ(mock_nresps, 2); T_EQ(decode(&mock_resps[1]).h.seq, 901);
 
   //#RESET aborts a stuck response at once, drops a pending WAIT and answers #OK
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.polls_to_done = -1;
   r = req(PC_CMD_ARM, 0, 0);
   pc_put_u32(p, 5000);
@@ -2569,7 +2715,7 @@ static void test_fel_reset_stall(void)
   T_EQ(r.h.status, 0); T_EQ(r.p[2] & 0x20, 0);                  //no deferred request pending
 
   //GET_LINK_STATS: 11 transport + 8 parser + 8 session + 2 startup counters, answered from every context
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.enc.bad = 7100; mock.enc.recovered = 7101;
   r = req_ctx(PC_CMD_GET_LINK_STATS, 0, 0, PC_CTX_ISR);
   T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p), 70); T_EQ(r.len, 4 + 70 * 4);
@@ -2594,7 +2740,7 @@ static void test_fel_reset_stall(void)
   T_EQ(pc_get_u32(r.p + 4 + 4 * 22), 1);
 
   //First MAIN interval (boot) is not a pass
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
   mock.now += 1500;
   pc_poll(&S, PC_CTX_MAIN);
@@ -2602,13 +2748,13 @@ static void test_fel_reset_stall(void)
   T_TRUE(pc_get_u16(r.p + 30) < 100);
 
   //GET_STATUS 1.1: main-loop pass time, last and max since the previous GET_STATUS
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_STATUS, 0, 0);
   mock.now += 40; pc_poll(&S, PC_CTX_MAIN);
   mock.now += 90; pc_poll(&S, PC_CTX_MAIN);
   mock.now += 30; pc_poll(&S, PC_CTX_MAIN);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 30), 90);
+  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 30), 90);
   r = req(PC_CMD_GET_STATUS, 0, 0);
   T_TRUE(pc_get_u16(r.p + 30) < 90);
 }
@@ -2764,7 +2910,7 @@ static void test_decim_protocol(void)
   uint32_t k;
 
   //Default off
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_DECIM, PC_CAP_DECIM);
   r = req(PC_CMD_GET_DECIM, 0, 0);
@@ -2815,7 +2961,7 @@ static void test_decim_protocol(void)
 
   //GET_CAPTURE_INFO: 76 bytes with the filter; start = (0x14 - 3000 words) mod 8192
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
-  T_EQ(r.len, 96); T_EQ(r.p[68], 0x82); T_EQ(r.p[69], 1); T_EQ(pc_get_u32(r.p + 72), 20);
+  T_EQ(r.len, PC_CAPTURE_INFO_LEN); T_EQ(r.p[68], 0x82); T_EQ(r.p[69], 1); T_EQ(pc_get_u32(r.p + 72), 20);
   T_EQ(pc_get_u16(r.p + 12), (100 + 8192 - 3000) % 8192);
   T_EQ(pc_get_u32(r.p + 28), 3000); T_EQ(pc_get_u32(r.p + 32), 6000);
 
@@ -3005,10 +3151,10 @@ static void test_decim_fir_protocol(void)
   uint8_t p[16];
 
   //Cap bit 16; CIC2 + FIR at 10 MSa/s, 6000 samples
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 25);
+  T_EQ(r.p[1], 26);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -3106,16 +3252,16 @@ static void test_seq_segments(void)
   resp_t r;
   uint32_t i, s;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 25);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 26);
   r = status();
-  T_EQ(r.len, 48); T_EQ(pc_get_u16(r.p + 44), 0xFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
+  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x1FF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
   r = status();
   T_EQ(r.p[46], 2); T_EQ(r.p[47], 6);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(pc_get_u16(r.p + 32), 0xFF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
+  T_EQ(pc_get_u16(r.p + 32), 0x1FF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
 
   //Default: off; the geometry the next arm writes (legacy: 1500 / 3000 samples = 750 / 1500 words)
   r = req(PC_CMD_GET_SEQ, 0, 0);
@@ -3169,7 +3315,7 @@ static void test_seq_segments(void)
   T_EQ(mock.trace_builds, 0);                                     //no single record to show
 
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
-  T_EQ(r.len, 96); T_EQ(r.p[76], 1); T_EQ(r.p[77], 0); T_EQ(r.p[78], 7); T_EQ(r.p[79], 0);
+  T_EQ(r.len, PC_CAPTURE_INFO_LEN); T_EQ(r.p[76], 1); T_EQ(r.p[77], 0); T_EQ(r.p[78], 7); T_EQ(r.p[79], 0);
   T_EQ(pc_get_u32(r.p + 80), 32); T_EQ(pc_get_u16(r.p + 84), 1); T_EQ(pc_get_u16(r.p + 86), 32);
   T_EQ(pc_get_u32(r.p + 92), 1001);
 
@@ -3302,7 +3448,7 @@ static void test_decim_held_divider(void)
   resp_t  r;
   uint8_t p[8];
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   set_trigger(0x30, 0, 0, 0, 0, 0, 4096, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -3339,12 +3485,12 @@ static void test_capture_stages(void)
   pc_decim_cfg c;
   int          has;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_CAPTURE_STAGES, PC_CAP_CAPTURE_STAGES);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0xFF);
+  T_EQ(pc_get_u16(r.p + 44), 0x1FF);
   r = req(PC_CMD_GET_HEALTH, 0, 0);
   T_EQ(r.len, PC_HEALTH_LEN); T_EQ(r.p[0], 3);
   T_EQ(pc_get_u16(r.p + 104), CS_PO); T_EQ(r.p[106], PC_CAPF_HAS); T_EQ(pc_get_u32(r.p + 116), 0);
@@ -3384,19 +3530,19 @@ static void test_enc_check(void)
   uint8_t  p[16];
 
   //caps ENC_CHECK, features bit 5
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   T_EQ(r.p[35], 0);                                             //interleave order: B first
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0xFF);
+  T_EQ(pc_get_u16(r.p + 44), 0x1FF);
 
   //fw 0.2.72, core order: verified (caps bit 12 clear) only when the bitstream reported convention 1 at boot
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_INTERLEAVE_UNVERIFIED, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);   //T3 still open
   //A boot 0x33 with another convention (enc_heal_hw.c: flag, data check): unverified, captures judged by data
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   mock.enc.boot33 = 0xF2; mock.enc.flags = PC_ENCF_CONV_BAD; mock.enc.mode = EH_MODE_DATA;
   pc_session_init(&S);
   pc_poll(&S, PC_CTX_MAIN);
@@ -3407,13 +3553,13 @@ static void test_enc_check(void)
   r = enc_capture();
   T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_last_why, EH_WHY_DATA);
   //...and the session never decides from the version alone: a bad boot byte without the flag
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   mock.enc.boot33 = 0xF2;
   pc_session_init(&S);
   T_EQ(S.var.caps & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
 
   //Gated rate (divider 19): nothing checked, 0x33 never read
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;
   mock.enc_bad_arms = -1;
   r = enc_capture();
@@ -3421,7 +3567,7 @@ static void test_enc_check(void)
   T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_notes, 0);
 
   //200 MSa/s, good: one 0x33 read, no ring read for the check, accepted
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;
   enc_divider(0);
   reads = mock.read_calls;
@@ -3484,7 +3630,7 @@ static void test_enc_check(void)
 
   //fw 0.2.72: a rate write after the sampling reset (the UI or another host command while the capture runs): 0x33 bit 0
   //would be set by the write alone (bench 0x1538: 112 of 5798 re-armed), so the capture is judged by its data
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;
   enc_divider(0);
   T_EQ(mock.enc_written, 1);                                    //SET_TIMEBASE wrote 0x0D...
@@ -3522,7 +3668,7 @@ static void test_seq_average(void)
   uint32_t i, s;
 
   //Legacy: 2 positions x 500 words (pre 50), N 16
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   set_trigger(0x38, 0, 0, 0, 1, 100, 1000, 0, 0, &r);
   r = set_seq(2, 0, 0, 2, 16, 0);
   T_EQ(r.h.status, 0); T_EQ(r.p[0], 2); T_EQ(pc_get_u16(r.p + 6), 16); T_EQ(pc_get_u16(r.p + 22), 4);
@@ -3564,7 +3710,7 @@ static void test_seq_average(void)
   r = read_seq(0, 0, 0, 0, 1);    T_EQ(r.h.status, PC_E_STATE);   T_EQ(pc_get_u16(r.p), 2);
 
   //16-bit records (CIC2 at 10 MSa/s): N up to 65536, 32-bit sums
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.decim_setting = 2;
   set_trigger(0x38, 0, 0, 0, 1, 100, 1000, 0, 0, &r);
   r = set_seq(2, 0, 0, 2, 0, 0);
@@ -3596,7 +3742,7 @@ static void test_diag_wire(void)
 {
   resp_t r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   mock.life.rst.valid = 1;
   mock.life.rst.type  = 4;
 
@@ -3642,7 +3788,7 @@ static void test_bode(void)
   uint8_t p[16];
   resp_t  r;
 
-  setup(0x153B);
+  setup(PC_FW_FPGA_VERSION);
   memset(p, 0, sizeof(p));
   r = req(PC_CMD_GET_STATUS, 0, 0);
   T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_BODE, PC_FEAT_W_BODE);
@@ -3695,6 +3841,7 @@ int main(void)
   test_channel();
   test_timebase();
   test_trigger();
+  test_trigger2();
   test_capture_and_raw();
   test_auto_timeout_and_stop();
   test_trace();

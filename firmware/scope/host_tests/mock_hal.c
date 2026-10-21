@@ -335,6 +335,17 @@ void pc_hal_acq_poll(int *done, int *triggered)
 
 uint16_t pc_hal_acq_finish(void) { mock.fpga_ops++; return mock.trigger_addr; }
 uint8_t  pc_hal_ext_status(void) { mock.fpga_ops++; mock.ext_reads++; return mock.ext_status; }
+
+//1.26: the trigger extension (fpga_bus.c fpga_trig on the scope)
+void pc_hal_trig_ext_read(pc_hw_trig_ext *t) { *t = mock.trig_ext; }
+void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
+{
+  mock.fpga_ops++;
+  mock.under_screen += mock.ui_screen;
+  mock.trig_ext = *t;
+  mock.trig_ext_writes++;
+}
+void pc_hal_trig_status(uint8_t out[4]) { mock.fpga_ops++; mock.trig_status_reads++; memcpy(out, mock.trig_st, 4); }
 void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
 
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
@@ -520,6 +531,11 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8_t)mock.trg.total; b[n++] = (uint8_t)(mock.trg.total >> 8);
   b[n++] = mock.long_mode;
   b[n++] = mock.decim_setting;
+  b[n++] = mock.trig_ext.type; b[n++] = mock.trig_ext.flags;                     //1.26, as pc_hal_scope.c
+  b[n++] = (uint8_t)mock.trig_ext.n; b[n++] = (uint8_t)(mock.trig_ext.n >> 8); b[n++] = (uint8_t)(mock.trig_ext.n >> 16);
+  b[n++] = (uint8_t)mock.trig_ext.h; b[n++] = (uint8_t)(mock.trig_ext.h >> 8); b[n++] = (uint8_t)(mock.trig_ext.h >> 16);
+  b[n++] = (uint8_t)mock.trig_ext.holdoff; b[n++] = (uint8_t)(mock.trig_ext.holdoff >> 8);
+  b[n++] = (uint8_t)(mock.trig_ext.holdoff >> 16); b[n++] = (uint8_t)(mock.trig_ext.holdoff >> 24);
   return pc_crc32(b, n);
 }
 

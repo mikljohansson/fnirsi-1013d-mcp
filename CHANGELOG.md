@@ -32,6 +32,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.103 + fw-c5 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 provisional, row 66)
+
+- Built for FPGA bitstream **0x153C** (`PC_FW_FPGA_VERSION`; the mismatch text follows the constant): a scope on 0x153B shows
+  the notice until fpga-c4's bitstream is flashed. Caps bits 2 HOLDOFF (0x1B is the trigger hold-off in 5 ns units) and
+  20 TRIG_TYPES; features word bit 8.
+- **SET_TRIGGER2 (0x0219)**: the trigger definition in one 24-byte request: type (edge, pulse width shorter / longer than
+  N, Nth edge after an idle time of H, timeout of N), polarity, source, N, H, level, hold-off; nothing is converted (N and
+  H are samples of the trigger stream, one memory word on CH1 / CH2, 5 ns on EXT). Runt / window / range / both cores
+  (0x153E) and out-of-range fields are E_BAD_ARG with the byte offset as detail. **GET_TRIGGER** grows to 52 bytes (12 the
+  hold-off, 28..51 the SET_TRIGGER2 body that reproduces the trigger); **SET_TRIGGER**'s hold-off field is accepted (was
+  E_UNSUPPORTED); **GET_STATUS** grows to 52 (48..51 FPGA 0x37 / 0x34 read while a host capture is in flight: hold-off
+  running, qualifier state, edges still to count); **GET_CAPTURE_INFO** to 112 (96..111 the trigger extension the capture
+  was armed with).
+- The FPGA side (fpga_bus.c): one copy of the extension, written at SET time with 0x66 = 1 (the next arm clears a running
+  hold-off; re-arms between definitions keep it, so a train's pulses are skipped) and re-written inside every sampling
+  reset window (UI and host arms alike); boot writes the power-on state once. The UI's Type row, peak detect and the
+  counter are separate items.
+- Host tests: `test_fpga_bus` test_trig_ext (every type's arm sequence, the 0x66 one-shot, the hold-off across re-arms on
+  the bus model), `test_session` test_trigger2; nine 1.26 vectors in `docs/protocol-vectors.json` (115 total).
+
 #### 0.2.103 - 2026-10-21 (protocol 1.25, row 65)
 
 - One supported FPGA bitstream (owner 2026-10-20 21:52): the firmware runs on `PC_FW_FPGA_VERSION` (0x153B) only; the

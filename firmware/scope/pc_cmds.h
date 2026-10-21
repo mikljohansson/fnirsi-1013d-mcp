@@ -24,7 +24,8 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 //compared with it. A different word (older or newer) is a mismatch: the UI shows the notice screen (ui_diag.c
 //ud_build_fpga_mismatch), GET_INFO 78 / GET_HEALTH 126 bit 0 report it, and every command that would touch the
 //acquisition answers E_UNSUPPORTED detail PC_UNSUP_FPGA_MISMATCH (F_BASIC commands keep working: pc_cmds.c).
-#define PC_FW_FPGA_VERSION  0x153B
+#define PC_FW_FPGA_VERSION  0x153C
+#define PC_FW_FPGA_VERSION_TEXT "0x153C"  //the same word as text (the mismatch error's text, pc_dispatch); keep in step
 #define PC_FPGA_F_MISMATCH  0x01      //GET_INFO 78 / GET_HEALTH 126 bit 0
 #define PC_UNSUP_FPGA_MISMATCH 1      //E_UNSUPPORTED detail: the running bitstream is not PC_FW_FPGA_VERSION
 
@@ -204,6 +205,12 @@ typedef struct
   uint16_t   seq_pre_words;     //0x0B / 0x0C as written
   uint16_t   seq_total_words;
   pc_hw_channel ch[2];
+  //1.26: the trigger extension in effect at the arm (GET_CAPTURE_INFO 96..111); the polarity is `edge`, the level `level`
+  uint8_t    trig_type;
+  uint8_t    trig_flags;
+  uint32_t   trig_n;
+  uint32_t   trig_h;
+  uint32_t   trig_holdoff;
 } pc_capture;
 
 typedef struct
@@ -253,6 +260,8 @@ typedef struct
   uint8_t    ring_valid;        //the FPGA ring still holds capture cap (no arm since its DONE)
   uint8_t    ui_started;        //a UI conversion started and has not been counted yet
   uint8_t    ext_flags;         //FPGA 0x28 at the last MAIN poll (EXT_TRIGGER only): bit0 level, bit1 gen on, bit2 edge
+  uint8_t    trig_st[4];        //1.26: FPGA 0x37 and the 3 bytes of 0x34, read at every MAIN poll while a host capture is
+                                //in flight (GET_STATUS 48..51); zeroed at ARM
   uint8_t    ui_trig;           //0x18 at the UI capture's DONE
   uint16_t   ui_addr;           //0x14 of the UI capture
 
@@ -388,6 +397,9 @@ int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a
 //MAIN context; returns 0, or 1 without a card). The report: pc_report.h
 #define PC_LINK_COUNTERS  70
 #define PC_INFO_LEN       80      //76 up to 1.24: 76 u16 built-for FPGA word, 78 u8 fpga_flags (PC_FPGA_F_MISMATCH), 79 0
+#define PC_STATUS_LEN     52      //48 in 1.17-1.25; 1.26: 48 u8 0x37, 49 u8 0x34 byte 0, 50 u16 edges still to count
+#define PC_TRIGGER_LEN    52      //28 up to 1.25; 1.26: 28.. the SET_TRIGGER2 body that reproduces the trigger
+#define PC_CAPTURE_INFO_LEN 112   //96 in 1.17-1.25; 1.26: 96 type, 97 flags, 98 u16 0, 100 u32 N, 104 u32 H, 108 u32 hold-off
 #define PC_HEALTH_LEN     128     //96 in 1.16-1.18, 104 in 1.19-1.23, 124 in 1.24 (layout 2); layout 3: 124 built-for word,
                                   //126 fpga_flags, 127 0
 #define PC_CAL_RESP_LEN   364     //356 in 1.16-1.23, 72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)

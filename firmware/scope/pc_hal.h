@@ -101,6 +101,36 @@ void     pc_hal_trigger_read(pc_hw_trigger *t);
 void     pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask);                    //[UI][FPGA] masked PC_TRG_* fields
 uint32_t pc_hal_auto_timeout_default(uint32_t total_samples);                          //what 1.00o5 writes to 0x0E
 
+//1.26 (fw-c5, FPGA 0x153C): the trigger extension (fpga_bus.h "Trigger types and hold-off"): type, flags, N, H and the
+//hold-off. The polarity is the trigger's edge, the level the trigger's level (pc_hw_trigger). The firmware keeps one
+//copy; the write puts the registers into the FPGA at once and asks for the hold-off clear at the next arm (0x66 = 1).
+//Nothing is converted: N and H are samples of the trigger stream (CH1 / CH2 one per memory word, EXT 5 ns clocks), the
+//hold-off is in 5 ns units.
+#define PC_TRG_T_EDGE     0
+#define PC_TRG_T_PULSE    1       //a pulse shorter (longer with PC_TRG_F_LONGER) than N samples; fires on its trailing edge
+#define PC_TRG_T_NTH      2       //the Nth edge after the arm, or after an idle time of H samples (H = 0: from the arm)
+#define PC_TRG_T_TIMEOUT  3       //the level held for N samples after the edge (or the arm)
+#define PC_TRG_T_RUNT     4       //0x153E: refused by this firmware (E_BAD_ARG)
+#define PC_TRG_T_WINDOW   5       //0x153E: refused
+#define PC_TRG_F_LONGER   0x01    //pulse width: longer than N (0x5E bit 3)
+#define PC_TRG_F_RANGE    0x02    //0x153E: refused
+#define PC_TRG_F_BOTH     0x04    //0x153E: refused
+#define PC_TRG_N_MAX      0xFFFFFFu   //0x5F / 0x60 are 24 bits
+#define PC_TRG_NTH_MAX    0xFFFFu     //the Nth edge count
+
+typedef struct
+{
+  uint8_t  type;                //PC_TRG_T_*
+  uint8_t  flags;               //PC_TRG_F_*
+  uint32_t n;                   //pulse width / timeout: samples; Nth edge: the count
+  uint32_t h;                   //Nth edge: idle samples (0 = count from the arm)
+  uint32_t holdoff;             //5 ns units, 0 = off
+} pc_hw_trig_ext;
+
+void     pc_hal_trig_ext_read(pc_hw_trig_ext *t);                                      //any context (a memory read)
+void     pc_hal_trig_ext_write(const pc_hw_trig_ext *t);                               //[FPGA] 0x5E / 0x5F / 0x60 / 0x1B, 0x66 = 1
+void     pc_hal_trig_status(uint8_t out[4]);                                           //[FPGA] 0x37, then the 3 bytes of 0x34
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Generator (Atlan4 DDS, FPGA 0x50-0x52)
 

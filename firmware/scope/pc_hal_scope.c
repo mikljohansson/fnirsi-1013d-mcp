@@ -468,6 +468,36 @@ uint8_t pc_hal_ext_status(void)
   return fpga_read_byte();
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Trigger types and hold-off (fw-c5, FPGA 0x153C, protocol 1.26): the firmware's copy lives in fpga_bus.c (fpga_trig),
+// which every arm (UI conversion or host ARM) re-writes inside the sampling reset window (fpga_arm_reset)
+
+void pc_hal_trig_ext_read(pc_hw_trig_ext *t)
+{
+  t->type    = fpga_trig.type;
+  t->flags   = fpga_trig.longer ? PC_TRG_F_LONGER : 0;
+  t->n       = fpga_trig.n;
+  t->h       = fpga_trig.h;
+  t->holdoff = fpga_trig.holdoff;
+}
+
+void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
+{
+  fpga_trig_ext x;
+
+  x.type    = t->type;
+  x.longer  = (uint8_t)((t->flags & PC_TRG_F_LONGER) ? 1 : 0);
+  x.n       = t->n;
+  x.h       = t->h;
+  x.holdoff = t->holdoff;
+  fpga_trig_write(&x, 1);
+}
+
+void pc_hal_trig_status(uint8_t out[4])
+{
+  fpga_trig_status(out);
+}
+
 //EXT selected: the generator drives the same pin, switch it off (UI copy and FPGA) and show it
 static void pc_ext_generator_off(void)
 {
@@ -1076,7 +1106,7 @@ void pc_hal_ui_set_run(int run)
 //rewrites it after every capture; the flag counts instead.
 uint32_t pc_hal_settings_fingerprint(void)
 {
-  uint8  b[40];
+  uint8  b[64];
   uint32 n = 0;
   int    i;
 
@@ -1107,6 +1137,13 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8)fpgasettings.totalsamples;
   b[n++] = (uint8)(fpgasettings.totalsamples >> 8);
   b[n++] = pc_dec_has() ? pc_hal_decim_setting() : 0;
+  //1.26: the trigger extension (a type, N, H or hold-off change is a capture-relevant setting)
+  b[n++] = fpga_trig.type;
+  b[n++] = fpga_trig.longer;
+  b[n++] = (uint8)fpga_trig.n;       b[n++] = (uint8)(fpga_trig.n >> 8);       b[n++] = (uint8)(fpga_trig.n >> 16);
+  b[n++] = (uint8)fpga_trig.h;       b[n++] = (uint8)(fpga_trig.h >> 8);       b[n++] = (uint8)(fpga_trig.h >> 16);
+  b[n++] = (uint8)fpga_trig.holdoff; b[n++] = (uint8)(fpga_trig.holdoff >> 8); b[n++] = (uint8)(fpga_trig.holdoff >> 16);
+  b[n++] = (uint8)(fpga_trig.holdoff >> 24);
 
   return pc_crc32(b, n);
 }
@@ -1985,6 +2022,9 @@ void pc_glue_init(void)
     fpga_encode_init();
     //fw 0.2.79: the capture stages, the stored value when it was trained on this bitstream (cap_hw.c)
     fpga_capture_init(pc_fpga_word);
+    //fw-c5 (0x153C): the trigger extension at its power-on state (edge, no hold-off) and the hold-off clear request for
+    //the first arm: a FEL load leaves the FPGA as the previous firmware left it (fpga_bus.h)
+    fpga_trig_write(&fpga_trig, 1);
   }
   pc_session_init(&pc_sess);
   pc_ready = 1;

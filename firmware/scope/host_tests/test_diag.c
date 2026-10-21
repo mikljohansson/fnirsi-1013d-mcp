@@ -293,7 +293,7 @@ static void test_ident_card(void)
   uint8_t tail[100];
   uint32_t n;
 
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
 
   //Record image identical to the running one
   card_image(700, NULL, 0, (const uint8_t *)&pc_image_ident, PC_ID_BYTES, 700 * 512 - 128);
@@ -353,7 +353,7 @@ static void test_bodies(void)
   static uint8_t scratch[65536];
   acal_prov p;
 
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
 
   {
@@ -445,7 +445,7 @@ static void test_report(void)
   pc_life  l;
   acal_prov p;
 
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
   mock.now = 754321;
   layout_life(&l);
@@ -460,10 +460,10 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.25, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.26, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
-  has("FPGA: version word 0x153b, variant 2, ring 8192 words, caps 0x");
-  has("; firmware built for 0x153b\r\n");
+  has("FPGA: version word 0x153c, variant 2, ring 8192 words, caps 0x");
+  has("; firmware built for 0x153c\r\n");
   has("USB serial: 1013D-0001");
   has("CPU: CP15 control 0x0005107d: MMU on, D-cache on, I-cache on");
   has("uptime: 0 h 12 min 34 s (754321 ms)");
@@ -486,7 +486,7 @@ static void test_report(void)
   T_TRUE(strstr(mock.report, "[report truncated]") == NULL);
 
   //fw 0.2.62 (1.19): the check line after captures, and the mismatch line
-  mock_reset(0x153B);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
   mock.enc.last33 = 0x77; mock.enc.flags = PC_ENCF_READ | PC_ENCF_GARBLED;
   mock.enc.checked = 1200; mock.enc.bad = 3; mock.enc.recovered = 2;
@@ -497,7 +497,7 @@ static void test_report(void)
   pc_session_init(&S);
   T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
   has("FPGA: version word 0x1532, variant 2, ring 8192 words, caps 0x");
-  has("; firmware built for 0x153b: MISMATCH, the acquisition does not run\r\n");
+  has("; firmware built for 0x153c: MISMATCH, the acquisition does not run\r\n");
 
   //Event 21 (1.19): reason, re-arms, value, caller
   {
@@ -568,7 +568,7 @@ int main(int argc, char **argv)
       const pc_card_id *c;
       size_t n;
 
-      mock_reset(0x153B);
+      mock_reset(PC_FW_FPGA_VERSION);
       if(!f)
         return 1;
       n = fread(mock.sd + PC_ID_SECTOR * 512, 1, (MOCK_SD_SECTORS - PC_ID_SECTOR) * 512, f);

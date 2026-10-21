@@ -34,6 +34,12 @@ typedef struct
   uint32_t forces;
   uint8_t  ext_status;            //FPGA 0x28
   uint32_t ext_reads;
+  //1.26 (fw-c5, FPGA 0x153C): the trigger extension the firmware wrote (every write asks for the hold-off clear), and
+  //what the 0x37 / 0x34 status reads answer
+  pc_hw_trig_ext trig_ext;
+  uint32_t trig_ext_writes;
+  uint8_t  trig_st[4];
+  uint32_t trig_status_reads;
   uint32_t read_calls;
   uint32_t max_read_start;        //largest start address passed to read_core (must be < ring)
   uint32_t debug_cmds[16];
