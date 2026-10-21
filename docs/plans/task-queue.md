@@ -283,6 +283,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-nopat (Opus explicitly, dispatched 15:5x, branch fw-nopat): the pattern cut on the firmware / MCP / docs side: SET_PATTERN,
+  SET_PATTERN_TRIGGER, trigger source 3 PAT, the engine and marker registers and their caps / features retired, the square path
+  unchanged (fpga_pat_* renamed fpga_gen_*), fpga_model to the stripped set, check_retired_regs extended, scope_pattern and
+  the simulator's pattern models removed, protocol row 67 rewritten as built, CHANGELOG fw-d5 / mcp-d6 entries rewritten.
+  fpga-d3 told to strip D2 to the square keeping 0x6C entries 0..1, 0x6D, 0x50 and 0x39's square bits; fpga-d2 told to push as is.
 - fw-roll done 15:4x, merged 15:4x (head a83ea0d): roll.c (divider plan, column means, 3000-column record, trigger) + roll_view.c
   on its own 32 KiB stream ring (both channels, legacy 8-bit, 200 S/s at 2 s/div and slower up to 4 kS/s at 100 ms/div);
   averagecommand / fpga_average_trace_data(_long) / the old roll functions removed; check_retired_regs covers 0x24..0x27; ARM
