@@ -64,6 +64,12 @@
 //    trigger_previous). Trigger hold-off: 0x1B (Atlan4 stored it unused) is a u32 in 5 ns units; from the trigger of
 //    a record no trigger is accepted until it has elapsed, across sequencer restarts and MCU re-arms (0x66 bit 0 lets
 //    the next 0x01 = 1 clear it). With 0x5E = 0 and 0x1B = 0 (power-on) the capture is cycle-identical to 0x153B.
+//  - 0x153D (D1, docs/plans/fpga-0x153c.md section 6): streaming logger. 0x69 bit 0 (stream) makes the capture never
+//    stop and never trigger after a normal arm, so the sample ring free-runs with the decimator's words (legacy or
+//    16-bit) at the programmed rate; 0x6A tells the FPGA the next ring word the MCU reads; read 0x38 (8 bytes, one
+//    snapshot) gives the write address, the words written since 0x01 = 0 and the unread words, with a lap flag that
+//    sets when a write overwrites the oldest unread word (0x69 bit 1 clears it). With 0x69 = 0 (power-on) the capture
+//    is cycle-identical to 0x153C.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -785,6 +791,18 @@ module fnirsi_1013D
   reg        ho_clr_t = 0;                 //toggles on that 0x01 = 1 (synchronised into clk_200MHz by the hold-off block)
   wire       ho_act;                       //the hold-off masks the trigger check (clk_200MHz register, see the hold-off block)
 
+  //Streaming logger (0x153D, D1; docs/plans/fpga-0x153c.md section 6; block "Streaming logger" after the counter)
+  reg        str = 0;                      //Command 0x69 bit 0: stream (the capture never stops and never triggers)
+  reg        lc_t = 0;                     //toggles on 0x69 bit 1 = 1: clear the lap flag (synchronised into clk_200MHz)
+  reg [4:0]  rd_hi = 0;                    //Command 0x6A high byte, held until the low byte
+  reg [12:0] log_rd = 0;                   //Command 0x6A: the reader position R (the next ring word the MCU reads), loaded
+                                           //whole on the low byte
+  reg        rd_t = 0;                     //toggles on that low byte (synchronised into clk_200MHz)
+  reg        l_req = 0;                    //toggles on the read command byte 0x38: snapshot request
+  reg [1:0]  str_q = 0;                    //str synchronised into clk_200MHz
+  wire       str_200 = str_q[1];           //masks the trigger check (clk_200MHz register, off the half-cycle compare path)
+  reg        str_s = 0;                    //str_200 on the write clock: forces sampling_enable
+
   //Segmented capture and averaging (0x1536), written by the MCU while 0x01 = 1
   reg [1:0]  seq_mode = 0;                 //Command 0x57 bits 1..0: 0 off, 1 segments, 2 averaging, 3 off
   reg        seq_circ = 0;                 //Command 0x57 bit 2: circular segments (until stopped)
@@ -1415,7 +1433,8 @@ freq_generator_dds_pwm u_freq
 
   wire [12:0] post_words = total_samples - pretrigger_samples;                      // words after the trigger (0x153B: shared below)
 
-  assign sampling_enable = ~(
+  //0x153D: while streaming (0x69 bit 0, str_s = its write clock copy) the write never stops
+  assign sampling_enable = str_s | ~(
     (sampling_triggered && (addr_delta >= post_words))                             // post-trigger complete
          || (~trigger_mode_s && time_base_timeout && ~sampling_triggered)           // auto mode timeout (0x153B: only while untriggered)
          				 );
@@ -1431,7 +1450,8 @@ assign sampling_enable = ~(
   //0x153B: no trigger is accepted once the write has stopped, so 0x18 describes the record (a trigger edge that lands
   //on the stop edge's own evaluation is still taken: the record stays the newest total words, 0x18 then reads 1)
   //0x153C: and not while the trigger hold-off runs (ho_act, a clk_200MHz register: off the half-cycle compare path)
-  assign trigger_check_enable = ((~sampling_triggered & sampling_half_way & sample_write_enable & ~ho_act));
+  //0x153D: and never while streaming (str_200, a clk_200MHz register too)
+  assign trigger_check_enable = ((~sampling_triggered & sampling_half_way & sample_write_enable & ~ho_act & ~str_200));
 
 //--------------------------------------------------------------------------------------------
 //Sampling triggered detect
@@ -2232,6 +2252,109 @@ assign sampling_enable = ~(
         end
     end
 
+//-------------------------------------------------------------------------------------
+//Streaming logger (0x153D, D1; docs/plans/fpga-0x153c.md section 6). With 0x69 bit 0 (stream) the capture never stops
+//and never triggers: sampling_enable is forced 1 (str_s, the write clock copy of the bit) and trigger_check_enable 0
+//(str_200), so after a normal arm (0x01 = 1 / 0 with 0x0B = 0x0C = 0) the sample ring free-runs with the decimator's
+//words (legacy or 16-bit) at the programmed rate; 0x0E, 0x1A, the hold-off and the trigger registers are irrelevant,
+//0x0A reads 0 and 0x18 reads 0, 0x14 is not meaningful. The MCU drains the ring with 0x1F / 0x20..0x23 as for a record
+//and tells the FPGA the next ring word it will read with 0x6A (R). 0x69 = 0 hands the capture back to the 0x153B rules
+//at the next write clock edge (an auto capture whose time-out has elapsed stops there and W freezes).
+//Bookkeeping on clk_200MHz; the write clock is read only through the sequencer's settled snapshot (swc_rise_q, with
+//adv_d / swe_d / ssr_d = what the capture logic saw at that edge), as the sequencer's sn_* registers:
+//  p_wr / p_wa:  a word was written at the last write clock edge; the address after it (W, held while nothing is written);
+//  p_rst:        that edge was a reset edge (0x01 = 1): its write is not counted, word 0 of the next capture is;
+//  lg_cnt:       words written since 0x01 = 0, 32 bits (wraps), as two 16-bit halves with a registered carry (lo_ones):
+//                writes are at least two clocks apart, so the flag is current at every count (a 32-bit increment in one
+//                clock missed clk_200MHz by 0.98 ns in build b1);
+//  occ:          unread words, 0 .. 8192: at a 0x6A write (W - R) mod 8192 (R = W is empty), +1 per write, saturating at
+//                8192 (full, nothing lost yet); a write at 8192 while streaming sets lap (the oldest unread word was
+//                overwritten); 0x69 bit 1 clears lap, nothing else does. 0x01 = 1 forces R, occ and lg_cnt to 0, so word
+//                0 is at ring word 0 and the MCU writes 0x6A only after the release;
+//  read 0x38:    a snapshot (l_*) copied 15..20 ns after the command byte, as 0x35: { stream, lap, 0, W[12:8] },
+//                W[7:0], lg_cnt, occ. lg_wa (W) and lg_cnt advance in the same stage, so W == lg_cnt mod 8192 always.
+//A word written at edge E is counted from E + 12.5 ns; the memory word is readable at once. The reader position takes
+//effect 15..20 ns after the 0x6A low byte. With 0x69 = 0 (power-on) nothing here touches the capture.
+
+  reg        p_v = 0, p_wr = 0, p_rst = 0;
+  reg [12:0] p_wa = 0, lg_wa = 0;
+  reg [15:0] lg_lo = 0, lg_hi = 0;
+  reg        lo_ones = 0;
+  wire [31:0] lg_cnt = { lg_hi, lg_lo };
+  reg [13:0] occ = 0;
+  reg        lap = 0;
+  reg [2:0]  rd_rq = 0, lc_rq = 0, l_rq = 0;
+  reg [12:0] rd_200 = 0;
+  reg        rd_ld = 0;
+  reg        l_str = 0, l_lap = 0;
+  reg [12:0] l_wa = 0;
+  reg [31:0] l_cnt = 0;
+  reg [13:0] l_occ = 0;
+  wire       l_cp = (l_rq[2] != l_rq[1]);
+
+  always @(posedge i_mcu_clk)
+    if(i_mcu_dcs & i_mcu_rws & (io_mcu_data == 8'h38))
+      l_req <= ~l_req;
+
+  always @(posedge sample_write_clock)
+    str_s <= str_200;
+
+  always @(posedge clk_200MHz)
+    begin
+      str_q <= { str_q[0], str };
+      rd_rq <= { rd_rq[1:0], rd_t };
+      lc_rq <= { lc_rq[1:0], lc_t };
+      l_rq  <= { l_rq[1:0], l_req };
+
+      p_v   <= swc_rise_q;
+      p_wr  <= swc_rise_q & adv_d & swe_d;
+      p_rst <= ssr_d;
+      if(swc_rise_q & adv_d & swe_d)
+        p_wa <= sample_write_address;
+      lg_wa <= p_wa;
+
+      rd_ld <= (rd_rq[2] != rd_rq[1]);
+      if(q_rs2)
+        rd_200 <= 0;
+      else if(rd_rq[2] != rd_rq[1])
+        rd_200 <= log_rd;
+
+      lo_ones <= &lg_lo;
+      if(p_v & p_rst)
+        begin
+          lg_lo <= 0;
+          lg_hi <= 0;
+          occ   <= 0;
+        end
+      else
+        begin
+          if(p_wr)
+            begin
+              lg_lo <= lg_lo + 16'd1;
+              if(lo_ones)
+                lg_hi <= lg_hi + 16'd1;
+            end
+          if(rd_ld)
+            occ <= { 1'b0, p_wa - rd_200 };
+          else if(p_wr & ~occ[13])
+            occ <= occ + 14'd1;
+        end
+
+      if(lc_rq[2] != lc_rq[1])
+        lap <= 0;
+      else if(p_wr & ~rd_ld & occ[13] & str_200)
+        lap <= 1;
+
+      if(l_cp)
+        begin
+          l_wa  <= lg_wa;
+          l_cnt <= lg_cnt;
+          l_occ <= occ;
+          l_lap <= lap;
+          l_str <= str_200;
+        end
+    end
+
 //=====================================================================================
 
   //Select the address and clock source based on the sample read enbale setting
@@ -2293,11 +2416,13 @@ assign sampling_enable = ~(
               | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)
               | (mcu_command == 8'h5F) | (mcu_command == 8'h60)                                     //0x153C triggers
               | (mcu_command == 8'h62)                                                               //0x153C counter
+              | (mcu_command == 8'h6A)                                                               //0x153D logger
               ) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
               | (mcu_command == 8'h2A) | (mcu_command == 8'h36)
               | (mcu_command == 8'h34)                                                               //0x153C triggers
               | (mcu_command == 8'h35)                                                               //0x153C counter
+              | (mcu_command == 8'h38)                                                               //0x153D logger
               ) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
@@ -2712,6 +2837,30 @@ assign sampling_enable = ~(
                 endcase
               end
 
+            //Streaming logger control (0x153D): bit 0 stream on (the capture never stops, never triggers), bit 1 = 1 clears
+            //the lap flag (self-clearing); bits 7..2 write 0
+            8'h69:
+              begin
+                str <= io_mcu_data[0];
+                if(io_mcu_data[1])
+                  lc_t <= ~lc_t;
+              end
+
+            //Reader position (0x153D), two bytes high byte first (13 bits): the next ring word the MCU reads; taken as a
+            //whole on the low byte. 0x01 = 1 resets it to 0
+            8'h6A:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    rd_hi <= io_mcu_data[4:0];
+                  4'h1:
+                    begin
+                      log_rd <= { rd_hi, io_mcu_data };
+                      rd_t   <= ~rd_t;
+                    end
+                endcase
+              end
+
           endcase
         end
     end
@@ -2910,6 +3059,25 @@ assign sampling_enable = ~(
                   4'hD:  o_mcu_data <= m_w[7:0];
                   4'hE:  o_mcu_data <= ~m_mn_n;
                   4'hF:  o_mcu_data <= m_mx;
+                endcase
+              end
+
+            //Streaming logger (0x153D), 8 bytes from the snapshot taken at the 0x38 command byte: { stream, lap, 0,
+            //W[12:8] } (W is 13 bits: one reserved bit, not the contract's three), W[7:0] (the address after the last word written = the next word to be written while streaming),
+            //words written since 0x01 = 0 (u32 high byte first, wraps), unread words since the reader position 0x6A
+            //(u16, 0 .. 8192; 8192 = full, the lap flag says a word was lost)
+            8'h38:
+              begin
+                case(mcu_state)
+                  4'h0:  o_mcu_data <= { l_str, l_lap, 1'b0, l_wa[12:8] };
+                  4'h1:  o_mcu_data <= l_wa[7:0];
+                  4'h2:  o_mcu_data <= l_cnt[31:24];
+                  4'h3:  o_mcu_data <= l_cnt[23:16];
+                  4'h4:  o_mcu_data <= l_cnt[15:8];
+                  4'h5:  o_mcu_data <= l_cnt[7:0];
+                  4'h6:  o_mcu_data <= { 2'b00, l_occ[13:8] };
+                  4'h7:  o_mcu_data <= l_occ[7:0];
+                  default: o_mcu_data <= 8'h00;
                 endcase
               end
 
