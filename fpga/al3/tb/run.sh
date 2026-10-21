@@ -62,7 +62,14 @@
 #      999.5 Hz, 10 kHz 25 %, 1 MHz, 10 MHz, 7.3 MHz, 3.5 + 2.25 clocks, 2 + 2 clocks) with every edge within one clock
 #      of ideal and the mean period exact, the double buffer (glitch-free change at once, accumulator kept, two commits
 #      in a row, a commit while idle, modes 1 / 2 as off, stop, index >= 2 ignored).
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter|stream|square runs one testbench.
+#  19. tb_skip.v (0x153D D3): the encodes always at full rate with sample skipping for K = 0 (the owner's decision of
+#      2026-10-21 17:59): at D in {1, 2, 3, 9, 19, 199, 399} every stored word is the captured pair of its write clock edge
+#      and consecutive words are D + 1 edges apart (the write clock toggles every 10 ns at every rate), the auto time-out,
+#      0x14, the 0x05 ready wait and a CH1 step's trigger position on the stored words, EXT at D = 49, the hardware counter
+#      with the filter off at D = 399 (E, T, duty exact: the 0x153C bench miscount), divider changes while idle, K = 1 as
+#      before. The K = 0 random phases of steps 1, 2, 4 and 6 run at D = 0 since 0x153D (the references gate their
+#      encodes at D > 0 and cannot model the skipping); this step holds the D > 0 coverage.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter|stream|square|skip runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -192,6 +199,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = square ]; then
   iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_square.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_square.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_square.vvp" +seed=$SEED +logfile="$WORK/square.log" | tee "$WORK/sim_square.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_square.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = skip ]; then
+  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_skip.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_skip.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_skip.vvp" +seed=$SEED | tee "$WORK/sim_skip.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_skip.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"

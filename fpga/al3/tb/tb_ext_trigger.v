@@ -332,7 +332,10 @@ module tb;
         wr1(8'h16, {7'd0, rnd[1]});                       // edge
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));         // level
         wr1(8'h1A, {7'd0, rnd[2]});                       // auto / normal
-        wr4(8'h0D, rnd[5:4]);                             // 100, 50, 33, 25 MHz write clock
+        wr4(8'h0D, 32'd0);                                // 0x153D: K = 0 is compared with the reference at 200 MSa/s only (the
+                                                          // dut stores every (D + 1)-th full-rate pair at D > 0, the reference
+                                                          // gates its encodes: tb_skip.v checks D > 0 against a model); rnd[5:4]
+                                                          // was the divider 0 .. 3 up to 0x153C
         pre_r = 13'd20 + (rnd[24:16] % 13'd280);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
         wr2(8'h0B, {3'd0, pre_r});
@@ -402,6 +405,18 @@ module tb;
     //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
     wr4(8'h52, 32'd0);
     wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
+    // 0x153D: the dut's write clock toggles on every clk_200MHz edge from power-on, the reference's from its divider
+    // counter's first count one cycle later, so their phases differ by an edge (the reference's A / B samples swapped
+    // against the dut's): copy the dut's write clock and encode flops into the reference at divider 0, half a clock from
+    // the toggling (negative) edges, as tb_decim.v does before its phase 4. Repeated wherever a K = 0 capture at D > 0
+    // (the reference's gated encodes) precedes a lockstep phase.
+    wr4(8'h0D, 32'd0); #200;
+    @(posedge dut.clk_200MHz); #0.6;
+    refd.sample_write_clock = dut.sample_write_clock;
+    refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
+    refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
+    refd.sample_rate_counter = 32'd1;
+    #500;
 
     //-------------------------------------------------------------------------------
     // Phase 1: equivalence with Atlan4's 0x1532 design for trigger sources 0/1
@@ -603,10 +618,12 @@ module tb;
     $display("step: CH1 trigger_address - edge = %0d, EXT trigger_address - edge = %0d",
              $signed(adc_addr - wa_at_edge), $signed(ext_addr - wa_at_edge));
     // 0x153A: the ADC data reaches the trigger compare and the memory 2.5 T + 15 ns after the pins (A core, stage 4;
-    // fpga/al3/README.md "Changes" section 10), EXT is not delayed: at divider 49 (T = 500 ns) CH1 triggers 1265 ns = 2.53
-    // words later than EXT, i.e. 2 or 3 words depending on where the step falls in the word (0x1532..0x1539: the same word)
-    check((adc_addr - ext_addr == 13'd2) || (adc_addr - ext_addr == 13'd3),
-          "EXT and CH1 level trigger on the same step: CH1 2 or 3 words later than EXT at divider 49 (0x153A data latency)");
+    // fpga/al3/README.md "Changes" section 10), EXT is not delayed. 0x153D: the encodes run at full rate at every divider,
+    // so T is the 10 ns full-rate word and the data lag is 40 ns whatever the divider: at divider 49 (500 ns stored words)
+    // CH1 triggers in the same stored word as EXT, or one word later when the step falls in the last 40 ns of a word
+    // (0x153A .. 0x153C with the gated encodes: 2.53 divided words = 2 or 3 words later)
+    check((adc_addr - ext_addr == 13'd0) || (adc_addr - ext_addr == 13'd1),
+          "EXT and CH1 level trigger on the same step: CH1 in the same stored word as EXT or one later at divider 49 (0x153D: full-rate encodes, 40 ns data lag)");
     step_mode = 0;
 
     //-------------------------------------------------------------------------------
@@ -644,6 +661,14 @@ module tb;
     flat_mode = 1; flat_val = 8'd20;
     wr1(8'h15, 8'h00);
     wr1(8'h17, 8'd128);
+    // 0x153D: the EXT captures at divider 49 above ran the reference's encodes gated: copy the dut's write clock phase again
+    wr4(8'h0D, 32'd0); #200;
+    @(posedge dut.clk_200MHz); #0.6;
+    refd.sample_write_clock = dut.sample_write_clock;
+    refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
+    refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
+    refd.sample_rate_counter = 32'd1;
+    #500;
     setup_capture(2'd0, 1'b0, 1'b0, 32'd0, 13'd100, 13'd200);
     wr4(8'h0E, 32'd9000);
     start_capture;

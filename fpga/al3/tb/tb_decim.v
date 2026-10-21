@@ -425,7 +425,10 @@ module tb;
         wr1(8'h16, {7'd0, rnd[1]});
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));
         wr1(8'h1A, {7'd0, rnd[2]});
-        wr4(8'h0D, rnd[5:4] + (rnd[10] ? 32'd0 : 32'd6));  // write clock 100 .. 12.5 MHz
+        wr4(8'h0D, 32'd0);                                // 0x153D: K = 0 is compared with the reference at 200 MSa/s only (the
+                                                          // dut stores every (D + 1)-th full-rate pair at D > 0, the reference
+                                                          // gates its encodes: tb_skip.v checks D > 0 against a model); up to
+                                                          // 0x153C rnd[5:4] + (rnd[10] ? 0 : 6) = write clock 100 .. 12.5 MHz
         pre_r = 13'd20 + (rnd[24:16] % 13'd280);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
         wr2(8'h0B, {3'd0, pre_r});
@@ -522,6 +525,19 @@ module tb;
     //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
     wr4(8'h52, 32'd0);
     wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
+    // 0x153D: the dut's write clock toggles on every clk_200MHz edge from power-on, the reference's from its divider
+    // counter's first count one cycle later, so their phases differ by an edge (the reference's A / B samples swapped
+    // against the dut's): copy the dut's write clock and encode flops into the reference at divider 0, half a clock from
+    // the toggling (negative) edges, as tb_decim.v does before its phase 4. Repeated wherever a K = 0 capture at D > 0
+    // (the reference's gated encodes) precedes a lockstep phase.
+    wr4(8'h0D, 32'd0); #200;
+    @(posedge dut.clk_200MHz); #0.6;
+    refd.sample_write_clock = dut.sample_write_clock;
+    refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
+    refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
+    refd.sample_rate_counter = 32'd1;
+    refd.swc_prev = dut.sample_write_clock;
+    #500;
 
     //-------------------------------------------------------------------------------
     // Phase 1: K = 0 equivalence with 0x1533
@@ -714,7 +730,8 @@ module tb;
     refd.sample_write_clock = dut.sample_write_clock;
     refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
     refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
-    refd.sample_rate_counter = dut.sample_rate_counter;
+    refd.sample_rate_counter = 20'd1;                     // 0x153D: the dut has no divider counter (the write clock toggles on
+                                                          // every edge); at divider 0 the reference's enable is 1 from counter 1 on
     refd.swc_prev = dut.sample_write_clock;               // 0x1539 has no swc_prev: it held the write clock of this edge
     adc_mode = 3; flat_val = 8'd20;
     wr1(8'h15, 8'h00);
