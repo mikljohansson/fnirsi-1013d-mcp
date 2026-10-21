@@ -39,7 +39,7 @@ Package layout in `mcp/`: `fnirsi/protocol.py` (frame codec, CRCs, structs), `fn
 | 0 | READ_ONLY | nothing | `scope_info`, `scope_profile`, `scope_status`, `get_config`, `fetch_waveform` (LOCAL), `read_calibration`, `screenshot`, `report`, `export_csv`, `decode` and `measure` on existing data, `log_status` | allowed |
 | 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_segments`, `capture_and_fft`, `decay_fit`, `measure` / `decode` with `capture=true`, `mask_test`, `dvm`, `log`, `log_stop` | allowed |
 | 2 | FRONT_END | relays (range, AC/DC) and the offset PWM; audible clicks, relay wear, a small transient at the input when AC coupling switches | `set_channel` | allowed, rate-limited to 5 relay changes per second by the server |
-| 3 | OUTPUT | drives the calibration pin (3.3 V logic square wave or pulse pattern). If that pin is wired into the detector (e.g. as a TX gate drive), this switches real coil current | `generator`, `pattern`, `sweep`, `bode_sweep`, `self_test_loopback` | needs a confirmation token; off at server start |
+| 3 | OUTPUT | drives the calibration pin (3.3 V logic square wave). If that pin is wired into the detector (e.g. as a TX gate drive), this switches real coil current | `generator`, `sweep`, `bode_sweep`, `self_test_loopback` | needs a confirmation token; off at server start |
 | 4 | RAW | arbitrary FPGA bus writes, rebooting into FEL | `raw_fpga`, `enter_fel` | disabled unless `FNIRSI_MCP_ENABLE_RAW=1`; needs a confirmation token |
 
 Configuration (environment variables of the server process):
@@ -188,7 +188,7 @@ available remotely in protocol v1."
 
 | Param | Type | Notes |
 |---|---|---|
-| `source` | `"CH1"`/`"CH2"`/`"EXT"`/`"pattern"` | `"EXT"` = the calibration pin as a logic input (caps EXT_TRIGGER); `"pattern"` = the marker of `scope_pattern` (protocol 1.27, caps PATTERN_GEN, edge type only, EXT's position convention) |
+| `source` | `"CH1"`/`"CH2"`/`"EXT"` | `"EXT"` = the calibration pin as a logic input (caps EXT_TRIGGER) |
 | `edge` | `"rising"`/`"falling"` | |
 | `level` | float V | converted to a raw core-A code with the channel's calibration minus `adc_a_comp`; or `level_code` 0..255 |
 | `mode` | `"auto"`/`"normal"`/`"single"` | remote captures never re-arm on their own, so single equals normal |
@@ -522,51 +522,24 @@ per-capture readings (`capture_t_s`, `<CH>_mean` / `_ac_rms` / `_rms` / `_min` /
 | `frequency` | float Hz | <= `FNIRSI_MCP_GEN_MAX_HZ` and <= 25 MHz |
 | `duty_percent` | float | <= `FNIRSI_MCP_GEN_MAX_DUTY` |
 
-Unchanged for the user; underneath (FPGA 0x153D, protocol 1.27) the square is the pattern generator's two steps on the
+Unchanged for the user; underneath (FPGA 0x153D, protocol 1.27) the square is a fractional two-step square on the
 200 MHz clock: high n_h + f_h / 65536 clocks, low n_l + f_l / 65536, one fraction accumulator. **Exact-frequency
 note**: the average frequency is 200 MHz x 65536 / P16 (P16 = the period in 1/65536 of a 5 ns clock, rounded to the
 nearest), exact to 2^-16 of the period (7.6e-11 at 1 kHz, 7.6e-7 at 10 MHz); every edge lies on the 5 ns grid within
 one clock of its ideal time, so a single period can be 5 ns longer than the next; a frequency whose period is an
 integer number of clocks (200 MHz / P: 1 kHz, 1 MHz) has no dither at all. A change while it runs is glitch-free and
-phase-continuous (taken at the next step boundary). Returns the actual frequency (`frequency_exact_hz`), duty,
+phase-continuous (taken at once, the step in progress completing with its old length). Returns the actual frequency (`frequency_exact_hz`), duty,
 `period_clocks`, `high_clocks` / `low_clocks` and the raw P16 / H16. Caveats: the calibration-output note, "Square wave
 only, 3.3 V logic. Not a sine source and not a power driver: buffer it before driving a MOSFET gate." Disabling
 (`enabled=false`) does not need a token. Up to protocol 1.26 the square came from Atlan4's 50 MHz DDS (11.64 mHz
 steps, 20 ns edge jitter).
 
-**`pattern`** (`scope_pattern`, tier 3, token unless `mode='off'`; protocol 1.27, caps PATTERN_GEN, the engine caps
-PATTERN_TRIGGER; contract 7.2 / 7.4 / 7.5). A pulse pattern on the calibration pin: up to 8 steps of logic level and
-duration, the TX drive of a detector.
-
-| Param | Type | Default | Notes |
-|---|---|---|---|
-| `steps` | list | required | `[{"level": 1, "width": "50us", "mark": true}, {"level": 0, "width": "950us"}]`: 10 ns .. 21 s per step, 1/65536 of 5 ns resolution; `mark` = this step's start is the marker |
-| `mode` | `single` / `repeat` / `continuous` / `off` | `repeat` | single: one burst per start; repeat: `repeat` bursts with `gap` between them; continuous: runs at once until changed; off: the pin idles |
-| `repeat` | 1..65536 | 1 | bursts per start |
-| `gap` | seconds | 0 | between bursts, 5 ns steps, <= 4.29 s |
-| `idle_level` | 0 / 1 | 0 | between bursts and when off |
-| `trigger_on_marker` | bool | true | the marker is the capture's trigger source `pattern` |
-| `start` | `mcu` / `trigger` / `both` | `mcu` | now; on the pattern trigger engine's event; either |
-| `trigger` | dict | none | the engine, in `scope_set_trigger`'s vocabulary: `source` CH1 / CH2 / EXT, `type` edge / pulse_width (`width`, `longer`) / nth_edge (`n`, `idle`) / timeout (`width`), `polarity` / `edge`, `level` (V) or `level_code`; seconds become samples of the engine's stream (a ring word on CH1 / CH2, 5 ns on EXT) |
-| `rearm` | bool | true | the engine re-arms after each burst (false: one shot) |
-| `capture` | bool | false | arm a host capture first, then start the pattern, and return the capture (the marker capture in one call) |
-| `capture_channels`, `timeout_s` | | CH1, 2 s | for `capture` |
-| `drive_pin` | bool | true | false runs the pattern (marker, engine) with the pin not driven: the post stays the EXT input |
-
-Returns the pattern as written (the gap echoed in 5 ns clocks), the burst length, the status (running, in gap,
-pending, step, bursts done, marker seen), the engine (own engine or the shared fallback), a timing diagram `.npz` (kind
-`pattern`, `scope_report` draws it with the markers) and with `capture=true` the capture (as `scope_capture`). The
-duty of the pattern (time high / burst) obeys `FNIRSI_MCP_GEN_MAX_DUTY`. It replaces the generator's square
-(`scope_generator` with a frequency gives it back). The marker triggers a capture only with both `trigger_on_marker`
-and `scope_set_trigger(source='pattern')` (edge type); it is armed once the pretrigger has filled, so arm first and
-start after (`capture=true`), or let a repeating / continuous pattern run.
-
 **`sweep`** (`scope_sweep`, tier 3, token; protocol 1.27, contract 7.3 / 7.4). A chirp of the generator's square:
 `start` / `stop` (Hz), `steps` (2..200,000), `time_s` (one pass) or `rate` (steps per second), `spacing` linear / log,
 `shape` single / triangle (start -> stop -> start), `duty_percent`. Host-stepped: one SET_GEN per step, each a
-glitch-free, phase-continuous change of the two pattern entries; before a step that comes sooner than one period of
+glitch-free, phase-continuous change of the square's two entries; before a step that comes sooner than one period of
 the frequency in effect the host polls GET_GEN until the previous change was taken (`pending`; the FPGA takes a commit
-made during step k from step k + 2). A USB round trip per step (about 0.2 ms in REMOTE) limits a host chirp to about
+within 3 clocks, or at the boundary of a step with less left). A USB round trip per step (about 0.2 ms in REMOTE) limits a host chirp to about
 **2,000 steps per second**; a faster request runs as fast as the link allows and says so (the device-paced 5,000
 steps / s needs a firmware CHIRP command, not in this protocol). At most 600 s per call. Returns the statistics (steps
 sent, achieved steps / s, late steps, polls) and restores the generator it found. Watch it on the scope's Spectrum
@@ -600,7 +573,7 @@ optional extra `plot`) and `<stem>.html` (plot embedded as base64, table, summar
 external resources, light and dark). Returns both paths, the kind, the summary lines, up to 50 table rows, the caveats
 and `how_to_show` (Claude Code: Read the PNG, publish the HTML with the Artifact tool). Kinds: capture, averaged
 capture, decay fit, segments, host FFT, the scope's spectrum, Bode (host or device), the streaming log's summary
-(`log`: min .. max per bin, the gaps marked), the pattern's timing diagram (`pattern`). Library: `fnirsi1013d.report`
+(`log`: min .. max per bin, the gaps marked). Library: `fnirsi1013d.report`
 (`build_report`, `load_result`), CLI `python -m fnirsi1013d.report <file|latest>`.
 
 **`self_test_loopback`** (tier 3, token). Asks the user (in the description) to connect the calibration

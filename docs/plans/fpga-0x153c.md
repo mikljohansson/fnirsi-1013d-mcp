@@ -428,6 +428,8 @@ before the transport fix).
 
 ## 7. Pulse pattern generator with a trigger marker (0x153D)
 
+**Cut by the owner 2026-10-21 15:55: 0x153D did not fit; the generator is the fractional square only.**
+
 ### 7.1 Pins: there is one
 
 P133 (`o_1khz_calib`) is the only FPGA signal that reaches the outside (README "Pin map"; `SYNTHESIS.md` section 2: about
@@ -564,6 +566,8 @@ front end's 30 MHz), not in this contract.
   capture on the marker.
 
 ### 7.5 Pattern trigger engine (owner, 2026-10-20 22:4x: "yes on the implementation")
+
+**Cut by the owner 2026-10-21 15:55: 0x153D did not fit; the generator is the fractional square only.**
 
 The pattern generator gets its own trigger engine, orthogonal to the capture trigger and with the same vocabulary:
 source CH1 / CH2 / EXT, types edge, pulse width, Nth edge, timeout, level, polarity, N, H. A detector's RX event or
