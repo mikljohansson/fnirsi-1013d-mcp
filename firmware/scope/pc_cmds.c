@@ -2231,7 +2231,6 @@ static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   //C6 peak detect
   if(req[0] == 4)
   {
-    if(!(s->var.caps & PC_CAP_PEAK_DETECT)) return pc_error(s, PC_E_UNSUPPORTED, 0, "peak detect");
     if(req[1] & 0x08)                       return pc_error(s, PC_E_BAD_ARG, 1, "FIR with peak detect");
     set = (uint8_t)((pc_hal_decim_setting() & (PC_DECIM_SET_FIR | 3)) | PC_DECIM_SET_PEAK);
   }
