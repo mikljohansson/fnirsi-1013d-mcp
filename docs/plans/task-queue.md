@@ -283,12 +283,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fpga-d2 done 16:0x, pushed f085b05 (not merged to main: the owner cut the pattern feature; fpga-d3 integrates the branch
+- fpga-d2 done 15:5x, pushed f085b05 (not merged to main: the owner cut the pattern feature; fpga-d3 integrates the branch
   stripped to the square). tb_pattern 10462 checks both seeds; run.sh 18 of 19 PASS both seeds, tb_decim's 2 K = 0 failures
   reproduce on the base source (a testbench effect of the DDS removal: EXT captures run to their time-out; fix = tb_fir's
   mem_dirty mask, handed to fpga-d3). TD b6 with C2: 7351 LUT / 6416 reg / 8321 LE (96.3 %), 22 errors on old paths.
   Square-only estimate: 150-190 LUT / 180-270 reg + ~96 reg for the glitch-free shadows, about 81 % of the LEs.
-- fw-nopat (Opus explicitly, dispatched 15:5x, branch fw-nopat): the pattern cut on the firmware / MCP / docs side: SET_PATTERN,
+- fw-nopat (Opus explicitly, dispatched 15:56, branch fw-nopat): the pattern cut on the firmware / MCP / docs side: SET_PATTERN,
   SET_PATTERN_TRIGGER, trigger source 3 PAT, the engine and marker registers and their caps / features retired, the square path
   unchanged (fpga_pat_* renamed fpga_gen_*), fpga_model to the stripped set, check_retired_regs extended, scope_pattern and
   the simulator's pattern models removed, protocol row 67 rewritten as built, CHANGELOG fw-d5 / mcp-d6 entries rewritten.
