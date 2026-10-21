@@ -2344,6 +2344,105 @@ duty (or the 0x153D pattern generator's 6 ns spikes): every spike visible, the m
 0x29 reads byte 0 = 0x80 and byte 1 = 0xC0 with 0x53 = 0x54 = 0; a falling trigger at the envelope's low edge triggers
 where the Scope view shows the band's lower edge crossing the marker.
 
+### 15. Integration build 0x153C and the cruft removal (fpga-c4, 2026-10-21)
+
+Items C0 and C4 of `docs/plans/fpga-0x153c.md` section 10 on the merged source of C1 (section 12, trigger types and
+hold-off), C3 (section 13, counter) and C2 (section 14, peak detect). The version byte is 0x3C (read 0x06 = 0x15 0x3C);
+the capability bits the firmware derives from the word are 2 HOLDOFF, 20 TRIG_TYPES, 21 PEAK_DETECT and 22 COUNTER
+(contract section 2.3; 1 GENERATOR as before, the DDS stays until 0x153D). Registers: `src/FPGA commands.txt`; the
+firmware's byte sequences: `tb/contract_0x153C.txt`. Images: `dist/al3-0x153C.bin` (sha256 `2580b090...c7f2`), flash
+image `07393bf5...1f77` (`tools/bitstreams.py pack` writes it), source commit 1f1ded4. **Not flashed.**
+
+#### Cruft removal (C0, contract section 13: the one-bitstream rule)
+
+Logic our firmware never writes or reads, removed on the merged source (the contract's deltas were measured one block at a
+time on 0x153B; the total here is against the merged baseline build b0 with the same flow):
+
+| Removed | Was | Now |
+|---|---|---|
+| write 0x3C, read 0x41 (`touch_panel_address`) | stored and read back; the only firmware writer was commented out | a write does nothing, the read returns the previous read byte |
+| reads 0x24..0x27 (the live ADC pins, `adc_q1`) | the IOB register of each pin (liveness only since 0x153A) | gone; READ_LIVE's firmware handler was already removed |
+| 0x53 bits 4..2 (`dec_swap`, `dec_neg_a`, `dec_neg_b`; the `swap` port of `decim_chan`) | swap: never set (B is the earlier sample by construction since 0x1538); neg: inert since 0x153A, read back in 0x29 | ignored on write, 0x29 byte 0 bits 4..2 read 0 |
+| write 0x0F (`sample_read_enable`) | a mux whose both arms were `i_mcu_clk`; written in every arm | a no-op write (the firmware still writes it: harmless) |
+| `trigger_detect_enable`, `trigger_rise_enable`, `trigger_fall_enable` | computed, consumed by nothing (fpga-gen12 invariant) | gone |
+| `w_last` | the address after the last word written, for the testbenches | `` `ifdef SIM`` (tb scripts compile with `-DSIM`), not in the bitstream |
+| the sample-rate divider on 32 bits | `sample_rate_counter`, the compare and `sce_q` 32 bits wide; `dec_pc` / `fir_hp` 31 bits | **div20**: compare, `sce_q`, the decimator's P count and the FIR eligibility on `sample_rate_divider[19:0]`; 0x0D keeps 4 bytes, bits 31..20 are ignored (the firmware's largest divider is 199,999, it rejects values above 0xFFFFF) |
+
+0x1B stays: C1 made it the trigger hold-off (the contract's section 13 row for it is superseded). Measured: the merged
+baseline b0 (main 50cbc71, version byte still 0x3B) 6265 LUT / 5466 reg / 7130 LE; with C0 (build b1) 6059 / 5387 / 7025:
+**-206 LUT / -79 reg / -105 LE** (the contract's -78 / -19 plus the shorter decimator counters of div20). A firmware that
+never wrote the removed registers sees no change: the equivalence steps of `tb/run.sh` (references 0x1532 .. 0x1535, which
+keep the registers) pass with 0 mismatches. Testbench changes for it: the random phases no longer write 0x0F / 0x3C or read
+0x41 / 0x24..0x27 (the random read-pointer value that used to travel through 0x3C / 0x41 is kept as a variable, so the
+stimulus is otherwise byte-identical), the single-bit reads 0x05 / 0x0A / 0x18 are compared on bit 0 (which replaces the
+0x41 "refill" of the read register's stale bits, fpga-gen12), 0x53 is written with bits 4..2 clear in every reference run
+(the references would swap the pair), the 0x29 checks expect bits 4..2 = 0, tb_fir's D = 0x40000002 case is divider 2
+(FIR not eligible: 0x29 = 0xC30C).
+
+#### Timing closure (C4)
+
+The merged source misses `clk_200MHz` in most placements at 71 % LUT (fpga-c3 -0.763 ns, fpga-c2 -0.504 ns before the
+merge). Builds of this integration, TD 4.6.8 SP1, `build.sh`, the slack of the worst `clk_200MHz` path:
+
+| Build | Source | LUT | `clk_200MHz` | Worst path |
+|---|---|---|---|---|
+| b0 | merged main 50cbc71 (0x3B) | 6265 | 5.375 ns, 9 errors, -0.375 | post-pass carry `pp_s0[16]` -> `pp_w1` -> `aw_d` (zaklad.v 1832 / 1851 / 1841 of that text) |
+| b1 | + C0 (78ccaa0) | 6059 | 5.928 ns, 2 errors, -0.928 | `sn_swe` -> the sequencer state `q_st` (3 LUT levels, 56 % net) |
+| v2 | b1 + the hold-off block after the qualifiers | 6056 | 5.261 ns, 2 errors, -0.261 | the post-pass carry again |
+| v3, v4 | b1 + `decim_chan` instances swapped / the encode self-check block moved | = b1 | byte-identical bitstream: not a re-roll | |
+| a0 | + post-pass lane adders (below), hold-off block at its C1 place | 6117 | 5.648 ns, 3 errors, -0.648 | `pp_xa2` -> the new 32-bit adder -> `pp_l2` (59 % net) |
+| a2 | a0 + the hold-off block after the qualifiers | 6118 | 5.047 ns, 1 error, -0.047 | the EXT qualifier's `rem` decrement (C1's +0.26 path) |
+| a3 | a0 + the hold-off block before the trigger types | 6117 | -0.516 | the other lane adder's routing |
+| a4, r1-r3 | `pp_l*` renamed / register declarations reordered | = a0 / a2 | byte-identical: not a re-roll | |
+| h1 | a0 + the hold-off block before "Capture of the trigger address" | 6122 | 5.430 ns, 9 errors, -0.430 | post-pass |
+| h2 | a0 + the hold-off block before "Segmented capture and averaging" | 6120 | 5.222 ns, 2 errors, -0.222 | post-pass |
+| **h4** | a0 + the hold-off block before "Sampling triggered detect" (**= the committed source 1f1ded4**) | **6126** | **4.772 ns, 0 errors, +0.228** | `q_untrig` saturating adder (the 0x1536 path) |
+
+Two lessons for the next integrator. (1) The only neutral edit that re-rolled TD's placement was the position of the hold-off
+`always` block; swapping instances, moving a pure `always` block, renaming registers and reordering declarations gave
+byte-identical bitstreams. (2) The post-pass carry was systematic (two of three rolls), so it was restructured rather than
+re-rolled: the 16-bit format's lane sums are added as two 32-bit words `pp_l0` / `pp_l2` in the same stage as the legacy
+17-bit lanes (`pp_xa1 = pp_xa3 = 0` in that format, so `{ pp_s1 + carry, pp_s0[15:0] }` = `pp_acc[31:0] + pp_xa0`), and
+`pp_w` is a plain select into `aw_d`. Same values on the same clock: no record, status byte or timing changes
+(tb_seg / seg_model and the contract's F scenario check the averaged words), +60 LUT.
+
+#### Build (h4 = the committed source, TD 4.6.8 SP1)
+
+6126 LUT (70.9 %) / 5451 reg / 7103 LE, 48 EMB9K, 2 EMB32K, 2 of 3 M18x18, 60 pads. `clk_200MHz` 0 errors, minimum period
+4.772 ns (worst +0.228 ns, `q_untrig` saturating adder); `sample_write_clock` 9.053 ns, `i_mcu_clk` 19.538 ns, `clkc[1]`
+2.197 ns, all 0 errors; `clkc[0]` 40 errors (the SDC artefact of every build since 0x1532). `tb/capture_report.sh`: encode
+pads 6.92 .. 7.46 ns after their edge; margins at the power-on stages 0x08E4 (worst bit, start / end of the valid window)
+CH1 A 1.31 / 4.46, CH1 B 1.67 / 4.11, CH2 A 3.63 / 2.14, CH2 B 1.52 / 4.26 ns: >= 1.31 ns, as for 0x153B; the wizard's
+training after flashing may move CH1 A and CH2 B to stage 3 (1.96 / 1.76 ns). `build/FPGA.bin` sha256 `2580b090...c7f2`
+(= `dist/al3-0x153C.bin`), padded flash image `07393bf5...1f77`.
+
+#### Tests
+
+`tb/run.sh`, 16 steps, `-DSIM`, references 0x1532 / 0x1533 / 0x1534 / 0x1535 / 0x1538 unchanged (the removed registers
+still exist there): RUN_RESULT_TEXT. Step 8's transcript is `tb/contract_0x153C.txt` (24 checks): the firmware's
+sequences of 0.2.104 with the boot writes of fw-c5 / fw-c7 (0x5E, 0x1B, 0x66; 0x62 = 128 / 6, 0x61 = gate 100 ms), 0x5E
+(0x5F / 0x60 for a qualified type) in every arm after 0x0B / 0x0C, and three new scenarios: T (SET_TRIGGER2 pulse width
+longer than 5 words on CH1 with a hold-off: three 3-word pulses do not trigger, the trailing edge of a 10-word pulse does
+at record index pre + 1; 0x37 / 0x34 status), PK (peak detect with 0x53 = 1, 0x56 = 2, 0x54 = 0, 0x55 = 128 << 8 at
+N = 20: 0x29 = 0x81 0xC0, READ_RAW layout 3 min / max bytes equal to the memory words, { HI, LO } at the trigger word), K
+(a 10 ms counter gate on a 100 kHz square: E 999, T 1,998,000 = E x 2000 clocks, W 999,000, min 40 / max 210). The S / A /
+F / P values moved against 0x153B's transcript because the added strobes shift the stimulus against the arm; every check
+of those scenarios still passes.
+
+#### Bench checks (contract section 9.2, 0x153C; the owner at the bench, fw 0.2.104+)
+
+1. 0x06 = 0x153C; with 0x5E / 0x56 bit 1 / 0x61 / 0x1B at 0 the 0x153B checks 1-6 of section 11 repeat (the probe on the
+   post, the amplitude check first: fpga-gen13's lesson).
+2. Pulse width: generator 10 kHz 20 % on the post to CH1: "longer than 15 us" triggers, "longer than 25 us" does not,
+   "shorter than 25 us" triggers on the falling edge.
+3. Nth edge: the generator gated by a host loop, trigger on pulse 3 after an idle gap.
+4. Timeout: stop the generator during a run: the trigger comes N samples after the last edge.
+5. Hold-off: 1 kHz square, hold-off 2.5 ms: every third edge triggers (segment timestamps 3 ms apart).
+6. Peak detect at 1 MSa/s on a 100 kHz square and a narrow DDS duty: every spike visible, the envelope stable; 0x29 reads
+   0x80 0xC0 with 0x53 = 0x54 = 0 (section 14).
+7. Counter: the post at 1 kHz and 1 MHz on CH1 and EXT: frequency within 1e-5 of phase_inc x 50 MHz / 2^32, duty 50 %,
+   min / max equal to the record's (section 13).
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).
