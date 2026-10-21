@@ -569,16 +569,17 @@ endmodule
 //  acc is cleared at a start, never at a commit or a wrap, so the mean period is exactly (n_h + n_l) + (f_h + f_l) /
 //  65536 clocks and every edge lies within one clock of its ideal time (the cumulative actual time is floor(ideal)).
 //  Pipeline (two clocks per step at least): nx_e is the entry of the next step, registered every clock from the active
-//  pair (e0 / e1) by the step in progress, and acc_sum = acc + nx_e.f is registered from it; the boundary's one 33-bit
-//  add with a carry-in reads both. The entries nx_e / acc_sum come from are therefore 1 and 2 clocks old at the boundary.
-//  Double buffer: 0x6C writes land in the shadows sh0 / sh1 (index 0 / 1; others are ignored); 0x6D bit 5 (commit) marks
-//  them pending. The pending pair is copied into e0 / e1 as a whole at the first clock at which the step in progress
-//  still has at least three clocks to run (cnt >= 1, or the boundary clock itself; at once while idle or at a start), so
-//  nx_e and acc_sum are consistent again before the next boundary reads them: the step in progress completes with its
-//  old duration and every step from the next boundary on is new. Glitch-free, phase-continuous; a commit during the high
-//  step changes the low step of the same period already, during the low step the next period. A second commit before the
-//  take replaces the first. (The 2-clock step n = 2 with a commit landing in its first clock would read the old f with
-//  the new n once: below the firmware's range, whose shortest step is 4 clocks.)
+//  pair (e0 / e1) by the step in progress (cur), and acc_sum = acc + f(next step) is registered every clock from acc and
+//  the active pair directly; at a boundary acc_sum takes acc_sum[15:0] + f(the step after the next) instead, so it is
+//  valid one clock after every boundary (a 2-clock step reads it in time). The boundary's one 33-bit add with a carry-in
+//  reads nx_e and acc_sum, both consistent with the active pair of two clocks before.
+//  Double buffer: 0x6C writes land in the shadows sh0 / sh1 (index 0 / 1; others are ignored); 0x6D bit 5 (commit) copies
+//  the pair into e0 / e1 as a whole on the clock the commit is seen, whatever the generator is doing: the step in
+//  progress has its count loaded already and completes with its old duration, the step starting at the next boundary
+//  uses the new pair when that boundary is two or more clocks away (always, for the firmware's steps of 4 clocks and
+//  more), else the one after it; every step is a complete old or new step. Glitch-free, phase-continuous (acc is not
+//  cleared). A second commit replaces the first at once; the pending flag of read 0x39 is therefore always 0 (the pattern
+//  generator of the fpga-d2 branch deferred the take to a step boundary).
 //  MCU side (i_mcu_clk): the staged 0x6C entry and the 0x6D byte are registers there; wr_t / ctl_t toggle on the last byte
 //  of a 0x6C / on every 0x6D write and are synchronised here (three flops), so the data they refer to is settled when the
 //  toggle is seen (the next bus strobe is >= 50 ns away).
@@ -599,7 +600,7 @@ module sq_gen
   input  wire [7:0]  ctl,            //the 0x6D byte: { -, -, commit, start, -, idle level, mode }
   output reg         level = 0,      //what the pin carries while 0x50 = 1
   output reg         running = 0,
-  output reg         pending = 0,    //a commit not yet taken
+  output wire        pending,        //a commit not yet taken: never (the pair is taken on the commit's own clock)
   output wire        step,           //the step in progress: 0 = entry 0 (high), 1 = entry 1 (low); 0 when idle
   output wire        mode_on
 );
@@ -625,11 +626,12 @@ wire commit = ct_ev & ctl[5];
 wire stop   = ct_ev & (ctl[1:0] != 2'd3);
 wire go_c   = ct_ev & (ctl[1:0] == 2'd3) & ~running & ~go & ~(|go_d);
 wire bd     = running & cnt[32] & ~go & ~(|go_d);          //boundary: the step in progress ends on this clock
-//the pending pair may be taken now: idle, at the start, at a boundary, or with at least three clocks of the step left
-wire take_ok = ~running | go | cnt[32] | (cnt[31:0] != 32'd0);
+wire [15:0] f_next = cur ? e0[15:0] : e1[15:0];            //the fraction of the next step (the other entry)
+wire [15:0] f_nn   = cur ? e1[15:0] : e0[15:0];            //the fraction of the step after the next (this entry again)
 
 assign step    = running & cur;
 assign mode_on = (mode == 2'd3);
+assign pending = 1'b0;
 
   always @(posedge clk)
     begin
@@ -637,22 +639,22 @@ assign mode_on = (mode == 2'd3);
       ct_s <= { ct_s[1:0], ctl_t };
       go   <= go_c;
       go_d <= { go_d[1:0], go };
-      nx_e    <= cur ? e0 : e1;
-      acc_sum <= { 1'b0, acc } + { 1'b0, nx_e[15:0] };
+      nx_e <= cur ? e0 : e1;
+      if(bd)
+        acc_sum <= { 1'b0, acc_sum[15:0] } + { 1'b0, f_nn };  //acc after this boundary + the fraction of the step after next
+      else
+        acc_sum <= { 1'b0, acc } + { 1'b0, f_next };
 
       if(wr_ev & (wr_idx == 5'd0))
         sh0 <= wr_e;
       if(wr_ev & (wr_idx == 5'd1))
         sh1 <= wr_e;
 
-      if((pending | commit) & take_ok)
+      if(commit)
         begin
-          e0      <= sh0;
-          e1      <= sh1;
-          pending <= 0;
+          e0 <= sh0;
+          e1 <= sh1;
         end
-      else if(commit)
-        pending <= 1;
 
       if(ct_ev)
         begin

@@ -247,8 +247,8 @@
             //0x41 (touch panel address): gone in 0x153C
             8'h39: //Square generator status (0x153D), 4 bytes; asynchronous (the generator runs on the 200 MHz clock)
                   4'h0:  o_mcu_data <= { running, 1'b0, pending, 4'b0000, step };
-                    //bit7 the square runs (mode 3 started); bit5 a commit (0x6D bit 5) not yet taken (set for a few clocks
-                    //at most: the pair is taken as soon as the step in progress has three clocks left); bit0 the step in
+                    //bit7 the square runs (mode 3 started); bit5 a commit (0x6D bit 5) not yet taken: always 0 (the pair is
+                    //taken on the clock the commit is seen); bit0 the step in
                     //progress (0 = the high step / entry 0, 1 = the low step / entry 1; 0 when idle). Bits 6, 4..1 read 0
                     //(the pattern generator's in-gap bit and step index of the fpga-d2 branch)
                   4'h1..4'h2: 0                      //(the fpga-d2 branch's bursts count) read 0

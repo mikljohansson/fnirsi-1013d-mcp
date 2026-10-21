@@ -18,7 +18,7 @@
 #      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
 #      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
 #   8. tb_seqcontract.v: the firmware's sequencer byte sequences (protocol 1.17) against the simulated FPGA; the
-#      transcript must equal tb/contract_0x153C.txt (the reference for the firmware's host tests).
+#      transcript must equal tb/contract_0x153D.txt (the reference for the firmware's host tests).
 #   9. encphase.sh MODE=check (0x1538): tb_encphase.v, the encode pins against the write clock after the firmware's
 #      UI and host arm sequences at swept write phases, plain and with delay-annotated encode flop inputs, and the
 #      0x33 self-check catching a late CH2 A flop.
@@ -141,8 +141,8 @@ if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
   iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
-  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153C.txt"; then echo "contract transcript = tb/contract_0x153C.txt"
-  else echo "contract transcript differs from tb/contract_0x153C.txt"; RC=1; fi
+  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153D.txt"; then echo "contract transcript = tb/contract_0x153D.txt"
+  else echo "contract transcript differs from tb/contract_0x153D.txt"; RC=1; fi
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = encphase ]; then
   MODE=check SIM_WORK="$WORK" DUT="$DUT" bash "$HERE/encphase.sh" "$SEED" | tee "$WORK/sim_encphase.log"
