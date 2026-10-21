@@ -495,6 +495,14 @@ module tb;
                                                           // stores every (D + 1)-th full-rate pair at D > 0; tb_skip.v has D > 0)
         if (rnd[12] && kr != 0) fir_set_cnt = fir_set_cnt + 1;
         shr = (kr == 0) ? rnd2[13:8] : rec_shift(kr, dv) - ((rnd2[3] && rec_shift(kr, dv) > 0) ? 6'd1 : 6'd0);
+        // 0x153D (fpga-d3c): no comparison while the rates change and until the arm has reset the capture, and the
+        // divider goes to 0 first: the previous capture may still run (normal mode without a trigger), and a transient
+        // K = 0 at the old D > 0 (0x53 written before 0x0D) has the dut storing every (D + 1)-th full-rate pair while the
+        // reference gates its encodes, which leaves the write clocks and the decimator count out of step (seed 12345:
+        // one word more in the dut at the K = 3 -> 0 change, and the stale 0x14 / filter state of the earlier non-lockstep
+        // phases at the start of phase 1); K >= 1 at D = 0 and K = 0 at D = 0 are lockstep in both
+        eq_on = 0;
+        wr4(8'h0D, 32'd0);
         wr1(8'h56, 8'h00);                                  // off while K and the divider change
         wr1(8'h53, {6'd0, kr});                           // 0x153C: bits 7..2 are gone (bit 2, the swap, was random here); the reference gets 0 too
         wr1(8'h54, shr);
@@ -535,6 +543,7 @@ module tb;
         end else
           ext_en = 0;
         start_capture;
+        eq_on = 1;
         wait_done(100000);
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference

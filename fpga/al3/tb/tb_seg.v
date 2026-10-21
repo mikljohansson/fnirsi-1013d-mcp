@@ -575,6 +575,10 @@ module tb;
                                                           // up to 0x153C rnd[17:16] + (rnd[18] ? 0 : 6)
         else         dv = rnd[19] ? rnd[23:20] : 32'd14 + rnd[28:24];
         shr = (kr == 0) ? rnd2[13:8] : (rnd[12] ? rec_shift_fir(kr, dv) : rec_shift(kr, dv));
+        // 0x153D (fpga-d3c): no comparison while the rates change and until the arm has reset the capture, and the
+        // divider goes to 0 first (as tb_fir.v: a transient K = 0 at the old D > 0 is not lockstep with the reference)
+        eq_on = 0;
+        wr4(8'h0D, 32'd0);
         // sequencer registers: mode 0 or 3 (off), random flag bits and values
         wr1(8'h57, {rnd2[31:26], rnd2[25] ? 2'd3 : 2'd0});
         wr2(8'h58, $random(seed));
@@ -623,6 +627,7 @@ module tb;
         // FIR settling when it engages (the reference sees the same writes; only the data delay)
         #((kr + 10) * ((dv / 2) + 1) * 10 + 500);
         start_capture;
+        eq_on = 1;
         wait_done(100000);
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
@@ -696,7 +701,9 @@ module tb;
   // legacy or 16-bit word period in ns and the timestamp increment per write clock edge (5 ns units)
   task geometry(input [1:0] kk, input [31:0] divider);
     begin
-      if (kk == 0) begin word_ns = 10 * (divider + 1); inc5 = 2 * (divider + 1); end
+      // 0x153D: the write clock runs at full rate at every divider, so the timestamp moves by 2 per 10 ns edge and a
+      // record's first stored word falls on any edge of the D + 1 skip cycle (up to 0x153C 2 (D + 1) per divided edge)
+      if (kk == 0) begin word_ns = 10 * (divider + 1); inc5 = 2; end
       else         begin word_ns = 10 * ((divider / 2) + 1); inc5 = 2; end
     end
   endtask
@@ -862,7 +869,7 @@ module tb;
     wr1(8'h17, 8'd200);
     wr4(8'h0E, 32'd60);
     seq_cfg(2'd1, 1'b0, 1'b0, 12'd4, 4'd6, 16'd1, 5'd0, 32'd0);
-    log_run(2'd1, 4, 1, 40, 12, 6, 0, 20, 4, 0);
+    log_run(2'd1, 4, 1, 40, 12, 6, 0, 20, 2, 0);   // 0x153D: timestamps move by 2 per full-rate edge (was 4 at D = 1)
     seg_log_arm = 1;
     start_capture;
     wait_seq(100000);
@@ -898,7 +905,7 @@ module tb;
     #2000;
     setup_capture(2'd0, 1'b0, 1'b1, 32'd9, 13'd20, 13'd100);
     seq_cfg(2'd1, 1'b0, 1'b0, 12'd5, 4'd7, 16'd1, 5'd0, 32'd0);
-    log_run(2'd1, 5, 1, 100, 20, 7, 0, 100, 20, 0);
+    log_run(2'd1, 5, 1, 100, 20, 7, 0, 100, 2, 0);   // 0x153D: 2 per full-rate edge (was 20 at D = 9)
     seg_log_arm = 1;
     start_capture;
     fork
@@ -983,7 +990,7 @@ module tb;
     wr1(8'h17, 8'd128);
     setup_capture(2'd0, 1'b0, 1'b1, 32'd9, 13'd30, 13'd100);
     seq_cfg(2'd2, 1'b0, 1'b0, 12'd1, 4'd0, 16'd4, 5'd2, 32'd0);
-    log_run(2'd2, 1, 4, 100, 30, 0, 0, 100, 20, 0);
+    log_run(2'd2, 1, 4, 100, 30, 0, 0, 100, 2, 0);   // 0x153D: 2 per full-rate edge (was 20 at D = 9)
     start_capture;
     fork
       step_pulses(4, 15000, 3000, 6000);
