@@ -3659,13 +3659,30 @@ static void test_enc_check(void)
   pc_session_init(&S);
   T_EQ(S.var.caps & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
 
-  //Gated rate (divider 19): nothing checked, 0x33 never read
+  //Divided rate (divider 19), fw-fullrate: 0x153D runs the encodes at 200 MSa/s at every rate and checks them on every
+  //clock, so the 0x33 check covers this capture too: one bad capture, re-armed once with the same geometry, recovered
+  setup(PC_FW_FPGA_VERSION);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  mock.enc_bad_arms = 1;
+  reads = mock.read_calls;
+  r = enc_capture();
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms, 2); T_EQ(mock.enc_status_reads, 2); T_EQ(mock.read_calls, reads);
+  T_EQ(mock.enc_last_why, EH_WHY_FLAG); T_EQ(mock.enc_last_note.ok, 1); T_EQ(mock.enc_last_note.tries, 1);
+
+  //...but the data check (a rate write after the sampling reset) is for divider 0 only: its core A neighbours are
+  //(D + 1) x 10 ns apart here, so nothing is checked and the ring is not read
   setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;
   mock.enc_bad_arms = -1;
-  r = enc_capture();
+  r = req(PC_CMD_ARM, 0, 0);
+  mock.enc_written = 1;                                         //a rate write while the capture runs
+  reads = mock.read_calls;
+  r = wait_done(100);
   T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
-  T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_notes, 0);
+  T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_notes, 0); T_EQ(mock.read_calls, reads);
+  mock.enc_written = 0;
+  mock.enc_bad_arms = 0;
 
   //200 MSa/s, good: one 0x33 read, no ring read for the check, accepted
   setup(PC_FW_FPGA_VERSION);

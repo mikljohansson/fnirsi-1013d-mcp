@@ -4,16 +4,18 @@
 // (host_tests/test_enc_heal.c, test_session.c); the target glue (UI and calibration conversions, counters, event 21, the
 // 0x33 read) is enc_heal_hw.c, the host ARM path is pc_acq_service in pc_cmds.c.
 //
-// The built-for bitstream (0x153B, PC_FW_FPGA_VERSION) derives the ADC encodes statelessly from the write clock and
-// checks them itself: FPGA read 0x33 (since 0x1538). Two ways to check one finished full-rate (divider 0, so legacy
-// 8-bit) capture:
-//   EH_MODE_FLAG: read 0x33; bit 0 set = an encode check failed since the last 0x01 = 1.
+// The built-for bitstream (0x153D, PC_FW_FPGA_VERSION) derives the ADC encodes statelessly from the write clock and
+// checks them itself: FPGA read 0x33 (since 0x1538). Since 0x153D the encodes run at 200 MSa/s at every rate and filter
+// (fw-fullrate; 0x153C and before gated them at divided rates), so the flag covers every capture. Two ways to check one
+// finished capture:
+//   EH_MODE_FLAG: read 0x33; bit 0 set = an encode check failed since the last 0x01 = 1. Every capture.
 //   EH_MODE_DATA: EH_CHECK_PAIRS words of each channel from the record start, per channel the RMS of core B's samples
 //     against the mean of their two core A neighbours (both neighbour pairs, the smaller one: it does not depend on the
 //     core order). A signal well under 100 MHz cancels, the cores' offset difference cancels with the mean, the ADC noise
 //     leaves about 1.3 codes; a garbled core leaves tens. Above EH_LIMIT16 the capture is bad. Used for a capture with a
 //     rate / filter write after its sampling reset (0x33 bit 0 is sticky until the next 0x01 = 1 and such a write can
 //     make one prediction miss, fw 0.2.72) and when the boot 0x33 reported an encode convention the firmware does not know.
+//     Divider 0 only (the legacy 8-bit layout with core A neighbours 5 ns away); other captures go unchecked then.
 // A bad capture is discarded and the conversion re-armed, at most EH_MAX_TRIES times per capture; then the last one is
 // accepted and flagged.
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -28,7 +30,7 @@
 #define EH_CHECK_PAIRS  250         //data check: words per channel read from the record start (1000 bus bytes)
 
 //Check modes (pc_hw_enc.mode)
-#define EH_MODE_NONE    0           //(never the bitstream's mode since fw-one; a divider >= 1 is not checked)
+#define EH_MODE_NONE    0           //(never the bitstream's mode since fw-one)
 #define EH_MODE_DATA    1           //residual of the record
 #define EH_MODE_FLAG    2           //FPGA read 0x33
 

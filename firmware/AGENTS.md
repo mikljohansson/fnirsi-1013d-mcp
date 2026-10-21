@@ -6382,6 +6382,16 @@ and the unchanged geometry against 0x153C. `fm.e` counts stored-word edges, so t
 
 **MCP host** (0e7a0a4): mcp/AGENTS.md "fw-fullrate".
 
+**Encode check over every capture** (last commit of the branch, on fpga-d3's confirmation). `fpga_encode_after_capture`
+(enc_heal_hw.c) and `pc_enc_rearm` (pc_cmds.c) skipped every capture at divider >= 1 (and host 16-bit ones), on the
+premise that the encodes were gated there. Now the FLAG check (0x33 bit 0) runs after every capture, any divider, filter
+or peak; the DATA check (after a rate write, or an unknown encode convention) stays divider-0 legacy only, its core A
+neighbours being 5 ns apart only there, so such captures go unchecked as before. A garbled divided-rate capture is
+re-armed (at most `EH_MAX_TRIES`, at the slowest time bases that can take seconds; only on a real fault). The 0x36
+self-check (`fpga_capture_check`) runs after every accepted capture with it. test_session: the divided-rate FLAG re-arm
+and the divided-rate DATA skip. The MCP simulator still models the check at divider 0 only (not needed by any host
+logic).
+
 **Bench (owner, after flashing 0x153D; FEL load of this build)**:
 
 1. Calibrate with both inputs open (probes off, USB cable away from the inputs): the zero step passes on both channels,

@@ -3892,7 +3892,9 @@ static int pc_dispatch(pc_session *s, int ctx)
 
 //fw 0.2.62: every full-rate host capture is checked before READ_RAW can read it (enc_heal.h): 0x1538+ by FPGA read 0x33,
 //0x1532..0x1537 by the B-against-A residual of the record's first words. A bad one is discarded and re-armed with the same
-//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2).
+//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2). fw-fullrate
+//(0x153D: the encodes at 200 MSa/s at every rate): the 0x33 check covers every capture, the residual divider-0 legacy
+//records only (its core A neighbours are 5 ns away only there).
 static uint8_t pc_enc_status(void *ctx)
 {
   (void)ctx;
@@ -3920,7 +3922,7 @@ static int pc_enc_rearm(pc_session *s, uint32_t start)
   pc_hal_enc_state(&e);
   mode = eh_capture_mode(e.mode, pc_hal_enc_written());
 
-  if((mode == EH_MODE_NONE) || (s->cap_divider != 0) || s->cap_wide)
+  if((mode == EH_MODE_NONE) || ((mode == EH_MODE_DATA) && ((s->cap_divider != 0) || s->cap_wide)))
     return 0;
 
   //Sequencer runs: the data check cannot read lane sums or segments (0x1536 / 0x1537), and a run STOP ended is final

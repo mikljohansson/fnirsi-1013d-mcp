@@ -160,6 +160,9 @@ sections 74 to 79.
 - **Host**: the mcp host decodes GET_CAL's one class (`Scope.scale` and `channel_scale` without `clock_class`,
   `cal_clock_class` gone), reads sector 708 blocks with one or two classes, and the simulator has one gain per core.
   (0e7a0a4) The host-test FPGA model runs 0x153D's write clock at 100 MHz and stores every (D + 1)-th pair. (f0f1f06)
+- **The encode check covers every capture**: with the encodes at full rate at every rate, FPGA read 0x33 checks every
+  capture (fpga-d3), so a garbled capture at a divided rate or with a filter is re-armed like a 200 MSa/s one (UI and
+  host ARM); the data check stays at divider 0.
 
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
