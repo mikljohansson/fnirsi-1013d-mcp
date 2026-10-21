@@ -2259,7 +2259,10 @@ snapshot, min / max and thresholds). `clk_200MHz` 0 errors, min period 4.931 ns 
 `q_untrig` saturating adder, zaklad.v 1478, not a counter path: the placement lottery of the 0x153A notes; 0x153B's
 build had 4.583 ns); `sample_write_clock` 9.594 ns, `i_mcu_clk` 20.37 ns, `clkc[1]` 2.376 ns, all 0 errors; `clkc[0]`
 58 errors (the SDC artefact). The contract's section 1.1 counts the counter inside gen8's +1115 LUT for three features
-plus about 50 LUT for min / max; 347 is the counter's share.
+plus about 50 LUT for min / max; 347 is the counter's share. The merge with C1 (section 12) builds to 6079 LUT (70.4 %) /
+5177 reg / 6822 LE and misses `clk_200MHz` by 0.763 ns on the sequencer's `q_pass` adder (8 setup errors, long fanout-1
+routes; `sample_write_clock` 9.7 ns, the other clocks clean): the placement lottery at 70 % LUT, for the integration build
+to re-roll (fpga/al3/AGENTS.md "0x153C C3 counter").
 
 #### Bench checks (C4's bench, item 7 of the contract's section 9.2)
 

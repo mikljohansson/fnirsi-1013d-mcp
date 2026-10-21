@@ -483,7 +483,8 @@ the per-gate numbers. Full `tb/run.sh` (16 steps, `REF_SRC_DIR=~/g11/refs`) on t
 (9252 s: ext 39, decim 98 + cic_model 1876, fir 163 + cic_model 1612, long 8, seg 53 + seg_model 22 runs, trigpos 882,
 contract 12 = contract_0x153B.txt, encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, counter 115;
 every equivalence phase 0 mismatches); seed 4242 **ALL PASS** (9057 s: 39, 98 + 1873, 165 + 1638, 8, 53 + 22, 882, 12,
-encphase, 70 + 26, 2274, 38, 85, 115). The
+encphase, 70 + 26, 2274, 38, 85, 115). On the merged source (7233bf9, C1 + C3, 16 steps with trigtypes): seed 12345
+**ALL PASS** (6510 s, trigtypes 1293, counter 115, everything else as above), seed 4242 **ALL PASS** (6292 s). The
 equivalence steps are untouched by the counter (0x61 = 0 in every reference step; the reference testbenches write
 command 0x35 as the CH2 offset, which also takes a snapshot, harmlessly).
 
@@ -493,6 +494,13 @@ command 0x35 as the CH2 offset, which also takes a snapshot, harmlessly).
 saturating adder, zaklad.v 1478, not a counter path; the lottery of the 0x153A notes), `sample_write_clock` 9.594 ns,
 `i_mcu_clk` 20.37 ns, `clkc[1]` 2.376 ns, all 0 errors; `clkc[0]` 58 (SDC artefact). The contract's section 1.1 counted
 the counter inside gen8's +1115 LUT for three features plus about 50 for min / max; 347 of 1115 is the counter's share.
+**Merged C1 + C3 build** (`~/c3/b2`, this branch after the merge of origin/main b9e6dcd, version byte still 0x3B): 6079 LUT
+(70.4 %) / 5177 reg / 6822 LE, `sample_write_clock` 9.7 ns, `i_mcu_clk` 20.77 ns, `clkc[1]` 3.02 ns, all 0 errors, but
+**`clk_200MHz` 8 setup errors, min period 5.763 ns (-0.763 ns)**: the three failing endpoints are the sequencer's `q_pass`
+adder (zaklad.v 1754 of the merged file), 2-level paths whose fanout-1 nets route 2.4 + 1.8 ns: placement spread at 70 %
+LUT, not a logic depth problem and not a counter or trigger path (the pure-C3 build met timing at 4.931 ns, C1's own build
+after its rewrites). Expect the lottery that the contract's section 1.1 predicted above 70 %: C4 should re-roll with a
+neutral rewrite (the 0x153B b1 -> b2 recipe) or pipeline the q_pass add, and read the summary before pinning.
 
 **For C4 (integration).** Merge order is free: the counter block shares no always block with C1 / C2; conflicts, if any,
 are the `mcu_state` term lines, the run.sh header / usage line, the `FPGA commands.txt` lists and the README section numbers
