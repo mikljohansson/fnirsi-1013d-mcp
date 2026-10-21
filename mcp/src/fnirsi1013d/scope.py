@@ -184,6 +184,10 @@ class Profile:
     info: P.InfoResp
     variant: str
     caps: list[str]
+    #: protocol 1.25 (fw 0.2.102): the bitstream the firmware is built for (0 on older firmware) and whether the scope
+    #: runs another one (then every command outside P.BASIC_CMDS answers E_UNSUPPORTED detail 1)
+    fw_fpga_version: int = 0
+    fpga_mismatch: bool = False
 
     @property
     def programmable(self) -> bool:
@@ -195,6 +199,16 @@ class Profile:
 
     def has(self, cap: P.Caps) -> bool:
         return bool(self.info.caps & cap)
+
+    def mismatch_caveat(self) -> str | None:
+        """The caveat every tool should carry while the scope runs another bitstream than the firmware needs (the
+        scope shows a notice screen and refuses captures and settings); None when the bitstream matches or the
+        firmware is older than 1.25."""
+        if not self.fpga_mismatch:
+            return None
+        return (f"FPGA bitstream mismatch: the scope runs 0x{self.info.fpga_version:04X}, this firmware needs "
+                f"0x{self.fw_fpga_version:04X}; captures and settings are refused (E_UNSUPPORTED detail "
+                f"{P.UNSUP_FPGA_MISMATCH}) until the bitstream is flashed (docs/guide/prepare.md)")
 
 
 class ScopeError(Exception):
@@ -427,7 +441,7 @@ class Scope:
             variant = P.VARIANT_NAMES[P.FpgaVariant(i.fpga_variant)]
         except ValueError:
             variant = "unknown"
-        return Profile(i, variant, P.caps_names(i.caps))
+        return Profile(i, variant, P.caps_names(i.caps), i.fw_fpga_version, i.fpga_mismatch)
 
     @property
     def response_limit(self) -> int:

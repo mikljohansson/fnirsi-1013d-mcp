@@ -42,8 +42,11 @@ PROTO_MAJOR = 1
 #: CAL_PROBE, the calibration wizard's zero measurement from the host; 1.22 (fw 0.2.72, row 62): the FPGA bus contract,
 #: link counters 64-67; 1.23 (fw 0.2.78, row 63): requests close the modal screens; 1.24 (fw 0.2.79, row 64,
 #: provisional numbering): FPGA 0x153A capture stages (caps CAPTURE_STAGES, features bit 7, GET_HEALTH 124 bytes
-#: layout 2, GET_CAL 364 bytes, event 23, EXT shifts 12 / 14 legacy samples)
-PROTO_MINOR = 24
+#: layout 2, GET_CAL 364 bytes, event 23, EXT shifts 12 / 14 legacy samples); 1.25 (fw 0.2.102): one built-for
+#: bitstream (FW_FPGA_VERSION 0x153B; GET_INFO 80 bytes with 76..79 fw_fpga_version / fpga_flags, GET_HEALTH 128 bytes
+#: layout 3 with 124..127 the same; a mismatch answers E_UNSUPPORTED detail 1 to every command outside BASIC_CMDS), one
+#: UI Average behaviour (GET_STATUS 46: 1 = the MCU's mean of N records, 2 = a sequencer run)
+PROTO_MINOR = 25
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -138,6 +141,22 @@ BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTER
 #: Control requests allowed while a deferred request is pending (section 3.2).
 #: SET_ACQ_STATE (1.3) is a control request too: RUN/STOP while a WAIT is pending aborts it (E_ABORTED).
 CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING, Cmd.SET_ACQ_STATE})
+#: Protocol 1.25 (fw 0.2.102): the commands a scope whose FPGA does not run the firmware's bitstream still answers
+#: (the firmware's F_BASIC set: the link, the diagnostics readers, the card, the screen, FEL; nothing that configures
+#: or reads the acquisition). Every other command gets E_UNSUPPORTED detail UNSUP_FPGA_MISMATCH with FPGA_MISMATCH_TEXT.
+BASIC_CMDS = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.TEST_PATTERN, Cmd.GET_LINK_STATS,
+                        Cmd.GET_BAD_FRAME, Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH, Cmd.READ_SPECTRUM, Cmd.SD_INFO,
+                        Cmd.SD_READ_SECTORS, Cmd.SD_STAGE, Cmd.SD_WRITE_SECTORS, Cmd.SAVE_REPORT, Cmd.GET_CAL,
+                        Cmd.READ_SCREEN, Cmd.FFT_BENCH, Cmd.ENTER_FEL})
+#: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
+#: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
+#: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.
+FW_FPGA_VERSION = 0x153B
+#: GET_INFO 78 / GET_HEALTH 126 bit 0: the version word the FPGA reported at boot differs from fw_fpga_version
+FPGA_F_MISMATCH = 0x01
+#: E_UNSUPPORTED detail of every non-basic command on such a scope, with this text
+UNSUP_FPGA_MISMATCH = 1
+FPGA_MISMATCH_TEXT = "FPGA bitstream mismatch: this firmware needs 0x153B"
 DEFERRED_CMDS = frozenset({Cmd.WAIT, Cmd.ACQUIRE_AVG})
 
 
@@ -167,7 +186,8 @@ STATUS_HINTS: dict[int, str] = {
     Status.E_BAD_LEN: "payload length wrong for the command",
     Status.E_UNKNOWN_CMD: "firmware does not know this command; check the firmware version",
     Status.E_BAD_ARG: "a field is out of range",
-    Status.E_UNSUPPORTED: "not available on this FPGA bitstream or firmware build",
+    Status.E_UNSUPPORTED: "not available on this FPGA bitstream or firmware build (detail 1: the scope does not run "
+                          "the bitstream the firmware is built for; flash it, docs/guide/prepare.md)",
     Status.E_NOT_REMOTE: "command needs REMOTE ownership; acquire the remote session first",
     Status.E_BUSY: "the scope cannot take the request now (see busy_hint for the reason)",
     Status.E_STATE: "wrong acquisition state (e.g. read before the capture is DONE)",
@@ -229,8 +249,11 @@ def feature_names(features: int) -> list[str]:
     return [f.name.lower() for f in Features if features & f and f.name]
 
 
-#: GET_STATUS byte 46 (protocol 1.17): the acquisition menu's Average
-UI_AVERAGE_NAMES = {0: "off", 1: "software", 2: "hardware"}
+#: GET_STATUS byte 46 (protocol 1.17): the acquisition menu's Average. Since fw 0.2.102 (1.25) one behaviour, the mean
+#: of N records (byte 47 = log2 N; 0 = single records, two did not fit the 40 ms budget): 1 = summed by the MCU
+#: (16-bit records and legacy records over 2046 words), 2 = one sequencer run (legacy records that fit the
+#: accumulator). Before 0.2.102, 1 was a software running average.
+UI_AVERAGE_NAMES = {0: "off", 1: "mcu", 2: "hardware"}
 
 
 def caps_names(caps: int) -> list[str]:
@@ -264,6 +287,10 @@ CMD_CAP: dict[Cmd, Caps] = {
 
 
 class FpgaVariant(enum.IntEnum):
+    """GET_INFO byte 10 (wire encoding). Since fw 0.2.102 the firmware supports one bitstream (FW_FPGA_VERSION, an AL3)
+    and always reports 2; the variant byte no longer encodes the version word (the stock / EF2 / EP4 values are history,
+    kept for older answers)."""
+
     UNKNOWN = 0
     STOCK = 1
     AL3 = 2
@@ -271,10 +298,6 @@ class FpgaVariant(enum.IntEnum):
     EP4 = 4
 
 
-#: 0x1533: AL3 with the external trigger on the calibration pin (fpga/al3, fpga-gen2; caps EXT_TRIGGER)
-FPGA_VERSION_WORDS = {0x1432: FpgaVariant.STOCK, 0x1532: FpgaVariant.AL3, 0x1533: FpgaVariant.AL3,
-                      0x1632: FpgaVariant.EF2,
-                      0x1732: FpgaVariant.EP4}
 VARIANT_NAMES = {FpgaVariant.UNKNOWN: "unknown", FpgaVariant.STOCK: "stock", FpgaVariant.AL3: "al3",
                  FpgaVariant.EF2: "ef2", FpgaVariant.EP4: "ep4"}
 
@@ -791,7 +814,9 @@ def _cstr(b: bytes | str) -> str:
 
 @dataclass
 class InfoResp(Payload):
-    """GET_INFO response, 76 bytes (section 8.2)."""
+    """GET_INFO response (section 8.2): 76 bytes up to protocol 1.24, 80 since 1.25 (fw 0.2.102): 76 u16
+    ``fw_fpga_version`` (the bitstream the firmware is built for), 78 u8 ``fpga_flags`` (FPGA_F_MISMATCH: the scope
+    runs another word), 79 0. A 76-byte answer reads them as 0 (``fpga_mismatch`` False)."""
 
     FIELDS = [("proto_major", "B"), ("proto_minor", "B"), ("max_request_frame", "H"),
               ("max_response_payload", "I"), ("fpga_version", "H"), ("fpga_variant", "B"), ("adc_bits", "B"),
@@ -799,7 +824,7 @@ class InfoResp(Payload):
               ("caps", "I"), ("gen_clock_hz", "I"), ("max_total_samples", "H"), ("min_total_samples", "H"),
               ("read_lag", "B"), ("n_ranges", "B"), ("n_hw_ranges", "B"), ("interleave_order", "B"),
               ("fw_version", "16s"), ("fw_build", "I"), ("serial", "16s"), ("screen_width", "H"),
-              ("screen_height", "H")]
+              ("screen_height", "H"), ("fw_fpga_version", "H"), ("fpga_flags", "B"), ("_r79", "x")]
     proto_major: int = PROTO_MAJOR
     proto_minor: int = PROTO_MINOR
     max_request_frame: int = MAX_REQUEST_FRAME
@@ -824,6 +849,9 @@ class InfoResp(Payload):
     serial: bytes = b""
     screen_width: int = 800
     screen_height: int = 480
+    #: 1.25: the bitstream this firmware is built for (0 in a 76-byte answer) and the FPGA_F_* flags
+    fw_fpga_version: int = 0
+    fpga_flags: int = 0
 
     @property
     def fw_version_str(self) -> str:
@@ -832,6 +860,12 @@ class InfoResp(Payload):
     @property
     def serial_str(self) -> str:
         return _cstr(self.serial)
+
+    @property
+    def fpga_mismatch(self) -> bool:
+        """1.25: the FPGA reported another version word than the firmware is built for; every command outside
+        BASIC_CMDS answers E_UNSUPPORTED detail UNSUP_FPGA_MISMATCH until that bitstream is flashed."""
+        return bool(self.fpga_flags & FPGA_F_MISMATCH)
 
 
 @dataclass
@@ -876,9 +910,10 @@ class StatusResp(Payload):
     display_mode: int = 0
     #: 1.17: Features of the bitstream (0 before 1.17)
     features: int = 0
-    #: 1.17: the acquisition menu's Average: 0 off, 1 software, 2 hardware (UI_AVERAGE_NAMES)
+    #: 1.17: the acquisition menu's Average (UI_AVERAGE_NAMES): 0 off; since 1.25 the mean of N records summed by
+    #: 1 the MCU or 2 the sequencer (before 0.2.102: 1 was a software running average)
     ui_average: int = 0
-    #: 1.17: log2 of the records per UI hardware-averaging run (ui_average 2 only)
+    #: 1.17: log2 of the records N per displayed record (ui_average 1 or 2; 0 = single records)
     ui_average_log2n: int = 0
 
     @property
@@ -926,8 +961,9 @@ class CaptureInfoHeader(Payload):
     F_SETTINGS_CHANGED: ClassVar[int] = 0x10
     #: 1.4: an EXT edge was seen during this capture
     F_EXT_EDGE: ClassVar[int] = 0x20
-    #: fw 0.2.97 (protocol 1.24, spare bit): the record may be joined from two passes of the ring (a stop the firmware
-    #: forced on FPGA 0x1532..0x153A / EF2 / EP4, or a trigger the FPGA's auto time-out may have cut)
+    #: fw 0.2.97..0.2.102 (protocol 1.24, spare bit): the record may be joined from two passes of the ring (a stop the
+    #: firmware forced on FPGA 0x1532..0x153A / EF2 / EP4). Never set since fw 0.2.102 (1.25: the firmware supports
+    #: 0x153B only, whose forced stop keeps the record whole); decoded for captures from older firmware
     F_MAYBE_SPLICED: ClassVar[int] = 0x40
 
 
@@ -1065,8 +1101,10 @@ SEQ_FIT_NAMES = {
     SEQ_FIT_PRE: "pretrigger must be shorter than the record",
     SEQ_FIT_N: "records per position N outside 1..65536 (at most 257 with 8-bit records)",
 }
-#: UI hardware averaging (pc_seq_ui_plan)
+#: UI averaging (pc_seq_ui_plan_n, pc_seq_ui_plan, pc_seq_ui_plan_mcu): N records plus their dead time (and the MCU
+#: path's readout, 4 bus bytes per ring word at about 300 ns each) fit the budget
 SEQ_UI_BUDGET_US, SEQ_UI_MAX_N, SEQ_UI_MIN_N = 40000, 64, 2
+SEQ_UI_READ_NS, SEQ_UI_READ_BYTES = 300, 4
 
 
 @dataclass
@@ -1293,18 +1331,51 @@ def seq_dead_ns(total_words: int, pre_words: int, word_ns: int) -> int:
     return total_words * 5 + 40 + (2 + pre_words) * word_ns + 100
 
 
-def seq_ui_plan(total_words: int, pre_words: int, divider: int) -> tuple[int, int]:
-    """pc_seq_ui_plan: (records N per UI averaging run, run time in us rounded up); N 0 = software averaging."""
-    word_ns = 10 * (divider + 1)
-    if total_words == 0 or total_words > SEQ_AVG_MAX_TOTAL or pre_words >= total_words or word_ns > 1_000_000:
+def seq_ui_plan_n(per_record_ns: int) -> tuple[int, int]:
+    """pc_seq_ui_plan_n (fw 0.2.102, one rule for both UI Average paths): the largest power of two N in 2..64 with
+    N x per_record_ns <= the 40 ms budget, and N x per_record_ns in us rounded up; (0, 0) when two do not fit (the
+    UI then shows single records, GET_STATUS 47 = 0)."""
+    if per_record_ns <= 0:
         return 0, 0
-    rec_ns = total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns)
     n = SEQ_UI_MAX_N
-    while n >= SEQ_UI_MIN_N and n * rec_ns > SEQ_UI_BUDGET_US * 1000:
+    while n >= SEQ_UI_MIN_N and n * per_record_ns > SEQ_UI_BUDGET_US * 1000:
         n >>= 1
     if n < SEQ_UI_MIN_N:
         return 0, 0
-    return n, (n * rec_ns + 999) // 1000
+    return n, (n * per_record_ns + 999) // 1000
+
+
+def seq_ui_plan(total_words: int, pre_words: int, divider: int) -> tuple[int, int]:
+    """pc_seq_ui_plan, the hardware path (GET_STATUS 46 = 2): a legacy record (one word = 10 (D + 1) ns) costed at the
+    record plus the sequencer's dead time; (0, 0) also when it does not fit the accumulator (> 2046 words) or
+    pre >= total."""
+    word_ns = 10 * (divider + 1)
+    if total_words == 0 or total_words > SEQ_AVG_MAX_TOTAL or pre_words >= total_words or word_ns > 1_000_000:
+        return 0, 0
+    return seq_ui_plan_n(total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns))
+
+
+def seq_ui_plan_mcu(total_words: int, pre_words: int, divider: int, wide: bool) -> tuple[int, int]:
+    """pc_seq_ui_plan_mcu, the MCU path (GET_STATUS 46 = 1, fw 0.2.102): any record (``wide``: the 16-bit layout, one
+    word = 5 (D + 1) ns, else 10 (D + 1)) costed at the record, the dead time and its readout (SEQ_UI_READ_BYTES bus
+    bytes per word at SEQ_UI_READ_NS); (0, 0) when pre >= total or two do not fit."""
+    word_ns = (5 if wide else 10) * (divider + 1)
+    if total_words == 0 or pre_words >= total_words or word_ns > 1_000_000:
+        return 0, 0
+    return seq_ui_plan_n(total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns) +
+                         total_words * SEQ_UI_READ_BYTES * SEQ_UI_READ_NS)
+
+
+def ui_average_plan(total_words: int, pre_words: int, divider: int, wide: bool) -> tuple[int, int]:
+    """What GET_STATUS 46 / 47 report with Average on (fw 0.2.102, pc_seq_hw.c): the hardware path for a legacy record
+    that fits the accumulator, the MCU path for every other record; (state, log2 N) with state 2 hardware, 1 MCU (log2 N
+    0 when two records do not fit the budget: single records)."""
+    hw = not wide and total_words <= SEQ_AVG_MAX_TOTAL
+    n, _us = seq_ui_plan(total_words, pre_words, divider) if hw else seq_ui_plan_mcu(total_words, pre_words, divider,
+                                                                                      wide)
+    if not n:
+        return 1, 0
+    return (2 if hw else 1), n.bit_length() - 1
 
 
 def seq_avg_code(lane_sum: int, c: int, gain: int, off: int) -> int:
@@ -3024,16 +3095,21 @@ LAST_END = ("unknown (no life record)", "settings saved at power-off",
             "ended without a power-off save (warm restart, power lost, a viewer open at power-off or the write failed)")
 
 
-#: GET_HEALTH 88 (protocol 1.19): how the firmware checks full-rate captures
+#: GET_HEALTH 88 (protocol 1.19): how the firmware checks full-rate captures. Since fw 0.2.102 (one bitstream) the
+#: mode is 2 on the built-for bitstream and 1 only when the boot 0x33 reported an unknown encode convention (the
+#: firmware then judges the records by their data); 0 was the stock / EF2 / EP4 bitstreams up to fw 0.2.101.
 ENC_MODES = {0: "none", 1: "record data", 2: "FPGA read 0x33"}
-ENC_MODE_TEXT = {0: "no check (stock, EF2 or EP4 bitstream)",
-                 1: "record data: core B against its core A neighbours over the first 250 words (AL3 0x1532..0x1537)",
-                 2: "FPGA self-check, read 0x33 after every capture (AL3 0x1538+)"}
+ENC_MODE_TEXT = {0: "no check (firmware before 0.2.102 on a stock, EF2 or EP4 bitstream)",
+                 1: "record data: core B against its core A neighbours over the first 250 words (the boot 0x33 "
+                    "reported an unknown encode convention; AL3 0x1532..0x1537 before fw 0.2.102)",
+                 2: "FPGA self-check, read 0x33 after every capture"}
 #: GET_HEALTH 90 flags (protocol 1.19)
 ENC_READ = 0x01  # a 0x33 byte was read since boot
 ENC_CONVENTION_BAD = 0x02  # 0x33 bits 3:2 at boot were not 01
 ENC_LAST_BAD = 0x04  # the last checked capture was accepted garbled after 16 re-arms
-ENC_ORDER_DIFFERS = 0x08  # core order differs from the convention (0x1537: recalibrate after flashing 0x153B)
+#: retired: core order differed from the convention (0x1537, fw 0.2.62..0.2.101); never set since fw 0.2.102 (one
+#: bitstream, the convention is the FPGA's own report), still decoded for older answers
+ENC_ORDER_DIFFERS = 0x08
 #: FPGA read 0x33 bits 7..4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right; a good capture reads 0xF6
 ENC33_PINS = ((7, "CH2 A"), (6, "CH2 B"), (5, "CH1 A"), (4, "CH1 B"))
 ENC33_GOOD = 0xF6
@@ -3122,7 +3198,8 @@ class HealthResp(Payload):
     """GET_HEALTH response, 96 bytes (protocol 1.16, row 55), 104 bytes from 1.19 (row 58: the full-rate encode check
     in 88..103; a 96-byte answer reads them as 0 and ``has_enc_check`` is False), 124 bytes and layout 2 from 1.24
     (row 64: the FPGA 0x153A capture stages in 104..123; a shorter answer reads them as 0 and ``has_capture`` is
-    False)."""
+    False), 128 bytes and layout 3 from 1.25 (fw 0.2.102: 124 u16 ``fw_fpga_version``, 126 u8 ``fpga_flags`` as
+    GET_INFO 76..78, 127 0; a shorter answer reads them as 0)."""
 
     FIELDS = [("layout", "B"), ("_r0", "x"), ("length", "H"), ("usb_state", "B"), ("usb_flags", "B"),
               ("usb_power", "B"), ("usb_faddr", "B"), ("suspend_ms", "I"), ("since_config_ms", "I"), ("cp15", "I"),
@@ -3134,9 +3211,9 @@ class HealthResp(Payload):
               ("rec_minutes", "I"), ("enc_mode", "B"), ("enc_last33", "B"), ("enc_flags", "B"),
               ("enc_boot33", "B"), ("enc_bad", "I"), ("enc_recovered", "I"), ("enc_checked", "I"),
               ("cap_value", "H"), ("cap_flags", "B"), ("cap_flagged", "B"), ("cap_counts", "4H"), ("cap_reads", "I"),
-              ("cap_flagged_n", "I")]
-    layout: int = 2
-    length: int = 124
+              ("cap_flagged_n", "I"), ("fw_fpga_version", "H"), ("fpga_flags", "B"), ("_r127", "x")]
+    layout: int = 3
+    length: int = 128
     usb_state: int = 3
     usb_flags: int = 0
     usb_power: int = 0
@@ -3184,10 +3261,33 @@ class HealthResp(Payload):
     cap_counts: tuple[int, ...] = (0, 0, 0, 0)
     cap_reads: int = 0
     cap_flagged_n: int = 0
+    #: protocol 1.25 (bytes 124..126): the bitstream the firmware is built for and the FPGA_F_* flags (as GET_INFO
+    #: 76..78; 0 in a shorter answer)
+    fw_fpga_version: int = 0
+    fpga_flags: int = 0
 
     @property
     def has_enc_check(self) -> bool:
         return self.length >= 104
+
+    @property
+    def has_fpga_version(self) -> bool:
+        """The answer carries the 1.25 bitstream block (layout 3, 128 bytes)."""
+        return self.layout >= 3 and self.length >= 128
+
+    @property
+    def fpga_mismatch(self) -> bool:
+        """1.25: the scope does not run the bitstream the firmware is built for (GET_HEALTH 126 bit 0)."""
+        return bool(self.fpga_flags & FPGA_F_MISMATCH)
+
+    def describe_fpga(self) -> dict[str, Any] | None:
+        """Bytes 124..126 (protocol 1.25) in words; None for an older answer."""
+        if not self.has_fpga_version:
+            return None
+        text = (f"FPGA bitstream mismatch: this firmware needs 0x{self.fw_fpga_version:04X}; captures and settings "
+                "are refused until it is flashed" if self.fpga_mismatch else
+                f"FPGA bitstream 0x{self.fw_fpga_version:04X}, the one this firmware is built for")
+        return {"firmware_bitstream": f"0x{self.fw_fpga_version:04X}", "mismatch": self.fpga_mismatch, "text": text}
 
     @property
     def has_capture(self) -> bool:
@@ -3300,7 +3400,8 @@ class HealthResp(Payload):
                    "registers": {k: f"0x{getattr(self, 'rec_' + k):08X}" for k in
                                  ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far")}}
         return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec,
-                "encode_check": self.describe_enc(), "capture_stages": self.describe_capture()}
+                "encode_check": self.describe_enc(), "capture_stages": self.describe_capture(),
+                "fpga": self.describe_fpga()}
 
 
 @dataclass

@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     url = args.port
     if args.simulator:
         from fnirsi1013d.simulator import SimConfig, start_simulator
-        server = start_simulator(SimConfig(variant="al3e", time_scale=0.0, ui_capture_period_s=0.0, seed=1))
+        server = start_simulator(SimConfig(time_scale=0.0, ui_capture_period_s=0.0, seed=1))
         url = server.url
     try:
         with Scope.connect(url) as scope:

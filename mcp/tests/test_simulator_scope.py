@@ -18,34 +18,18 @@ def remote_scope(srv) -> Scope:
     return s
 
 
-@pytest.mark.parametrize("variant,version,ring,maxs", [("stock", 0x1432, 4096, 3000), ("al3", 0x1532, 8192, 16382),
-                                                        ("ef2", 0x1632, 6144, 12286), ("ep4", 0x1732, 6144, 12286)])
-def test_variant_identity(sim_factory, variant, version, ring, maxs):
-    srv = sim_factory(variant=variant)
+def test_variant_identity(sim_factory):
+    """One bitstream since fw 0.2.102: the simulated scope is an AL3A10 running 0x153B with the firmware's fixed
+    geometry; the variant kwarg accepts "al3" only."""
+    srv = sim_factory(variant="al3")
     with Scope.connect(srv.url) as s:
         i = s.info
-        assert (i.fpga_version, i.ring_words, i.max_total_samples) == (version, ring, maxs)
+        assert (i.fpga_version, i.ring_words, i.max_total_samples, i.min_total_samples) == (0x153B, 8192, 16382, 80)
+        assert (i.fw_fpga_version, i.fpga_mismatch) == (0x153B, False)
         p = s.profile()
-        assert p.variant == variant
-        assert p.programmable == (variant != "stock") and p.has_generator == (variant != "stock")
-
-
-def test_stock_geometry_is_fixed(sim_factory):
-    srv = sim_factory(variant="stock")
-    s = remote_scope(srv)
-    try:
-        with pytest.raises(DeviceError) as e:
-            s.set_trigger(pretrigger_samples=200, total_samples=1000)
-        assert e.value.status == P.Status.E_UNSUPPORTED
-        tr = s.get_trigger(cached=False)
-        assert (tr.pretrigger_samples, tr.total_samples, tr.pretrigger_words) == (1500, 3000, 750)
-        with pytest.raises(DeviceError) as e:
-            s.set_gen(enable=True)
-        assert e.value.status == P.Status.E_UNSUPPORTED
-        cap = s.capture(["CH1"], 1.0)
-        assert cap is not None and cap.n == 3000
-    finally:
-        s.close()
+        assert p.variant == "al3" and p.programmable and p.has_generator and p.mismatch_caveat() is None
+    with pytest.raises(ValueError, match="one bitstream"):
+        sim_factory(variant="stock")
 
 
 def test_trigger_validation_al3(sim_factory):
@@ -59,9 +43,6 @@ def test_trigger_validation_al3(sim_factory):
             assert e.value.status == P.Status.E_BAD_ARG and e.value.detail == bit
         with pytest.raises(DeviceError) as e:
             s.set_trigger(holdoff=5)
-        assert e.value.status == P.Status.E_UNSUPPORTED
-        with pytest.raises(DeviceError) as e:
-            s.set_trigger(source=2)
         assert e.value.status == P.Status.E_UNSUPPORTED
     finally:
         s.close()
@@ -175,7 +156,7 @@ def test_debug_fpga_stale_first_byte(sim_factory):
     try:
         data = s.debug_fpga([(P.DBG_WRITE_CMD, 0x06), (P.DBG_READ_DATA, 2), (P.DBG_WRITE_CMD, 0x1F),
                              (P.DBG_WRITE_DATA, b"\x00\xc8"), (P.DBG_WRITE_CMD, 0x20), (P.DBG_READ_DATA, 4)])
-        assert data[:2] == b"\x15\x32"
+        assert data[:2] == b"\x15\x3b"
         assert data[2] == 61 and list(data[3:]) == [61, 62, 63]  # stale (+1) then mem[201..]
     finally:
         s.close()

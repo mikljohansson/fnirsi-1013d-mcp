@@ -55,28 +55,28 @@ def test_suspend_event_fields(ev, text):
 
 
 def test_fir_variant_set_decim(sim_factory):
-    srv = sim_factory(variant="al3f", signal="dc:v=0.1")
+    srv = sim_factory(signal="dc:v=0.1")
     with Scope.connect(srv.url) as s:
-        assert s.info.fpga_version == 0x1535 and s.info.caps & P.Caps.FIR and s.info.caps & P.Caps.DECIM
+        assert s.info.fpga_version == 0x153B and s.info.caps & P.Caps.FIR and s.info.caps & P.Caps.DECIM
         s.set_timebase(divider=19)
         s.set_decim("cic2", flags=P.SetDecimReq.NEG_B)
         st = s.set_decim("cic2+fir")
         assert st.flags == P.SetDecimReq.FIR | P.SetDecimReq.NEG_B and st.filter_setting == "cic2+fir"
         d = st.next
         assert d.fir and d.gain == 100 and d.filter_name == "cic2+fir" and st.next_mode & P.DECIM_FIR_ACT
-        assert st.ext_shift == 0 and d.ext_shift == 6
+        assert st.ext_shift == 0 and d.ext_shift == 6  # from the 0x29 status alone (no cap-stage flag in it)
         assert s.set_decim("cic2").next.fir_en is False  # the name clears the FIR bit, keeps the others
         assert s.get_decim().flags == P.SetDecimReq.NEG_B
-    with Scope.connect(sim_factory(variant="al3d").url) as s:
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.SET_DECIM, bytes([2, 16, 0, 0]))  # flags bits 4-7 are E_BAD_ARG detail 1
+        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 1)
+    with Scope.connect(sim_factory(caps_clear=int(P.Caps.FIR)).url) as s:  # a firmware without the cap
         with pytest.raises(ValueError, match="no FIR"):
             s.set_decim("cic2+fir")
-        with pytest.raises(DeviceError) as e:
-            s.t.request(P.Cmd.SET_DECIM, bytes([2, 8, 0, 0]))
-        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 1)
 
 
 def test_fir_capture_volts_noise_and_ext(sim_factory):
-    srv = sim_factory(variant="al3f", signal="dc:v=0.1", noise_lsb=1.0)
+    srv = sim_factory(signal="dc:v=0.1", noise_lsb=1.0)
     with Scope.connect(srv.url) as s:
         s.set_timebase(divider=199)  # N = 200: FIR active, CIC on 100
         s.set_trigger(pretrigger_samples=1000, total_samples=4000, mode=0)
@@ -89,7 +89,7 @@ def test_fir_capture_volts_noise_and_ext(sim_factory):
         assert np.std(c.codes) == pytest.approx(expect, rel=0.25)
         tc = s.read_trace_capture(["CH1"])
         assert tc.decim == cap.decim and np.array_equal(tc.channels["CH1"].samples16, c.samples16)
-    srv = sim_factory(variant="al3f", signal="gate:period=200us,width=50us,high=0.5", noise_lsb=0.3)
+    srv = sim_factory(signal="gate:period=200us,width=50us,high=0.5", noise_lsb=0.3)
     srv.device.cfg.ext_signal = parse_signal("gate:period=200us,width=50us,high=3.3")
     with Scope.connect(srv.url) as s:
         s.set_channel(0, range_index=4)
@@ -99,15 +99,16 @@ def test_fir_capture_volts_noise_and_ext(sim_factory):
         offs = []
         for _ in range(3):
             cap = s.capture(["CH1"], 1.0)
-            assert cap.triggered and cap.capture_info.ext_shift == 6
+            assert cap.triggered and cap.capture_info.ext_shift == 7
             x = A.find_edge_near(cap.channels["CH1"].volts, 0.25, "rising", cap.pretrigger_samples, 10)
             offs.append(x - cap.pretrigger_samples)
-        assert max(abs(o) for o in offs) <= 1.0, offs
+        # 0x153A+: the shift rounds the 40 ns capture-stage latency up to a whole sample at N = 20 (see test_decim)
+        assert max(abs(o) for o in offs) <= 1.5, offs
 
 
 def test_set_decimation_tool_fir(sim_factory, tmp_path):
     from test_server import client_for
-    srv = sim_factory(variant="al3f")
+    srv = sim_factory()
 
     async def main():
         async with client_for(srv, tmp_path) as c:
@@ -119,7 +120,7 @@ def test_set_decimation_tool_fir(sim_factory, tmp_path):
             await c.call("scope_set_timebase", divider=21)  # N = 22
             r = await c.call("scope_set_decimation", filter="cic3+fir")
             assert r["applied"]["effective"] == "cic3" and "FIR requested but not active" in r["caveats"][0]
-        async with client_for(sim_factory(variant="al3d"), tmp_path) as c:
+        async with client_for(sim_factory(caps_clear=int(P.Caps.FIR)), tmp_path) as c:
             assert "no compensation FIR" in await c.fails("scope_set_decimation", filter="boxcar+fir")
     anyio.run(main)
 

@@ -96,7 +96,7 @@ def build_host_vectors() -> list[dict[str, Any]]:
     info = P.InfoResp(fpga_version=0x1532, fpga_variant=2, ring_words=8192, caps=0x1803, gen_clock_hz=50_000_000,
                       max_total_samples=16382, fw_version=b"0.1.0", fw_build=0x1234ABCD, serial=b"A1B2C3D4",
                       proto_minor=0)
-    v.append(_vec("host_resp_get_info_al3", _f(P.Cmd.GET_INFO, 1, info.pack(), flags=R).encode(),
+    v.append(_vec("host_resp_get_info_al3", _f(P.Cmd.GET_INFO, 1, info.pack()[:76], flags=R).encode(),
                   "GET_INFO response, 76 bytes, AL3 0x1532, caps PROG_TRIGGER_POS|GENERATOR_DDS|READ_LAG_UNVERIFIED|"
                   "INTERLEAVE_UNVERIFIED"))
     st = P.StatusResp(1, 3, 0x0B, 0, 42, 6609, 6209, 3, 123456, 15, 18, 0)
@@ -105,7 +105,7 @@ def build_host_vectors() -> list[dict[str, Any]]:
     info11 = P.InfoResp(fpga_version=0x1532, fpga_variant=2, ring_words=8192, caps=0x1C03, gen_clock_hz=50_000_000,
                         max_total_samples=16382, fw_version=b"0.1.1", fw_build=0x5A8432BE, serial=b"1013D-0001",
                         proto_minor=1)
-    v.append(_vec("host_resp_get_info_al3_proto_1_1", _f(P.Cmd.GET_INFO, 2, info11.pack(), flags=R).encode(),
+    v.append(_vec("host_resp_get_info_al3_proto_1_1", _f(P.Cmd.GET_INFO, 2, info11.pack()[:76], flags=R).encode(),
                   "GET_INFO response of firmware 0.1.1: proto 1.1, caps 0x1C03 (ENTER_FEL added)"))
     st11 = P.StatusResp(1, 3, 0x0B, 0, 43, 6609, 6209, 3, 123456, 15, 18, 0, 0, 7, 31)
     v.append(_vec("host_resp_get_status_proto_1_1", _f(P.Cmd.GET_STATUS, 6, st11.pack()[:32], flags=R).encode(),
@@ -139,6 +139,30 @@ def build_host_vectors() -> list[dict[str, Any]]:
                   P.error_payload(2, "at most 41 rows per request"), P.Status.E_OVERFLOW, R).encode(),
                   "READ_SCREEN E_OVERFLOW detail 2: more rows than fit one response (42 x 1600 + 8 > 66560)"))
     v += build_host_vectors_1_3()
+    v += build_host_vectors_1_25()
+    return v
+
+
+def build_host_vectors_1_25() -> list[dict[str, Any]]:
+    """Protocol 1.25 (fw 0.2.102, one built-for bitstream) frames: GET_INFO 80 bytes with and without the mismatch,
+    the refusal every non-basic command gets on a mismatch."""
+    R = P.FLAG_RESPONSE
+    C = P.Caps  # the firmware's fixed word (pc_variant_init; READ_LAG_UNVERIFIED still set, INTERLEAVE_UNVERIFIED clear)
+    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR_DDS | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL | C.READ_LAG_UNVERIFIED |
+               C.SHARED_MODE | C.SD_SECTORS | C.DECIM | C.FIR | C.SEQ | C.ENC_CHECK | C.CAPTURE_STAGES)  # 0xFEC4B
+    v = []
+    info = P.InfoResp(fpga_version=0x153B, fpga_variant=2, ring_words=8192, caps=caps, gen_clock_hz=50_000_000,
+                      max_total_samples=16382, fw_version=b"0.2.102", fw_build=0x0A014F16, serial=b"1013D-0001",
+                      proto_minor=25, fw_fpga_version=0x153B)
+    v.append(_vec("host_resp_get_info_1_25", _f(P.Cmd.GET_INFO, 4, info.pack(), flags=R).encode(),
+                  "GET_INFO response, protocol 1.25 (80 bytes): FPGA 0x153B = the built-for word at 76, flags 78 = 0"))
+    bad = P.InfoResp(**{**info.__dict__, "fpga_version": 0x1532, "fpga_flags": P.FPGA_F_MISMATCH})
+    v.append(_vec("host_resp_get_info_1_25_mismatch", _f(P.Cmd.GET_INFO, 5, bad.pack(), flags=R).encode(),
+                  "GET_INFO response, protocol 1.25: the FPGA reports 0x1532, the firmware is built for 0x153B "
+                  "(76), flags 78 bit 0 FPGA_MISMATCH; caps and geometry are the firmware's fixed ones"))
+    v.append(_vec("host_resp_e_unsupported_fpga_mismatch", _f(P.Cmd.ARM, 6, P.error_payload(
+        P.UNSUP_FPGA_MISMATCH, P.FPGA_MISMATCH_TEXT), P.Status.E_UNSUPPORTED, R).encode(),
+        "E_UNSUPPORTED detail 1 with the mismatch text: every command outside the basic set on such a scope"))
     return v
 
 
@@ -149,7 +173,7 @@ def build_host_vectors_1_3() -> list[dict[str, Any]]:
     info = P.InfoResp(fpga_version=0x1532, fpga_variant=2, ring_words=8192, caps=0x3C03, gen_clock_hz=50_000_000,
                       max_total_samples=16382, fw_version=b"0.2.0", fw_build=0x0013C0DE, serial=b"1013D-0001",
                       proto_minor=3)
-    v.append(_vec("host_resp_get_info_al3_proto_1_3", _f(P.Cmd.GET_INFO, 3, info.pack(), flags=R).encode(),
+    v.append(_vec("host_resp_get_info_al3_proto_1_3", _f(P.Cmd.GET_INFO, 3, info.pack()[:76], flags=R).encode(),
                   "GET_INFO response, protocol 1.3: caps 0x3C03 (SHARED_MODE bit 13 added)"))
     st = P.StatusResp(control=2, acq_state=3, flags=0x0B, capture_id=44, trigger_addr=6609, capture_start_word=6209,
                       ms_since_arm=3, uptime_ms=123456, battery_level=18, pass_ms=20, pass_max_ms=35,

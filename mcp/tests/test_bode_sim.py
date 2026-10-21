@@ -98,7 +98,6 @@ def _fast(f):
 
 
 def _sim(sim_factory, ch1=RC_IN, ch2=RC_OUT, **kw):
-    kw.setdefault("variant", "al3f")
     srv = sim_factory(**kw)
     srv.device.cfg.signals = (parse_signal(ch1), parse_signal(ch2))
     return srv
@@ -312,7 +311,7 @@ def test_menu_opened_during_a_sweep_closes(sim_factory):
 
 
 def test_runner_refuses_without_the_filter_and_restores_ext(sim_factory):
-    with Scope.connect(_sim(sim_factory, variant="al3x").url) as s:
+    with Scope.connect(_sim(sim_factory, caps_clear=int(P.Caps.DECIM)).url) as s:  # a firmware without the cap
         with pytest.raises(B.BodeError, match="decimation filter"):
             _run(s, B.plan_sweep(1e3, 10e3, 2))
     srv = _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, noise_lsb=0.5)
