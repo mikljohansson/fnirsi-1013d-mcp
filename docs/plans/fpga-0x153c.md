@@ -1,7 +1,7 @@
 # FPGA 0x153C, 0x153D, 0x153E: advanced triggers, peak detect, counter, logger, pattern generator
 
 > **Owner decisions 2026-10-21:** the pattern generator, its trigger engine and the marker source were cut from 0x153D at
-> 15:55 (the design did not fit; the generator is the fractional square only). 0x153E is not built for 0.3.0 (16:1x): runt,
+> 15:55 (the design did not fit; the generator is the fractional square only). 0x153E is not built for 0.3.0 (16:15): runt,
 > window and the pulse-width range are dropped; both-core triggering stays a later candidate. The rest of this document is
 > the design record as planned.
 
