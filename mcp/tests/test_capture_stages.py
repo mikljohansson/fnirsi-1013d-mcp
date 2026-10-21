@@ -158,10 +158,8 @@ def test_ext_shifts_0x153a():
     assert f.fir and g.fir and (f.ext_shift, g.ext_shift) == (5, 5)
     h = P.decim_config(2, P.DECIM_SET_FIR, 19, 4000, cap)  # N 20: (250 + 350 + 45 + 40) / 100 = 6.85 -> 7
     assert h.ext_shift == 7 and P.decim_config(2, P.DECIM_SET_FIR, 19, 4000, P.DECIM_HAS_FIR).ext_shift == 6
-    # 0x53 bits 3 / 4 select nothing on 0x153A: written 0, the swap bit kept
-    flags = P.DECIM_SWAP | P.DECIM_NEG_A | P.DECIM_NEG_B
-    assert P.decim_config(2, flags, 9, 4000, cap).flags == P.DECIM_SWAP
-    assert P.decim_config(2, flags, 9, 4000, P.DECIM_HAS_FIR).flags == flags
+    # 0x53 carries K alone (bits 4..2 gone in 0x153C, fw-cruft): other request bits do not reach the mode
+    assert P.decim_config(2, 0x1C, 9, 4000, cap).mode == 2 and P.decim_config(2, 0x1C, 9, 4000, cap).status == 0x82
     assert P.decim_config(0, 0, 9, 4000, P.DECIM_HAS_NONE | P.DECIM_HAS_CAPSTAGES).why == 6
 
 

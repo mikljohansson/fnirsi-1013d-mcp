@@ -2144,11 +2144,8 @@ def parse_decim_filter(name: str) -> tuple[int, bool]:
     base, _, fir = n.partition("+")
     return DECIM_FILTERS.index(base), bool(fir)
 
-#: 0x53 / 0x29 byte 0 bits besides K (bits 1:0)
-DECIM_SWAP = 0x04  # core A is the earlier sample of each pair (host only, not saved)
-DECIM_NEG_A = 0x08  # A cores captured on the falling write-clock edge
-DECIM_NEG_B = 0x10
-DECIM_FLAGS = DECIM_SWAP | DECIM_NEG_A | DECIM_NEG_B
+#: 0x29 byte 0 bits besides K (bits 1:0). 0x53 carries K alone: bits 4..2 (the core-order swap, the falling-edge
+#: capture) are gone in FPGA 0x153C and read 0 (fw-cruft; SET_DECIM flags bits 0..2 are accepted and dropped)
 DECIM_WIDE = 0x80  # 0x29 bit 7: 16-bit layout active (K >= 1)
 DECIM_FIR_EN = 0x40  # 0x29 bit 6 (1.11): 0x56 FIR enable as written
 DECIM_FIR_ACT = 0x20  # 0x29 bit 5 (1.11): FIR active now (enable, K >= 1, N >= 16, N % 4 == 0)
@@ -2218,12 +2215,11 @@ def ext_shift_legacy(divider: int, cap: bool = False) -> int:
 
 @dataclass
 class DecimConfig:
-    """Effective decimation for a setting (pc_decim_cfg): order K (0 = legacy 8-bit), flags, shift S, why (DECIM_WHY
+    """Effective decimation for a setting (pc_decim_cfg): order K (0 = legacy 8-bit), shift S, why (DECIM_WHY
     index), factor N (0 legacy), gain (N^K; (N/2)^K with the FIR active; 1 legacy), FIR enable as written (1.11) and
     whether the FIR is active."""
 
     k: int = 0
-    flags: int = 0
     shift: int = 0
     why: int = 0
     n: int = 0
@@ -2239,8 +2235,8 @@ class DecimConfig:
 
     @property
     def mode(self) -> int:
-        """The 0x53 byte."""
-        return (self.k & 3) | self.flags
+        """The 0x53 byte: K alone (bits 4..2 written 0)."""
+        return self.k & 3
 
     @property
     def status(self) -> int:
@@ -2267,7 +2263,7 @@ class DecimConfig:
             gain, s = 1, 0
         if gain is None:
             gain = decim_gain(n // 2 if fir else n, k) if k else 1
-        return cls(k, status & DECIM_FLAGS, s, why, n if k else 0, gain if k else 1, bool(status & DECIM_FIR_EN),
+        return cls(k, s, why, n if k else 0, gain if k else 1, bool(status & DECIM_FIR_EN),
                    fir, peak=peak, peak_en=peak_en)
 
     @property
@@ -2330,7 +2326,7 @@ def decim_fir_eligible(n: int) -> bool:
 
 def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: int = DECIM_HAS_CIC) -> DecimConfig:
     """pc_decim_config: the configuration an arm writes for the Filter setting ``k_req`` (0-3; 4 = peak detect since
-    1.26), ``flags`` (DECIM_FLAGS bits, plus DECIM_SET_FIR), the 0x0D divider, the capture length and the bitstream's
+    1.26), ``flags`` (DECIM_SET_FIR; other bits are ignored), the 0x0D divider, the capture length and the bitstream's
     level (DECIM_HAS_*, | DECIM_HAS_CAPSTAGES on 0x153A+). With the FIR active the CIC decimates by M = N / 2: gain
     M^K, S one higher, exactness on M. Peak detect runs the 16-bit path as K = 1 with the same legacy cases (divider 0,
     records over 8190 samples) and no FIR, shift 0, gain 1; the FIR request is dropped, and 0x56 bit 1 (``peak_en``,
@@ -2341,10 +2337,7 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: 
     has &= ~DECIM_HAS_CAPSTAGES
     if has == DECIM_HAS_NONE:
         return DecimConfig(why=6, cap=cap)
-    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR) and not peak,
-                    cap=cap)
-    if cap:  # 0x153A: bits 3 / 4 select nothing (they read back in 0x29), kept 0
-        c.flags &= ~(DECIM_NEG_A | DECIM_NEG_B)
+    c = DecimConfig(fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR) and not peak, cap=cap)
     if k == 0:
         c.why = 1
         return c
@@ -2370,16 +2363,13 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: 
 
 @dataclass
 class SetDecimReq(Payload):
-    """SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3, 4 peak detect since 1.26), u8 flags (bit 0 core-order
-    swap, bit 1 / 2 capture the A / B cores on the falling edge, bit 3 FIR), u16 0."""
+    """SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3, 4 peak detect since 1.26), u8 flags (bit 3 FIR; bits
+    0..2, once the core-order swap and the falling-edge capture, are accepted and dropped since 1.27), u16 0."""
 
     FIELDS = [("filter", "B"), ("flags", "B"), ("_r", "2x")]
     filter: int = 0
     flags: int = 0
 
-    SWAP: ClassVar[int] = 0x01
-    NEG_A: ClassVar[int] = 0x02
-    NEG_B: ClassVar[int] = 0x04
     #: 1.11 (caps FIR): the CIC compensation FIR
     FIR: ClassVar[int] = 0x08
 

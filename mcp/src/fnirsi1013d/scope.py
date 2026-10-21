@@ -760,9 +760,8 @@ class Scope:
 
     def set_decim(self, filter_: int | str, flags: int | None = None) -> P.DecimState:
         """SET_DECIM: 0 / 'off', 1 / 'boxcar', 2 / 'cic2', 3 / 'cic3', and on 0x1535+ (caps FIR, protocol 1.11)
-        'boxcar+fir', 'cic2+fir', 'cic3+fir'. ``flags`` (P.SetDecimReq bits: core-order swap, host only; falling-edge
-        capture of the A / B cores, hidden and saved) default to the current ones, so a filter change keeps the
-        person's hidden settings; a filter name sets the FIR bit itself. The firmware lowers K where the result
+        'boxcar+fir', 'cic2+fir', 'cic3+fir'. ``flags`` (P.SetDecimReq.FIR) default to the current ones; a filter
+        name sets the FIR bit itself. The firmware lowers K where the result
         would not be exact or not possible (``DecimState.why``) and engages the FIR only at N >= 16 with N % 4 == 0
         (10 MSa/s and slower). A filter needs a trigger total of at most 8190 samples."""
         if isinstance(filter_, str):

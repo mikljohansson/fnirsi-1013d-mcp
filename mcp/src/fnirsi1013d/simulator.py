@@ -622,8 +622,7 @@ class Settings:
     sr_index: int = 4
     trigger: TriggerState = field(default_factory=TriggerState)
     gen: GenState = field(default_factory=GenState)
-    #: the Filter setting as the firmware keeps it: bits 1:0 K requested, bits 2-4 P.DECIM_FLAGS, bit 5
-    #: P.DECIM_SET_FIR (1.11)
+    #: the Filter setting as the firmware keeps it: bits 1:0 K requested, bits 4..2 0, bit 5 P.DECIM_SET_FIR (1.11)
     decim: int = 0
     #: 1.26: the ACQ menu's Sample row = Peak (SET_DECIM filter 4; the Filter word above is kept for the way back)
     peak: int = 0
@@ -1506,7 +1505,7 @@ class Device:
         if self.cap_on:
             has |= P.DECIM_HAS_CAPSTAGES
         k_req = P.DECIM_PEAK if s.peak and self.trig26_on else s.decim & 3
-        return P.decim_config(k_req, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), s.divider,
+        return P.decim_config(k_req, s.decim & P.DECIM_SET_FIR, s.divider,
                               s.trigger.total_samples, has)
 
     def _peak_samples(self, ch: int, t0: float, k0: int, n: int, settings: Settings, seed: int,
@@ -2953,7 +2952,7 @@ class Device:
         last = self.decim_written
         filt = P.DECIM_PEAK if s.peak and self.trig26_on else s.decim & 3
         sb = (lambda d: d.shift_byte) if self.trig26_on else (lambda d: d.shift)  # 1.26: the peak bits in the shift byte
-        flags = s.decim & (P.DECIM_FLAGS | (0 if filt == P.DECIM_PEAK else P.DECIM_SET_FIR))  # the kept FIR masked
+        flags = s.decim & (0 if filt == P.DECIM_PEAK else P.DECIM_SET_FIR)  # the kept FIR masked
         return P.DecimState(filt, flags >> 2, nxt.status, sb(nxt), nxt.n, nxt.gain,
                             s.divider, nxt.rate(s.divider), last.status if last else 0xFF, sb(last) if last else 0,
                             last.status if last else 0, sb(last) if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
@@ -2970,7 +2969,7 @@ class Device:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3, 4 peak")
         if r.filter == P.DECIM_PEAK and not (self.caps & P.Caps.PEAK_DETECT):
             raise _DevErr(P.Status.E_UNSUPPORTED, 0, "peak detect needs caps PEAK_DETECT (protocol 1.26)")
-        if r.flags & ~0x0F:  # bits 0-2 the swap and NEG bits, bit 3 the FIR (1.11)
+        if r.flags & ~0x0F:  # bit 3 the FIR (1.11); bits 0-2 (swap, falling edge) accepted and dropped (1.27)
             raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
         if r.filter == P.DECIM_PEAK and r.flags & P.SetDecimReq.FIR:
             raise _DevErr(P.Status.E_BAD_ARG, 1, "FIR with peak detect")
@@ -2978,17 +2977,17 @@ class Device:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
         if r.filter == P.DECIM_PEAK:  # 1.26: the Sample row; the Filter word keeps its K and FIR for the way back
             self.settings.peak = 1
-            self.settings.decim = (self.settings.decim & (3 | P.DECIM_SET_FIR)) | ((r.flags & 0x07) << 2)
+            self.settings.decim = self.settings.decim & (3 | P.DECIM_SET_FIR)
         else:
             self.settings.peak = 0
-            self.settings.decim = r.filter | ((r.flags & 0x0F) << 2)
+            self.settings.decim = r.filter | ((r.flags & P.SetDecimReq.FIR) << 2)
         return self._ok(req, self.decim_state().pack())
 
-    def ui_set_decim(self, filter_: int, flags: int = 0) -> None:
+    def ui_set_decim(self, filter_: int) -> None:
         """Test hook: the person sets the acquisition Filter at the scope."""
         with self.lock:
             before = self.settings_key()
-            self.settings.decim = filter_ | ((flags & 0x07) << 2)
+            self.settings.decim = filter_
             self._bump_if_changed(before)
 
     def _cmd_read_spectrum(self, req: P.Frame) -> P.Frame:
@@ -3771,7 +3770,7 @@ class Device:
         if k_req not in need:
             raise _DevErr(P.Status.E_BAD_ARG, P.LOG_D_FORMAT, f"format {r.format} does not fit the filter setting "
                                                              f"{P.DECIM_FILTERS[k_req]} (SET_DECIM first)")
-        dec = P.decim_config(k_req, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), r.divider, 2000, P.DECIM_HAS_FIR)
+        dec = P.decim_config(k_req, s.decim & P.DECIM_SET_FIR, r.divider, 2000, P.DECIM_HAS_FIR)
         if r.format != P.LOG_FMT_RAW8 and not dec.k:
             raise _DevErr(P.Status.E_BAD_ARG, P.LOG_D_FORMAT, f"the filter is not active at divider {r.divider}")
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):

@@ -48,9 +48,9 @@ def test_decim_config_fallbacks():
     assert (c.k, c.why, c.n) == (2, 4, 10336)
     assert P.decim_config(2, 0, 2_000_000, 3000).why == 5
     assert P.decim_config(1, 0, 0, 3000).why == 2 and P.decim_config(1, 0, 9, 8192).why == 3
-    assert P.decim_config(1, P.DECIM_SWAP, 9, 3000, P.DECIM_HAS_NONE).why == 6
-    c = P.decim_config(2, P.DECIM_NEG_A, 19, 3000)
-    assert c.mode == 0x0A and c.status == 0x8A and c.code_per_count == pytest.approx(2 / 400)
+    assert P.decim_config(1, 0, 9, 3000, P.DECIM_HAS_NONE).why == 6
+    c = P.decim_config(2, 0, 19, 3000)
+    assert c.mode == 0x02 and c.status == 0x82 and c.code_per_count == pytest.approx(2 / 400)
     assert P.decim_to_code(65535, P.decim_scale_q24(400, 1), 0) == 255
     assert P.decim_to_code(25600, P.decim_scale_q24(400, 1), 24) == 129  # 128 + 1.5 with the Q24 scale just below 1/200
 
@@ -61,7 +61,7 @@ def test_wire_layouts():
     b = st.pack()
     assert struct.unpack_from("<BBBBIQII", b) == (2, 1, 0x86, 1, 20, 400, 19, 10_000_000)
     assert b[24] == 0xFF and struct.unpack_from("<HBB", b, 28) == (8190, 0, 2)
-    assert st.next == P.DecimConfig(2, P.DECIM_SWAP, 1, 0, 20, 400)
+    assert st.next == P.DecimConfig(2, 1, 0, 20, 400)
     h = P.CaptureInfoHeader(7, 1, 0, 1, 100, 50, 19, 24, 0, 0, 128, 0, 1000, 4000)
     old = P.CaptureInfo(h, [P.CaptureChannelInfo(), P.CaptureChannelInfo()])
     assert len(old.pack()) == 68 and P.CaptureInfo.unpack(old.pack()).decim is None
@@ -69,7 +69,7 @@ def test_wire_layouts():
     raw = new.pack()
     assert len(raw) == 76 and raw[68:] == bytes([0x82, 1, 2, 0, 20, 0, 0, 0])
     back = P.CaptureInfo.unpack(raw)
-    assert back.decim == P.DecimConfig(2, 0, 1, 0, 20, 400)
+    assert back.decim == P.DecimConfig(2, 1, 0, 20, 400)
     assert back.trigger().total_words == 4000 and back.timebase().dt == pytest.approx(100e-9)
     assert P.ReadTraceHeader(decim_mode=0x83, decim_shift=15).pack()[30:] == bytes([0x83, 15])
     assert P.Timebase(divider=198, sample_period_ps=1_000_000).dt == pytest.approx(1e-6)  # N = 200, not 199
@@ -106,8 +106,8 @@ def test_get_set_decim_and_settings(sim_factory):
             s.set_decim("boxcar")
         assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 0)
         s.set_trigger(total_samples=4000)
-        s.set_decim(1, flags=P.SetDecimReq.NEG_A)
-        assert s.set_decim("cic3").flags == P.SetDecimReq.NEG_A  # flags kept by default
+        assert s.set_decim(1, flags=0x07).flags == 0  # 1.27: bits 0..2 (swap, falling edge) accepted and dropped
+        s.set_decim("cic3")
         s.set_timebase(divider=19999)  # N = 20000: CIC3 not exact
         st = s.get_decim()
         assert (st.next.k, st.why, P.DECIM_WHY[st.why]) == (2, 4, "CIC3 not exact at this N: CIC2 used")

@@ -29,7 +29,7 @@ def test_filter_names_and_status_decoding():
     off = P.decim_config(2, P.DECIM_SET_FIR, 21, 3000, P.DECIM_HAS_FIR)  # N = 22: not a multiple of 4
     assert off.fir_en and not off.fir and off.gain == 22 ** 2 and off.filter_name == "cic2"
     assert not P.decim_config(2, P.DECIM_SET_FIR, 19, 3000, P.DECIM_HAS_CIC).fir_en  # 0x1534 never gets 0x56
-    st = P.DecimState(filter=2, flags=P.SetDecimReq.FIR | P.SetDecimReq.NEG_A)
+    st = P.DecimState(filter=2, flags=P.SetDecimReq.FIR)
     assert st.filter_setting == "cic2+fir"
     assert P.SetDecimReq(2, P.SetDecimReq.FIR).pack() == bytes([2, 8, 0, 0])
 
@@ -59,14 +59,14 @@ def test_fir_variant_set_decim(sim_factory):
     with Scope.connect(srv.url) as s:
         assert s.info.fpga_version == P.FW_FPGA_VERSION and s.info.caps & P.Caps.FIR and s.info.caps & P.Caps.DECIM
         s.set_timebase(divider=19)
-        s.set_decim("cic2", flags=P.SetDecimReq.NEG_B)
+        s.set_decim("cic2")
         st = s.set_decim("cic2+fir")
-        assert st.flags == P.SetDecimReq.FIR | P.SetDecimReq.NEG_B and st.filter_setting == "cic2+fir"
+        assert st.flags == P.SetDecimReq.FIR and st.filter_setting == "cic2+fir"
         d = st.next
         assert d.fir and d.gain == 100 and d.filter_name == "cic2+fir" and st.next_mode & P.DECIM_FIR_ACT
         assert st.ext_shift == 0 and d.ext_shift == 6  # from the 0x29 status alone (no cap-stage flag in it)
         assert s.set_decim("cic2").next.fir_en is False  # the name clears the FIR bit, keeps the others
-        assert s.get_decim().flags == P.SetDecimReq.NEG_B
+        assert s.get_decim().flags == 0
         with pytest.raises(DeviceError) as e:
             s.t.request(P.Cmd.SET_DECIM, bytes([2, 16, 0, 0]))  # flags bits 4-7 are E_BAD_ARG detail 1
         assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 1)
