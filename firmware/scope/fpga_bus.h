@@ -52,8 +52,53 @@ typedef struct
   void     (*idle)(void);   //called every 65536 polls of an unbounded wait (USB BUSY answers); may be 0
 } fpga_arm_cfg;
 
-//Geometry (early), 0x01 = 1, the 0x05 ready wait, geometry again, 0x0E, 0x01 = 0. 0 = released, -1 = ready never came
+//Geometry (early), 0x01 = 1, the 0x05 ready wait, geometry again, the trigger type registers (fpga_trig_arm), 0x0E,
+//0x01 = 0. 0 = released, -1 = ready never came
 int  fpga_arm_reset(const fpga_arm_cfg *c);
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26; docs/plans/fpga-0x153c.md sections 2.1, 3, 3.6; the RTL
+// semantics in fpga/al3/AGENTS.md "0x153C C1 triggers"). Registers: 0x5E type (bits 2..0: 0 edge, 1 pulse width, 2 Nth
+// edge, 3 timeout; 4 runt and 5 window are 0x153E and act as edge on 0x153C) with bit 3 "longer than N"; 0x5F u24 N;
+// 0x60 u24 H (Nth edge idle time, 0 = count from the arm); 0x1B u32 hold-off in 5 ns clocks (0 = off: from the trigger
+// of a record no trigger is accepted until it elapsed, across sequencer restarts and MCU re-arms; 0 written releases a
+// running one at once); 0x66 bit 0 = 1: the next 0x01 = 1 also clears the hold-off timer (one-shot, consumed). 0x16 is
+// the polarity per type and stays the UI's trigger edge (fpga_set_trigger_edge). Reads: 0x34 (3 bytes: { 0, 0,
+// counting, pulse began, EXT, longer, type[1:0] }, u16 edges still to count) and 0x37 ({ 0, 0, 0, hold-off running,
+// type bit 2, 0, 0, 0 }), asynchronous.
+//
+// The firmware holds one copy (fpga_trig): SET_TRIGGER2 / SET_TRIGGER's hold-off write it through fpga_trig_write (the
+// registers at once, like 0x15..0x17, plus 0x66 = 1 so the next arm starts a clean hold-off: a new trigger definition
+// is a new session; re-arms between writes keep the hold-off running, which is what skips the pulses of a train), and
+// every arm re-writes the type registers inside the 0x01 = 1 window (fpga_trig_arm, after the geometry: the qualifier
+// is held in reset until the first write clock edge after the release, so they apply at every rate), which also puts
+// a FEL-loaded firmware's FPGA into the state the firmware believes. N and H are samples of the trigger stream (CH1 /
+// CH2: one per memory word; EXT: 5 ns clocks); the firmware converts nothing.
+
+#define FPGA_TRIG_EDGE     0
+#define FPGA_TRIG_PULSE    1
+#define FPGA_TRIG_NTH      2
+#define FPGA_TRIG_TIMEOUT  3
+#define FPGA_TRIG_N_MAX    0xFFFFFFu   //0x5F / 0x60 are 24 bits
+#define FPGA_TRIG_NTH_MAX  0xFFFFu     //Nth edge counts bits 15..0 of N
+
+typedef struct
+{
+  uint8_t  type;            //0x5E bits 2..0
+  uint8_t  longer;          //0x5E bit 3 (pulse width: 1 = longer than N, 0 = shorter)
+  uint32_t n;               //0x5F (24 bits)
+  uint32_t h;               //0x60 (24 bits)
+  uint32_t holdoff;         //0x1B, 5 ns units, 0 = off
+} fpga_trig_ext;
+
+extern fpga_trig_ext fpga_trig;      //what the firmware holds; power-on / boot: all 0 (the edge type, no hold-off)
+
+//0x5E, and with a type other than edge 0x5F and 0x60: the writes of every arm, inside the 0x01 = 1 window
+void fpga_trig_arm(void);
+//Take t: the type registers, 0x1B, and 0x66 = 1 when clear (the next 0x01 = 1 clears a running hold-off)
+void fpga_trig_write(const fpga_trig_ext *t, int clear);
+//Read 0x37 into out[0] and the 3 bytes of 0x34 into out[1..3] (6 strobes)
+void fpga_trig_status(uint8_t out[4]);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Writes that set the capture state (fw 0.2.72): 0x0D rate, 0x53 / 0x56 filter, 0x01 = 1 sampling reset. Counted

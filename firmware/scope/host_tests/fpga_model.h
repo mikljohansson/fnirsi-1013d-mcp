@@ -16,6 +16,13 @@
 //     0x0E is long past then). 0x14 per bitstream: 0x1532..0x153A latch the pretrigger on a time-out stop and let it cut
 //     a triggered capture, and an edge after the stop still sets 0x18; 0x153B+ latch W - total + pretrigger, end only
 //     untriggered captures and take no trigger after the stop. Reads 0x0A (done), 0x18 (triggered), 0x14 (13 bit).
+//   - fw-c5 (0x153C, protocol 1.26): the trigger extension registers 0x5E (type, longer), 0x5F / 0x60 (u24 N / H),
+//     0x1B (u32 hold-off, 5 ns), 0x66 (bit 0: the next 0x01 = 1 clears the hold-off, consumed), reads 0x34 and 0x37
+//     (fpga/al3/AGENTS.md "0x153C C1 triggers"). The hold-off is modelled on the capture logic: a trigger taken while
+//     the hold-off of the previous trigger runs is not taken (the edge passes, as on the FPGA); 0x1B = 0 releases a
+//     running one at once; the timer survives arms unless 0x66 was written before the 0x01 = 1. The qualifier state
+//     machines (pulse width, Nth edge, timeout) are not modelled: the model triggers at trig_at whatever the type, and
+//     0x34 reports the reset state of the counters (edges to count = N - 1, counting = H == 0).
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -75,6 +82,14 @@ typedef struct
   uint16_t taddr;                   //0x14
   uint32_t stop_n;                  //W, words written at the stop
 
+  //fw-c5 (0x153C): the trigger extension registers and the hold-off timer
+  uint8_t  reg_5e;                  //type (bits 2..0), longer (bit 3)
+  uint32_t reg_5f, reg_60;          //N, H (24 bits)
+  uint32_t reg_1b;                  //hold-off, 5 ns units
+  uint8_t  ho_clr_req;              //0x66 bit 0, consumed by the next 0x01 = 1
+  uint64_t ho_until_ps;             //the hold-off of the last trigger ends here (0 = none)
+  uint32_t ho_blocked;              //triggers not taken because the hold-off ran
+
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;
   uint32_t seed;
@@ -83,6 +98,7 @@ typedef struct
 extern fpga_model fm;
 
 void fm_reset(uint16_t version, uint32_t divider, uint32_t seed);
+int  fm_holdoff_running(void);              //0x37 bit 4 as the model sees it now
 void fm_fill(uint32_t salt);                //distinct bytes per word and lane
 void fm_advance_ns(uint32_t ns);            //idle time (e.g. the capture after the release)
 int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the first matching write at or after from, -1

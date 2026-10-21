@@ -20,6 +20,12 @@ static uint64_t fm_period_ps(void)
   return (uint64_t)10000 * (fm.divider + 1);
 }
 
+//fw-c5 (0x153C): the hold-off of the last trigger still runs (0x37 bit 4); 0x1B = 0 releases it at once
+int fm_holdoff_running(void)
+{
+  return (fm.version >= 0x153C) && fm.reg_1b && (fm.t_ps < fm.ho_until_ps);
+}
+
 //fw 0.2.97: one write clock edge of the capture logic (fpga_model.h)
 static void fm_capture_edge(void)
 {
@@ -39,9 +45,17 @@ static void fm_capture_edge(void)
     //The trigger compares the word written on this edge (after the pretrigger words, as sampling_half_way)
     if(!fm.triggered && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at) && (fm.n >= pre))
     {
-      fm.triggered = 1;
-      fm.trig_word = fm.n;
-      fm.taddr     = (uint16_t)(fm.n % fm.ring);
+      if(fm_holdoff_running())
+        fm.ho_blocked++;                                 //0x153C: trigger_check_enable masked by the hold-off
+      else
+      {
+        fm.triggered = 1;
+        fm.trig_word = fm.n;
+        fm.taddr     = (uint16_t)(fm.n % fm.ring);
+
+        if((fm.version >= 0x153C) && fm.reg_1b)
+          fm.ho_until_ps = fm.t_ps + (uint64_t)fm.reg_1b * 5000;
+      }
     }
 
     fm.n++;
@@ -112,6 +126,7 @@ void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
 {
   memset(&fm, 0, sizeof(fm));
   memset(&fpga_bus_wr, 0, sizeof(fpga_bus_wr));      //a fresh FPGA holds nothing the firmware wrote
+  memset(&fpga_trig, 0, sizeof(fpga_trig));          //and the firmware's copy of the trigger extension is at power-on too
   fm.version = version;
   fm.divider = divider;
   fm.seed    = seed;
@@ -144,7 +159,8 @@ static uint32_t fm_len(uint8_t cmd)
   switch(cmd)
   {
     case 0x0B: case 0x0C: case 0x1F: case 0x38: case 0x58: case 0x5A:  return 2;
-    case 0x0D: case 0x0E: case 0x50: case 0x51: case 0x52: case 0x5C:  return 4;
+    case 0x5F: case 0x60:                                               return 3;   //0x153C: u24 N, H
+    case 0x0D: case 0x0E: case 0x1B: case 0x50: case 0x51: case 0x52: case 0x5C:  return 4;
     default:                                                            return 1;
   }
 }
@@ -168,6 +184,13 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       {
         fm.in_reset       = 1;
         fm.edges_in_reset = 0;
+
+        //0x153C: a pending 0x66 request makes this reset clear the hold-off timer (one-shot)
+        if(fm.ho_clr_req)
+        {
+          fm.ho_until_ps = 0;
+          fm.ho_clr_req  = 0;
+        }
       }
       else if(fm.in_reset)
       {
@@ -197,6 +220,14 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       fm.rd_ptr = v % fm.ring;
       fm.rd_q   = fm.rd_ptr;             //the memory's address register samples the pointer on the next strobes
       break;
+
+    //0x153C trigger extension (fw-c5); on older bitstreams the latches exist (0x1B: Atlan4's unused hold-off) or
+    //the writes are ignored, and nothing below acts on them (fm_holdoff_running, the reads check the version)
+    case 0x5E: fm.reg_5e = (uint8_t)v;           break;
+    case 0x5F: fm.reg_5f = v & 0xFFFFFF;         break;
+    case 0x60: fm.reg_60 = v & 0xFFFFFF;         break;
+    case 0x1B: fm.reg_1b = v;                    break;
+    case 0x66: fm.ho_clr_req = (uint8_t)(v & 1); break;
   }
 }
 
@@ -268,6 +299,28 @@ uint8_t fpga_io_strobe_read(void)
 
     case 0x14:
       out = (uint8_t)((fm.nbytes++ == 0) ? (fm.taddr >> 8) : fm.taddr);
+      break;
+
+    //0x153C: the qualifier status at its reset state (the state machines are not modelled, fpga_model.h) and the
+    //extension status. Older bitstreams have no such read and return the stale bus byte (0 here)
+    case 0x34:
+      if(fm.version >= 0x153C)
+      {
+        uint32_t n16 = fm.reg_5f & 0xFFFF, rem = ((fm.reg_5e & 3) == 2) ? ((n16 ? n16 : 1) - 1) : 0;
+        uint8_t  counting = (uint8_t)(((fm.reg_5e & 3) == 2) && (fm.reg_60 == 0));
+
+        switch(fm.nbytes++)
+        {
+          case 0:  out = (uint8_t)((counting << 5) | ((fm.reg_5e & 0x08) >> 1) | (fm.reg_5e & 0x03)); break;
+          case 1:  out = (uint8_t)(rem >> 8); break;
+          default: out = (uint8_t)rem;        break;
+        }
+      }
+      break;
+
+    case 0x37:
+      if(fm.version >= 0x153C)
+        out = (uint8_t)((fm_holdoff_running() ? 0x10 : 0) | ((fm.reg_5e & 0x04) << 1));
       break;
   }
 
