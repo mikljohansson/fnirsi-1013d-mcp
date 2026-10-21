@@ -578,7 +578,14 @@ on seeds 12345 and 4242**; the K = 0 + peak records match their windows at laten
 Full `tb/run.sh` on the branch before the merge (14 steps, `REF_SRC_DIR=~/g11/refs`, two seeds in parallel): steps 1-3
 (ext 39, decim 98, cic_model 1929 / 1876 samples) PASS on both seeds, then WSL shut down with the agent's session (the detached
 jobs die when no wsl.exe is attached; the earlier run without the 0x56 masks had failed tb_decim as described). On the
-merged source (C1 + C3 + C2, 17 steps): RESULTS_PLACEHOLDER
+merged source (ad4856a = C1 + C3 + C2, 16 steps, 2026-10-21): **ALL PASS on seeds 12345 and 4242**. Steps 1-14 in one run
+per seed (04:16-05:46): ext 39, decim 98 + cic_model 1876 / 1873 samples, fir 163 / 165 + cic_model 1612 / 1638, long 8,
+seg 53 + seg_model 22 runs, trigpos 882, contract 12 (transcript = contract_0x153B.txt), encphase PASS, mcuread 70 + 26,
+adccap 2274, firstrec 38, timeout 85, trigtypes 1293; that run then stopped on a `fi` the merge resolution had dropped
+between the counter and the peak blocks of run.sh (bash reads the script as it goes; fixed in 15e5d4f, `bash -n` clean), so
+steps 15 and 16 ran alone with the fixed script (`ONLY=peak` / `ONLY=counter`, 08:13): peak 45 / 45 checks (24 / 26 s),
+counter 115 / 115 (2061 / 2045 s), each ending in `ALL PASS`. Every equivalence phase 0 mismatches: a firmware that writes
+none of the new registers sees 0x153B.
 
 **Build** (TD 4.6.8 SP1, `build.sh ~/c2/b1`, source fb0cf59, a synthesis check of this branch alone): 5126 LUT / 4694 reg /
 5893 LE (0x153B: 4990 LUT; +136 LUT, about +290 reg = the two peak pipelines), 48 EMB9K, 2 EMB32K, 2 M18x18.
