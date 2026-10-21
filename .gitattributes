@@ -1,0 +1,9 @@
+# Line endings: LF in the repository and in every checkout (the owner's rule; CRLF merges broke the tree twice).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.bin binary
+*.pdf binary
+*.gif binary
+# Anlogic-generated IP sources are kept byte for byte as the tool wrote them.
+fpga/al3/src/al_ip/* -text
