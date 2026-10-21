@@ -2349,9 +2349,55 @@ static void test_acq_grid(void)
     T_EQ(ui_acq_box_at(UI_ACQ_GRID_X(i), UI_ACQ_TB_Y + UI_ACQ_GRID_DY(i)), -1);
 }
 
+//fw-acqui (owner 2026-10-21): the Filter box's three modes, the host's other modes by name, the press sequence
+static void test_acq_filter(void)
+{
+  static const struct { uint8 set; const char *name; uint8 next; } t[] =
+  {
+    { PC_DECIM_OFF,                               "Off",        UI_FILTER_HIRES },
+    { PC_DECIM_BOXCAR,                            "Hi-Res",     UI_FILTER_ANTIALIAS },
+    { PC_DECIM_CIC3 | PC_DECIM_SET_FIR,           "Anti-alias", UI_FILTER_OFF },
+    { PC_DECIM_OFF | PC_DECIM_SET_FIR,            "Off",        UI_FILTER_HIRES },      //SET_DECIM 0 with flags bit 3
+    { PC_DECIM_BOXCAR | PC_DECIM_SET_FIR,         "boxcar+FIR", UI_FILTER_OFF },        //host modes: a press goes to Off
+    { PC_DECIM_CIC2,                              "CIC2",       UI_FILTER_OFF },
+    { PC_DECIM_CIC3,                              "CIC3",       UI_FILTER_OFF },
+    { PC_DECIM_CIC2 | PC_DECIM_SET_FIR,           "CIC2+FIR",   UI_FILTER_OFF },
+  };
+  uint32 i;
+  uint8  s;
+
+  T_EQ(UI_FILTER_OFF, 0);
+  T_EQ(UI_FILTER_HIRES, PC_DECIM_BOXCAR);
+  T_EQ(UI_FILTER_ANTIALIAS, PC_DECIM_CIC3 | PC_DECIM_SET_FIR);
+
+  for(i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+  {
+    T_STR(ui_filter_name(t[i].set), t[i].name);
+    T_EQ(ui_filter_next(t[i].set), t[i].next);
+    T_TRUE(ui_text_width(&font_2, ui_filter_name(t[i].set)) <= UI_ACQ_BOX_W - 8);
+    //The Peak bit (the Sample row's, kept beside the Filter in the UI byte) neither names nor steps the Filter
+    T_STR(ui_filter_name(t[i].set | PC_DECIM_SET_PEAK), t[i].name);
+    T_EQ(ui_filter_next(t[i].set | PC_DECIM_SET_PEAK), t[i].next);
+  }
+
+  //From every setting (the three and each host mode) at most three presses reach Off, and from there the cycle Off,
+  //Hi-Res, Anti-alias
+  for(i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+  {
+    uint32 n = 1;
+
+    for(s = ui_filter_next(t[i].set); (s != UI_FILTER_OFF) && (n < 3); n++)
+      s = ui_filter_next(s);
+    T_EQ(s, UI_FILTER_OFF);
+    T_EQ((s = ui_filter_next(s)), UI_FILTER_HIRES);
+    T_EQ((s = ui_filter_next(s)), UI_FILTER_ANTIALIAS);
+    T_EQ((s = ui_filter_next(s)), UI_FILTER_OFF);
+  }
+}
+
 static void test_acq_row(void)
 {
-  static const char *fv[] = { "off", "boxcar", "CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
+  static const char *fv[] = { "Off", "Hi-Res", "Anti-alias", "CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR" };
   const ui_acq_row *r;
   uint8 g, v, p;
   int i;
@@ -2386,38 +2432,38 @@ static void test_acq_row(void)
   T_EQ(ui_acq_box_at(350, 162), -1);
   T_EQ(ui_acq_box_at(350, 211), -1);
 
-  //Normal (AcqMenuSample): Filter off, Sample "Normal" grey-box white text, no note
-  r = acq(0, 0, 0, 0, 0, "off");
+  //Normal (AcqMenuSample): Filter Off, Sample "Normal" grey-box white text, no note
+  r = acq(0, 0, 0, 0, 0, ui_filter_name(UI_FILTER_OFF));
   T_STR(r->line1[UI_ACQ_ROLL], "Roll");       T_STR(r->line2[UI_ACQ_ROLL], "mode");
   T_STR(r->line1[UI_ACQ_AVERAGE], "Average"); T_STR(r->line2[UI_ACQ_AVERAGE], "mode");
-  T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "off");
+  T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "Off");
   T_STR(r->line1[UI_ACQ_SAMPLE], "Sample");   T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");
   for(i = 0; i < UI_ACQ_BOXES; i++)
     T_EQ(r->state[i], UI_ACQ_BOX_OFF);
   for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
     T_TRUE(r->note[i] == 0);
 
-  //Average on, Filter CIC2: green boxes
-  r = acq(0, 1, 1, 0, 0, "CIC2");
+  //Average on, Filter Hi-Res: green boxes
+  r = acq(0, 1, 1, 0, 0, "Hi-Res");
   T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
   T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
   T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_OFF);
 
   //Peak (AcqMenuPeak): Sample green "Peak"; Filter and Average grey with their values kept; the four-line note
-  r = acq(0, 1, 1, 1, 0, "CIC2+FIR");
+  r = acq(0, 1, 1, 1, 0, "Anti-alias");
   T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_ON);
   T_STR(r->line2[UI_ACQ_SAMPLE], "Peak");
   T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
-  T_STR(r->line2[UI_ACQ_FILTER], "CIC2+FIR");
+  T_STR(r->line2[UI_ACQ_FILTER], "Anti-alias");
   T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_GREY);
   T_EQ(r->state[UI_ACQ_ROLL], UI_ACQ_BOX_OFF);
   T_STR(r->note[0], "Peak:");
   T_STR(r->note[1], "Filter and");
   T_STR(r->note[2], "Average");
   T_STR(r->note[3], "not applied");
-  r = acq(0, 0, 0, 1, 0, "off");
+  r = acq(0, 0, 0, 1, 0, "Off");
   T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
-  T_STR(r->line2[UI_ACQ_FILTER], "off");
+  T_STR(r->line2[UI_ACQ_FILTER], "Off");
 
   //Back to Normal: both boxes as they were, the note gone
   r = acq(0, 1, 1, 0, 0, "CIC2+FIR");
@@ -2502,6 +2548,7 @@ static void test_acq_row(void)
 int main(void)
 {
   test_acq_grid();
+  test_acq_filter();
   test_acq_row();
   test_sig4();
   test_cards();

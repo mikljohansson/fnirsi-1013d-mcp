@@ -1145,16 +1145,6 @@ static void pc_dec_follow_mode(void)
   scopesettings.display_data_done = 1;
 }
 
-static const char *pc_dec_names[8] = { "off", "boxcar", "CIC2", "CIC3", "off", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
-
-//Index into pc_dec_names: "+FIR" with the filter on
-static uint32 pc_dec_name_index(void)
-{
-  uint32 k = pc_dec_setting & 3;
-
-  return ((pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
-}
-
 //ui-sample (docs/plans/ui-rows.md section 3): the ACQ menu's row as data (ui_ctrl.h ui_acq_row_build)
 static void pc_acq_row(ui_acq_row *r)
 {
@@ -1165,7 +1155,7 @@ static void pc_acq_row(ui_acq_row *r)
   in.filter_on    = (pc_dec_setting & 3) != 0;
   in.peak         = pc_dec_peak;
   in.spectrum     = spectrum_mode() != SPECTRUM_MODE_SCOPE;
-  in.filter_value = pc_dec_names[pc_dec_name_index()];
+  in.filter_value = ui_filter_name(pc_dec_setting);
   ui_acq_row_build(&in, r);
 }
 
@@ -1315,8 +1305,6 @@ static void pc_dec_fit_memory(void)
   scopesettings.nofsamples      = total / 2;
 }
 
-//A tap steps off, boxcar, CIC2, CIC3; on 0x1535+ each filter also with the FIR: off, boxcar, boxcar+FIR, CIC2,
-//CIC2+FIR, CIC3, CIC3+FIR
 //The DEFAULT button and a settings sector that failed to load (scope_reset_config_data)
 void pc_glue_settings_defaults(void)
 {
@@ -1346,21 +1334,13 @@ void pc_glue_settings_defaults(void)
     pc_dec_fit_memory();
 }
 
+//A tap steps Off, Hi-Res, Anti-alias; a mode the host set (CIC2, CIC3, boxcar+FIR, CIC2+FIR) goes to Off (fw-acqui,
+//ui_ctrl.h ui_filter_next)
 void pc_glue_decim_tap(void)
 {
-  uint32 k = pc_dec_setting & 3, fir = (pc_dec_setting & PC_DECIM_SET_FIR) != 0;
+  pc_dec_setting = ui_filter_next(pc_dec_setting);
 
-  if(k && !fir)
-    fir = 1;
-  else
-  {
-    k   = (k + 1) & 3;
-    fir = 0;
-  }
-
-  pc_dec_setting = (uint8)(k | (fir ? PC_DECIM_SET_FIR : 0));
-
-  if(k)
+  if(pc_dec_setting & 3)
     pc_dec_fit_memory();
 
   //fw 0.2.84: the Memory column again on every change (acq_view_mem_chips): Off brings back the depths a filter hid

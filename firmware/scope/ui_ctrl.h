@@ -9,6 +9,7 @@
 #define UI_CTRL_H
 
 #include "types.h"
+#include "pc_decim.h"
 
 //Right bar buttons: 51 x 50 at x 739 (1.00o5's slots)
 #define UI_BAR_X              739
@@ -196,6 +197,22 @@ void ui_acq_row_build(const ui_acq_in *in, ui_acq_row *r);
 //mode's Filter setting as kept and Sample: the peak bit in the Scope view only, the Filter's K / FIR kept under it, so
 //pc_decim_config arms peak detect (SET_DECIM filter 4's path) and the Filter comes back with Normal
 uint8 ui_acq_decim_set(uint8 filter_set, int peak, int spectrum);
+
+//The Filter box's three modes (fw-acqui, owner 2026-10-21; Tektronix / Rigol "Hi Res", Keysight "High Resolution"):
+//Off, Hi-Res = the boxcar (the mean of the N samples per output, no overshoot) and Anti-alias = CIC3 + FIR (flat passband
+//to fs / 4, the most alias rejection; CIC2 + FIR where CIC3 is not exact, GET_DECIM's why). Setting bytes as pc_decim.h
+//(bits 1:0 K, PC_DECIM_SET_FIR); every SET_DECIM mode stays the host's
+#define UI_FILTER_OFF         PC_DECIM_OFF
+#define UI_FILTER_HIRES       PC_DECIM_BOXCAR
+#define UI_FILTER_ANTIALIAS   (PC_DECIM_CIC3 | PC_DECIM_SET_FIR)
+
+//The box's value line for a setting: "Off" (K 0, the FIR bit ignored), "Hi-Res", "Anti-alias", and any other mode the
+//host set (or an older firmware saved) by its own name: "boxcar+FIR", "CIC2", "CIC3", "CIC2+FIR"
+const char *ui_filter_name(uint8 filter_set);
+
+//A press on the box: Off -> Hi-Res -> Anti-alias -> Off; from a host mode to Off (the start of the cycle: the press
+//leaves a mode the box cannot offer for the one every scope has, and the next presses step as always)
+uint8 ui_filter_next(uint8 filter_set);
 
 //The box under a touch at menu coordinates x, y: UI_ACQ_ROLL .. UI_ACQ_SAMPLE, or -1 (the drawn box, down to the rule)
 int  ui_acq_box_at(uint32 x, uint32 y);

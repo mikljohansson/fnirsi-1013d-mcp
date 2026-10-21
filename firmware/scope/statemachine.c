@@ -2611,7 +2611,7 @@ void handle_acquisition_menu_touch(void)
             scope_acqusition_settings(0);
           }
 
-          //Filter selector in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3, each with the FIR
+          //Filter selector in 1.00o5's Long memory slot: Off, Hi-Res, Anti-alias (fw-acqui; a host mode goes to Off)
           //fw 0.2.64: a filter shortens the record to 8190 samples (16-bit layout): the time/div follows
           if((box == UI_ACQ_FILTER) && pc_glue_acq_box_live(UI_ACQ_FILTER))
           {

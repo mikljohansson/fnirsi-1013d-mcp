@@ -197,6 +197,26 @@ uint8 ui_acq_decim_set(uint8 filter_set, int peak, int spectrum)
   return (uint8)((filter_set & (PC_DECIM_SET_FIR | 3)) | ((peak && !spectrum) ? PC_DECIM_SET_PEAK : 0));
 }
 
+const char *ui_filter_name(uint8 filter_set)
+{
+  static const char *const names[8] = { "Off", "Hi-Res", "CIC2", "CIC3", "Off", "boxcar+FIR", "CIC2+FIR", "Anti-alias" };
+
+  return names[(filter_set & 3) | ((filter_set & PC_DECIM_SET_FIR) ? 4 : 0)];
+}
+
+uint8 ui_filter_next(uint8 filter_set)
+{
+  filter_set &= PC_DECIM_SET_FIR | 3;
+
+  if(!(filter_set & 3))
+    return UI_FILTER_HIRES;
+
+  if(filter_set == UI_FILTER_HIRES)
+    return UI_FILTER_ANTIALIAS;
+
+  return UI_FILTER_OFF;
+}
+
 int ui_acq_box_at(uint32 x, uint32 y)
 {
   uint32 i;
