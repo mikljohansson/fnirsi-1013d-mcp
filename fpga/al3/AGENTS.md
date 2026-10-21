@@ -9,6 +9,7 @@ State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
   the pattern trigger engine (0x76-0x7D, read 0x42); `tb/tb_pattern.v` = run.sh step 18 (10462 checks). Version byte still
   0x3B (D3). Build: 7198 LUT / 6127 reg / 8061 LE (93 % of the LEs), `clk_200MHz` misses on old paths (congestion); the
   measured cut table is in the section "0x153D D2 pattern generator, fpga-d2" below. **Not built for dist, not flashed.**
+  The owner cut the pattern feature at integration (15:55); fpga-d3 strips the branch to the fractional square.
 - fpga-c1 (2026-10-20 night, branch `fpga-c1`): **0x153C item C1** (trigger types + hold-off, `docs/plans/fpga-0x153c.md`
   section 10) implemented in `src/zaklad.v` and `tb/tb_trigtypes.v` (run.sh step 14), version byte still 0x3B until C4
   integrates with C2 (peak detect) and C3 (counter). Section "0x153C C1 triggers, fpga-c1" below. **Not built for dist, not
@@ -375,6 +376,12 @@ Decimation filter (0x1534), open items:
   being flashed with fw 0.2.33.
 
 ## 0x153D D2 pattern generator, fpga-d2 (2026-10-21)
+
+**Owner decision 2026-10-21 15:55 (via the coordinator): the pattern feature (the step table, bursts, the pattern trigger
+engine, the marker as trigger source) is cut from 0x153D in favour of a plain accurate fractional square generator;
+fpga-d3 strips this branch's RTL to the two-step fractional square during integration and owns the stripped version (the
+size estimate for it is in the paragraph "If the owner cuts the pattern" below). This section describes the branch as
+pushed (head b0a059c plus this note), before the cut.**
 
 Brief (coordinator): item D2 of `docs/plans/fpga-0x153c.md` section 10: remove the DDS, the pulse pattern generator
 (module `pat_gen`: 8 steps of u32 + u16 / 65536 clocks, double-buffered entries 0 / 1, bursts / repeat / gap / continuous,
