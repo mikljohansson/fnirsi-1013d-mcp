@@ -35,6 +35,12 @@
 //    period, width and duty of CH1 / CH2 / EXT over a 10 ms / 100 ms / 1 s gate, the source's raw min and max over the
 //    gate). With 0x61 = 0 (power-on) nothing runs; the counter never touches the capture. Write 0x35 (CH2 offset) is
 //    unchanged (docs/plans/fpga-0x153c.md section 5, fpga/al3/README.md section 13).
+//  - 0x69, 0x6A (new writes), 0x38 (new read, 8 bytes; 0x153D D1): streaming logger. 0x69 bit 0 makes the capture never
+//    stop and never trigger after a normal arm, so the sample ring free-runs at the programmed rate (legacy or 16-bit
+//    words); 0x6A is the next ring word the MCU reads; 0x38 reports the write address, the words written since
+//    0x01 = 0 and the unread words with a lap flag (set when a write overwrites the oldest unread word, cleared by 0x69
+//    bit 1). With 0x69 = 0 (power-on) the capture is cycle-identical to 0x153C. Write 0x38 (display brightness) is
+//    unchanged (docs/plans/fpga-0x153c.md section 6, fpga/al3/README.md section 14).
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -212,6 +218,19 @@
                   4'hF:  o_mcu_data <= max;   //maximum; 255 / 0 when no sample (EXT source, or before the first gate)
                   //frequency = E / (T x 5 ns), period = T x 5 ns / E, +width = W x 5 ns / E, duty = W / T. One read per
                   //screen pass: the command byte plus 16 data strobes.
+
+            8'h38: //Streaming logger (0x153D), 8 bytes from a snapshot taken when the command byte 0x38 is written (copied on
+                   //the 200 MHz side 15 .. 20 ns after the command strobe, as 0x35; the bytes are static for the read)
+                  4'h0:  o_mcu_data <= { stream, lap, 1'b0, W[12:8] };    //stream = 0x69 bit 0 in effect; lap: a write
+                                       //overwrote the oldest unread word since the last 0x69 bit 1 (sticky, survives 0x01 = 1)
+                  4'h1:  o_mcu_data <= W[7:0];     //W: the ring address after the last word written (= the next word to be
+                                       //written while streaming; frozen after a stop); word 0 of a capture is ring word 0
+                  4'h2..4'h5: count[31:0]          //words written since 0x01 = 0 (memory words, high byte first, wraps at
+                                       //2^32); W == count mod 8192 in every snapshot
+                  4'h6..4'h7: unread[15:0]         //unread words since the reader position 0x6A: 0 .. 8192 (8192 = the ring is
+                                       //full, nothing lost yet; the next write sets lap). Bits 15..14 read 0.
+                  //A word written at a write clock edge E is in the count from E + 12.5 ns and readable through
+                  //0x1F / 0x20..0x23 at once. Read cost: the command byte plus 8 data strobes.
 //---------------------------------------------------------------------------------------
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
@@ -512,5 +531,33 @@
             8'h62: //Counter level and hysteresis, 2 bytes
                   4'h0: cnt_lvl <= io_mcu_data;        //raw ADC code: high at >= level
                   4'h1: cnt_hys <= io_mcu_data;        //low below level - hysteresis
+
+//---------------------------------------------------------------------------------------
+// Streaming logger (0x153D, D1). Details: fpga/al3/README.md "Changes" section 14, the contract
+// docs/plans/fpga-0x153c.md section 6. The sample ring is the FIFO: with 0x69 bit 0 the capture never stops and never
+// triggers after a normal arm (0x69 = 1, 0x57 = 0, 0x1A = 0, 0x0B = 0x0C = 0, 0x01 = 1, the 0x05 wait, 0x0E = 0, 0x01 = 0),
+// so the ring free-runs with the decimator's words at the programmed rate (0x0D, 0x53 .. 0x56: legacy two samples per word
+// per channel, or one 16-bit word per channel; the peak format too), 0x0E and 0x1A are irrelevant, 0x0A reads 0 and 0x18
+// reads 0, 0x14 is not meaningful. The MCU reads 0x38, drains [R, W) with 0x1F / 0x20..0x23 exactly as READ_RAW (one 0x1F,
+// command and dummy strobe per lane pass, split at the ring end), then writes 0x6A = the next word to read; after a lap it
+// writes 0x6A = W of a fresh 0x38 and 0x69 = 3 (the words in between are the gap). 0x01 = 1 resets the FPGA's reader
+// position, the unread count and the counter to 0 (write 0x6A only after 0x01 = 0). Power-on 0x69 = 0: the capture is
+// cycle-identical to 0x153C; nothing here touches it.
+
+            8'h69: //Logger control, 1 byte
+                    str  <= io_mcu_data[0];            //1 = stream: the write never stops, no trigger is accepted (takes
+                                                       //effect within 15 ns + one write clock; write it before 0x01 = 1).
+                                                       //0 = hand the capture back to the 0x153B rules at the next write
+                                                       //clock edge: in auto mode with 0x0E = 0 the write stops there (0x0A =
+                                                       //1, W and the count freeze, 0x14 = W: drain the tail), in normal mode
+                                                       //it runs on until a trigger
+                    if(io_mcu_data[1]) clear lap;      //bit 1 = 1 clears the lap flag (self-clearing); bits 7..2 write 0
+
+            8'h6A: //Reader position R, 2 bytes high byte first (13 bits): the next ring word the MCU reads
+                  4'h0..4'h1: R[12:8], R[7:0]          //taken as a whole on the low byte, in effect 15 .. 20 ns later: the
+                                                       //unread count becomes (W - R) mod 8192 (R = W: empty), then +1 per
+                                                       //word written, saturating at 8192 (full); a write while it is 8192
+                                                       //and stream is on sets the lap flag (the oldest unread word was
+                                                       //overwritten). R must lie between the previous R and W.
 
 //=======================================================================================
