@@ -13,6 +13,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   next of Off / Average / Anti-alias: the mockup round decides which). Process: mockups first (docs/mockups/, the
   ui-rows.md style) and an adversarial review per docs/ui-guidelines.md, then the firmware item (settings word migration for
   saved CIC2 / CIC3 values, the warnings that name the Filter, the user guide, the Peak greying unchanged). Not dispatched.
+  Naming (coordinator 16:3x, owner to confirm in the mockup round): "Average" for the boxcar clashes with ACQ Average (the
+  mean of N records); proposed Off / Hi-Res / Anti-alias, "Hi-Res" being the bench-scope name for a boxcar mode.
 - **No 0x153E for 0.3.0** (owner decision 2026-10-21 16:15, after the walk-through of the 0x153E features): 0.3.0 ships on
   0x153D. Runt, window and the pulse-width range are dropped from the roadmap (owner: runt "rather special", window = check
   the dip or the spike separately, range "marginal"); both-core triggering stays the only later 0x153E candidate ("if we do
