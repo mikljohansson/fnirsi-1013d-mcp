@@ -266,6 +266,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-ci done 11:4x, merged 11:5x: the Bode tests compare the generator's configuration (the live 0x39 bits masked; the
+  sweep's last SET_GEN leaves PENDING for up to two steps), and the simulator's log lap hook fires only once a word is unread
+  (the IndexError was lap[0], the lap had skipped 0 words when the first read shared the start's clock tick; Python 3.12 on
+  Windows has a 15.6 ms clock). No host behaviour change, no CHANGELOG entry. ruff clean, 53 tests of the three files pass
+  locally; the CI run of this push is the proof.
 - mcp-ci (Opus explicitly, dispatched 11:27, branch mcp-ci): the Windows CI mcp job has failed on both pushes since mcp-d6
   (runs 39569591451, 39576242367; Linux and the local Windows run green): test_bode_sim / test_bode_device compare a GET_GEN
   snapshot that includes the live 0x39 pattern status byte (128 before, 129 / 161 after), and test_d27's logger overflow test
