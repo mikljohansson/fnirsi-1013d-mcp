@@ -7652,6 +7652,358 @@
    ],
    "device_events": [],
    "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_26",
+   "description": "GET_INFO response, protocol 1.26 (80 bytes): FPGA 0x153C, caps add HOLDOFF (2), TRIG_TYPES (20), PEAK_DETECT (21), COUNTER (22) = 0x7FEC4F",
+   "hex": "a5130101020007000000500000009b8b011a0002000401003c1502080020020200c2eb0b4fec7f0080f0fa02fe3f500000070600302e322e31303400000000000000000026018c0c31303133442d303030310000000000002003e0013c15000020967225",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 7,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "011a0002000401003c1502080020020200c2eb0b4fec7f0080f0fa02fe3f500000070600302e322e31303400000000000000000026018c0c31303133442d303030310000000000002003e0013c150000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_unsupported_fpga_mismatch_1_26",
+   "description": "E_UNSUPPORTED detail 1 with the 1.26 mismatch text (the scope runs another word than 0x153C)",
+   "hex": "a51301010002080005003500000022ec0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353343744652bf",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 8,
+     "status": 5,
+     "flags": 1,
+     "len": 53,
+     "payload": "0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353343"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_pulse_longer",
+   "description": "SET_TRIGGER2 0x0219 (24 bytes): type 1 pulse width, polarity 0 positive pulse, flags LONGER, source CH1, N 1500 samples (15 us at 1 MSa/s legacy words), H 0, level 140, level2 0, hold-off 0",
+   "hex": "a5130100190232000000180000009a1f01000100dc050000000000008c0000000000000000000000e8127203",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 50,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100dc050000000000008c0000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 50,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100dc050000000000008c0000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_nth_edge",
+   "description": "SET_TRIGGER2: type 2 Nth edge, polarity 1 falling edges counted, source CH2, N 3, idle H 20000 samples, level 128",
+   "hex": "a51301001902330000001800000049580201000103000000204e00008000000000000000000000003a558a81",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 51,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0201000103000000204e0000800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 51,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0201000103000000204e0000800000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_timeout_ext",
+   "description": "SET_TRIGGER2: type 3 timeout, polarity 1 held low, source EXT, N 200000 x 5 ns = 1 ms, level 0",
+   "hex": "a513010019023400000018000000519f03010002400d030000000000000000000000000000000000ea653d6c",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 52,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010002400d030000000000000000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 52,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010002400d030000000000000000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_edge_holdoff",
+   "description": "SET_TRIGGER2: type 0 edge rising (N, H 0), CH1, level 128, hold-off 500 000 x 5 ns = 2.5 ms (the firmware writes 0x66 with it: the next ARM clears a running hold-off)",
+   "hex": "a51301001902350000001800000082d80000000000000000000000008000000020a1070000000000f42fa9c6",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0000000000000000000000008000000020a1070000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0000000000000000000000008000000020a1070000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_trigger_1_26_pulse",
+   "description": "GET_TRIGGER response, protocol 1.26 (52 bytes): the 28-byte TRIGGER (12 hold-off 500000 units) then the SET_TRIGGER2 block at 28..51 (pulse width longer than 1500, level 140, hold-off 500000)",
+   "hex": "a5130101040136000000340000002b8100008c01e8030000a00f000020a10700a00f0000f401d0070000000001000100dc050000000000008c00000020a1070000000000c1c7f868",
+   "frames": [
+    {
+     "cmd": 260,
+     "seq": 54,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "00008c01e8030000a00f000020a10700a00f0000f401d0070000000001000100dc050000000000008c00000020a1070000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_status_1_26_armed",
+   "description": "GET_STATUS response, protocol 1.26 (52 bytes): ARMED (run_state SINGLE), features 0x7FF, 48 0x37 = 0x10 hold-off running, 49 0x34 = 0x22 counting + type 2 Nth edge, 50 edges still to count 2",
+   "hex": "a5130101030037000000340000002131020108002c000000000000000300000040e20100ffff12000000000014002300110000001000000002000000ff070000102202006ba3ddfa",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 55,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "020108002c000000000000000300000040e20100ffff12000000000014002300110000001000000002000000ff07000010220200"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_get_counter_read",
+   "description": "GET_COUNTER 0x0213 request (8 bytes): what 0 = read the snapshot (the other fields ignored)",
+   "hex": "a513010013023c00000008000000ed0e000000000000000069df2265",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 60,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 60,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_get_counter_config",
+   "description": "GET_COUNTER request: what 1 = configure then read: gate 3 (1 s), source 2 (CH2), level 140, hysteresis 6",
+   "hex": "a513010013023d000000080000003e490103028c060000002e66d584",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 61,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0103028c06000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 61,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0103028c06000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_counter",
+   "description": "GET_COUNTER response (24 bytes): flags NEW|VALID, seq 17, gate 2 (100 ms), source 0 (the trigger source, CH1), E 1000, T 20 000 000 clocks, W 4 000 000 (10.000000 kHz, duty 20 %), min 112, max 147, level 128, hysteresis 6, freq_mHz 10 000 000",
+   "hex": "a513010113023c0000001800000003cd03110200e8030000002d310100093d007093800680969800c04fed02",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 60,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "03110200e8030000002d310100093d007093800680969800"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_decim_peak",
+   "description": "SET_DECIM filter 4 = peak detect (flags 0)",
+   "hex": "a51301000d023e000000040000001b63040000004b4826ae",
+   "frames": [
+    {
+     "cmd": 525,
+     "seq": 62,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "04000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 525,
+     "seq": 62,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "04000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_decim_peak",
+   "description": "GET_DECIM / SET_DECIM response (36 bytes) with peak detect at divider 199: filter 4, next mode 0x81 (16-bit, K 1), shift byte 0xC0 (bit 7 peak active, bit 6 peak written, S 0), N 200, gain 1, 1 MSa/s, features 0x7FF (bits 8-10 TRIG_TYPES / PEAK / COUNTER)",
+   "hex": "a51301010c023e0000002400000059e3040081c0c80000000100000000000000c700000040420f00ff000000fe1f0000ff07000010307767",
+   "frames": [
+    {
+     "cmd": 524,
+     "seq": 62,
+     "status": 0,
+     "flags": 1,
+     "len": 36,
+     "payload": "040081c0c80000000100000000000000c700000040420f00ff000000fe1f0000ff070000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_read_raw_peak",
+   "description": "READ_RAW CH1 both cores, addr_mode 1 (capture-relative), layout 3 = peak pairs, 4 words",
+   "hex": "a513010004023f0000001000000090d0030103000000000004000000000000006e0fa384",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 63,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "03010300000000000400000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 516,
+     "seq": 63,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "03010300000000000400000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_read_raw_peak",
+   "description": "READ_RAW response, layout 3: per channel 4 minima (100 101 90 102) then 4 maxima (140 141 170 139)",
+   "hex": "a513010104023f000000180000001a8d4d00000041180020040000000303030064655a668c8daa8be7d03e5c",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 63,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "4d00000041180020040000000303030064655a668c8daa8b"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_capture_info_1_26_peak",
+   "description": "GET_CAPTURE_INFO response (112 bytes) of a peak-detect host capture at divider 199 with a pulse-width trigger: byte 68 mode 0x81, 69 shift byte 0xC0, 72 N 200, 76 run mode 0 (a single capture), 79 = 0x03 (bit 0 16-bit records, bit 1 peak), 96 type 1, 97 flags LONGER, 100 N 1500, 104 H 0, 108 hold-off 500000",
+   "hex": "a513010109024000000070000000feb04d000000140000000001d11941180000c7000000ff00008c01000000e8030000a00f0000010100000100e803b544010000800000010300000100f203e28100000081000081c00000c8000000000000030000000000000000000000000000000001010000dc0500000000000020a10700ade6ee94",
+   "frames": [
+    {
+     "cmd": 521,
+     "seq": 64,
+     "status": 0,
+     "flags": 1,
+     "len": 112,
+     "payload": "4d000000140000000001d11941180000c7000000ff00008c01000000e8030000a00f0000010100000100e803b544010000800000010300000100f203e28100000081000081c00000c8000000000000030000000000000000000000000000000001010000dc0500000000000020a10700"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
   }
  ]
 }

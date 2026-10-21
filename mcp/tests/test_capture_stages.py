@@ -24,7 +24,7 @@ def frame_payload(name: str) -> bytes:
 
 
 def test_bits_and_version():
-    assert P.PROTO_MINOR == 25
+    assert P.PROTO_MINOR >= 25
     assert P.Caps.CAPTURE_STAGES == 0x80000 and P.Features.CAPTURE_STAGES == 0x0080
     assert P.feature_names(0xFF)[-1] == "capture_stages"
     assert P.EVENT_TYPES[23] == "adc_capture"
@@ -169,7 +169,7 @@ def test_simulator_al3c(sim_factory):
     srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     d = srv.device
     with Scope.connect(srv.url) as s:
-        assert s.info.caps & P.Caps.CAPTURE_STAGES and s.info.proto_minor == 25
+        assert s.info.caps & P.Caps.CAPTURE_STAGES and s.info.proto_minor >= 25
         assert s.status().features & P.Features.CAPTURE_STAGES
         h = s.health()
         assert (h.layout, h.length, h.cap_value, h.cap_flags, h.cap_reads) == (3, 128, P.CAP_POWER_ON, P.CAPF_HAS, 0)
@@ -194,10 +194,11 @@ def test_simulator_al3c(sim_factory):
         s.capture(["CH1"])
         assert s.health().cap_reads == 4
         assert s.get_decim().ext_shift == 0  # CH1 trigger
-        d.cap_stored = (0x08DC, 0x153B)  # trained on the bitstream the scope runs
+        d.cap_stored = (0x08DC, P.FW_FPGA_VERSION)  # trained on the bitstream the scope runs
         d.cap_boot()
         c = s.get_cal(1, cached=False)
-        assert (c.cap_trailer, c.cap_stored, c.cap_stored_fpga, c.cap_value) == (1, 0x08DC, 0x153B, 0x08DC)
+        assert (c.cap_trailer, c.cap_stored, c.cap_stored_fpga, c.cap_value) == \
+            (1, 0x08DC, P.FW_FPGA_VERSION, 0x08DC)
         assert c.cap_flags == P.CAPF_HAS | P.CAPF_TRAINED
         d.cap_stored = (0x08DC, 0x153A)  # trained on another bitstream: not applied
         d.cap_boot()
