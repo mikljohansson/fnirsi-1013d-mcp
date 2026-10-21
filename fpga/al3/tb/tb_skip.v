@@ -166,12 +166,12 @@ module tb;
   endtask
 
   task capture(input [1:0] src, input integer pre, input integer tot, input integer normal, input integer edge_dir,
-               input [31:0] tmo);
+               input [31:0] tmo, input [7:0] lvl);
     begin
       wr1(8'h15, {6'd0, src});
       wr1(8'h16, edge_dir);
-      wr1(8'h17, 8'd128);
-      wr2(8'h55, 16'h8000);
+      wr1(8'h17, lvl);
+      wr2(8'h55, {lvl, 8'h00});
       wr1(8'h1A, normal);
       wr2(8'h0B, pre);
       wr2(8'h0C, tot);
@@ -249,7 +249,7 @@ module tb;
     mode = 0;
     for (nq = 0; nq < 7; nq = nq + 1) begin
       setup(0, dlist[nq]);
-      capture(2'd0, 10, 40, 0, 0, 32'd40);
+      capture(2'd0, 10, 40, 0, 0, 32'd40, 8'hFF);          // level 255: never crossed, the time-out ends the capture
       check_geometry(dlist[nq], "random data, auto time-out");
       check(ta == ((dut.w_last - 13'd40 + 13'd10) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger (stored words)");
       check(nwr >= 40 && nwr <= 44, "the time-out stops the write at 0x0E + 2 stored words (40 .. 44 words)");
@@ -262,7 +262,7 @@ module tb;
       setup(0, dlist[nq]);
       mode = 1; level = LO;
       fork
-        capture(2'd0, 10, 40, 1, 0, 32'h00FFFFFF);
+        capture(2'd0, 10, 40, 1, 0, 32'h00FFFFFF, 8'd128);
         begin
           wait (dut.sample_system_reset === 1'b1); wait (dut.sample_system_reset === 1'b0);
           #(20 * 10 * (dlist[nq] + 1) + 300);             // 20 words of LO after the release, then the step
@@ -286,8 +286,9 @@ module tb;
     mode = 1; level = LO;
     ext_en = 1; ext_v = 0;
     fork
-      capture(2'd2, 100, 200, 1, 0, 32'h00FFFFFF);
+      capture(2'd2, 100, 200, 1, 0, 32'h00FFFFFF, 8'd128);
       begin
+        wait (dut.sample_system_reset === 1'b1); wait (dut.sample_system_reset === 1'b0);
         wait (dut.sampling_half_way === 1'b1);
         #3000;
         @(posedge dut.sample_write_clock);
@@ -331,10 +332,10 @@ module tb;
     wr4(8'h0D, 32'd2);
     cur_d = 2;
     #100;
-    capture(2'd0, 10, 40, 0, 0, 32'd40);
+    capture(2'd0, 10, 40, 0, 0, 32'd40, 8'hFF);
     check_geometry(2, "after 9 -> 399 -> 2 while idle");
     setup(1, 19);                                         // K = 1 boxcar, N = 20: the filter path as before
-    capture(2'd0, 10, 40, 0, 0, 32'd40);
+    capture(2'd0, 10, 40, 0, 0, 32'd40, 8'hFF);
     lat_box = -1;
     for (k = 0; k < 40 && lat_box < 0; k = k + 1) begin
       okc = 1; cnt = 0;
