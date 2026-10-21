@@ -4,7 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-one (2026-10-20): fw 0.2.103 provisional, protocol 1.25 provisional (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
+**Branch fw-one (2026-10-20): fw 0.2.103, protocol 1.25 (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
 **Branch fw-diag (2026-10-20): fw 0.2.100, protocol 1.24 unchanged: Diagnostics Restarts tile counts crashes only (type 0 = deliberate), the noise rows use the zero step's limits (gated 1.0, full 3.0 codes, one pair of constants in adc_cal.h; the wizard's gated limit tightened from 3.0); section 66.**
 **Branch fw-floor (2026-10-20): fw 0.2.99, protocol 1.24 unchanged: Frequency response ch2_small points grey (BODE_F_BAD, mcp BAD_FLAGS) and the two-line "CH2 too small above ... kHz" note with its mcp caveat; section 65.**
 **Branch fw-arm2 (2026-10-20): fw 0.2.98, protocol 1.24 unchanged: the Frequency response engine reads its records as 0.2.96 did (0.2.97's 0x14 / cut rules counted half its captures as time-outs); section 64 addendum.**
@@ -5035,7 +5035,7 @@ mode" in the menu, FEL-load 0.2.101, and either report the error and sector numb
 Bug indicators: a refusal on the 8192 card; a backup range other than 750..2261; SD_INFO check 3 on the new image; the
 Firmware tile not OK after step 2.
 
-## 68. fw-one: one bitstream, one Average (fw 0.2.103 provisional, protocol 1.25 provisional, row 65)
+## 68. fw-one: one bitstream, one Average (fw 0.2.103, protocol 1.25, row 65)
 
 Branch `worktree-agent-aab3f2c1fc0fe37cd` (worktree) from main a02cc21 (fw 0.2.102). Brief: the two owner decisions of
 2026-10-20 (21:52 "every firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner";
