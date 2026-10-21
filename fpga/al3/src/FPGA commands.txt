@@ -62,7 +62,7 @@
 //    same record layout), but the two samples of a word are 5 ns apart instead of half a word, and the hardware counter
 //    (0x35), the capture window (0x63 / 0x36) and the encode self-check (0x33) see the full-rate stream at every rate
 //    (up to 0x153C the counter miscounted with the filter off at D > 0: bench 2026-10-21 17:53). The 0x05 ready wait is
-//    six write clocks (60 ns) at every rate. fpga/al3/README.md section 18.
+//    six write clocks (60 ns) at every rate. fpga/al3/README.md section 17, "Full-rate encodes and sample skipping".
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 //  - Gone in 0x153C (docs/plans/fpga-0x153c.md section 13, the one-bitstream rule: our firmware never wrote or read
@@ -244,7 +244,10 @@
                   4'h0:  o_mcu_data <= { stream, lap, 1'b0, W[12:8] };    //stream = 0x69 bit 0 in effect; lap: a write
                                        //overwrote the oldest unread word since the last 0x69 bit 1 (sticky, survives 0x01 = 1)
                   4'h1:  o_mcu_data <= W[7:0];     //W: the ring address after the last word written (= the next word to be
-                                       //written while streaming; frozen after a stop); word 0 of a capture is ring word 0
+                                       //written while streaming; frozen after a stop); word 0 of a capture is ring word 0;
+                                       //0x01 = 1 sets W = 0 (since 9ba3ddf: with the 60 ns ready wait no stored word need
+                                       //fall in the reset window at K = 0, D > 0, and W read the previous record's end
+                                       //until the first stored word, up to D + 1 write clocks = 2 ms at 1 kSa/s)
                   4'h2..4'h5: count[31:0]          //words written since 0x01 = 0 (memory words, high byte first, wraps at
                                        //2^32); W == count mod 8192 in every snapshot
                   4'h6..4'h7: unread[15:0]         //unread words since the reader position 0x6A: 0 .. 8192 (8192 = the ring is
@@ -612,7 +615,7 @@
 // reads 0, 0x14 is not meaningful. The MCU reads 0x38, drains [R, W) with 0x1F / 0x20..0x23 exactly as READ_RAW (one 0x1F,
 // command and dummy strobe per lane pass, split at the ring end), then writes 0x6A = the next word to read; after a lap it
 // writes 0x6A = W of a fresh 0x38 and 0x69 = 3 (the words in between are the gap). 0x01 = 1 resets the FPGA's reader
-// position, the unread count and the counter to 0 (write 0x6A only after 0x01 = 0). Power-on 0x69 = 0: the capture is
+// position, W, the unread count and the counter to 0 (write 0x6A only after 0x01 = 0). Power-on 0x69 = 0: the capture is
 // cycle-identical to 0x153C; nothing here touches it.
 
             8'h69: //Logger control, 1 byte

@@ -2752,9 +2752,95 @@ testbenches (0x1532 .. 0x1535 references) write 0x52 = 0 to the reference and a 
 random phases (it acts as EXT in the dut as in the references); tb_ext_trigger's generator check is the 100 + 100 clock
 square on the pin and its source-3 case expects an EXT trigger as up to 0x153C.
 
+#### Full-rate encodes and sample skipping (owner 2026-10-21 17:59; fpga-d3, fpga-d3b, fpga-d3c)
+
+**The change (646c453).** The write clock toggles on every falling `clk_200MHz` edge at every setting, so the four ADC
+cores are encoded at 100 MHz each, antiphase, whatever 0x0D and 0x53 say (Atlan4's divider counter, `sample_clock_enable`,
+the look-ahead `sce_q` and 0x1538's encode prediction reduce to the toggle). With K = 0 and D = 0x0D[19:0] > 0 a 20-bit
+skip counter on the write clock (`skip_cnt`, free-running like `dec_pc`, reloaded from 0x0D) stores one captured pair per
+D + 1 edges: `swc_adv = dec_on ? dec_wr : skip_adv`, `skip_adv` a register computed from the same divider sample as the
+next count (a combinational 20-bit compare missed the 10 ns write clock by 0.22 ns on the memory write enable). The word
+rate, the word order (core B before core A) and the record layout are 0x153C's; the two samples of a word are 5 ns apart
+at every rate (up to 0x153C half a divided word); a record starts at an arbitrary phase of the D + 1 cycle (the first
+word within D + 1 edges of the release), as a filtered record does. The sequencer's timestamp increment is the constant
+2 (5 ns units per 10 ns edge), the 0x05 ready wait is six write clocks = 60 ns at every rate (up to 0x153C six stored
+words: 60 us at D = 999), and the hardware counter, the outlier counters (0x36), the capture window and the encode
+self-check see the full-rate stream at every rate (the 0x153C bench: the counter miscounted 1 kHz with the filter off at
+D > 0). Firmware 0.2.105 (on main) is built against these semantics.
+
+**The W fault (9ba3ddf, found by `tb_seqcontract.v` scenario L on 646c453).** The logger's W (`p_wa`, read 0x38 bytes 0-1)
+loaded only on a stored write. With the six-word ready wait a stored write always fell inside the 0x01 = 1 window and
+loaded W with 0; with the 60 ns wait at D = 399, K = 0 none need fall there, so W kept the previous record's end while
+the count read 0 and the firmware's base W - count pointed 46 words past word 0. Fix: W also loads at a reset edge
+(`swc_rise_q & (ssr_d | (adv_d & swe_d))`, the address is 0 there). Nothing else in the logger changed.
+
+**Register audit (fpga-d3c).** Every register that loads only on a stored write (`swc_adv`, `adv_d`, `dec_wr`, `skip_adv`
+terms) was checked for a value the firmware or the design could see between the 0x05 ready and the first stored word,
+which up to 0x153C a stored write inside the reset window had set. With K >= 1 the write clock already ran at full rate
+in 0x153C, so the change is new only for K = 0 at D > 0. No other fault: every such register is reset explicitly or is
+first read after a stored write.
+
+| Register (read) | Loaded | Verdict |
+|---|---|---|
+| `sample_write_address`, `time_base_cnt`, `sampling_half_way`, `trigger_previous` / `trigger_data` | `cap_rst` resets, then stored writes | reset |
+| `sample_write_enable` (0x0A), `trigger_address` (0x14), `trigger_read_address` | `cap_rst` (and `ssr_d` for the read address) | reset |
+| `sampling_triggered` (0x18), `ext_pending` | `cap_rst200` | reset |
+| ADC qualifier (0x34), `q_hr_adc` | held in reset from `cap_rst` until the first stored word | reset |
+| logger W `p_wa` (0x38) | stored writes only | **the fault above, fixed in 9ba3ddf** |
+| logger count, occupancy, `p_wr` (0x38); reader R `rd_200` | the reset edge (one every 10 ns) / `q_rs2` | reset |
+| logger `lap` | 0x69 bit 1 only | unchanged, by the contract |
+| `ts_cap` (segment / average timestamps in 0x2B..) | every untriggered stored write, no reset | first read after a stored write: the sequencer copies it at a record's end only, and every record's first stored word loads it (`st_s` is 0 there: a trigger needs `sampling_half_way`, which needs a stored word) |
+| `ts_cnt`, `seg_base_s` / `seg_mask_s`, sequencer `q_*` (0x2A), accumulators | `sample_system_reset` / `ssr_d` / `q_rs2` | reset |
+| outlier counters (0x36), encode check (0x33) | `sample_system_reset`; every edge while writing | reset (and full rate) |
+| hardware counter (0x35), hold-off (0x37) | independent of the write path; 0x61 / 0x66 | unchanged |
+| decimator `dec_pc` / `dec_sv`, FIR and peak phase, `skip_cnt` | free-running by design | unchanged (K >= 1 had the full-rate write clock before) |
+| `w_last` (`SIM` only) | stored writes | read by the testbenches only after a capture ended |
+
+`tb_skip.v` phase 6 checks the ones that matter at the slowest K = 0 rate the firmware uses (D = 199999, 1 kSa/s): after
+a D = 1 auto record that left 0x14 = 12 and W = 42, the release is placed 1.5 ms before the skip counter's next stored
+edge and 0x14, 0x0A, 0x18, 0x38 (W, count, occupancy) read 0 and 0x34 its reset-window value before that word; after it
+0x38 reads W = 1, count 1. The check fails on the 646c453 logger (W read 42: a mutation run with the fix reverted).
+
+**Testbench changes for the full-rate encodes** (every one because the old check encoded the divided write clock):
+- `tb_skip.v` (new, run.sh step 19, `ONLY=skip`, 125 checks): the D > 0 model (every stored word is the captured pair of
+  its edge, words D + 1 edges apart at D = 1 .. 399, the first within D + 1 edges, the write clock never stops), the
+  auto time-out and 0x14 on stored words, the 0x05 ready wait of 60 ns, a CH1 step's trigger position, EXT at D = 49, the
+  counter at D = 399 with the filter off, divider changes while idle, K = 1 unchanged, the audit phase above.
+- `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_seg.v`: the K = 0 lockstep random phases run at D = 0 (the 0x1532 ..
+  0x1535 references gate their encodes at D > 0 and cannot follow the skipping), with the reference's write clock phase
+  and encode flops copied from the dut before each lockstep phase that follows a K = 0 capture at D > 0 (the dut toggles
+  from power-on, the references one cycle later); tb_decim's phase-4 resync no longer copies the removed divider
+  counter. `tb_ext_trigger.v` and `tb_decim.v` end with 12 more random K = 0 captures at D = 1 .. 9 under the phase's
+  random trigger / EXT / generator settings, checked against the model of the dut's own pair stream (the stored-word,
+  stride and first-word checks of tb_skip; the reference is out of step from there, so they run last).
+- `tb_ext_trigger.v` "CH1 2 or 3 words later than EXT at divider 49" -> the same stored word or one later (the data lag
+  is 40 ns at every rate).
+- `tb_trigpos.v` "core B half a word from core A" -> 5 ns at every rate.
+- `tb_peak.v` "the write clock runs at the divided rate again" -> one legacy word per 20 edges at full rate.
+- `tb_adccap.v` (fc367e7): T = 10 ns at every divider for the window and the B-first check, consecutive stored words D + 1
+  encodes apart, the outlier counters compared with the full-rate stream from the third edge (2082 checks).
+- `tb_counter.v`: the 10 MSa/s (divider 9) gate keeps the 200 MSa/s tolerance 3e-6 (5 ns resolution; was 2e-5 for 50 ns
+  samples).
+- `tb_encphase.v`: the monitor starts two write clocks = 20 ns after the last 0x0D / 0x53 write at every rate (was
+  (D + 1) x 20 ns).
+- `tb_seqcontract.v`: no check changed; `tb/contract_0x153D.txt` regenerated. Its K = 0, D > 0 scenarios (S, SR, A, P, T)
+  and the logger scenario L differ in the data, the timestamps and the poll counts (the samples are every (D + 1)-th
+  full-rate pair now, the ready wait is short); F (K = 1 after the K = 0 scenarios) differs in data and polls because the
+  free-running decimator phase depends on the write clock's history; head, PK, K and G are unchanged.
+
 #### Build
 
-TD 4.6.8 SP1 (`build.sh`), the pinned source (commit ecdc6f0; the bitstream of `dist/al3-0x153D.bin`): **6430 LUT (74.4 %)
+TD 4.6.8 SP1 (`build.sh`), **the pinned source since the full-rate change: commit 50b4abe** (646c453's full-rate encodes,
+9ba3ddf's W fix, the roll k4 below; the bitstream of `dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, padded `04e3328b...d0e7`;
+a rebuild of the committed source in a fresh work dir gives the same bytes): **6385 LUT (73.9 %) / 5887 reg (68.1 %) /
+7420 LE (85.9 % of 8640: 1220 LEs free)**, 48 EMB9K + 2 EMB32K (all), 2 of 3 M18x18, 60 pads; `clk_200MHz` **0 errors,
+minimum period 4.955 ns** (+0.045 ns); `sample_write_clock` 8.966 ns, `i_mcu_clk` 22.694 ns, `clkc[1]` 2.489 ns, all 0
+errors; `clkc[0]` 5 errors (the SDC artefact). `tb/capture_report.sh`: ADC capture margins at the power-on stages (worst
+bit, start / end of the valid window) CH1 A 1.48 / 4.30 (stage 4), CH1 B 1.49 / 4.29 (4), CH2 A 4.19 / 1.58 (3), CH2 B
+1.63 / 4.15 (4): >= 1.48 ns. Against the pre-full-rate pin ecdc6f0 below: -45 LUT / -24 reg / -31 LE (the divider
+counter and the encode prediction gone, the skip counter and the W term added).
+
+The pre-full-rate pin, history (commit ecdc6f0, the bitstream `11b83ce7...bca97` that was in dist before): **6430 LUT (74.4 %)
 / 5911 reg (68.4 %) / 7451 LE (86.2 % of 8640: 1189 LEs free)**, 48 EMB9K + 2 EMB32K (all), 2 of 3 M18x18, 60 pads;
 `clk_200MHz` **0 errors, minimum period 4.945 ns** (+0.055 ns); `sample_write_clock` 9.718 ns, `i_mcu_clk` 26.482 ns,
 `clkc[1]` 2.68 ns, all 0 errors; `clkc[0]` 40 (the SDC artefact of every build since 0x1532). `tb/capture_report.sh`: encode
@@ -2786,7 +2872,13 @@ helped; TD 4.6.8 has no placer seed or effort option, `create_bound` is its only
 | h2l / rdl / sql | h2 / rd / sq + the logger block before the hardware counter | -1.061 / -0.752 / -0.298 | the post-pass lane adder / `qual_ext/rem` and the ADC capture registers / a sequencer register |
 | rds / sqs / rdx | rd / sq + the logger block before the sequencer, rd + the logger block before the outlier counters | -0.217 / -0.556 / -0.673 | sequencer registers / `pp_l*` / the accumulator RAM address |
 | rdc / h2c | rd / h2 + the hardware counter block before the sequencer | -0.974 / -0.099 | the counter's registers / a sequencer register |
-| **h2x** | **h2 + the logger block before "Outlier counters" = the pinned source** | **+0.055, 0 errors** | `q_untrig` (the 0x1536 path C4's build also had as its worst) |
+| **h2x** | **h2 + the logger block before "Outlier counters" = the pinned source before the full-rate change** | **+0.055, 0 errors** | `q_untrig` (the 0x1536 path C4's build also had as its worst) |
+| fixA = c0 | 9ba3ddf (full rate + the W fix) as committed by fpga-d3b; c0 = the same with the comment edits (byte-identical) | -0.009, 1 error | an adder (`add17`) |
+| v1 / v2 / v4 / v5 / v6 / v7 / v8 / v10 (fpga-d3c) | the hold-off block before "Loading of the command register" / the hardware counter / the streaming logger / "Sampling half way detect" / "Capture of the trigger address" / "Outlier counters" / "Channel 1 DC offset" (v9, before "Display brightness", is the same bytes) / "Updating of the sample read address" | -0.289 / -0.195 / -0.574 / -0.743 / -0.464 / -0.672 / -0.303 (and `sample_write_clock` -0.43) / -0.151 | routing on old paths |
+| v3 = k1 / l1 / l2 / l3 | the logger block before the hold-off (= the counter before the logger) / before the sequencer / before "Sampling reset state" / before "Loading of the command register" | -0.298 / -1.222 / -1.351 / -0.772 | routing |
+| k2 | the hardware counter block after the hold-off (before "Sampling reset state") | +0.056, 0 errors | rejected: CH1 A capture margin 0.96 ns at its power-on stage (< 1 ns) |
+| k3 / k5 / k6 / k7 / k8 / k9 | the hardware counter block before the sequencer / "Loading of the command register" / "Capture of the trigger address" / "Segmented capture" / "Outlier counters" / "Sampling half way detect" | -0.230 / -0.051 / -0.778 / -0.650 / -1.061 / -1.047 | routing |
+| **k4** | **the MCU read-address block (between the counter and the hold-off) before the hardware counter = the pinned source 50b4abe** | **+0.045, 0 errors** | capture margins >= 1.48 ns |
 
 Lesson for the next integrator (0x153E, if the owner reopens it): at this fill expect 10 to 20 rolls; the knobs that
 re-roll TD's placement are the positions of the clk_200MHz `always` blocks (the hold-off block, the logger block, the
