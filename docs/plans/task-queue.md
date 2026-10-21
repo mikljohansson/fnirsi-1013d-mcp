@@ -288,12 +288,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fpga-d3 interim 16:2x: origin/fpga-d2 merged and stripped to the fractional square (d60a0ad, not pushed): kept 0x6C entries
+- fpga-d3 interim 16:1x: origin/fpga-d2 merged and stripped to the fractional square (d60a0ad, not pushed): kept 0x6C entries
   0 / 1, 0x6D (modes 0 / 3, idle level, start, commit), 0x50, read 0x39 reduced to RUNNING / PENDING / step / mode active;
   0x6E, 0x6F, 0x76-0x7D, read 0x42 not decoded; 0x15 = 3 is EXT again. Changed semantics: a commit is taken at once when the
   step in progress has >= 3 clocks left (D2: from the third boundary), two commits in a row both apply. Estimate +180 LUT /
   +330 reg instead of D2's +1119 / +950; build running; tb_decim got tb_fir's mem_dirty mask. Forwarded to fw-nopat.
-- Post-0.3.0 candidate (coordinator, 16:2x, owner asked what else could be compacted): a measured compaction audit on the
+- Post-0.3.0 candidate (coordinator, 16:1x, owner asked what else could be compacted): a measured compaction audit on the
   0x153D source like contract section 13: the 0x17 / 0x55 level pair, seq_raw, cycle-identical narrowings (counter min / max
   about 64 reg / 40 LUT, the logger's u32 word counter with a firmware change, the square's u32 step count: 24 bits = 6 Hz
   floor). Before 0.3.0 only if fpga-d3 cannot close timing; feature blocks (filters, FIR, sequencer) are the owner's call.
