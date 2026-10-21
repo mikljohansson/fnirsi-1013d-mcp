@@ -15,6 +15,8 @@
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
 
 //Settings sector word for the acquisition Filter setting: FPGA_SETTING_OFFSET (192) + 15, unused by 1.00o5
+#define PC_SETTING_WORD_TRIG  202   //ui-type: the trigger Type row, words 202 / 203 (marker 0xA000; trig_ui.h), the retired
+                                    //1.00o5 hold-off slots
 #define PC_SETTING_WORD_DECIM 207
 #define PC_SETTING_WORD_SPEC0 208   //fw 0.2.39: spectrum view FFT length, window, scale (0x5E00 marker)
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
@@ -98,6 +100,11 @@ uint16 pc_glue_decim_spec_setting_word(void);    //fw 0.2.64: word 212, the Spec
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
 uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (scope_save_config_data)
+//ui-type: the trigger menu's Type row (trig_ui.h; docs/plans/ui-rows.md section 2)
+uint32 pc_glue_trig_tw5(void);                   //the trigger stream's word period for the UI acquisition now, 5 ns units
+void   pc_glue_trig_ui_apply(void);              //the menu changed the row: the registers through fpga_trig_write (SET_TRIGGER2's path)
+void   pc_glue_trig_rate_check(void);            //the menu opens: the Width / Idle snapped into the rate's range, with the notice
+int    pc_glue_trig_params(void);                //1 when the menu shows the type's parameter rows (Pulse / Nth, not in Frequency response)
 
 //fw 0.2.66: the Bode plot (bode_view.c), a mode opened from the generator menu
 int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)

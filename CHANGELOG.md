@@ -48,8 +48,31 @@ CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switc
   inside menus (no FPGA access in the handler; a configuration is written by the next pass). Byte-exact with the mcp's
   `host_` vectors (mcp-c8).
 - Host tests: `test_fpga_bus` test_counter / test_counter_derive on the bus model's synthetic square waves,
-  `test_session` test_counter, `test_ui` test_counter_cards; six 1.26 counter vectors (137 total); `test_ui_diag`'s
-  mismatch texts follow `PC_FW_FPGA_VERSION` (they were literal "0x153b" since fw-c5).
+  `test_session` test_counter, `test_ui` test_counter_cards; six 1.26 counter vectors (137 total).
+#### 0.2.103 + ui-type (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 unchanged)
+
+- **Trigger type in the trigger menu** (`docs/plans/ui-rows.md` section 2; FPGA 0x153C): a sixth row "Trigger" / "type"
+  with Edge, Pulse, Nth. Under Pulse the edge row reads "Pulse" / "polarity" (Positive / Negative) and two rows follow:
+  "Width" (- / + on the 1-2-5 ladder 10ns .. 10s, only the steps the sample rate can count) and "Pulse" Shorter / Longer.
+  Under Nth: "N" (1 .. 65535 in its value box, - / + by 1, a tap opens the keypad) and "Idle" (- / +, "Off" below the
+  ladder). The menu is 336 px, 430 with the parameter rows; the waveform viewer greys the rows; Frequency response draws
+  no parameter rows and keeps "Not used by the sweep" last.
+- The Width and Idle times are kept in time across rate changes: words = round(t / Tw) from the trigger stream's word
+  period (10 (D + 1) ns legacy, N x 5 ns with the Filter, 5 ns on EXT), clamped to the FPGA's 1 .. 2^24 - 1 (Width at
+  least 2); a step the new rate cannot count snaps to the nearest it can, with "Width set to 5us for this rate" / "Idle
+  set to 5us for this rate" shown after the time/div's own notice (the notice line queues two, nothing is lost).
+- The menu arms through the SET_TRIGGER2 path (`fpga_trig_write`): GET_TRIGGER shows the menu's type, N and H; a host
+  SET_TRIGGER2 shows in the menu as the nearest ladder step and keeps its exact words until the rate changes.
+- The trigger chip's edge symbol slot shows the type's glyph: the rising / falling edge, one full pulse of its polarity,
+  two short edges and one tall. "No trigger: check the level and Width" / "No trigger: check the level and N" / "No
+  trigger: check the level, N and Idle" replace the plain hint for those types (the Spectrum's line too).
+- Settings words 202 / 203 (the retired 1.00o5 hold-off slots, marker 0xA000) hold the type, polarity bit, Width and
+  Idle steps and N; a sector without the marker reads Edge; Restore default settings resets them.
+- The Frequency response sweep arms the edge type whatever the menu holds (a qualified type would make every point
+  wait for the time-out).
+- Host tests: `test_trig_ui` (ladder, word periods, ranges at six rates, snap, steps, registers per type, host round trip,
+  settings words, the glyphs as pixels), `test_acq_view` the notice queue, `test_ui` the hints; `test_ui_diag` follows
+  the 0x153C built-for word (four 0x153B literals left by fw-c5).
 
 #### 0.2.103 + fw-c5 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 provisional, row 66)
 

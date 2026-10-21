@@ -28,6 +28,8 @@
 #include "pc_hal.h"
 #include "fpga_control.h"
 #include "scope_functions.h"
+#include "ui_ctrl.h"
+#include "fpga_bus.h"
 #include "menu.h"
 #include "pc_hooks.h"
 #include "ui_ctrl.h"
@@ -954,8 +956,12 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
   if(spec.wait && !spec.autostage && scopesettings.runstate)
     p = fmt_str(p, "Waiting for a capture at the new rate   ");
 
+  //ui-type: the hint of the trigger type armed (ui_ctrl.c, the Scope's rule)
   if(spec_untrig && scopesettings.runstate && !spec.autostage)
-    p = fmt_str(p, "No trigger: check the trigger level   ");
+  {
+    p = fmt_str(p, ui_no_trigger_hint(fpga_trig.type, fpga_trig.h ? 1 : 0));
+    p = fmt_str(p, "   ");
+  }
 
   if(p == t)
     return;

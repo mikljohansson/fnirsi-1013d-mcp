@@ -5,6 +5,7 @@ step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (version provisional), protocol 1.26 (row 66 addition, provisional): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
+**Branch ui-type (2026-10-21): fw 0.2.103 + C5 + ui-type (version provisional), protocol 1.26 unchanged: the trigger menu's Type row (Edge / Pulse / Nth with Width, Shorter / Longer, N, Idle), the chip glyph, the notice queue, the hints, settings words 202 / 203; section 72.**
 **Branch fw-c5 (2026-10-21): fw 0.2.103 + C5 (version provisional, the coordinator numbers it), protocol 1.26 (row 66, provisional): built for FPGA 0x153C (`PC_FW_FPGA_VERSION`; a scope on 0x153B shows the mismatch notice until C4's bitstream is flashed), caps bits 2 HOLDOFF / 20 TRIG_TYPES, SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112, the trigger extension registers 0x5E / 0x5F / 0x60 / 0x1B / 0x66 in fpga_bus.c with the arm-window writes; section 69.**
 **Branch fw-one (2026-10-20): fw 0.2.103, protocol 1.25 (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
 **Branch fw-diag (2026-10-20): fw 0.2.100, protocol 1.24 unchanged: Diagnostics Restarts tile counts crashes only (type 0 = deliberate), the noise rows use the zero step's limits (gated 1.0, full 3.0 codes, one pair of constants in adc_cal.h; the wizard's gated limit tightened from 3.0); section 66.**
@@ -5320,7 +5321,7 @@ runs 0x153B; the coordinator numbers the version (`PC_FW_VERSION` is still 0.2.1
   bounds, the 0x153B model); test_session `test_counter` (above); test_ui `test_counter_cards` (`ui_fmt_ps`, the rule for
   both channels and every item, the duty rounding, the registered sources). test_session's features word is 0x5FF now
   (bit 10; C6 adds bit 9). test_ui_diag's mismatch texts were literal "0x153b" since fw-c5 moved the constant (a
-  pre-existing failure of `make test`): they follow `PC_FW_FPGA_VERSION` now (the "newer" case uses the constant + 1).
+  pre-existing failure of `make test`); ui-type fixed them in parallel and the merge took its version.
   `make -s test` green (test_fpga_bus 8834 checks, test_session 72435, test_ui 1434375, test_ui_diag 12996; check_vectors
   OK against 137 vectors, the mcp's 40 `host_` ones kept by gen_vectors). GCC 10 build: no warnings in the files touched.
 - **Vectors** (gen_vectors.py: GET_COUNTER in CMDS, the one-per-command `req_get_counter`, section 5g):
@@ -5374,3 +5375,102 @@ GET_COUNTER closing a menu (F_MODAL lost in a merge).
 - The counter's min / max could feed Vmin / Vmax / Vpp through a source in scope_functions.c (the contract's list) once
   the 8-bit per-core conversion is wanted there.
 - The pass hook runs in the long (roll) time base too (harmless reads); the cards are not shown there.
+## 72. ui-type: the trigger Type row (fw 0.2.103 + C5 + ui-type, version provisional, protocol 1.26 unchanged)
+
+Branch `ui-type` (worktree) from main c432354 (fw-c5 merged). Brief: the trigger-menu part of `docs/plans/ui-rows.md`
+(section 2, the checklist items 3-7 of section 5; the ACQ Sample row is another item). Mockups `docs/mockups/ui-rows/
+TrigMenu*.png`, `ScopePulse.png`. Commits: e3352c6 (trig_ui, the pure module and its test), d67c852 (the notice queue
+and the hint), 70635b7 (the firmware: menu, touch, glue, settings, Spectrum hint, the sweep's edge arm), 84c6e2a
+(test_ui_diag's 0x153B literals), then the docs. **Nothing benched**: the coordinator numbers the version and benches.
+
+**What was built**
+- **trig_ui.c/.h** (pure, `host_tests/test_trig_ui.c`, 340 checks): the state `trig_ui` { type, longer, width_i, idle_i,
+  n }; the ladder 28 steps 10ns .. 10s as times in 5 ns units (`tui_step_t5`); the word period `tui_tw5(divider, wide,
+  ext)` = 2 (D + 1) legacy, 2 (floor(D / 2) + 1) on the 16-bit path, 1 on EXT (all 5 ns units, so 10 s and the largest
+  period fit 32 bits and `tui_words` is one 32-bit division, round half up); `tui_range` (the contiguous steps a rate can
+  arm: Width words >= 2, Idle >= 1, both <= 2^24 - 1), `tui_rate` (the chosen type's parameter clamped into it, returns
+  what moved), `tui_nearest` (a host value as a step), `tui_hw` (the registers per type), `tui_from_hw` (the host's
+  write into the state), the steps (`tui_step_width` / `_idle` with Off below the ladder / `_n`), `tui_set_n`, the
+  settings words (`tui_word0` 0xA000 | type | longer << 2 | width_i << 3 | idle_i << 8, `tui_word1` N, `tui_restore` with
+  field checks), the texts (`tui_step_text` "10ns" .. "10s", `tui_idle_text` "Off", `tui_n_text`), the glyphs
+  (`tui_glyph_rects`: 2 px strokes as fill rectangles in a 14 x 14 field). Defaults Edge, Shorter, Width 2us, N 2, Idle
+  50us.
+- **acq_view.c**: two notice slots (`acq_view_notice_queue(slot, ...)`): the time/div's (0) shows before the trigger's
+  (1), each for `ACQ_NOTICE_MS`; a new notice replaces its slot's, a time/div notice drops a pending trigger notice.
+  **ui_ctrl.c** `ui_no_trigger_hint(type, idle_on)` and `ui_warn_in.trig_type / trig_idle`.
+- **pc_hal_scope.c** (block "The trigger menu's Type row"): `pc_glue_trig_tw5()` (the divider the FPGA holds, the mode's
+  Filter setting through `pc_dec_config`, EXT from the channel row); `pc_trig_rate(tw5, notice)` derives fpga_trig's
+  n / h from the ladder step when the word period changed since the last derivation (`pc_trig_tw5_last`), snaps with
+  the notice; called at every UI arm (`pc_glue_decim_conversion`, before the sampling reset, so `fpga_trig_arm` writes
+  the words inside the window) and when the menu opens (`pc_glue_trig_rate_check`, not in roll mode). A UI edit goes
+  through `pc_trig_write` -> `fpga_trig_write(&x, 1)` (0x1B kept, 0x66 = 1 as SET_TRIGGER2) and `pc_glue_trig_ui_apply`
+  sets `display_data_done` in RUN so the next pass re-arms. `pc_hal_trig_ext_write` (the host) syncs the state with
+  `tui_from_hw`: the shared screen rule both ways; the host's exact words stay armed until the next derivation. Power-on:
+  `pc_ui_fix_settings` restores words 202 / 203 and `pc_trig_restore_apply` snaps silently and writes the registers on
+  the built-for word; `pc_glue_settings_defaults` resets to Edge (and arms when `pc_ready`). The fingerprint already
+  carried fpga_trig, so settings_seq follows UI edits. `pc_glue_trig_params()` = the parameter rows are shown (Pulse /
+  Nth, not in Frequency response).
+- **menu.c**: `scope_trigger_menu_height()` (336 + 94 with the rows + 24 in Frequency response; `TRIGGER_MENU_HEIGHT` is
+  it, `TRIGGER_MENU_SAVE_H` 432 is what the statemachine saves and restores under the menu, the type changing the height
+  inside it); `scope_draw_trigger_menu()` (the drawing, reused in place after a type change; `scope_open_trigger_menu`
+  slides it); `trig_box` (the 22 px choice box), `trig_row` (the fold-out's 44 px value row at x + 8, 204 wide: keys 30 x
+  36 at the ends, label at + 40, value right-aligned at - 40 in PALEYELLOW, the N value box 72 x 30 outlined; without
+  keys the two-state row); `scope_trigger_type_select` (Edge 65 / 44, Pulse 113 / 50, Nth 167 / 40 at y + 297, the
+  chosen in TRIGGER_COLOR), `scope_trigger_param_select` (rows at y + 334 and + 380), `scope_trigger_edge_select`
+  (Positive 66 / 62, Negative 147 / 62 under Pulse; Rising / Falling as 1.00o5 placed them), `scope_trigger_symbol(x, y,
+  color)` (the 14 x 14 slot at x + 65, y + 19 filled in the colour set, the glyph in `color`). The keypad
+  (`scope_open_keyboard_menu`) titles "TRIGGER  Set N" with MIN 1 / Default 2 / MAX 65535 and greys the prefix and sign
+  keys when `trignmenuopen`.
+- **statemachine.c**: the Type row at y + 283 .. 332 (boxes as drawn); the parameter rows at + 334 .. 378 and + 380 ..
+  424 (halves at x + 110; N's value box x + 100 .. 172 opens `handle_trigger_n_keypad`, nested as the generator's: the
+  screen under it in displaybuffer2, the number applied on OK, the current value on a touch outside or a host request,
+  closed on every way out by `close_open_trigger_menus(0)`); a type change restores the saved rect and redraws the
+  menu in place; the edge row's hit boxes widened to the polarity boxes (66 .. 128, 147 .. 209).
+- **scope_functions.c**: words 202 / 203 written; **spectrum.c**: the hint from `ui_no_trigger_hint(fpga_trig.type,
+  fpga_trig.h != 0)`; **pc_bode.c** `bh_arm`: fpga_trig.type swapped to edge around `pc_hal_arm` (restored after).
+- Host tests: test_trig_ui (above), test_acq_view `test_notice_queue`, test_ui `test_warnings` (the hints, 240 px in
+  font_3 / 209 in font_2 against the 420 px box); test_ui_diag fixed for 0x153C (fw-c5 left four 0x153B literals, CI
+  was red). `make -s test` green; GCC 10 build without warnings in the touched files.
+
+**Numbers (the note's table 2.4, as the code gives them)**: 200 MSa/s (Tw 10 ns): Width 20ns .. 100ms (2 .. 10^7 words),
+Idle 10ns .. 100ms. 1 MSa/s with the Filter (Tw 1 us): Width 2us .. 10s (2 .. 10^7 words), Idle 500ns .. 10s (500ns is
+half a word, rounded up to 1: the same rule as the note's 10us at 4 us words); legacy 1 MSa/s (Tw 2 us): Width 5us
+(3 words) .. 10s. 10 kSa/s legacy (Tw 200 us): Width 500us (3 words) .. 10s (50000 words), Idle 100us .. 10s; with the
+Filter (Tw 100 us) Width 200us .. 10s. 500 kSa/s: 10us legacy / 5us 16-bit .. 10s; 500 Sa/s: 10ms / 5ms .. 10s (2500
+words); EXT: 10ns .. 50ms (10^7 words) for both, Idle Off then 10ns (decided 6).
+
+**Decided and why**
+- The state is the ladder index, not a time in ns: the note's persistence stores indexes, the menu steps through them,
+  and a host value is shown as the nearest step (the note's rule); after a rate change the step's words replace the
+  host's exact words (kept in time by the ladder, as 2.4 says).
+- The snap runs at the UI arm, not at every rate writer: every path (rate box, zoom, SET_TIMEBASE, Filter, Sample, the
+  channel row's EXT) changes the word period, and the arm is where the words must be right; the menu's opening runs the
+  same check so stopped scopes show snapped rows. Only the chosen type's parameter snaps with a notice; the other type's
+  parameter snaps silently when it is chosen (the menu shows it then).
+- A host **timeout** type (3) has no box: the Type row shows none chosen and no parameter rows (the chip the edge
+  glyph), a tap on a box takes over; it is stored as Edge in word 202. Nothing is hidden, nothing is invented.
+- The **Nth glyph** deviates from the mockup as rendered: rows.py's one polyline at a 2 px pitch with a 2 px stroke is a
+  solid block in TrigMenuNth.png (checked pixel by pixel); the firmware draws two short rising steps with stubs three
+  pixels apart on the tall edge's baseline (test_trig_ui holds the pixels). Rise / fall / pulse+ / pulse- match the
+  PNGs pixel for pixel.
+- The menu's row labels stay white in the waveform viewer (as the five existing rows do in firmware); the mockup greys
+  them. The Rising / Falling texts keep 1.00o5's x (78 / 156) instead of centring (nothing moves without a reason).
+- The viewer shows the live `trig_ui` state: the waveform file has no trigger type (the stored trigger is the edge).
+- The sweep arms the edge type: "Not used by the sweep" would otherwise be false (every point waiting its time-out).
+
+**Bench (coordinator, FEL load)**
+1. Trigger menu: six rows, height 336; Pulse: the polarity row, Width 2us, Pulse Shorter, height 430; Nth: N 2 in its
+   box, Idle 50us; the chip's glyph per type; the viewer greys; Frequency response shows the note last and no rows.
+2. 1 kHz 20 % on CH1 at 500 kSa/s (Tw 4 us legacy): Pulse Longer, Width 100us: triggers on the trailing edge of the
+   200 us pulse; Width 500us: "No trigger: check the level and Width" in Normal. GET_TRIGGER 28 = 1, 32 = 25 words.
+3. Zoom to 200 MSa/s with Width 10s: the plot says "Width set to 100ms for this rate"; the ACQ rate box after a time/div
+   snap shows the time/div notice first, then the Width's.
+4. Nth N 3, Idle Off: the third edge after the arm; the keypad: 65535 accepted, 0 becomes 1, a host request closes it.
+5. Host SET_TRIGGER2 pulse N 1500 at 1 MSa/s with the Filter: the menu shows Width 1ms; GET_TRIGGER still 1500 until
+   a rate change.
+6. Settings saved, power cycle: the type and rows come back; Restore default settings: Edge.
+
+**Open**
+- The snap notices draw on the Scope's line only (`pc_glue_scope_warning`); the Spectrum's own line does not show them.
+- Roll mode: the - / + use the roll rate's range (the rows keep their values; nothing snaps).
+- The ACQ Sample row (ui-rows.md section 3) and the C6 / C7 items are separate.

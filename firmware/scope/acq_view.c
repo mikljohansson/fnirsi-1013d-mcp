@@ -9,8 +9,12 @@
 
 #include <string.h>
 
-static char   acq_notice_text[48];
-static uint8  acq_notice_state;                 //0 none, 1 waiting to be drawn, 2 showing since acq_notice_ms
+//ui-type (docs/plans/ui-rows.md 2.4): two notice slots, the time/div's (0) before the trigger's (1), so one change that
+//fires both ("Time/div set to 1us for this rate" from a rate box, then "Width set to 5us for this rate" from the arm
+//that follows) shows them one after the other, each for ACQ_NOTICE_MS, through the one line; nothing is lost. A new
+//notice replaces its slot's; a new time/div notice also drops a pending trigger notice (a new change replaces the queue)
+static char   acq_notice_text[2][48];
+static uint8  acq_notice_state[2];              //0 none, 1 waiting to be drawn, 2 showing since acq_notice_ms
 static uint32 acq_notice_ms;
 
 //The current rate in samples per second, 0 in long mode or out of range
@@ -231,37 +235,52 @@ int acq_view_fit(int notice)
 }
 
 //The notice: head, mid and tail joined (no libc: copied by hand), cut to the buffer; shown from the next draw
-static void acq_notice_set(const char *head, const char *mid, const char *tail)
+void acq_view_notice_queue(int slot, const char *head, const char *mid, const char *tail)
 {
   const char *part[3] = { head, mid, tail };
   uint32      i, j, k = 0;
+  char       *t = acq_notice_text[slot ? 1 : 0];
 
   for(j = 0; j < 3; j++)
-    for(i = 0; part[j][i] && (k < sizeof(acq_notice_text) - 1); i++)
-      acq_notice_text[k++] = part[j][i];
-  acq_notice_text[k] = 0;
+    for(i = 0; part[j][i] && (k < sizeof(acq_notice_text[0]) - 1); i++)
+      t[k++] = part[j][i];
+  t[k] = 0;
 
-  acq_notice_state = 1;
+  acq_notice_state[slot ? 1 : 0] = 1;
+
+  if(!slot)
+    acq_notice_state[1] = 0;
+}
+
+static void acq_notice_set(const char *head, const char *mid, const char *tail)
+{
+  acq_view_notice_queue(0, head, mid, tail);
 }
 
 const char *acq_view_notice(void)
 {
-  if(acq_notice_state == 1)
+  int slot;
+
+  for(slot = 0; slot < 2; slot++)
   {
-    acq_notice_state = 2;
-    acq_notice_ms    = timer0ticks;
+    if(acq_notice_state[slot] == 2)
+    {
+      if((timer0ticks - acq_notice_ms) < ACQ_NOTICE_MS)
+        return acq_notice_text[slot];
+
+      //Its time is up: the next slot's turn (started below when one waits)
+      acq_notice_state[slot] = 0;
+    }
+
+    if(acq_notice_state[slot] == 1)
+    {
+      acq_notice_state[slot] = 2;
+      acq_notice_ms          = timer0ticks;
+      return acq_notice_text[slot];
+    }
   }
 
-  if(acq_notice_state != 2)
-    return 0;
-
-  if((timer0ticks - acq_notice_ms) >= ACQ_NOTICE_MS)
-  {
-    acq_notice_state = 0;
-    return 0;
-  }
-
-  return acq_notice_text;
+  return 0;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -35,6 +35,8 @@
 #include "phosphor.h"
 #include "spec_fmt.h"
 #include "acal_live.h"
+#include "trig_ui.h"
+#include "bode_view.h"
 #include "ui_menu.h"
 #include "ui_settings.h"
 #include "ui_fmt.h"
@@ -63,6 +65,7 @@ static pc_session    pc_sess;
 static uint8         pc_ready;
 static uint8         pc_rtc_present;        //DS3231 answered its address at boot
 static uint16        pc_fpga_word;
+static uint32        pc_trig_tw5_last;                //ui-type: the word period fpga_trig's words were derived for (0: none yet)
 
 extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
 extern uint32        cardsectors;           //sd_card_interface.c: card size from the CSD, 0 = no card
@@ -493,6 +496,11 @@ void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
   x.h       = t->h;
   x.holdoff = t->holdoff;
   fpga_trig_write(&x, 1);
+
+  //ui-type: the shared screen: the menu shows the host's type, a width or idle time as the nearest ladder step of the
+  //rate (the host's exact words stay armed until the word period changes or the menu edits the row)
+  pc_trig_tw5_last = pc_glue_trig_tw5();
+  tui_from_hw(&trig_ui, x.type, x.longer, x.n, x.h, pc_trig_tw5_last);
 }
 
 void pc_hal_trig_status(uint8_t out[4])
@@ -766,6 +774,103 @@ void pc_glue_decim_rearm(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// The trigger menu's Type row (ui-type, docs/plans/ui-rows.md section 2; trig_ui.h). The menu keeps its Width and Idle
+// time as ladder steps (time); fpga_trig holds the words armed. The words are derived whenever the trigger stream's
+// word period changes (a rate, Filter or source change: at the UI arm that follows, or when the menu opens), the step
+// snapped into the rate's range with the notice; a host SET_TRIGGER2's exact words stay armed until then and show as
+// the nearest step (pc_hal_trig_ext_write). A UI edit writes the registers at once through fpga_trig_write, the path
+// SET_TRIGGER2 takes, so GET_TRIGGER reflects the menu and the fingerprint (settings_seq) sees both sides' changes.
+
+uint32 pc_glue_trig_tw5(void)
+{
+  pc_decim_cfg c;
+
+  pc_dec_config(&c, pc_dec_setting);
+  return tui_tw5(pc_hal_divider_now(), c.k != 0, scopesettings.triggerchannel == 2);
+}
+
+//The words for word period tw5 into fpga_trig when it changed since the last derivation: the chosen type's time
+//parameter snaps into the range (notice: "Width set to 5us for this rate" / "Idle set to ..." queued after the
+//time/div's). Edge has no words; the host's timeout keeps its own N
+static void pc_trig_rate(uint32 tw5, int notice)
+{
+  int    snap;
+  uint32 n, h;
+
+  if(tw5 == pc_trig_tw5_last)
+    return;
+
+  snap             = tui_rate(&trig_ui, tw5);
+  pc_trig_tw5_last = tw5;
+
+  if((trig_ui.type != TUI_PULSE) && (trig_ui.type != TUI_NTH))
+    return;
+
+  tui_hw(&trig_ui, tw5, &fpga_trig.type, &fpga_trig.longer, &n, &h);
+  fpga_trig.n = n;
+  fpga_trig.h = h;
+
+  if(!notice)
+    return;
+
+  if(snap == TUI_SNAP_WIDTH)
+    acq_view_notice_queue(1, "Width set to ", tui_step_text(trig_ui.width_i), " for this rate");
+  else if(snap == TUI_SNAP_IDLE)
+    acq_view_notice_queue(1, "Idle set to ", tui_idle_text(trig_ui.idle_i), " for this rate");
+}
+
+void pc_glue_trig_rate_check(void)
+{
+  //Roll mode does not use the trigger: the rows keep their values until the next armed rate (ui-rows.md 2.4)
+  if(scopesettings.long_mode)
+    return;
+
+  pc_trig_rate(pc_glue_trig_tw5(), 1);
+}
+
+//The registers for the state at the current word period: 0x5E / 0x5F / 0x60 at once, 0x1B kept (the host's hold-off is
+//not the menu's to clear) and 0x66 = 1 (a new definition is a new session, as SET_TRIGGER2)
+static void pc_trig_write(void)
+{
+  fpga_trig_ext x = fpga_trig;
+  uint32        tw5 = pc_glue_trig_tw5(), n, h;
+
+  (void)tui_rate(&trig_ui, tw5);
+  pc_trig_tw5_last = tw5;
+  tui_hw(&trig_ui, tw5, &x.type, &x.longer, &n, &h);
+  x.n = n;
+  x.h = h;
+  fpga_trig_write(&x, 1);
+}
+
+void pc_glue_trig_ui_apply(void)
+{
+  pc_trig_write();
+
+  //The next UI pass arms a fresh conversion with it (a Normal-mode wait armed with the old type would hold the screen)
+  if(scopesettings.runstate)
+    scopesettings.display_data_done = 1;
+}
+
+int pc_glue_trig_params(void)
+{
+  return ((trig_ui.type == TUI_PULSE) || (trig_ui.type == TUI_NTH)) && !bode_view_active();
+}
+
+//Power-on and Restore default settings: the state as restored or reset, the Width / Idle snapped into the rate's range
+//silently (nothing was armed yet), the registers written on the built-for bitstream only
+static void pc_trig_restore_apply(void)
+{
+  uint32 tw5 = pc_glue_trig_tw5();
+
+  (void)tui_rate(&trig_ui, tw5);
+  pc_trig_tw5_last = tw5;
+
+  if(pc_fpga_word == PC_FW_FPGA_VERSION)
+    pc_trig_write();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // Firmware auto mode (fw 0.2.41). The FPGA's auto time-out (0x0E) counts samples (the record length), so at fast rates
 // it expires in microseconds (3000 samples at 10 MS/s = 0.3 ms), before a slow signal's next edge; and 0x18 keeps
 // watching after sampling stopped, so such a record read "triggered" when an edge came between the stop and the read
@@ -799,6 +904,10 @@ void pc_glue_decim_conversion(void)
   if(!scopesettings.long_mode)
   {
     int fw_auto = ui && (scopesettings.triggermode == 0);
+
+    //ui-type: the Width / Idle time in words of this rate's trigger stream (fpga_trig, written inside the arm window)
+    if(ui)
+      pc_trig_rate(tui_tw5(pc_hal_divider_now(), c.k != 0, scopesettings.triggerchannel == 2), 1);
 
     fpga_write_cmd(0x1A);
     fpga_write_byte((scopesettings.triggermode || fw_auto) ? 0x01 : 0x00);
@@ -1031,6 +1140,11 @@ void pc_glue_settings_defaults(void)
 
   //fw 0.2.69: the Frequency response settings (words 219, 220, 213..215) back to their defaults
   bode_view_defaults();
+
+  //ui-type: the trigger Type row back to Edge (words 202 / 203); armed when the FPGA is up (the Settings screen's action)
+  tui_defaults(&trig_ui);
+  if(pc_ready)
+    pc_trig_restore_apply();
 
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
@@ -1832,6 +1946,9 @@ void pc_glue_scope_warning(void)
   w.untrig  = pc_scope_untrig;
   w.running = scopesettings.runstate ? 1 : 0;
   w.xy      = scopesettings.xymodedisplay ? 1 : 0;
+  //ui-type: the hint names the settings of the trigger type armed (ui-rows.md 2.6)
+  w.trig_type = fpga_trig.type;
+  w.trig_idle = fpga_trig.h ? 1 : 0;
 
   t = ui_scope_warning(&w);
 
@@ -2026,6 +2143,11 @@ static void pc_ui_fix_settings(void)
                              settingsworkbuffer[PC_SETTING_WORD_BODE2]);
   //fw 0.2.69: its MEASURES list (words 213..215; no marker: the defaults)
   bode_view_ms_restore(&settingsworkbuffer[PC_SETTING_WORD_BODE_MS]);
+
+  //ui-type: the trigger Type row (words 202 / 203, marker 0xA000): Edge on a sector written before it (0 there); the
+  //Width / Idle time snapped into the rate's range silently and the registers written (trig_ui.h, ui-rows.md section 4)
+  (void)tui_restore(&trig_ui, settingsworkbuffer[PC_SETTING_WORD_TRIG], settingsworkbuffer[PC_SETTING_WORD_TRIG + 1]);
+  pc_trig_restore_apply();
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)

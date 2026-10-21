@@ -539,12 +539,7 @@ static void test_stress(void)
   }
 
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  {
-    char line[80];
-
-    sprintf(line, "FPGA bitstream 0x1532: this firmware needs 0x%04x", PC_FW_FPGA_VERSION);   //the built-for constant
-    T_TRUE(has_text(line));
-  }
+  T_TRUE(has_text("FPGA bitstream 0x1532: this firmware needs 0x153c"));
   T_EQ(text_colour("FPGA bitstream 0x1532"), UD_C_WARN);
   T_TRUE(has_text("from RAM. No SD card:"));
   T_TRUE(has_text("No PC"));
@@ -899,12 +894,7 @@ static void test_fpga_mismatch(void)
   ud_build_fpga_mismatch(&pg, &in);
   check_layout("fpga mismatch", 0);
   T_TRUE(has_text("FPGA bitstream"));
-  {
-    char line[80];
-
-    sprintf(line, "This firmware needs FPGA bitstream %s.", need);                    //the built-for constant
-    T_TRUE(has_text(line));
-  }
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153C."));
   T_TRUE(has_text("This scope has 0x1532."));
   T_EQ(text_colour("This firmware needs"), UD_C_WARN);
   T_EQ(text_colour("This scope has"), UD_C_WARN);
@@ -912,7 +902,7 @@ static void test_fpga_mismatch(void)
   T_TRUE(has_text("or remove the card to run the stock firmware."));
   T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. The scope, the spectrum analyser, the frequency response and the generator do not run"));
   T_TRUE(has_text("Diagnostics shows the version word and saves a report to the card."));
-  T_TRUE(has_text(need));                                      //the constant the texts quote
+  T_TRUE(strstr(need, "0x153C") != NULL);                      //the constant the texts quote
   T_EQ(pg.nbtn, 3);
   T_EQ(ud_hit(&pg, 30, 410), UD_ID_DIAG);
   T_EQ(ud_hit(&pg, 400, 450), UD_ID_SETTINGS);
@@ -920,15 +910,10 @@ static void test_fpga_mismatch(void)
   T_EQ(ud_hit(&pg, 260, 430), UD_ID_NONE);
 
   //A newer word is a mismatch too (the next bitstream ships with its own firmware)
-  in.fpga = (uint16_t)(PC_FW_FPGA_VERSION + 1);
+  in.fpga = 0x153D;
   ud_build_fpga_mismatch(&pg, &in);
   check_layout("fpga mismatch newer", 0);
-  {
-    char line[80];
-
-    sprintf(line, "This scope has 0x%04X.", PC_FW_FPGA_VERSION + 1);
-    T_TRUE(has_text(line));
-  }
+  T_TRUE(has_text("This scope has 0x153D."));
 
   //On the Diagnostics pages of a mismatched scope nothing measures: no Calibrate, DC shift trim or Volts calibration;
   //Save report, Clear calibration, the log and FEL stay
@@ -936,12 +921,7 @@ static void test_fpga_mismatch(void)
   check_layout("mismatch status", 0);
   T_EQ(ud_hit(&pg, 20, 430), UD_ID_NONE);
   T_EQ(ud_hit(&pg, 200, 430), UD_ID_REPORT);
-  {
-    char line[80];
-
-    sprintf(line, "FPGA bitstream 0x%04x: this firmware needs 0x%04x", PC_FW_FPGA_VERSION + 1, PC_FW_FPGA_VERSION);
-    T_TRUE(has_text(line));
-  }
+  T_TRUE(has_text("FPGA bitstream 0x153d: this firmware needs 0x153c"));
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   check_layout("mismatch cal", 0);
   {

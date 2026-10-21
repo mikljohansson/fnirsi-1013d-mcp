@@ -27,6 +27,7 @@
 #include "sin_cos_math.h"
 #include "tb_view.h"
 #include "acq_view.h"
+#include "trig_ui.h"
 #include "ref_and_math.h"
 /*
 //sinx
@@ -6413,8 +6414,9 @@ void scope_save_config_data(void)
   
   *ptr++ = fpgasettings.totalsamples;
   *ptr++ = fpgasettings.settriggerpoint;
-  *ptr++ = 0;                                 //retired slots: 1.00o5 trigger hold-off enable, value (never sent to the FPGA)
-  *ptr++ = 0;
+  //ui-type: the trigger Type row in the retired 1.00o5 hold-off slots (words 202 / 203, marker 0xA000; trig_ui.h)
+  *ptr++ = tui_word0(&trig_ui);
+  *ptr++ = tui_word1(&trig_ui);
 
   //Acquisition Filter setting (decimation filter, 0x1534+) in a spare word of the FPGA block
   settingsworkbuffer[PC_SETTING_WORD_DECIM] = pc_glue_decim_setting_word();

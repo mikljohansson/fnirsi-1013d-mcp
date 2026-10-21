@@ -24,6 +24,7 @@
 #include "types.h"
 #include "variables.h"
 #include "fpga_control.h"
+#include "fpga_bus.h"
 
 //pc_hal_scope.c (fw 0.2.66)
 uint32 pc_glue_caps(void);
@@ -186,7 +187,18 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
   //record's periods to arrive)
   bh_total = bh_wide ? total : total / 2;
 
-  return pc_hal_arm(0, (uint16)bh_total, 2 * total, 0, &dc, &sq);
+  //ui-type: the sweep's captures take the edge type whatever Type the trigger menu holds ("Not used by the sweep"): a
+  //qualified type would make every point wait for the time-out. The arm writes the type registers inside its window
+  //from fpga_trig, so the copy is swapped for the call and put back (the next UI arm writes the menu's type again)
+  {
+    fpga_trig_ext keep = fpga_trig;
+    int           r;
+
+    fpga_trig.type = FPGA_TRIG_EDGE;
+    r = pc_hal_arm(0, (uint16)bh_total, 2 * total, 0, &dc, &sq);
+    fpga_trig = keep;
+    return r;
+  }
 }
 
 static int bh_poll(void *ctx)

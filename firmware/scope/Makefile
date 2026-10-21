@@ -91,6 +91,8 @@ SRCS += tb_view.c acq_view.c
 SRCS += slider_ov.c slider_ov_draw.c
 # fw 0.2.77: the Spectrum's zoom ladder, span drives the sample rate (pure C, host_tests/test_spec_zoom.c)
 SRCS += spec_ladder.c
+# ui-type: the trigger menu's Type row as data (pure C, host_tests/test_trig_ui.c)
+SRCS += trig_ui.c
 # fw 0.2.59: Diagnostics pages and the first-run screen (ui_diag.c pure, host_tests/test_ui.c), their drawing and dialogs
 # (ui_dlg.c) and the display mode (ui_diag_view.c)
 SRCS += ui_diag.c ui_dlg.c ui_diag_view.c

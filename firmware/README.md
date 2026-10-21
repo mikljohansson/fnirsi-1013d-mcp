@@ -402,8 +402,18 @@ unchanged; power-on (every register 0) is 0x153B behaviour.
   SET_TRIGGER keeps the edge type's fields, the geometry and the mode, and now accepts its `holdoff` (5 ns units).
   GET_STATUS 48..51 carries 0x37 / 0x34 read at every MAIN poll while a host capture is in flight (6 strobes), GET_CAPTURE_INFO
   96..111 the extension the capture was armed with. Caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8.
-- **Not here**: the UI's Type row (`docs/plans/ui-rows.md`, a later item, converts the menu's time to samples and
-  drives the same `fpga_trig_write`), peak detect (C6) and the counter (C7).
+- **The UI's Type row** (ui-type, `docs/plans/ui-rows.md` section 2): the trigger menu's sixth row Edge / Pulse / Nth
+  with its parameter rows (Pulse: Width on the 1-2-5 ladder 10ns .. 10s and Shorter / Longer; Nth: N 1 .. 65535 with the
+  generator's keypad, Idle with Off below the ladder; under Pulse the edge row reads Pulse polarity Positive /
+  Negative). `trig_ui.c` (pure, `host_tests/test_trig_ui.c`) keeps the times as ladder steps and converts them to words
+  of the trigger stream in 5 ns units (words = round(t / Tw), Tw = 10 (D + 1) ns legacy, N x 5 ns on the 16-bit path,
+  5 ns on EXT; Width 2 .. 2^24 - 1 words, Idle 1 ..), so a rate offers only the steps it can count and a step outside
+  the new rate's range snaps to the nearest inside it with the notice "Width set to 5us for this rate" / "Idle set to ..."
+  queued after the time/div's (acq_view.c, two notice slots). The menu writes the registers through `fpga_trig_write`,
+  the path SET_TRIGGER2 takes, and every UI arm re-derives the words when the word period changed; a host SET_TRIGGER2
+  shows in the menu as the nearest step and keeps its exact words until then. Settings words 202 / 203 (marker 0xA000)
+  hold the row; the chip's edge symbol slot shows the type's glyph; the "No trigger" hint names the type's settings. The
+  Frequency response sweep arms the edge type whatever the menu holds. Peak detect (C6) and the counter (C7) are separate.
 - **Host tests**: `test_fpga_bus.c` `test_trig_ext` (every type's write and arm sequence against `fpga_model.c`, the
   0x66 one-shot, the hold-off masking a trigger across a re-arm, released by 0x66 + arm, by 0x1B = 0 or by running out,
   the status reads), `test_session.c` `test_trigger2` (the commands, the refusals, settings_seq, the status bytes, the
