@@ -92,9 +92,7 @@ come from the FPGA's streaming logger, 200 samples per second per channel at 2 s
 100 ms/div. The trigger works as before in roll mode. Auto rolls at once. Normal and Single wait until the trigger
 channel crosses the level pointer in the chosen direction, then roll 3000 points. After that, Single stops and Normal
 waits again. EXT does not exist in roll mode: the line "No EXT trigger in roll mode: runs as Auto" says so. A capture
-or a log started from the PC stops the roll, as it stops the normal acquisition. Press RUN to roll again. Roll mode
-needs the FPGA bitstream 0x153D. On an older bitstream it stops at once and says "Roll mode needs FPGA bitstream
-0x153D" (on 0x153C the roll trace of earlier firmware was not valid).
+or a log started from the PC stops the roll, as it stops the normal acquisition. Press RUN to roll again.
 
 **CTRL page.**
 

@@ -32,63 +32,16 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### Unnumbered (provisional) - fw-roll (protocol unchanged): roll mode on the streaming logger
+#### 0.2.105 - 2026-10-21 (protocol 1.27, row 67): built for FPGA 0x153D
 
-Branch `fw-roll`, not benched, not numbered (`PC_FW_VERSION` unchanged). Needs the FPGA bitstream 0x153D. Handoff:
-`firmware/AGENTS.md` section 78.
+One firmware for bitstream 0x153D (`PC_FW_FPGA_VERSION` 0x153D; any other word shows the mismatch notice): the streaming
+logger, the generator as a fractional square, roll mode on the logger stream, three small fixes and what 0x153C dropped.
+Merged from fw-d4, fw-d5, fw-nopat, fw-roll, fw-small and fw-cruft on 2026-10-21 and numbered by fw-105 (387ef1e). The
+owner cut 0x153D's pattern generator on 2026-10-21 because it did not fit the FPGA, so SET_PATTERN, SET_PATTERN_TRIGGER
+and trigger source 3 never shipped. Not benched: the bench list is `firmware/AGENTS.md` section 80; the handoffs are
+sections 74 to 79.
 
-- **Roll mode shows real samples again, both channels, continuously** (100 ms/div to 50 s/div): every point is the
-  average of the samples of its screen column, taken from the FPGA's streaming logger (200 S/s per channel at 2 s/div and
-  slower, up to 4 kS/s at 100 ms/div). The trace scrolls with the newest point at the right edge, without the old
-  per-point wait. On 0x153C the roll trace was not valid: it read the live ADC registers 0x24 / 0x26, which that
-  bitstream removed. On a bitstream without the logger, roll mode stops with "Roll mode needs FPGA bitstream 0x153D".
-  (8e1458d, 827506f)
-- **The roll trigger is kept** (Auto rolls at once; Normal and Single wait for the trigger channel to cross the level,
-  then take 3000 points; Single then stops). The level now is the trigger pointer's level at every V/div; before it
-  matched the pointer at one setting only. EXT is not available in roll mode: it rolls as Auto and says so. (827506f)
-- **A capture or a log from the PC takes precedence over roll mode**, as over the normal acquisition: ARM and LOG_START
-  stop the roll (STOP) instead of answering E_STATE "UI long time base"; READ_RAW refuses only while the roll runs.
-  (532f8af)
-- `host_tests/check_retired_regs.py` also fails on reads 0x24..0x27, including a command byte kept in the channel
-  settings. (7ca8d78)
-
-#### Unnumbered (provisional) - fw-cruft (protocol 1.27, row 67): what the 0x153C bitstream dropped
-
-Branch `fw-cruft`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 77.
-
-- **No more 0x0F writes**: the UI and host arms and the done poll wrote 0x0F (`sample_read_enable`, a no-op mux on
-  every Atlan4 bitstream, removed in 0x153C); gone with `fpga_set_long_timebase` and `scopesettings.samplemode`.
-  `host_tests/check_retired_regs.py` (in `make test`) fails on a literal 0x0F / 0x3C / 0x41 FPGA write. (43e2b0a)
-- **READ_LIVE (0x0206) and caps bit 9 LIVE_READ retired** (never built): the code still answers E_UNSUPPORTED, the
-  bit is reserved; `req_read_live` left the vectors. (b10bc96)
-- **0x53 carries K alone**: the core-order swap (SET_DECIM flags bit 0) did nothing on 0x153C and made GET_DECIM's
-  status disagree with the FPGA's 0x29; SET_DECIM accepts flags bits 0..2 and drops them, GET_DECIM reports them 0.
-  (19618eb)
-- **Known regression, not fixed here**: the roll mode (100 ms/div and slower) reads the live ADC registers 0x24 / 0x26,
-  which 0x153C removed; the trace there is not valid on 0x153C (section 77 "Open"; fixed by fw-roll above).
-
-#### Unnumbered (provisional) - fw-small (protocol unchanged): three small fixes
-
-Branch `fw-small`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 76.
-
-- **The auto-mode deadline stops the capture at the deadline**: the forced stop (the host's and the Scope view's
-  auto-mode deadline, FORCE, the Frequency response and Average deadlines) writes 0x0E = 0 before 0x1A = 0. With an
-  explicit SET_TRIGGER `auto_timeout` it wrote 0x1A = 0 alone, the FPGA's own count (0x0E) had not expired, and the
-  record ended up to twice the deadline later; a trigger in between was reported untriggered. Host test
-  `test_fpga_bus` test_force_deadline. (53551d4)
-- **Vmax / Vmin / Vpp with Sample = Peak read the peaks**: the cards take the lowest min byte and the highest max byte of
-  the peak record, as the bars draw them (Vp too); a narrow spike showed at about half its height (the midpoint trace).
-  Vavg, Vrms, the centre the 50 % trigger level takes, Freq, Period, the widths and the duties stay on the midpoint
-  trace. Host test
-  `test_peak_bars` test_extremes. (7c3ced0)
-- **Calibration**: "ADC readout fault near code 128" now says "power-cycle and retry; report it if it persists" instead
-  of "check the FPGA bitstream" (there is one bitstream to run); `docs/guide/calibration.md` explains the message again.
-  (cee3268)
-
-#### Unreleased, provisional (fw-d4, protocol 1.27, row 67): the streaming logger for FPGA 0x153D
-
-Not numbered and not benched: needs the 0x153D bitstream (item D3); the built-for word stays 0x153C until that
-integration, and on 0x153C LOG_START answers E_FPGA detail 1.
+**The streaming logger (fw-d4).**
 
 - **Streaming logger** (contract `docs/plans/fpga-0x153c.md` item D4, section 6): LOG_START 0x0214 / LOG_READ 0x0215 /
   LOG_STOP 0x0216 log CH1 and / or CH2 as raw 8-bit samples, the filtered word's high byte, filtered 16-bit or peak
@@ -104,15 +57,9 @@ integration, and on 0x153C LOG_START answers E_FPGA detail 1.
   rates: 500 kB/s through, CPU duty 52-60 % best case, 78-82 % worst case), `test_session` test_logger; eleven 1.27
   logger vectors (151 total). (46d1bb6)
 
-#### Unnumbered (provisional) - fw-d5 / fw-nopat (protocol 1.27, row 67): the generator as a fractional square, FPGA 0x153D
+**The generator as a fractional square (fw-d5, fw-nopat).**
 
-Branches `fw-d5` and `fw-nopat`, not benched, not numbered (`PC_FW_VERSION` unchanged, still built for 0x153C until the
-0x153D integration). Needs bitstream 0x153D: on 0x153C the generator writes go to unused codes. Commits 30fe638,
-4743591 (Bode on P), 4f12433, 5e5545f (fw-d5); c7a05e3, 78fc734, 990922e (fw-nopat: the owner cut 0x153D's pattern
-generator on 2026-10-21 because it did not fit the FPGA, so SET_PATTERN, SET_PATTERN_TRIGGER and trigger source 3 never
-shipped).
-
-- The generator is a fractional two-step square on the 200 MHz clock (5 ns edges, every edge within one clock of ideal,
+- **The generator is a fractional two-step square on the 200 MHz clock** (5 ns edges, every edge within one clock of ideal,
   the mean frequency exact to 2^-16 of a clock per period); a frequency or duty change while it runs is glitch-free and
   taken at once (the step in progress completes). The DDS writes (0x51 / 0x52) are gone. The menu, the calibration
   wizard (its static levels and 1 kHz), the boot state and the Frequency response engine use it.
@@ -121,7 +68,59 @@ shipped).
   generator clock is 200 MHz; caps bit 1 is renamed GENERATOR. Caps bits 24 / 27 and features bits 12 / 13 and the
   command codes 0x0217 / 0x021A are reserved.
 - Frequency response: the stimulus period is P clocks of 5 ns (P = 4 M of the DDS era), the frequency grid four times
-  finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
+  finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2. Commits 30fe638, 4743591
+  (Bode on P), 4f12433, 5e5545f (fw-d5); c7a05e3, 78fc734, 990922e (fw-nopat).
+
+**Roll mode on the logger stream (fw-roll).**
+
+- **Roll mode shows real samples again, both channels, continuously** (100 ms/div to 50 s/div): every point is the
+  average of the samples of its screen column, taken from the FPGA's streaming logger (200 S/s per channel at 2 s/div and
+  slower, up to 4 kS/s at 100 ms/div). The trace scrolls with the newest point at the right edge, without the old
+  per-point wait. On 0x153C the roll trace was not valid: it read the live ADC registers 0x24 / 0x26, which that
+  bitstream removed. (8e1458d, 827506f)
+- **The roll trigger is kept** (Auto rolls at once; Normal and Single wait for the trigger channel to cross the level,
+  then take 3000 points; Single then stops). The level now is the trigger pointer's level at every V/div; before it
+  matched the pointer at one setting only. EXT is not available in roll mode: it rolls as Auto and says so. (827506f)
+- **A capture or a log from the PC takes precedence over roll mode**, as over the normal acquisition: ARM and LOG_START
+  stop the roll (STOP) instead of answering E_STATE "UI long time base"; READ_RAW refuses only while the roll runs.
+  (532f8af)
+- `host_tests/check_retired_regs.py` also fails on reads 0x24..0x27, including a command byte kept in the channel
+  settings. (7ca8d78)
+
+**Small fixes (fw-small).**
+
+- **The auto-mode deadline stops the capture at the deadline**: the forced stop (the host's and the Scope view's
+  auto-mode deadline, FORCE, the Frequency response and Average deadlines) writes 0x0E = 0 before 0x1A = 0. With an
+  explicit SET_TRIGGER `auto_timeout` it wrote 0x1A = 0 alone, the FPGA's own count (0x0E) had not expired, and the
+  record ended up to twice the deadline later; a trigger in between was reported untriggered. Host test
+  `test_fpga_bus` test_force_deadline. (53551d4)
+- **Vmax / Vmin / Vpp with Sample = Peak read the peaks**: the cards take the lowest min byte and the highest max byte of
+  the peak record, as the bars draw them (Vp too); a narrow spike showed at about half its height (the midpoint trace).
+  Vavg, Vrms, the centre the 50 % trigger level takes, Freq, Period, the widths and the duties stay on the midpoint
+  trace. Host test
+  `test_peak_bars` test_extremes. (7c3ced0)
+- **Calibration**: "ADC readout fault near code 128" now says "power-cycle and retry; report it if it persists" instead
+  of "check the FPGA bitstream" (there is one bitstream to run); `docs/guide/calibration.md` explains the message again.
+  (cee3268)
+
+**What the 0x153C bitstream dropped (fw-cruft).**
+
+- **No more 0x0F writes**: the UI and host arms and the done poll wrote 0x0F (`sample_read_enable`, a no-op mux on
+  every Atlan4 bitstream, removed in 0x153C); gone with `fpga_set_long_timebase` and `scopesettings.samplemode`.
+  `host_tests/check_retired_regs.py` (in `make test`) fails on a literal 0x0F / 0x3C / 0x41 FPGA write. (43e2b0a)
+- **READ_LIVE (0x0206) and caps bit 9 LIVE_READ retired** (never built): the code still answers E_UNSUPPORTED, the
+  bit is reserved; `req_read_live` left the vectors. (b10bc96)
+- **0x53 carries K alone**: the core-order swap (SET_DECIM flags bit 0) did nothing on 0x153C and made GET_DECIM's
+  status disagree with the FPGA's 0x29; SET_DECIM accepts flags bits 0..2 and drops them, GET_DECIM reports them 0.
+  (19618eb)
+
+**One bitstream (fw-105).**
+
+- No checks for a bitstream without the 0x153D features: LOG_START no longer answers E_FPGA detail 1 and roll mode no
+  longer stops with "Roll mode needs FPGA bitstream 0x153D" (another bitstream is a mismatch and refused before); a
+  stream that stops while logging still ends the log with an error (5c0ea67). The calibration wizard's "Gain calibration
+  needs the open FPGA bitstream" screen and the Frequency response's "needs FPGA 0x1534 or later" are gone: the
+  generator is always there (fb3a28a).
 
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
@@ -1627,7 +1626,7 @@ was found (commit not identified).
   (1777a67); the 0x53 swap / falling-edge flags removed (`DECIM_SWAP`, `DECIM_NEG_A` / `_B`, `DecimConfig.flags`,
   `SetDecimReq.SWAP` / `NEG_A` / `NEG_B`, the decimation result's "flags" list; the simulator drops SET_DECIM flags
   bits 0..2) (eea44e1).
-- 2026-10-21 (mcp-d6, provisional, protocol 1.27 / FPGA 0x153D, docs/plans/fpga-0x153c.md item D6; simulator only):
+- 2026-10-21 (mcp-d6, protocol 1.27 / FPGA 0x153D / fw 0.2.105, docs/plans/fpga-0x153c.md item D6; simulator only):
   the host side of the 0x153D generation, byte-exact with fw-d4's logger and fw-d5's generator vectors.
   **The generator is a fractional square**: SET_GEN's raw modes are P16 / H16 (the period and high part in 1/65536 of
   a 5 ns clock), GET_GEN 40 bytes with the square's status (`pending`: a change not yet taken), gen_clock 200 MHz, caps
@@ -1650,7 +1649,7 @@ was found (commit not identified).
   settle is the firmware's; filter 4 with the FIR bit is refused as the firmware refuses it and `set_decim('peak')`
   never sends it; the simulator's midpoint trace uses the full clock class (717ca16, 6fbd0ff). README: 35 tools in
   the default profile (6a59730).
-- 2026-10-21 (mcp-c8, provisional, protocol 1.26 / FPGA 0x153C, docs/plans/fpga-0x153c.md item C8): the host side
+- 2026-10-21 (mcp-c8, protocol 1.26 / FPGA 0x153C / fw 0.2.104, docs/plans/fpga-0x153c.md item C8): the host side
   of the 0x153C generation. Trigger types (SET_TRIGGER2, byte-exact with fw-c5: `scope_set_trigger` gains `type`
   edge / pulse_width / nth_edge / timeout, `polarity`, `width`, `longer`, `n`, `idle` in seconds converted to
   trigger-stream samples, `hold_off` in 5 ns steps; runt / window refused with the 0x153E hint), GET_TRIGGER 52 /
@@ -1663,7 +1662,7 @@ was found (commit not identified).
   `scope_info` / `scope_profile` / every tool's caveats, the stock-variant texts gone, `ui_averaging` off / mcu /
   hardware with `ui_averaging_records` for both, the EXT refusal names caps EXT_TRIGGER). The firmware's C6 / C7
   must match the peak and counter bytes (docs/mcp-tools.md names them).
-- 2026-10-20 (mcp-soft, provisional): four host-side data tools (docs/mcp-tools.md 4.3b): `scope_decode` (UART with
+- 2026-10-20 (mcp-soft): four host-side data tools (docs/mcp-tools.md 4.3b): `scope_decode` (UART with
   auto-baud, SPI, I2C; from a saved capture, the last capture, the scope's latest or a fresh one; frames with times,
   errors, a preview, the samples-per-bit caveats; `fnirsi1013d.decode`, 64f23f4, 19d6eea), `scope_mask_test` (a
   tolerance band around a reference capture or a stored mask, n captures pass / fail with the first failing sample;
