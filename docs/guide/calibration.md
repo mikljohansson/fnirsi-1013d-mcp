@@ -96,9 +96,9 @@ Diagnostics > Status shows one calibration verdict with its reason:
 | Check | Saved calibration does not match the current offsets: run Calibrate. | Run Calibrate |
 | Fault | Uncalibrated: readings may be several % off. Run Calibrate. | Run Calibrate |
 
-Below the verdict, the Status page shows per channel the gain ratio between the rates (limit 2 %) and the worst noise
-RMS with the inputs open, gated (limit 1.0 code) and at full rate (limit 3.0 code), each with OK or Check. The noise
-limits are the wizard's own pass criterion, so a calibration that passed shows OK. The provenance line says when the
+Below the verdict, the Status page shows per channel the gain difference between the two ADC cores ("Core gain split,
+A / B", limit 8.0 %) and the worst noise RMS with the inputs open (limit 3.0 code), each with OK or Check. Both
+limits are the wizard's own pass criteria, so a calibration that passed shows OK. The provenance line says when the
 calibration was taken, for example "Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."
 
 Diagnostics > Calibration shows the values per range: the offset centre, the volts factor, the zeros and gains of both

@@ -450,9 +450,9 @@ contract's section 10) drives it as follows.
   they differ from what the FPGA holds, 0x54 at every 16-bit arm as before), then 0x55 = raw << 8 with raw =
   `pc_peak_level(level, gain, off)`, the inverse of the mean-core correction below, for CH1 / CH2 (EXT: level << 8).
 - **The readout** (`pc_glue_decim_read`): the 16-bit words into `pc_dec_raw` as for the filter; then, instead of the
-  filter's scale, the **mean-core 8-bit correction in the full clock class**: `fpga_channel_correction_full` (acal_correction
-  at divider 0 plus the v4 tracking, since the ADCs run at 200 MSa/s under peak detect exactly as on the filter path; the
-  divider's own class would be the gated one) gives gain_a / gain_b / off_a / off_b, `pc_peak_gain` / `pc_peak_off` take
+  filter's scale, the **mean-core 8-bit correction**: `fpga_channel_correction` (acal_correction plus the v4 tracking; one
+  clock class since fw 0.2.105, section 6.6; 0.2.103-0.2.104 had `fpga_channel_correction_full` for the full class here)
+  gives gain_a / gain_b / off_a / off_b, `pc_peak_gain` / `pc_peak_off` take
   their means, and both bytes of every word go through code = (raw x gain + off) / 2^16. The processed trace (the screen,
   the measurements, the software trigger, READ_TRACE's 8-bit samples) takes the **corrected midpoint** `pc_peak_mid`
   (the contract's `samples` for the host; a spike shows at half its height there, the UI item's Scope bars draw the
@@ -960,7 +960,7 @@ its complement, core B the earlier sample: `PC_INTERLEAVE_ORDER` 0, now fixed) a
 
 What the firmware does (`enc_heal.c/.h` pure, `enc_heal_hw.c` target, `pc_acq_service` in pc_cmds.c for host ARM):
 - Every capture at divider 0 (200 MSa/s; always the legacy 8-bit layout) is checked before anything reads it:
-  the UI readout, the calibration wizard, the v4 class probe, the 1.00o5 calibration and auto setup (all through
+  the UI readout, the calibration wizard, the v4 class probe (up to fw 0.2.104), the 1.00o5 calibration and auto setup (all through
   `fpga_done_conversion`) and host ARM (`pc_acq_service`, before READ_RAW / READ_TRACE can see it).
 - 0x1538..0x153F: FPGA read 0x33; bit 0 set means an encode check failed since the last 0x01 = 1. One bus byte.
 - 0x1532..0x1537: the residual of 0.2.61 on the record's first 250 words per channel, read from the ring the readout
@@ -1108,7 +1108,7 @@ grey not available; the word always next to the colour).
 
 **Diagnostics** (Menu > Diagnostics) is a display mode of the main loop, not a modal screen: the main loop keeps polling
 the PC protocol (every command works, also the ones that need the main loop) and does the page's pass instead of the
-scope's (no acquisition, no scope touch handling, no clock, no class probe). The page is rebuilt from GET_HEALTH, GET_CAL,
+scope's (no acquisition, no scope touch handling, no clock). The page is rebuilt from GET_HEALTH, GET_CAL,
 GET_LINK_STATS and the card image identity and redrawn once a second ("Updates every second"). The scope screen is kept
 in `displaybuffer2`; whatever the PC changes meanwhile (and the MCP chip, the battery icon) is drawn there
 (`ui_diag_scope_buffer`, used by `pc_draw_begin`), so Back returns to the current scope screen. Header: "Diagnostics",
@@ -1131,20 +1131,21 @@ Settings screen has it; x 696 before 0.2.63).
   Calibration box: one verdict (Fault: no calibration block; Check: block not bound to the offsets, FPGA changed since
   calibration, gains not measured (stock: not possible), gains carried over, calibrated under 5 minutes after power-on,
   a value over its limit, in two lines: "A value is over its limit (below): move chargers and the USB cable away and
-  calibrate again." "If it stays, the input stage is noisy."; OK otherwise), per channel the class gain ratio full /
-  gated (limit 2 %) and the worst noise RMS over the ranges, "Noise RMS, inputs open", gated ("limit 1.0 code") and
-  full ("limit 3.0 code"), each with OK or Check. The noise rows measure the zero step's open-input condition, so their
-  limits are the zero step's pass criterion, one pair of constants (`adc_cal.h` `ACAL_MAX_NOISE16_FULL` / `_GATED`,
-  fw 0.2.100; 0.3 / 1.0 code and a "provisional" note before); the provenance sentence ("Calibrated on fw 0.2.59,
+  calibrate again." "If it stays, the input stage is noisy."; OK otherwise), per channel the core gain split
+  |G_A / G_B - 1| ("Core gain split, A / B", limit 8.0 %, the gain step's own `ACAL_GAIN_MAX_SPLIT`) and the worst
+  noise RMS over the ranges ("Noise RMS, inputs open", limit 3.0 code), each with OK or Check. The noise row measures
+  the zero step's open-input condition, so its limit is the zero step's pass criterion (`adc_cal.h` `ACAL_MAX_NOISE16`;
+  fw 0.2.100-0.2.104 had the class gain ratio full / gated, limit 2 %, and a gated noise row, limit 1.0 code; one
+  clock class since fw 0.2.105, section 6.6); the provenance sentence ("Calibrated on fw 0.2.59,
   FPGA 0x1535, 12 min after power-on, 1 power-on ago.",
   or why there is none). Buttons: Calibrate (green), Save report to card (the file name, or "Report not saved: no card",
   ... in place of the hint).
 - **Calibration**: the block state per channel and the provenance; per channel the table per hardware range (PWM centre
-  in use, amber outside 860 +- 100; volts factor in % from 1.00o5's default, amber beyond 3 %; zeros of core A / B gated
-  and full), the gains per class and core with the range they were measured on (or "carried over", "not measured"), the
-  noise ("Noise RMS, inputs open: gated 0.50, full 1.19 code", amber over a limit, then "Gated limit 1.0 code, full
-  limit 3.0 code"), the v4 tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", "Full-rate offset +0.70 code, 4 probes,
-  12 s ago", grey until they ran), the DC shift values and whether the 1.00o5 core compensations are in use. Buttons:
+  in use, amber outside 860 +- 100; volts factor in % from 1.00o5's default, amber beyond 3 %; zeros of core A / B),
+  the gains per core with the range they were measured on ("Gains A 1.0071, B 0.9940, range 1 V", or "carried over",
+  "not measured"), the noise ("Noise RMS, inputs open: 1.19 code, limit 3.0 code", amber over a limit), the v4
+  tracking ("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago", grey until it ran; the "Full-rate offset" line of the
+  class probe went in fw 0.2.105), the DC shift values and whether the 1.00o5 core compensations are in use. Buttons:
   Calibrate, DC shift trim (1.00o5's manual trim of the trace scale, `dc_shift_cal`, not saved: while on, CTRL on the
   scope opens the trim pages; was in Settings 0.2.55-0.2.56 and Other settings before; since 0.2.63 the button is green
   while on, grey while off, with "On: CTRL on the scope opens the trim." beside it only while on), Volts calibration (the 1.00o5
@@ -2309,6 +2310,9 @@ calibration's own 708/709 write: back up sectors 700-710 first):
 
 ### 6.3 Calibration data v3: per-core, per-class gain (fw 0.2.45, protocol 1.12)
 
+**Since fw 0.2.105 (FPGA 0x153D) there is one clock class (section 6.6).** What follows is the two-class design of
+fw 0.2.45-0.2.104 and its bench history.
+
 Why: the gain bench of 2026-10-18 (docs/hardware-status.md, CH1 range 2, +-1.0045 V against the shorted-input raw
 zeros) found a linear gain mismatch between the cores at full rate (A 28.62, B 27.71 codes/V, A/B 1.033) and almost
 none gated (A 28.54, B 28.42, A/B 1.004), and the full-rate class 1.1 % below the gated one. The zero-only v2 model
@@ -2515,6 +2519,10 @@ gains of a calibration taken on 0x1537 are on the wrong cores of chip 1 once 0x1
 
 ### 6.5 Calibration v4: background interleave tracking (fw 0.2.50, protocol 1.15)
 
+**Since fw 0.2.105 (section 6.6)** the class probe and its common mode cm are gone and the tracker's d / e apply to
+every 8-bit readout (it still learns from divider-0 records only). The rest of this section is the design of
+fw 0.2.50-0.2.104.
+
 Design and numbers: docs/plans/interleave-tracking.md; wire: protocol row 54 (1.15; the branch wrote it as row 53 / 1.14). Files: `acal_track.c/.h` (pure C: the
 A - B estimator and fit, the class-probe check and the apply functions; `host_tests/test_acal_track.c`), `acal_live.c/.h`
 (the per-channel state, the readout hooks, the class-probe scheduler).
@@ -2592,3 +2600,47 @@ mode subtracted, valid probes, age); grey until they ran. The bow q is in GET_CA
 4. Negative checks: a 40 MHz signal or the post square at 200 MSa/s with fast edges must not move d (records rejected or
    few pairs; `last_pairs`), a running sine must not trigger class probes (cm_age grows), opening a menu or arming a
    host single stops probes, and a probe never shows as a glitch in the trace (the screen just skips one update).
+
+### 6.6 One clock class (fw 0.2.105, FPGA 0x153D; fw-fullrate 2026-10-21)
+
+**Why.** The 0x153C counter miscounted with Filter Off at divided rates, because Atlan's K = 0 sample-skipping path gated
+the ADC encode clocks with the divider (bench 2026-10-21, docs/hardware-status.md). The owner decided (task queue
+2026-10-21 17:59) that in 0x153D the encodes always run at 200 MSa/s (100 MHz per core, antiphase). The register
+interface is unchanged: at K = 0, D > 0 the FPGA stores one pair per D + 1 write-clock edges, same rates, record layout
+and word order (B before A); the trigger compares the stored words. Every capture therefore has the full-rate zeros and
+gains, and the gated class of sections 6.2-6.5 does not exist any more.
+
+**Model** (`adc_cal.h`): per channel, core and hardware range a zero and an offset slope, per core a gain G_k; one
+`acal_correction` for every readout (8-bit at any divider, the 16-bit filter path, the C6 peak records). The A - B
+tracker (`acal_track_apply`) applies to every 8-bit readout; it learns from divider-0 records only, the evenly
+interleaved trace its neighbour interpolation assumes (at D > 0 a pair's two samples are 5 ns apart, the pairs
+(D + 1) x 10 ns). The class probe (`acal_cm_*`, `PC_CAL_CLASS_PROBE`, FPGA caller 3) is removed.
+
+**Wizard.** The centre search stays at 2 MSa/s (two coarse points, two slope points 150 counts either side, the refined
+centre; a 2 MSa/s record spans the 25 kHz offset-PWM ripple, so few conversions do); it is no longer a class. The
+calibration is the 200 MSa/s points as before: zero at the centre, slope points either side, 64 conversions each. The
+gated zero point (CAL_PROBE point 4) is not measured, the gain step measures its three levels at 200 MSa/s only. One
+noise limit, 3 codes (`ACAL_MAX_NOISE16`), also for the capture-stage training's quiet-input check at 2 MSa/s (1 code
+up to 0.2.104). Retired: ACAL_E_CLASS (11), ACAL_E_GAIN_CLASS (16) and the "gated twin" rule that turned a clip at full
+rate into ACAL_E_READOUT (19 now only means a core with no clean capture stage).
+
+**Gain scale.** `input_calibration` (the volts calibration) is fitted on the codes the gains produce. Blocks of
+fw 0.2.45-0.2.104 have full-rate gains on the gated scale (G_k = gated mean / g_k, about 1.1 % up), so with every capture
+at full rate those gains keep the old scale. A gain step since 0.2.105 sets G'_k = (G_A span_A + G_B span_B) / 2 /
+span_k with the gains in use G (1 when never measured): the cores against each other, the mean corrected span kept, so
+the volts calibration stays fitted (host model: the scale within 0.1 %, test_adc_cal). A channel that never had
+measured gains reads with the mean full-rate gain; its volts calibration was fitted on gated codes, about 1 % off, and
+wants the volts calibration again.
+
+**Storage and wire** (protocol 1.27 unchanged, docs/protocol.md row 67). The sector 708 block keeps the v3 layout and
+its two class slots: slot 0 is the calibration, slot 1 (the gated class of 0.2.45-0.2.104) is written 0. The header's
+classes field is written 1: a firmware before 0.2.105 rejects the block (`ACAL_E_VERSION`, 1.00o5 compensations)
+instead of reading zero gated values; blocks with 2 still load, slot 0 used, slot 1 ignored, no forced recalibration
+(the next Save writes classes 1). GET_CAL: 73 bit 2 reserved (0), the block's slot-1 bytes 0, 256 bits 5..6 and
+280..287 reserved (0), bit 4 = tracker applied: v3 and the 8-bit path at any divider. CAL_PROBE: point 4 never measured,
+the point and failure "class" byte is the rate (1 = 2 MSa/s, 0 = 200 MSa/s), the same values as before.
+
+**Diagnostics.** Status: "Core gain split, A / B" (limit 8.0 %) and "Noise RMS, inputs open" (limit 3.0 code) per
+channel. Calibration page: one zero column, one gains line, one noise line, no "Full-rate offset" line.
+
+**Bench** (owner, after flashing 0x153D): firmware/AGENTS.md section 83.

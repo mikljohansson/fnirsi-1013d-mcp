@@ -48,6 +48,17 @@ full step already shows at 20 MSa/s.
 From then on the calibration has two clock classes. FULL covers 200 MSa/s and every filtered capture. GATED covers
 every slower legacy rate.
 
+**2026-10-21: one class again.** The 0x153C hardware counter showed the same gating from another side: with Filter Off at
+a divided rate it miscounted, because the gated encodes sampled the input too slowly. The owner decided that in FPGA
+0x153D the ADC encodes always run at 200 MSa/s (100 MHz per core). At a divided rate with Filter Off the FPGA keeps one
+sample pair in every D + 1, so the record looks as before. Every capture now has the full-rate zeros and gains.
+fw 0.2.105 therefore merged the two classes into one. The wizard keeps its quick centre search at 2 MSa/s, but the
+calibration is the 200 MSa/s points alone. The class probe that compared the classes in the background is gone. A
+calibration saved by an older firmware still loads: its full-rate values are used and its gated values ignored. Those
+full-rate gains already carry the gated scale the volts calibration was fitted on, and a new gain step keeps that
+scale, so the volts stay right without a new volts calibration. The sections below are the history of the two-class
+design.
+
 ## Calibration v2: per-core zeros (fw 0.2.43)
 
 fw-cal built calibration v2 on 2026-10-18. The model per channel, range, core and class is a zero plus an offset slope:

@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-fullrate (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): one calibration clock class for FPGA 0x153D, whose ADC encodes run at 200 MSa/s at every rate (the gated class, its wizard steps, the class probe gone; old cards load), the host-test model of the full-rate encodes, the encode check over every capture; section 83 has the owner's bench list.**
 **Branch fw-105 (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): the merged fw-d4 / fw-d5 / fw-nopat / fw-roll / fw-small / fw-cruft numbered and built for FPGA 0x153D (`PC_FW_FPGA_VERSION`), the dead checks for a bitstream without the 0x153D features removed (LOG_START E_FPGA detail 1, `fpga_log_start` -2, roll's "needs 0x153D" stop, the wizard's CW_GAIN_NA, the Frequency response's caps test); section 80 has the owner's bench list.**
 **Branch fw-d4 (2026-10-21): fw 0.2.105 (was 0.2.104 + D4), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built for 0x153D since fw 0.2.105; section 74.**
 **Branch fw-d5 (2026-10-21): fw 0.2.105 (was 0.2.104 + D5), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M (the patterns cut by fw-nopat); fw 0.2.105 for 0x153D; section 75.**
@@ -6324,3 +6325,72 @@ waits on nothing; USB drive's loop waits on the touch only.
 2. USB drive, Exit: the notice. Diagnostics, Calibration tab, Log tab, Back: the notice, its three buttons answer.
 3. Leave the notice up for 2 minutes, then tap each button: it answers every time (the probe no longer runs).
 4. While on the notice the MCP still gets GET_INFO (76 = 0x153D, 78 = 1) and ARM answers E_UNSUPPORTED detail 1.
+
+## 83. fw-fullrate: one calibration clock class, FPGA 0x153D's full-rate encodes (fw 0.2.105, protocol 1.27 row 67)
+
+Branch `fw-fullrate` from main 895bff7 (fw 0.2.105, `PC_FW_VERSION` and `PC_FW_FPGA_VERSION` 0x153D unchanged). Brief:
+the owner's decision of 2026-10-21 17:59 (docs/plans/task-queue.md "## Firmware"): the 0x153C counter is exact at full
+rate but miscounts with Filter Off at divided rates, because Atlan's K = 0 sample-skipping path gated the ADC encodes with
+the divider; in 0x153D the encodes always run at 200 MSa/s (fpga-d3 changes the RTL). Register interface unchanged: at
+K = 0, D > 0 the FPGA stores one pair per D + 1 write-clock edges (B 5 ns before A), same geometry, rates and record
+layout; the trigger compares the stored words. fpga-d3 also confirmed: 0x33's encode check runs every clock at every
+rate (its prediction part becomes trivially true), the 0x36 outlier counters compare every write-clock edge's pair at
+every D and K, the 0x05 ready wait at slow rates is six write clocks (60 ns), the sequencer timestamp steps by 2 (5 ns
+units) per write clock. Nothing benched. Design and wire: firmware/README.md section 6.6, docs/protocol.md row 67.
+
+**Calibration: one class** (c8649f4). `adc_cal.h`: `acal_channel` is zero / slope / noise [core][range] and gain [core];
+`acal_correction` has no divider; `acal_corr.cls` is gone. The wizard (`cal_wiz_ui.c`) keeps the 2 MSa/s centre search
+(`CAL_RATE_SEARCH`: coarse points, slope points 150 counts either side, refined centre; `acal_range_meas.search16_lo/hi`,
+not stored) and stores the 200 MSa/s points (zero 64 conversions, now with 60 ms settle as the gated zero had, slopes);
+the gain step measures low / high / low at 200 MSa/s only. One noise limit `ACAL_MAX_NOISE16` (3 codes), also for the
+training's quiet-input check (1 code up to 0.2.104). Retired: `ACAL_E_CLASS` (11), `ACAL_E_GAIN_CLASS` (16),
+`acal_readout_fault` (the gated-twin rule; `ACAL_E_READOUT` is only the training's now), CAL_PROBE point 4 (never
+measured). `acal_point.rate` / `acal_fail.rate` (`ACAL_RATE_FULL` 0, `ACAL_RATE_SEARCH` 1) replace `cls`, with the same
+wire values. `fpga_channel_correction_full` is gone (the peak path takes `fpga_channel_correction`).
+
+**Gain scale (decision).** `acal_gain_store` sets G'_k = (G_A span_A + G_B span_B) / 2 / span_k with the gains in use
+(unity when never measured): the mean corrected span stays, so `input_calibration` (fitted on the gated scale by
+0.2.45-0.2.104) keeps its fit. An old block's full-rate gains already carry that scale (about 1.1 % up). A unit that
+never had measured gains reads about 1 % differently than its volts calibration was fitted on; a volts calibration
+fixes that (no firmware workaround).
+
+**Storage and wire (decision).** Layout unchanged, so no new protocol minor: the v3 block keeps its two class slots, slot
+1 written 0, header classes 1 (`ACAL_BLOCK_CLASSES`); `acal_unpack` takes classes 1 and 2 (slot 0 used): old cards keep
+their calibration, no forced recalibration, the next Save writes classes 1. Classes 1 makes a firmware before 0.2.105
+reject the block (1.00o5 compensations) instead of reading zero gated zeros and gains on a downgrade. GET_CAL 364 bytes:
+73 bit 2 reserved, the slot-1 bytes 0 (`acal_pack_channel`), 256 bits 5..6 and 280..287 reserved. `adc_cal_v3` vector
+regenerated (gen_vectors.py: classes 1, channels as [core][range]).
+
+**v4.** The class probe is removed (`acal_cm_*`, `PC_CAL_CLASS_PROBE`, `acal_live_service`, `FPGA_WHO_PROBE`, the
+"Full-rate offset" line) (5aafcdb). The tracker's d / e apply to every 8-bit readout (`acal_track_apply` needs version 3
+only); it learns from divider-0 records only (`acal_live_prepared`: `fpga_divider == 0`), the evenly interleaved trace
+its neighbour interpolation assumes. GET_CAL 256 bit 4 = v3 and the 8-bit path at any divider.
+
+**Diagnostics.** Status: "Core gain split, A / B" (|G_A / G_B - 1|, limit `UD_LIM_SPLIT_TENTHS` 8.0 %, the gain step's
+`ACAL_GAIN_MAX_SPLIT`) and "Noise RMS, inputs open" (`UD_LIM_NOISE`, 3.0 code); the class gain ratio and the gated
+noise column are gone. Calibration page: one zero column, "Gains A .., B .., range ..", "Noise RMS, inputs open: 1.19
+code, limit 3.0 code".
+
+**Counter.** No firmware condition suspected the counter at divided rates (`fpga_counter.c`, `ui_meas.c` card rule,
+`pc_glue_counter_pass`): the cards take it whenever a current result with a period holds. The rate-change rule
+(`fpga_bus_wr.wclk`) stays: whether a 0x0D write still disturbs the counter's stream on 0x153D is the bench's question.
+
+**Host-test FPGA model** (f0f1f06). `fpga_model.c`: on 0x153D's legacy path the write clock runs at 10 ns and a word is
+stored on every (D + 1)-th edge (`fm_store_edge`, `fm.wphase`); `fm.raw_words` makes the words the synthetic stream's
+pairs (`fm_fullrate_pair`: pair (D + 1) w, B sample 2p, A 2p + 1); `test_fpga_bus` `test_fullrate` checks D 0, 4, 399
+and the unchanged geometry against 0x153C. `fm.e` counts stored-word edges, so the trigger and stop rules are as before.
+
+**MCP host** (0e7a0a4): mcp/AGENTS.md "fw-fullrate".
+
+**Bench (owner, after flashing 0x153D; FEL load of this build)**:
+
+1. Calibrate with both inputs open (probes off, USB cable away from the inputs): the zero step passes on both channels,
+   then the gain steps with the probes on the post pass; Save. Diagnostics Status: OK, core gain split and noise within
+   their limits; Calibration page shows one zero column and "Gains A .., B ..".
+2. A steady level (the calibration post held static or a DC source, CH1 range 2): the trace mean and the per-core means
+   (READ_RAW or READ_TRACE odd / even) read the same codes at 200 MSa/s and at 500 kSa/s with Filter Off, within noise
+   (0.1 code); the same with CIC2 at 500 kSa/s. Before 0x153D core B dropped 3.6 codes at the divided rate.
+3. The counter with Filter Off at 500 kSa/s: the generator at 1 kHz reads 1.000 000 kHz exactly, at 1 MHz 1.000 000 MHz
+   exactly (Freq card and the host's counter result); also right after changing the time base (the rate-change rule).
+4. A card calibrated by 0.2.104 or older, before step 1: it loads (Diagnostics: calibrated, no "run Calibrate"), volts
+   on a known DC level match the 0.2.104 reading at 200 MSa/s within 0.2 %.

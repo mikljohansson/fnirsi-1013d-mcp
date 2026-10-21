@@ -140,6 +140,27 @@ sections 74 to 79.
   class probe no longer runs under the notice (it could arm conversions with an unbounded ready wait on the mismatched
   bitstream). (f08b5b1)
 
+**One calibration clock class (fw-fullrate).**
+
+- **One clock class**: FPGA 0x153D runs the ADC encodes at 200 MSa/s at every rate (owner, 2026-10-21: the 0x153C
+  counter miscounted with Filter Off at divided rates because the encodes were gated), so the calibration's gated class
+  is gone. Every readout (8-bit at any divider, the 16-bit filter path, peak) uses one set of per-core zeros, slopes and
+  gains; the A - B tracker applies at every divider (it learns from 200 MSa/s records). The wizard keeps its 2 MSa/s
+  centre search and stores the 200 MSa/s points; the gated zero point and gain levels, the "zero moves with the sample
+  rate" and "gain: clock classes" checks and the "gated twin" readout rule are gone; one noise limit, 3 codes. A gain
+  step keeps the mean corrected span of the gains in use, so the volts calibration keeps its scale. (c8649f4)
+- **Saved calibrations keep working**: a block saved by fw 0.2.45-0.2.104 loads with its full-rate values (the gated
+  ones ignored), no recalibration. The block layout is unchanged; its gated slots are written 0 and its header says one
+  class, so an older firmware falls back to the 1.00o5 compensations rather than misread it. GET_CAL keeps its 364
+  bytes: the gated fields, byte 73 bit 2 and the class probe's bytes 280..287 read 0 (protocol 1.27, row 67). (c8649f4)
+- **The class probe is removed**: the background comparison of the two classes every 30 s (fw 0.2.50) and its common
+  mode cm. (5aafcdb)
+- **Diagnostics**: the Status page shows the core gain split (limit 8 %) and one noise row (limit 3.0 code) per
+  channel; the Calibration page one zero column, one gains line, one noise line. (c8649f4)
+- **Host**: the mcp host decodes GET_CAL's one class (`Scope.scale` and `channel_scale` without `clock_class`,
+  `cal_clock_class` gone), reads sector 708 blocks with one or two classes, and the simulator has one gain per core.
+  (0e7a0a4) The host-test FPGA model runs 0x153D's write clock at 100 MHz and stores every (D + 1)-th pair. (f0f1f06)
+
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):
