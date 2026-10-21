@@ -322,9 +322,34 @@ module tb;
   reg [12:0] pre_r, tot_r;
   reg gen_on;
 
+  // fpga-d3c (0x153D): the K = 0 random phase at D > 0 as a model check (skip_mode = 1, after the last lockstep phase).
+  // The reference gates its encodes at D > 0 and cannot follow the dut, so nothing is compared with it there; instead
+  // every stored word must be the captured pair of its own write clock edge (adc*_w at that edge), consecutive words of
+  // a record exactly D + 1 edges apart and the first word within D + 1 edges of the last reset edge, under the phase's
+  // random trigger / EXT / generator settings (tb_skip.v has the directed D > 0 cases).
+  reg        skip_mode = 0;
+  reg        sm_on = 0;
+  integer    sm_d = 0, sm_edge = 0, sm_last = -1, sm_rel = 0, sm_nwr = 0, sm_valbad = 0, sm_gapbad = 0, sm_firstbad = 0;
+  integer    sm_caps = 0, sm_done = 0;
+  always @(posedge dut.sample_write_clock) begin
+    if (sm_on) begin
+      if (dut.cap_rst) begin
+        sm_last = -1; sm_rel = sm_edge;
+      end else if (dut.sample_write_enable && dut.swc_adv) begin
+        if (dut.sample_dia !== { dut.adc2B_w, dut.adc2A_w, dut.adc1B_w, dut.adc1A_w }) sm_valbad = sm_valbad + 1;
+        if (sm_last >= 0) begin
+          if (sm_edge - sm_last != sm_d + 1) sm_gapbad = sm_gapbad + 1;
+        end else if (sm_edge - sm_rel > sm_d + 1)
+          sm_firstbad = sm_firstbad + 1;
+        sm_last = sm_edge; sm_nwr = sm_nwr + 1;
+      end
+      sm_edge = sm_edge + 1;
+    end
+  end
+
   task random_phase(input integer iterations);
     begin
-      eq_on = 1; bus_cmp_on = 1;
+      eq_on = !skip_mode; bus_cmp_on = !skip_mode;
       for (it = 0; it < iterations; it = it + 1) begin
         rnd = $random(seed);
         // configuration through the MCU bus exactly as firmware would
@@ -332,7 +357,8 @@ module tb;
         wr1(8'h16, {7'd0, rnd[1]});                       // edge
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));         // level
         wr1(8'h1A, {7'd0, rnd[2]});                       // auto / normal
-        wr4(8'h0D, 32'd0);                                // 0x153D: K = 0 is compared with the reference at 200 MSa/s only (the
+        sm_d = skip_mode ? 1 + rnd[5:4] + (rnd[3] ? 5 : 0) : 0;   // fpga-d3c: D 1 .. 9 in skip_mode
+        wr4(8'h0D, sm_d);                                 // 0x153D: K = 0 is compared with the reference at 200 MSa/s only (the
                                                           // dut stores every (D + 1)-th full-rate pair at D > 0, the reference
                                                           // gates its encodes: tb_skip.v checks D > 0 against a model); rnd[5:4]
                                                           // was the divider 0 .. 3 up to 0x153C
@@ -364,17 +390,20 @@ module tb;
           join_none
         end else
           ext_en = 0;
+        sm_on = skip_mode;
         start_capture;
         wait_done(100000);                                // 0x153D: an EXT capture with the pin driven (pattern off) never
                                                           // triggers and runs to its time-out (up to 1.8 ms at divider 9)
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
-        bus_cmp_on = rnd[2];
+        sm_on = 0;
+        if (skip_mode) begin sm_caps = sm_caps + 1; sm_done = sm_done + done; end
+        bus_cmp_on = rnd[2] & !skip_mode;
         rd2(8'h14);
         rd1(8'h18);
         if (!rnd[2] && !rd_d[0])
           check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
-        bus_cmp_on = 1;
+        bus_cmp_on = !skip_mode;
         wr2(8'h1F, {3'd0, rnd_ptr[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
@@ -679,6 +708,16 @@ module tb;
     random_phase(10);
     $display("phase 3: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after EXT use, CH1/CH2 again identical to Atlan4 0x1532");
+
+    // fpga-d3c: K = 0 at D = 1 .. 9 under the random settings, against the model of the dut's own pair stream (the
+    // reference is out of step from here on, so this runs last)
+    skip_mode = 1;
+    random_phase(12);
+    skip_mode = 0;
+    $display("skip phase: %0d captures (%0d done), %0d stored words, %0d not the pair of their edge, %0d gaps other than D + 1 edges, %0d first words late",
+             sm_caps, sm_done, sm_nwr, sm_valbad, sm_gapbad, sm_firstbad);
+    check(sm_done == sm_caps && sm_nwr > 0 && sm_valbad == 0, "K = 0, D > 0 (random settings): every stored word is the captured pair of its write clock edge");
+    check(sm_gapbad == 0 && sm_firstbad == 0, "K = 0, D > 0 (random settings): words D + 1 edges apart, the first within D + 1 edges of the release");
 
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");
     $finish;

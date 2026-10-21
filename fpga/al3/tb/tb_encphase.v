@@ -106,7 +106,7 @@ module tb;
 
   integer cur_k = 0, cur_d = 0, polls;
 
-  task settle_window(input integer d);                  // 2 write clock periods (D + 1) x 10 ns, then monitor
+  task settle_window(input integer d);                  // 2 write clock periods (D + 1) x 10 ns, then monitor (0x153D: D = 0 always)
     begin
       #(20 * (d + 1) + 20);
       mon_on = 1;
@@ -141,7 +141,8 @@ module tb;
       wr2(8'h0C, 16'd60);
       wr4(8'h0E, 32'd100);
       wr1(8'h01, 8'h00);
-      settle_window(kk ? 0 : d);
+      settle_window(0);                                 // 0x153D: the write clock runs at 100 MHz at every divider, so two
+                                                        // write clocks are 20 ns at every rate (up to 0x153C (D + 1) x 20 ns with K = 0)
       #(10 * 40 * ((kk ? 0 : d) + 1));                  // 40 write clock periods with the monitor on
       mon_on = 0;
       if (has33) begin

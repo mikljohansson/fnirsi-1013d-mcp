@@ -152,6 +152,10 @@ module tb;
   // the firmware's arm (pc_hal_arm), the capture and its bookkeeping
 
   integer done, polls, ta, i, j, k, w, okc, cur_d, rel_edge, ready_polls, gaps, gapbad, valbad, xcr;
+  reg [7:0] a6 [0:7];                       // phase 6 reads
+  reg [7:0] q6 [0:2];
+  reg [7:0] r6 [0:2];
+  reg [7:0] b6 [0:1];
   real    t_rel, t_done;
 
   task setup(input integer kk, input integer d);
@@ -355,6 +359,52 @@ module tb;
     gapbad = 0;
     for (i = 1; i < nwr; i = i + 1) if (wedge[i] >= 0 && wedge[i - 1] >= 0 && wedge[i] - wedge[i - 1] != 10) gapbad = gapbad + 1;
     check(nwr > 0 && gapbad == 0, "K = 1 at D = 19: one word per P = 10 write clocks as before");
+
+    // 6. (fpga-d3c register audit) what the firmware can read between the 0x05 ready and the first stored word at the
+    // slowest K = 0 rate it uses (D = 199999, 1 kSa/s). Up to 0x153C the 0x05 wait was six stored words at every
+    // rate, so registers loaded only on a stored write saw one inside the reset window; now the wait is 60 ns and the
+    // first word comes up to D + 1 edges (2 ms) after the release. After a D = 1 auto record that left them non-zero,
+    // the release is placed 1.5 ms before the skip counter's next stored edge, and 0x14, 0x0A, 0x18, 0x38 (W, count,
+    // occupancy) and 0x34 (the ADC qualifier) are read before that word: they must read their reset values (0x34 the
+    // value it reads inside the 0x01 = 1 window); after the first word 0x38 must read W = 1, count 1.
+    setup(0, 1);
+    capture(2'd0, 10, 40, 0, 0, 32'd40, 8'hFF);
+    wr_cmd(8'h38); for (k = 0; k < 8; k = k + 1) begin rd_byte; a6[k] = rd_d; end
+    $display("  audit: the D = 1 record left 0x14 = %0d, W = %0d, count %0d", ta, {a6[0][4:0], a6[1]}, {a6[2], a6[3], a6[4], a6[5]});
+    check(ta != 0 && {a6[0][4:0], a6[1]} != 0, "audit: the previous record left 0x14 and W non-zero");
+    wr4(8'h0D, 32'd199999); cur_d = 199999;
+    wr1(8'h15, 8'd0); wr1(8'h16, 8'd0); wr1(8'h17, 8'hFF); wr2(8'h55, 16'hFF00); wr1(8'h1A, 8'd0);
+    wr2(8'h0B, 16'd10); wr2(8'h0C, 16'd40);
+    wr1(8'h01, 8'h01);
+    wr_cmd(8'h05); polls = 0; rd_byte;
+    while (rd_d[0] !== 1'b1 && polls < 100000) begin rd_byte; polls = polls + 1; end
+    wr2(8'h0B, 16'd10); wr2(8'h0C, 16'd40); wr1(8'h5E, 8'h00); wr4(8'h0E, 32'd40);
+    wr_cmd(8'h34); for (k = 0; k < 3; k = k + 1) begin rd_byte; q6[k] = rd_d; end
+    wait (dut.skip_cnt == 150000);
+    for (i = 0; i < 8192; i = i + 1) wedge[i] = -1;
+    nedge = 0; nwr = 0; mon = 1;
+    wr1(8'h01, 8'h00);
+    rel_edge = nedge; t_rel = $realtime;
+    rd2(8'h14); ta = rd16 & 8191;
+    rd1(8'h0A); b6[0] = rd_d;
+    rd1(8'h18); b6[1] = rd_d;
+    wr_cmd(8'h38); for (k = 0; k < 8; k = k + 1) begin rd_byte; a6[k] = rd_d; end
+    wr_cmd(8'h34); for (k = 0; k < 3; k = k + 1) begin rd_byte; r6[k] = rd_d; end
+    $display("  audit at D = 199999, %0.0f ns after the release, %0d words stored: 0x14 %0d, 0x0A %0d, 0x18 %0d, W %0d, count %0d, occ %0d, 0x34 %h%h%h (in the window %h%h%h)",
+             $realtime - t_rel, nwr, ta, b6[0][0], b6[1][0], {a6[0][4:0], a6[1]}, {a6[2], a6[3], a6[4], a6[5]}, {a6[6][5:0], a6[7]},
+             r6[0], r6[1], r6[2], q6[0], q6[1], q6[2]);
+    check(nwr == 0, "audit: the reads came before the first stored word");
+    check(ta == 0 && b6[0][0] == 0 && b6[1][0] == 0, "audit: 0x14 = 0, 0x0A = 0, 0x18 = 0 before the first stored word at D = 199999");
+    check({a6[0][4:0], a6[1]} == 0 && {a6[2], a6[3], a6[4], a6[5]} == 0 && {a6[6][5:0], a6[7]} == 0,
+          "audit: 0x38 W = 0, count 0, occupancy 0 before the first stored word at D = 199999");
+    check(r6[0] == q6[0] && r6[1] == q6[1] && r6[2] == q6[2], "audit: 0x34 reads its reset-window value before the first stored word");
+    wait (nwr > 0);
+    #100;
+    wr_cmd(8'h38); for (k = 0; k < 8; k = k + 1) begin rd_byte; a6[k] = rd_d; end
+    $display("  audit: first word %0.3f ms after the release; then W %0d, count %0d", ($realtime - t_rel) / 1.0e6, {a6[0][4:0], a6[1]}, {a6[2], a6[3], a6[4], a6[5]});
+    check({a6[0][4:0], a6[1]} == 1 && {a6[2], a6[3], a6[4], a6[5]} == 1, "audit: after the first stored word 0x38 reads W = 1, count 1");
+    mon = 0;
+    wr1(8'h01, 8'h01); wr4(8'h0D, 32'd0); #200; wr1(8'h01, 8'h00); #200;
 
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");
     $finish;

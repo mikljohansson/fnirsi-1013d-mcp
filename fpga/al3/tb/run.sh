@@ -67,8 +67,11 @@
 #      and consecutive words are D + 1 edges apart (the write clock toggles every 10 ns at every rate), the auto time-out,
 #      0x14, the 0x05 ready wait and a CH1 step's trigger position on the stored words, EXT at D = 49, the hardware counter
 #      with the filter off at D = 399 (E, T, duty exact: the 0x153C bench miscount), divider changes while idle, K = 1 as
-#      before. The K = 0 random phases of steps 1, 2, 4 and 6 run at D = 0 since 0x153D (the references gate their
-#      encodes at D > 0 and cannot model the skipping); this step holds the D > 0 coverage.
+#      before, and (fpga-d3c's register audit) at D = 199999 (1 kSa/s) 0x14, 0x0A, 0x18, 0x38 and 0x34 read their reset
+#      values between the 0x05 ready and the first stored word after a record that left them non-zero, then 0x38 W = 1.
+#      The K = 0 lockstep random phases of steps 1, 2, 4 and 6 run at D = 0 since 0x153D (the references gate their
+#      encodes at D > 0 and cannot model the skipping); steps 1 and 2 end with 12 more random K = 0 captures at D = 1 .. 9
+#      checked against the model of the dut's own pair stream instead (the reference is out of step after them).
 # Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter|stream|square|skip runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
