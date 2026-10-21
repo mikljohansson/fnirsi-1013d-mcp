@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_sta
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h $(SRC)/gen_pat.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll
 
 $(OUT):
 	mkdir -p $@
@@ -133,6 +133,11 @@ LOG_SRCS := fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/fpga_log
 $(OUT)/test_log: test_log.c test_util.h $(LOG_SRCS) fpga_model.h $(SRC)/fpga_bus.h $(SRC)/fpga_log.h $(SRC)/pc_logring.h | $(OUT)
 	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_log.c $(LOG_SRCS)
 
+# fw-roll: the roll mode's plan, columns, record and trigger (roll.c), and end to end on the model's 0x153D stream
+ROLL_SRCS := fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/fpga_log.c $(SRC)/pc_logring.c $(SRC)/roll.c
+$(OUT)/test_roll: test_roll.c test_util.h $(ROLL_SRCS) fpga_model.h $(SRC)/fpga_bus.h $(SRC)/fpga_log.h $(SRC)/pc_logring.h $(SRC)/roll.h | $(OUT)
+	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_roll.c $(ROLL_SRCS)
+
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
 
@@ -190,6 +195,7 @@ test: all
 	$(OUT)/test_trig_ui
 	$(OUT)/test_peak_bars
 	$(OUT)/test_log
+	$(OUT)/test_roll
 	$(OUT)/test_seq
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu
