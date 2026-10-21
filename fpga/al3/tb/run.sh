@@ -161,14 +161,15 @@ if [ "$ONLY" = all ] || [ "$ONLY" = trigtypes ]; then
   vvp -n "$WORK/tb_trigtypes.vvp" +seed=$SEED +runs=${TRIGTYPES_RUNS:-2} +logfile="$WORK/trigtypes.log" | grep -v '^  intent' | tee "$WORK/sim_trigtypes.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigtypes.log" || RC=1
 fi
-if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
-  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
-  vvp -n "$WORK/tb_counter.vvp" +seed=$SEED | tee "$WORK/sim_counter.log"
-  grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
 if [ "$ONLY" = all ] || [ "$ONLY" = peak ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_peak.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_peak.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_peak.vvp" +seed=$SEED | tee "$WORK/sim_peak.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_peak.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_counter.vvp" +seed=$SEED | tee "$WORK/sim_counter.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
