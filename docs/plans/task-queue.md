@@ -276,6 +276,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-c8 (Opus, dispatched 04:32, done 06:1x, merged 06:2x as the commit after c432354): protocol 1.26 on the host; Trigger2
+  byte-identical to fw-c5; peak detect and GET_COUNTER wire formats from the contract (sent to fw-c6 / fw-c7 to match:
+  SET_DECIM filter 4, shift-byte bits 7/6, mode 0x81, READ_RAW layout 3 = minima then maxima per channel, GET_CAPTURE_INFO
+  79 bits 1/0, E_STATE 7; GET_COUNTER 0x0213 request 8 B with what = configure, response 24 B with level / hysteresis /
+  freq_mHz); tools scope_set_trigger types, scope_counter (tier 0 read / 1 configure), scope_capture(peak=true),
+  report kinds; simulator TrigQual port, hold-off, peak records, counter; 131 vectors; fw-one leftovers done; 520 tests.
 - fw-c6 / fw-c7 / ui-type (Opus, dispatched 05:12-05:13, branches of the same names): C6 firmware peak detect (SET_DECIM
   mode 4, READ_RAW layout 3, the refusals, fpga_model, features bit 9, caps bit 21), C7 firmware counter (boot 0x61/0x62,
   the once-per-pass 0x35 reader, the cards' sources, GET_COUNTER / SET_COUNTER, features bit 10, caps bit 22), the trigger
