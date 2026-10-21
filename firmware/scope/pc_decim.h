@@ -65,12 +65,13 @@
                                         //at K >= 1; 0x53 bits 3 / 4 inert, written 0)
 
 //Filter setting of new settings (no valid settings word, or the DEFAULT button), per mode since fw 0.2.64 (owner,
-//2026-10-19): the Scope trace defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot pulses on a square wave),
-//the Spectrum to CIC2 + FIR (flat passband, alias rejection 78-83 dB on 0x1535). On bitstreams without the FIR the bit is
-//ignored (pc_dec_mode_eff) and the setting acts as CIC2. Change them here only. PC_DECIM_DEFAULT_OLD is the single
-//default of 0.2.44..0.2.63, used to migrate their settings sectors.
-#define PC_DECIM_DEFAULT_SCOPE  (PC_DECIM_CIC2)
-#define PC_DECIM_DEFAULT_SPEC   (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)
+//2026-10-19: the Scope trace without the FIR, whose 6-9 % step overshoot pulses on a square wave; the Spectrum with it,
+//flat passband and the most alias rejection). Since fw-acqui (2026-10-21) the defaults are two of the Filter box's three
+//modes (ui_ctrl.h UI_FILTER_*), so a fresh scope's box never shows a mode it cannot step back to: the Scope Hi-Res (the
+//boxcar, no overshoot; was CIC2), the Spectrum Anti-alias (CIC3 + FIR; was CIC2 + FIR). Change them here only.
+//PC_DECIM_DEFAULT_OLD is the single default of 0.2.44..0.2.63, used to migrate their settings sectors.
+#define PC_DECIM_DEFAULT_SCOPE  (PC_DECIM_BOXCAR)
+#define PC_DECIM_DEFAULT_SPEC   (PC_DECIM_CIC3 | PC_DECIM_SET_FIR)
 #define PC_DECIM_DEFAULT_OLD    (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)
 
 //FIR eligibility: N >= 16 (the 15-tap FIR needs N/2 write clocks per output) and N a multiple of 4

@@ -410,7 +410,7 @@ static void ui_config(uint8 set, uint32_t divider, uint32_t total, pc_decim_cfg 
 static void test_decim_calls(void)
 {
   pc_decim_cfg c;
-  uint8        cic2 = PC_DECIM_DEFAULT_SCOPE, cic2fir = PC_DECIM_CIC2 | PC_DECIM_SET_FIR;
+  uint8        cic2 = PC_DECIM_CIC2, cic2fir = PC_DECIM_CIC2 | PC_DECIM_SET_FIR;
 
   //Scope, CIC2 at 1 MSa/s (divider 99 -> N 100): Peak arms peak detect, K 1, no FIR, the window N
   T_EQ(ui_acq_decim_set(cic2, 1, 0), cic2 | PC_DECIM_SET_PEAK);

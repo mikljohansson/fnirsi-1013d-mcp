@@ -2393,6 +2393,10 @@ static void test_acq_filter(void)
     T_EQ((s = ui_filter_next(s)), UI_FILTER_ANTIALIAS);
     T_EQ((s = ui_filter_next(s)), UI_FILTER_OFF);
   }
+
+  //The defaults are among the three (a fresh scope's box never shows a host mode)
+  T_EQ(PC_DECIM_DEFAULT_SCOPE, UI_FILTER_HIRES);
+  T_EQ(PC_DECIM_DEFAULT_SPEC, UI_FILTER_ANTIALIAS);
 }
 
 static void test_acq_row(void)
