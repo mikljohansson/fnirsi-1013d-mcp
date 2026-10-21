@@ -486,7 +486,7 @@ void fm_ptrig_event(void)
   fm.ptrig_events++;
 
   if(((src == 1) || (src == 2)) && fm.pat_mode && !fm.pat_run)
-    fm_pat_start(fm_clk() + 4);                             //20 ns after the event clock (fpga-d2)
+    fm_pat_start(fm_clk() + 6);                             //30 ns after the event clock (fpga-d2, tb_pattern)
 
   if(!(fm.ptrig[7] & 2))
     fm.ptrig[7] &= (uint8_t)~1;
@@ -541,7 +541,7 @@ static void fm_pat_write(uint8_t cmd)
           fm_pat_set_level(fm_pat_idle(), now + 1);
       }
       else if(!fm.pat_run && ((mode == 3) || ((v & 0x10) && (src != 1))))
-        fm_pat_start(now + 7);                                //step 0 about 35-40 ns after the strobe (fpga-d2)
+        fm_pat_start(now + 8);                                //step 0 40..45 ns after the strobe (fpga-d2, tb_pattern)
       else if(!fm.pat_run)
         fm_pat_set_level(fm_pat_idle(), now + 1);
       break;

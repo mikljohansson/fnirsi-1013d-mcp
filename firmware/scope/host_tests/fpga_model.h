@@ -51,8 +51,8 @@
 //     generator on the 5 ns clock grid, event-driven per step: 0x6C entries (0 and 1 double-buffered: a write goes to
 //     the shadow, 0x6D bit 5 commit makes them pending; the engine prefetches two steps ahead (fpga-d2 after the first
 //     build), so a commit during step k is taken at the boundary into k + 1 (pending 0 from there) and gives old k,
-//     k + 1 and k + 2, new from k + 3; a start takes the pending shadows before step 0, which begins 4 clocks after the
-//     start is seen: about 35 ns after a 0x6D strobe, 20 ns after an engine event), one 16-bit fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only),
+//     k + 1 and k + 2, new from k + 3; a start takes the pending shadows before step 0, which begins after the
+//     start is seen: 40..45 ns after a 0x6D strobe, 30 ns after an engine event, as tb_pattern measured), one 16-bit fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only),
 //     bursts (mode 1 one, mode 2 R with R - 1 gaps, mode 3 continuous with a gap after each), the idle level, mode 0
 //     stopping at once, a start bit or a mode-3 write starting an idle engine (ignored while it runs), 0x6E R (0 =
 //     65536), 0x6F gap, 0x50 the pin driver, the marker (the first clock of a mark step: 0x39 byte 3 bit 1 until 0x01 = 1;
