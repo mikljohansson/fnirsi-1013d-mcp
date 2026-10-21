@@ -3,6 +3,12 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
+State on 2026-10-21 (fpga-d1, branch `fpga-d1`):
+- fpga-d1 (2026-10-21, branch `fpga-d1`): **0x153D item D1**, the streaming logger (0x69 stream / clear lap, 0x6A reader
+  position, read 0x38 = 8-byte snapshot: stream, lap, W, words written, unread 0 .. 8192 with a full detector) in
+  `src/zaklad.v` (the two gates in the capture logic, the block "Streaming logger" after the counter) and `tb/tb_stream.v`
+  (run.sh step 17), `FPGA commands.txt`, README section 16. Version byte still 0x3B (D3 sets 0x3D). Semantics agreed with
+  fw-d4 (merged). Section "0x153D D1 logger, fpga-d1" below. **Not built for dist, not flashed.**
 State on 2026-10-21 (fpga-c4, branch `fpga-c4`):
 - fpga-c4 (2026-10-21, branch `fpga-c4`): **0x153C built and simulated, not flashed**: C0 cruft removal + div20 (-206 LUT
   against the merged baseline), version byte 0x3C, the post-pass lane adders in one stage and the hold-off block placed for
@@ -383,6 +389,85 @@ Decimation filter (0x1534), open items:
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
 
+## 0x153D D1 logger, fpga-d1 (2026-10-21)
+
+Brief (coordinator): item D1 of `docs/plans/fpga-0x153c.md` section 10: the streaming logger registers 0x69 (stream on,
+clear lap) and 0x6A (reader position), read 0x38 (8-byte snapshot), the `stream` gating of the capture logic, the word
+counter, the lap detection; `tb/tb_stream.v` as run.sh step 17; `src/FPGA commands.txt`; README "Changes" section 16 (C2 took 14, C4 15 in the merges). RTL
+and testbench only; no version byte change (D3), no dist, no flash. Branch `fpga-d1` from main 55e5f6b (C1 + C3 merged;
+C2's peak detect and D2's pattern generator are not on this branch). fw-d4 (the logger firmware) was told the semantics
+as built on 2026-10-21 and adopted them (`fpga_model.c` on branch `fw-d4` models the occ detector).
+
+**What is in `src/zaklad.v`** (+161 lines): the header bullet; declarations after C1's `wire ho_act` (`str`, `lc_t`, `rd_hi`,
+`log_rd`, `rd_t`, `l_req`, `str_q` / `str_200`, `str_s`); the two capture-logic lines D1 owns: `assign sampling_enable =
+str_s | ~(...)` (one new term in front of the unchanged expression) and `trigger_check_enable` with `& ~str_200` appended
+after C1's `& ~ho_act`; the block "Streaming logger" after the counter's `m_*` snapshot block (the `l_req` toggle on
+`i_mcu_clk`, the one write-clock flop `str_s`, the clk_200MHz bookkeeping `p_*` / `lg_*` / `occ` / `lap` / `rd_200` and the
+snapshot `l_*`); the decoder cases 0x69 and 0x6A appended after C3's 0x62; the read case 0x38 appended after C3's 0x35;
+one line each in the `mcu_state` lists (0x6A write, 0x38 read, commented "0x153D logger"). The write address block is
+unchanged (the logger reads the address through the snapshot instead of adding a counter there).
+
+**Semantics as built** (README section 16 has the full map; deviations from the contract are listed there and were
+agreed with fw-d4): 0x69 bit 0 stream (the write never stops, no trigger is accepted, both through synchronised copies of
+the bit: `str_s` on the write clock into `sampling_enable`, `str_200` on clk_200MHz into `trigger_check_enable`), bit 1
+clear lap (a toggle into clk_200MHz); 0x6A = the next ring word the MCU reads (13 bits, whole on the low byte, a toggle
+into clk_200MHz; 0x01 = 1 forces the FPGA's copy to 0); read 0x38 = { stream, lap, 0, W[12:8] } (one reserved bit: the
+contract's three do not fit 13 address bits), W[7:0], u32 words written since 0x01 = 0, u16 unread 0 .. 8192. The lap
+detector is a **full detector**: `occ` = unread words, loaded with (W - R) mod 8192 at a 0x6A write, +1 per written word,
+saturating at 8192; a write at 8192 while streaming sets `lap`; the contract's literal "a write lands on R" would flag a
+false lap after every complete drain (R = W). W = the address after the last word written (frozen after a stop), equal to
+the counter mod 8192 in every snapshot. 0x69 = 0 hands the capture back to the 0x153B rules at the next write clock edge
+(auto mode with 0x0E = 0: the write stops, 0x14 = W, the tail drains; normal mode: runs on until a trigger). The lap flag
+survives 0x01 = 1 (only 0x69 bit 1 clears it, contract). Latencies: a word written at edge E is counted from E + 12.5 ns;
+R takes effect 15 .. 20 ns after the 0x6A low byte; the stream bit within 15 ns + one write clock (write it before
+0x01 = 1).
+
+**Design pattern** (for D2 / D3): the write clock is read only through the sequencer's settled snapshot (`swc_rise_q`
+with `adv_d`, `swe_d`, `ssr_d`, `sample_write_address`), one pipeline stage later the counters update, so W and the count
+are consistent at every clk_200MHz edge and the 0x38 copy (the 0x35 toggle pattern) never tears. Nothing is added to the
+write clock domain but one flop (`str_s`) and one OR term; nothing to the half-cycle compare path but the `~str_200`
+AND beside `~ho_act`.
+
+**Tests**: `tb/tb_stream.v` (step 17, `ONLY=stream`): **757 checks, 0 errors, PASS on seeds 12345 and 4242** (README
+section 16 lists the seven case groups with the measured rates: 100.02 Mwords/s at D 0 and K 1 D 1, 498.7 kwords/s at D 199,
+the three contract tiers 250.8 / 248.3 / 124.6 kwords/s with the reader keeping up at 300 ns strobes, the lap exactly at
+word R + 8192 at 100 and 5 Mwords/s, the empty ring, stop, restart). **Full `tb/run.sh`, 17 steps, ALL PASS on seeds 12345
+(13793 s) and 4242 (13414 s)**, started 09:50 and finished about 13:40 on 2026-10-21 on the WSL shared with fpga-c4 and fpga-d2
+(hence the time): ext 39, decim 98 + cic_model 1876 / 1873, fir 163 / 165 + cic_model 1612 / 1638, long 8, seg 53 + seg_model
+22, trigpos 882, contract 12 (= contract_0x153B.txt), encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85,
+trigtypes 1293, counter 115, stream 757; every equivalence phase 0 mismatches. The source of the runs is commit 9607b13 (the
+RTL) with ed8b9d4 (the tb); the one-chunk smoke runs (516 checks) passed on both seeds too (378 s / 595 s). **Merge with
+origin/main at c5ecf09** (fpga-c2's peak detect, 50cbc71): `zaklad.v` auto-merged (C2's blocks and mine touch no common
+line), conflicts only in `run.sh` (usage line, step headers), `FPGA commands.txt` (header bullets) and the README (C2 took
+section 14, the logger is section 16), resolved "keep both, theirs first"; on the merged source the stream step (516 checks,
+`STREAM_CHUNKS=1`, seed 12345) and the ext equivalence step (39 checks, seed 4242) pass; the full 17-step run above is the
+pre-merge source, as C1's was (D3's integration run repeats every step on the merged 0x153D source anyway).
+
+**Build**: TD 4.6.8 SP1 headless (`~/d1/td/b2`, this branch = C1 + C3 + logger, version byte 0x3B): **6208 LUT (71.9 %) / 5363
+reg / 6977 LE**, block RAM and M18x18 unchanged: **+129 LUT / +186 reg / +155 LE** over the merged C1 + C3 build (6079 / 5177 /
+6822). `FPGA.bin` sha256 `5c4b51a8...8083`. `clk_200MHz` **4 setup errors, 5.383 ns (-0.383 ns)**, all on C3's `c_mx > k_mx`
+compare into the min / max register enable (an existing path, the lottery; not chased, as briefed); `sample_write_clock`
+9.498 ns, `i_mcu_clk` 22.3 ns, `clkc[1]` 2.434 ns 0 errors, `clkc[0]` 62 (SDC artefact). Build b1 (one 32-bit increment for
+the word counter) missed by 0.979 ns on that counter's carry chain (37 endpoints): a 32-bit +1 in one 200 MHz clock does
+not fit this device at 72 %; the counter is two 16-bit halves with a registered carry since (D2 / D3: keep adders on
+clk_200MHz at 16 bits or pipeline them).
+
+**For D3 (integration)**: the merge with D2 conflicts only where both append (the decoder after 0x62, the read mux after
+0x35, the `mcu_state` lines, run.sh's header / usage line / last step block, `FPGA commands.txt`, README section numbers:
+D1 = 15, C2 = 14, so D2 takes 16); keep both, either order. `tb_stream.v` accepts 0x06 = 0x153B .. 0x153D. Step 17 takes about
+15 min per seed. Bench items 8 and 9 of the contract's 9.2 are the logger's.
+
+**For fw-d4 / D6**: the arm and drain sequences the tb runs are the ones fw-d4 described (README section 16 "Arm"); after
+a lap resync with 0x6A = W of a fresh 0x38 and 0x69 = 3; the firmware's own loss rule (count > consumed + 8192) agrees
+with the lap bit.
+
+**Commands**: `wsl -d <distro> -- bash <launcher>` writing a small script that exports `REF_SRC_DIR=$HOME/g11/refs
+SIM_WORK=$HOME/d1/sim-<name> ONLY=stream` and `exec`s `tb/run.sh <seed>`, started with `setsid nohup bash <script> > log
+2>&1 < /dev/null &` (the first attempt with `setsid nohup env ... bash run.sh ... &` inline died when the wsl call
+returned; the script indirection survived); `STREAM_CHUNKS=1` for a quick run. The TD build of a Windows worktree: copy
+`build.sh`, `build.tcl`, `src/` to a WSL directory and run `bash ./build.sh <workdir>` there (`SRC_REV` needs WSL git).
+Logs read from Windows through `//wsl.localhost/<distro>/home/<user>/d1/logs/`. The worktree guard refuses heredocs that
+also contain git commands and compound git commands: one git command per call, commit messages from a file.
 ## 0x153C built, fpga-c4 (2026-10-21)
 
 Brief (coordinator): items C0 (cruft removal, folded into C4 after the three merges) and C4 (integration, build, contract)
