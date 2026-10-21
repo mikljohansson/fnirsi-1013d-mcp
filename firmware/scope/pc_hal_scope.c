@@ -138,10 +138,8 @@ void pc_hal_channel_read(int ch, pc_hw_channel *c)
   c->adc_a_rawavg    = s->adc1rawaverage;
   c->adc_b_rawavg    = s->adc2rawaverage;
   c->cal2_loaded     = adc_cal_loaded;
-  c->divider         = fpga_divider;
   c->cal2            = adc_cal[ch ? 1 : 0];
   c->trk             = acal_trk[ch ? 1 : 0];
-  c->cm              = acal_cms[ch ? 1 : 0];
 }
 
 void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
@@ -758,7 +756,7 @@ static uint16 pc_dec_level16(const pc_decim_cfg *c, uint8 chan, int32 level)
     {
       acal_corr k;
 
-      fpga_channel_correction_full(chan ? &scopesettings.channel2 : &scopesettings.channel1, &k);
+      fpga_channel_correction(chan ? &scopesettings.channel2 : &scopesettings.channel1, &k);
       raw = pc_peak_level((uint8)level, pc_peak_gain(k.gain_a, k.gain_b), pc_peak_off(k.off_a, k.off_b));
     }
 
@@ -790,7 +788,7 @@ static void pc_dec_apply(const pc_decim_cfg *c)
     //scale and its corr16 zero term, so the level sits where the corrected trace shows it (it ignored both before,
     //about 1 % level error at full rate). EXT has no samples: the plain conversion.
     //C6 peak detect: the FPGA compares the window max (rising) or min (falling) as the high byte, so 0x55 = raw << 8 with
-    //the raw code whose mean-core full-class correction (pc_glue_decim_read's) gives the UI level
+    //the raw code whose mean-core correction (pc_glue_decim_read's) gives the UI level
     fpga_set_decim_level(pc_dec_level16(c, scopesettings.triggerchannel, (int16)scopesettings.triggerlevel));
 
     //(K + 2) output periods, (K + 10) N x 5 ns + 1 us with the FIR; timer0 ticks are 1 ms, + 1 for the partial tick
@@ -1050,16 +1048,15 @@ void pc_glue_decim_read(void *settings, uint32 start)
   if(pc_dec_cur.peak)
   {
     //C6 peak record: each word = { max (high byte), min (low byte) } raw codes from either core. Both go through the
-    //mean of the two cores' 8-bit corrections in the full clock class (the ADCs run at 200 MSa/s here, as on the filter
-    //path; fpga_channel_correction_full), and the trace takes the corrected midpoint (the host's READ_TRACE too; the
-    //pairs stay in pc_dec_raw for READ_TRACE WIDE and the Scope view's bars). Overload rule: either byte at a rail
-    //(pc_peak_overload; fpga_read_adc_data's own check sees the midpoint only)
+    //mean of the two cores' 8-bit corrections (fpga_channel_correction), and the trace takes the corrected midpoint
+    //(the host's READ_TRACE too; the pairs stay in pc_dec_raw for READ_TRACE WIDE and the Scope view's bars). Overload
+    //rule: either byte at a rail (pc_peak_overload; fpga_read_adc_data's own check sees the midpoint only)
     acal_corr k;
     uint32    gain;
     int32     off;
     uint8     ov = 0;
 
-    fpga_channel_correction_full(s, &k);
+    fpga_channel_correction(s, &k);
     gain = pc_peak_gain(k.gain_a, k.gain_b);
     off  = pc_peak_off(k.off_a, k.off_b);
 
@@ -1081,7 +1078,7 @@ void pc_glue_decim_read(void *settings, uint32 start)
     return;
   }
 
-  //Into the 8-bit trace domain with the readout's full-class correction (adc_cal.h): gain16 folded into the scale, corr16
+  //Into the 8-bit trace domain with the readout's correction (adc_cal.h): gain16 folded into the scale, corr16
   //added (each output sample weighs both cores equally for even N). fpga_read_adc_data then passes the codes through
   //unchanged (unity gain, no offset for a 16-bit readout)
   scale = acal_scale(pc_dec_cur.scale_q24, s->gain16);
@@ -2790,14 +2787,6 @@ void pc_glue_ui_service(void)
   pc_right_bar_follow();
   pc_dec_follow_mode();
   pc_run_follow();
-
-  //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
-  //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host
-  //holds the UI off the ring (READ_RAW hold). Never on a mismatched bitstream (fw-diag): the notice screen runs instead
-  //of the scope and the probe's arms wait on the FPGA without a bound
-  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) && !ui_diag_active() && !pc_glue_fpga_mismatch() &&
-                    (!pc_ready || (!pc_sess.ui_hold && (pc_sess.acq_state != PC_ACQ_ARMED) &&
-                                   (pc_sess.acq_state != PC_ACQ_TRIGGERED))));
 }
 
 //fw 0.2.52 (pc_diag.c): the session for the report, the DS3231 for the calibration provenance

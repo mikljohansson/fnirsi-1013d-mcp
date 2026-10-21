@@ -132,9 +132,12 @@ int fpga_encode_after_capture(void)
   int      bad, rearm;
   int      mode = eh_capture_mode(eh_st.mode, fpga_bus_wr.since_reset);
 
-  //Full rate only (divider 0 is always the legacy 8-bit layout). A UI averaging run leaves lane sums in the ring, not
-  //samples: the data check cannot read it (the flag covers the whole run, unless a rate write came during it)
-  if((fpga_divider != 0) || ((mode == EH_MODE_DATA) && pc_seq_ui_running()))
+  //The flag check covers every capture (fw-fullrate: on 0x153D the encodes run at 200 MSa/s at every rate and filter,
+  //and the FPGA checks them on every clock, fpga-d3 2026-10-21). The data check only at divider 0 (always the legacy
+  //8-bit layout): it interpolates core B between its core A neighbours, which are 5 ns away only there (at D > 0 the
+  //pairs are (D + 1) x 10 ns apart, at K > 0 the words are 16-bit). A UI averaging run leaves lane sums in the ring, not
+  //samples: the data check cannot read it either (the flag covers the whole run, unless a rate write came during it)
+  if((mode == EH_MODE_DATA) && ((fpga_divider != 0) || pc_seq_ui_running()))
     return 0;
 
   //The record as fpga_do_conversion set it up and the UI reads it: the 0x0B words before 0x14

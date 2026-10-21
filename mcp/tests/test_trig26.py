@@ -507,30 +507,22 @@ def test_peak_config_matches_the_firmware_vectors():
         assert got.tolist() == k["mids"], k
 
 
-def test_peak_volts_use_the_full_clock_class(sim_factory):
-    """fw-c6: a peak record's two bytes come from the 200 MSa/s stream, so the full class's correction applies while
-    GET_CAL at a divider > 0 reports the gated class (CAL_GATED, gain_a .. off_b). The host converts layout 3 with the
-    full class: 0.25 V reads 0.25 V where the gated class would be codes off, and the scope's midpoint trace (the full
-    correction, pc_peak_mid) agrees with the host's codes."""
-    unit = dict(zero_error=((-3.0, -5.0), (1.0, 2.0)), gated_zero_shift=((-0.8, -3.6), (0.4, -1.0)),
-                core_gain=(((1.020, 0.988), (1.002, 0.998)), ((0.995, 1.010), (1.0, 1.0))), noise_lsb=0.8)
-    s, srv = _scope(sim_factory, signal="dc:v=0.25", cal_v3=True, v4=((0.6, 0.002, 0.0, 0.4), (0.0, 0.0, 0.0, 0.0)),
-                    **unit)
+def test_peak_volts_use_the_calibration(sim_factory):
+    """fw-c6: a peak record's two bytes come from the 200 MSa/s stream; since fw 0.2.105 (one calibration class) the
+    correction GET_CAL reports at a divider > 0 is the one the peak path applies. 0.25 V reads 0.25 V on a unit whose
+    cores differ in zero and gain, and the scope's midpoint trace (pc_peak_mid) agrees with the host's codes."""
+    unit = dict(zero_error=((-3.0, -5.0), (1.0, 2.0)), core_gain=((1.016, 0.984), (0.995, 1.005)), noise_lsb=0.8)
+    s, srv = _scope(sim_factory, signal="dc:v=0.25", cal_v3=True, v4=((0.6, 0.002, 0.0), (0.0, 0.0, 0.0)), **unit)
     try:
         s.set_timebase(divider=19)
         s.set_trigger(total_samples=4000, pretrigger_samples=100, mode=0)
         s.set_decim("peak")
-        cal = s.get_cal(0, cached=False)
-        assert cal.cal_flags & P.CAL_GATED and s.current_clock_class() == P.CAL_CLASS_FULL
         cap = s.capture(["CH1"], timeout_s=2)
         c = cap.channels["CH1"]
-        assert cap.peak and "full clock" in c.scale.source
+        assert cap.peak and c.scale.source.startswith("scope calibration v3")
         lsb = c.volts_per_lsb
         assert abs(float(c.volts.mean()) - 0.25) / lsb < 0.3
         assert float(c.min_volts.mean()) < 0.25 < float(c.max_volts.mean())
-        gated = s.scale(0, c.config, P.CAL_CLASS_GATED)
-        mid_raw = (c.min_codes.astype(float) + c.max_codes) / 2
-        assert abs(float(gated.volts_mean_raw(mid_raw).mean()) - 0.25) / lsb > 1.0
         _hdr, data = s.read_trace(["CH1"])
         assert abs(float(data[0][1].astype(float).mean()) - float(c.codes.mean())) < 0.5
     finally:

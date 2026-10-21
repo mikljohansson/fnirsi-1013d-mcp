@@ -1071,15 +1071,15 @@ static void test_cal_battery_pattern(void)
   T_EQ(r.p[256], 0); T_EQ(r.p[257], 0);
   T_EQ(pc_get_u16(r.p + 258), 0); T_EQ(pc_get_u32(r.p + 260), 0); T_EQ(pc_get_u32(r.p + 264), 0);
   T_EQ(pc_get_u32(r.p + 268), 0xFFFFFFFFu); T_EQ(pc_get_u32(r.p + 272), 0);
-  T_EQ(pc_get_u16(r.p + 280), 0); T_EQ(pc_get_u16(r.p + 282), 0); T_EQ(pc_get_u32(r.p + 284), 0xFFFFFFFFu);
+  T_EQ(pc_get_u16(r.p + 280), 0); T_EQ(pc_get_u16(r.p + 282), 0); T_EQ(pc_get_u32(r.p + 284), 0);
 
-  //v3 block bound to the PWM centres, gains never measured: per-core zeros at the gated clock, dcoffset 100 (v2 numbers)
+  //v3 block bound to the PWM centres, gains never measured: per-core zeros, dcoffset 100 (v2 numbers). One clock class
+  //since fw 0.2.105: the same correction at every divider, flags bit 2 (the gated class in use) never set
   {
     pc_hw_channel *c = &mock.ch[1];
     uint32_t j, k;
 
     c->cal2_loaded = 1;
-    c->divider     = 199;
     c->dcoffset    = 100;
     c->range       = 3;
     for(j=0;j<ACAL_RANGES;j++)
@@ -1087,25 +1087,23 @@ static void test_cal_battery_pattern(void)
       c->cal2.pwm[j] = c->cal_offset[j];
       for(k=0;k<2;k++)
       {
-        c->cal2.zero[ACAL_FULL][k][j]  = (int16_t)(k ? 2067 : 2107);
-        c->cal2.zero[ACAL_GATED][k][j] = (int16_t)(k ? 2010 : 2094);
-        c->cal2.slope[ACAL_GATED][k][j] = (int16_t)(k ? -17026 : -17308);
-        c->cal2.slope[ACAL_FULL][k][j]  = (int16_t)(k ? -17026 : -17308);
-        c->cal2.noise[ACAL_GATED][k][j] = (uint8_t)(10 + k);
+        c->cal2.zero[k][j]  = (int16_t)(k ? 2010 : 2094);
+        c->cal2.slope[k][j] = (int16_t)(k ? -17026 : -17308);
+        c->cal2.noise[k][j] = (uint8_t)(10 + k);
       }
     }
     acal_gain_carry(0, &c->cal2);
 
     r = req(PC_CMD_GET_CAL, "", 1);
     T_EQ(r.len, PC_CAL_RESP_LEN);
-    T_EQ(r.p[72], 3); T_EQ(r.p[73], 1 | 2 | 4);
+    T_EQ(r.p[72], 3); T_EQ(r.p[73], 1 | 2);
     //T = 128 - 100 x 100 / 385 = 103; A: 2094 + round(-17308 x 100 / 4096) = 2094 - 423 = 1671, to 1648: -23 sixteenths
     T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9);
     //B: 2010 - 416 = 1594, to 1648: +54 = 3 codes + 6
     T_EQ((int16_t)pc_get_u16(r.p + 76), 3); T_EQ(r.p[79], 6);
     T_EQ((int32_t)pc_get_u32(r.p + 80), 103 * 256);
-    //16-bit: full-rate zeros 2107 - 423 = 1684, 2067 - 416 = 1651: 1648 - 1667.5 -> -20 (half away from zero)
-    T_EQ((int32_t)pc_get_u32(r.p + 84), -20);
+    //16-bit: the same zeros: 1648 - (1671 + 1594) / 2 = 15.5 -> 16 (half away from zero)
+    T_EQ((int32_t)pc_get_u32(r.p + 84), 16);
     T_EQ((int32_t)pc_get_u32(r.p + 88), 25);
     //unity gains: offsets 4096 x the sixteenths, gain16 1
     T_EQ(pc_get_u32(r.p + 92), 65536); T_EQ(pc_get_u32(r.p + 96), 65536);
@@ -1113,34 +1111,39 @@ static void test_cal_battery_pattern(void)
     T_EQ(pc_get_u32(r.p + 108), 65536);
     //the stored block, layout of protocol row 51
     T_EQ(pc_get_u16(r.p + 112), c->cal_offset[0]);
-    T_EQ((int16_t)pc_get_u16(r.p + 124), 2107);                 //zero[full][A][0]
-    T_EQ((int16_t)pc_get_u16(r.p + 124 + 24 + 12 + 6), 2010);   //zero[gated][B][3]
-    T_EQ((int16_t)pc_get_u16(r.p + 172 + 24 + 12), -17026);     //slope[gated][B][0]
-    T_EQ(r.p[220 + 12 + 6], 11);                                //noise[gated][B][0]
-    T_EQ(pc_get_u16(r.p + 244), ACAL_GAIN_ONE);                 //gain[full][A]
+    T_EQ((int16_t)pc_get_u16(r.p + 124), 2094);                 //zero[slot 0][A][0]
+    T_EQ((int16_t)pc_get_u16(r.p + 124 + 18), 2010);            //zero[0][B][3]
+    T_EQ(pc_get_u16(r.p + 124 + 24 + 12 + 6), 0);               //slot 1 (the gated class up to fw 0.2.104): 0
+    T_EQ((int16_t)pc_get_u16(r.p + 172 + 12), -17026);          //slope[0][B][0]
+    T_EQ(pc_get_u16(r.p + 172 + 24 + 12), 0);
+    T_EQ(r.p[220 + 6], 11);                                     //noise[0][B][0]
+    T_EQ(r.p[220 + 12 + 6], 0);
+    T_EQ(pc_get_u16(r.p + 244), ACAL_GAIN_ONE);                 //gain[0][A]
+    T_EQ(pc_get_u16(r.p + 248), 0);
     T_EQ(r.p[252], ACAL_GAIN_NONE); T_EQ(r.p[253], 0);
 
-    //measured gains (gated A 0.9979, B 1.0021), carried over from an earlier calibration
-    c->cal2.gain[ACAL_GATED][0] = 32699;
-    c->cal2.gain[ACAL_GATED][1] = 32837;
+    //measured gains (A 0.9979, B 1.0021), carried over from an earlier calibration
+    c->cal2.gain[0] = 32699;
+    c->cal2.gain[1] = 32837;
     c->cal2.gain_range = 2;
     c->cal2.gain_flags = ACAL_GAIN_KEPT;
     r = req(PC_CMD_GET_CAL, "", 1);
-    T_EQ(r.p[72], 3); T_EQ(r.p[73], 1 | 2 | 4 | 8 | 16);
+    T_EQ(r.p[72], 3); T_EQ(r.p[73], 1 | 2 | 8 | 16);
     T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9);  //the correction at 0 V is unchanged
     T_EQ(pc_get_u32(r.p + 92), 65398); T_EQ(pc_get_u32(r.p + 96), 65674);
     //(1648 x 65536 - 65398 x 1671) / 16 = -79795.6, (1648 x 65536 - 65674 x 1594) / 16 = 207435.8
     T_EQ((int32_t)pc_get_u32(r.p + 100), -79796); T_EQ((int32_t)pc_get_u32(r.p + 104), 207436);
-    T_EQ(pc_get_u32(r.p + 108), 65536);                         //full-class gains still unity
-    T_EQ(pc_get_u16(r.p + 248), 32699); T_EQ(r.p[252], 2); T_EQ(r.p[253], ACAL_GAIN_KEPT);
+    T_EQ(pc_get_u32(r.p + 108), 65536);                         //harmonic mean of 0.9979 and 1.0021: 1.0000
+    T_EQ(pc_get_u16(r.p + 244), 32699); T_EQ(pc_get_u16(r.p + 248), 0);
+    T_EQ(r.p[252], 2); T_EQ(r.p[253], ACAL_GAIN_KEPT);
     acal_gain_carry(0, &c->cal2);
 
     //GET_CHANNEL zero_q8 follows the v3 zero
     r = req(PC_CMD_GET_CHANNEL, "", 1);
     T_EQ((int32_t)pc_get_u32(r.p + 20), 103 * 256);
 
-    //1.14: calibration v4 state in the channel snapshot (acal_live.c on the scope). Gated divider: the tracker is not
-    //applied and cm only moves corr16 (the 16-bit path is the full class)
+    //1.14: calibration v4 state in the channel snapshot (acal_live.c on the scope). Applied to every 8-bit readout
+    //(bit 4) at any divider since fw 0.2.105; 280..287 (the class probe's common mode up to fw 0.2.104) stay 0
     {
       pc_decim_cfg dsave = mock.decim_cur;
       int          wsave = mock.decim_written;
@@ -1149,34 +1152,25 @@ static void test_cal_battery_pattern(void)
       c->trk.d_q8 = 437; c->trk.e_q24 = 503316; c->trk.q_q24 = -9500;
       c->trk.flags = ACAL_TRK_DATA | ACAL_TRK_GAIN | ACAL_TRK_LAST;
       c->trk.last_ms = mock.now - 1234; c->trk.records = 77; c->trk.last_pairs = 2900; c->trk.spread16 = 450;
-      c->cm.cm_q8 = 205; c->cm.probes = 3; c->cm.last_ms = mock.now - 5000; c->cm.flags = ACAL_CM_DATA | ACAL_CM_LAST;
       mock.decim_written = 0;
 
       r = req(PC_CMD_GET_CAL, "", 1);
       T_EQ(r.len, PC_CAL_RESP_LEN);
-      T_EQ(r.p[256], 0x01 | 0x02 | 0x08 | 0x20 | 0x40); T_EQ(r.p[257], 0);
+      T_EQ(r.p[256], 0x01 | 0x02 | 0x08 | 0x10); T_EQ(r.p[257], 0);
       T_EQ((int16_t)pc_get_u16(r.p + 258), 437); T_EQ((int32_t)pc_get_u32(r.p + 260), 503316);
       T_EQ((int32_t)pc_get_u32(r.p + 264), -9500); T_EQ(pc_get_u32(r.p + 268), 1234);
       T_EQ(pc_get_u32(r.p + 272), 77); T_EQ(pc_get_u16(r.p + 276), 2900); T_EQ(pc_get_u16(r.p + 278), 450);
-      T_EQ((int16_t)pc_get_u16(r.p + 280), 205); T_EQ(pc_get_u16(r.p + 282), 3); T_EQ(pc_get_u32(r.p + 284), 5000);
-      //corr16 -20 - round(205 / 16) = -33; the 8-bit gated correction and the 0 V fields unchanged
-      T_EQ((int32_t)pc_get_u32(r.p + 84), -33);
-      T_EQ(pc_get_u32(r.p + 92), 65536); T_EQ(pc_get_u32(r.p + 96), 65536);
-      T_EQ((int32_t)pc_get_u32(r.p + 100), 4096 * -23); T_EQ((int32_t)pc_get_u32(r.p + 104), 4096 * 54);
-      T_EQ(pc_get_u32(r.p + 108), 65536);
+      T_EQ(pc_get_u16(r.p + 280), 0); T_EQ(pc_get_u16(r.p + 282), 0); T_EQ(pc_get_u32(r.p + 284), 0);
+      //corr16 and the 0 V fields unchanged; gains 1 -+ e / 2: 65536 x 0.015 = 983.04; offsets: the split, as the
+      //readout does it (acal_track_apply)
       T_EQ((int32_t)pc_get_u32(r.p + 80), 103 * 256);
       T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9);
-
-      //Full class (divider 0), last arm legacy: applied to the next readout (bit 4). Gains 1 -+ e / 2: 65536 x 0.015 =
-      //983.04; offsets: cm off both cores, then the split, as the readout does it (acal_v4_apply)
-      c->divider = 0;
-      r = req(PC_CMD_GET_CAL, "", 1);
-      T_EQ(r.p[256], 0x01 | 0x02 | 0x08 | 0x10 | 0x20 | 0x40);
       T_EQ(pc_get_u32(r.p + 92), 65536 - 983); T_EQ(pc_get_u32(r.p + 96), 65536 + 983);
-      acal_correction(&c->cal2, c->cal_offset, c->range, 0, c->dcoffset, c->dc_shift_value, c->adc_a_comp, c->adc_b_comp, &e);
-      T_EQ((int32_t)pc_get_u32(r.p + 84), e.corr16 - 13);
+      acal_correction(&c->cal2, c->cal_offset, c->range, c->dcoffset, c->dc_shift_value, c->adc_a_comp, c->adc_b_comp,
+                      &e);
+      T_EQ((int32_t)pc_get_u32(r.p + 84), e.corr16);
       T_EQ(pc_get_u32(r.p + 108), e.gain16);
-      acal_v4_apply(&c->trk, &c->cm, &e);
+      acal_track_apply(&c->trk, &e);
       T_EQ((int32_t)pc_get_u32(r.p + 100), e.off_a); T_EQ((int32_t)pc_get_u32(r.p + 104), e.off_b);
       T_EQ(pc_get_u32(r.p + 92), e.gain_a);
 
@@ -1184,27 +1178,25 @@ static void test_cal_battery_pattern(void)
       mock.decim_written = 1;
       mock.decim_cur.k = 2;
       r = req(PC_CMD_GET_CAL, "", 1);
-      T_EQ(r.p[256], 0x01 | 0x02 | 0x08 | 0x20 | 0x40);
+      T_EQ(r.p[256], 0x01 | 0x02 | 0x08);
       T_EQ((int32_t)pc_get_u32(r.p + 100), e.off_a);
 
       //Tracking data without a bound block: version 1, nothing applied, the tail still reports the state
       c->cal_offset[2]++;
       r = req(PC_CMD_GET_CAL, "", 1);
-      T_EQ(r.p[72], 1); T_EQ(r.p[256], 0x01 | 0x02 | 0x08 | 0x20 | 0x40);
+      T_EQ(r.p[72], 1); T_EQ(r.p[256], 0x01 | 0x02 | 0x08);
       T_EQ((int32_t)pc_get_u32(r.p + 84), 8); T_EQ(pc_get_u32(r.p + 92), 65536);
       c->cal_offset[2]--;
 
       mock.decim_cur = dsave;
       mock.decim_written = wsave;
-      c->divider = 199;
       acal_track_reset(&c->trk);
-      acal_cm_reset(&c->cm);
     }
 
     //not bound (sector 709 values changed): back to 1.00o5, flags say why
     c->cal_offset[2]++;
     r = req(PC_CMD_GET_CAL, "", 1);
-    T_EQ(r.p[72], 1); T_EQ(r.p[73], 1 | 4);
+    T_EQ(r.p[72], 1); T_EQ(r.p[73], 1);
     T_EQ((int16_t)pc_get_u16(r.p + 74), 2);
     c->cal_offset[2]--;
     c->cal2_loaded = 0;
@@ -3667,13 +3659,30 @@ static void test_enc_check(void)
   pc_session_init(&S);
   T_EQ(S.var.caps & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
 
-  //Gated rate (divider 19): nothing checked, 0x33 never read
+  //Divided rate (divider 19), fw-fullrate: 0x153D runs the encodes at 200 MSa/s at every rate and checks them on every
+  //clock, so the 0x33 check covers this capture too: one bad capture, re-armed once with the same geometry, recovered
+  setup(PC_FW_FPGA_VERSION);
+  mock.polls_to_trigger = 1; mock.polls_to_done = 1;
+  mock.enc_bad_arms = 1;
+  reads = mock.read_calls;
+  r = enc_capture();
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
+  T_EQ(mock.arms, 2); T_EQ(mock.enc_status_reads, 2); T_EQ(mock.read_calls, reads);
+  T_EQ(mock.enc_last_why, EH_WHY_FLAG); T_EQ(mock.enc_last_note.ok, 1); T_EQ(mock.enc_last_note.tries, 1);
+
+  //...but the data check (a rate write after the sampling reset) is for divider 0 only: its core A neighbours are
+  //(D + 1) x 10 ns apart here, so nothing is checked and the ring is not read
   setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;
   mock.enc_bad_arms = -1;
-  r = enc_capture();
+  r = req(PC_CMD_ARM, 0, 0);
+  mock.enc_written = 1;                                         //a rate write while the capture runs
+  reads = mock.read_calls;
+  r = wait_done(100);
   T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
-  T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_notes, 0);
+  T_EQ(mock.arms, 1); T_EQ(mock.enc_status_reads, 0); T_EQ(mock.enc_notes, 0); T_EQ(mock.read_calls, reads);
+  mock.enc_written = 0;
+  mock.enc_bad_arms = 0;
 
   //200 MSa/s, good: one 0x33 read, no ring read for the check, accepted
   setup(PC_FW_FPGA_VERSION);

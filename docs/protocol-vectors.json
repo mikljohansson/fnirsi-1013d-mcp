@@ -3597,8 +3597,8 @@
   ]
  },
  "adc_cal_v3": {
-  "notes": "Calibration data v3 block (protocol 1.12, row 51), sector 708 bytes 128..431, little-endian: u32 magic 'ACAL', u16 version 3, u16 length 304, u16 clock classes 2, u16 0; per channel (CH1, CH2, 144 bytes): u16 pwm[6] (the dc_calibration_offset values it was measured at; ignored unless equal to sector 709's), i16 zero[class][core][range] (class 0 full rate = divider 0 and filtered, 1 gated = legacy divider >= 1; core 0 A = FPGA 0x20/0x22, 1 B = 0x21/0x23; 1/16 code), i16 slope[class][core][range] (Q16 codes per PWM count), u8 noise[class][core][range] (RMS, 1/16 code), u16 gain[class][core] (Q15, 32768 = 1), u8 gain_range (0xFF = never measured), u8 gain_flags (bit 0 carried over), u16 gain_lever (1/16 code); u32 zlib.crc32 of the 300 bytes before it. GET_CAL (1.12) bytes 112..255 carry the same per-channel layout for the requested channel.",
-  "block_hex": "4143414c0300300102000000880384038c0387038c0387033b083b083b083b083b083b081308130813081308130813082e082e082e082e082e082e08d907d907d907d907d907d90797bc97bc97bc97bc97bc97bc44bf44bf44bf44bf44bf44bf64bc64bc64bc64bc64bc64bc7ebd7ebd7ebd7ebd7ebd7ebd0c0c0c0c0c0c1313131313130a0a0a0a0a0a1515151515155f7f8e83bb7f458002008805880384038c0387038c0387033b083b083b083b083b083b081308130813081308b3ff13082e082e082e082e082e082e08d907d907d907d907d907d90797bc97bc97bc97bc97bce0b144bf44bf44bf44bf44bf44bf64bc64bc64bc64bc64bc64bc7ebd7ebd7ebd7ebd7ebd7ebd0c0c0c0c0c0c13132f1313130a0a0a0a0a0a1515151515155f7f8e83bb7f1879ff010000adbc7b36",
+  "notes": "Calibration data v3 block (protocol 1.12, row 51), sector 708 bytes 128..431, little-endian: u32 magic 'ACAL', u16 version 3, u16 length 304, u16 classes (1 written since fw 0.2.105; 2 by fw 0.2.45-0.2.104, still read, slot 1 ignored), u16 0; per channel (CH1, CH2, 144 bytes): u16 pwm[6] (the dc_calibration_offset values it was measured at; ignored unless equal to sector 709's), i16 zero[slot][core][range] (slot 0 the calibration, slot 1 reserved = 0, the gated class up to fw 0.2.104; core 0 A = FPGA 0x20/0x22, 1 B = 0x21/0x23; 1/16 code), i16 slope[slot][core][range] (Q16 codes per PWM count), u8 noise[slot][core][range] (RMS, 1/16 code), u16 gain[slot][core] (Q15, 32768 = 1), u8 gain_range (0xFF = never measured), u8 gain_flags (bit 0 carried over), u16 gain_lever (1/16 code); u32 zlib.crc32 of the 300 bytes before it. GET_CAL (1.12) bytes 112..255 carry the same per-channel layout for the requested channel. channels[] give slot 0 only: zero / slope / noise [core][range], gain [core].",
+  "block_hex": "4143414c0300300101000000880384038c0387038c0387033b083b083b083b083b083b0813081308130813081308130800000000000000000000000000000000000000000000000097bc97bc97bc97bc97bc97bc44bf44bf44bf44bf44bf44bf0000000000000000000000000000000000000000000000000c0c0c0c0c0c1313131313130000000000000000000000005f7f8e830000000002008805880384038c0387038c0387033b083b083b083b083b083b081308130813081308b3ff130800000000000000000000000000000000000000000000000097bc97bc97bc97bc97bce0b144bf44bf44bf44bf44bf44bf0000000000000000000000000000000000000000000000000c0c0c0c0c0c13132f1313130000000000000000000000005f7f187900000000ff0100005043f20f",
   "channels": [
    {
     "pwm": [
@@ -3611,127 +3611,61 @@
     ],
     "zero": [
      [
-      [
-       2107,
-       2107,
-       2107,
-       2107,
-       2107,
-       2107
-      ],
-      [
-       2067,
-       2067,
-       2067,
-       2067,
-       2067,
-       2067
-      ]
+      2107,
+      2107,
+      2107,
+      2107,
+      2107,
+      2107
      ],
      [
-      [
-       2094,
-       2094,
-       2094,
-       2094,
-       2094,
-       2094
-      ],
-      [
-       2009,
-       2009,
-       2009,
-       2009,
-       2009,
-       2009
-      ]
+      2067,
+      2067,
+      2067,
+      2067,
+      2067,
+      2067
      ]
     ],
     "slope": [
      [
-      [
-       -17257,
-       -17257,
-       -17257,
-       -17257,
-       -17257,
-       -17257
-      ],
-      [
-       -16572,
-       -16572,
-       -16572,
-       -16572,
-       -16572,
-       -16572
-      ]
+      -17257,
+      -17257,
+      -17257,
+      -17257,
+      -17257,
+      -17257
      ],
      [
-      [
-       -17308,
-       -17308,
-       -17308,
-       -17308,
-       -17308,
-       -17308
-      ],
-      [
-       -17026,
-       -17026,
-       -17026,
-       -17026,
-       -17026,
-       -17026
-      ]
+      -16572,
+      -16572,
+      -16572,
+      -16572,
+      -16572,
+      -16572
      ]
     ],
     "noise": [
      [
-      [
-       12,
-       12,
-       12,
-       12,
-       12,
-       12
-      ],
-      [
-       19,
-       19,
-       19,
-       19,
-       19,
-       19
-      ]
+      12,
+      12,
+      12,
+      12,
+      12,
+      12
      ],
      [
-      [
-       10,
-       10,
-       10,
-       10,
-       10,
-       10
-      ],
-      [
-       21,
-       21,
-       21,
-       21,
-       21,
-       21
-      ]
+      19,
+      19,
+      19,
+      19,
+      19,
+      19
      ]
     ],
     "gain": [
-     [
-      32607,
-      33678
-     ],
-     [
-      32699,
-      32837
-     ]
+     32607,
+     33678
     ],
     "gain_range": 2,
     "gain_flags": 0,
@@ -3748,127 +3682,61 @@
     ],
     "zero": [
      [
-      [
-       2107,
-       2107,
-       2107,
-       2107,
-       2107,
-       2107
-      ],
-      [
-       2067,
-       2067,
-       2067,
-       2067,
-       -77,
-       2067
-      ]
+      2107,
+      2107,
+      2107,
+      2107,
+      2107,
+      2107
      ],
      [
-      [
-       2094,
-       2094,
-       2094,
-       2094,
-       2094,
-       2094
-      ],
-      [
-       2009,
-       2009,
-       2009,
-       2009,
-       2009,
-       2009
-      ]
+      2067,
+      2067,
+      2067,
+      2067,
+      -77,
+      2067
      ]
     ],
     "slope": [
      [
-      [
-       -17257,
-       -17257,
-       -17257,
-       -17257,
-       -17257,
-       -20000
-      ],
-      [
-       -16572,
-       -16572,
-       -16572,
-       -16572,
-       -16572,
-       -16572
-      ]
+      -17257,
+      -17257,
+      -17257,
+      -17257,
+      -17257,
+      -20000
      ],
      [
-      [
-       -17308,
-       -17308,
-       -17308,
-       -17308,
-       -17308,
-       -17308
-      ],
-      [
-       -17026,
-       -17026,
-       -17026,
-       -17026,
-       -17026,
-       -17026
-      ]
+      -16572,
+      -16572,
+      -16572,
+      -16572,
+      -16572,
+      -16572
      ]
     ],
     "noise": [
      [
-      [
-       12,
-       12,
-       12,
-       12,
-       12,
-       12
-      ],
-      [
-       19,
-       19,
-       47,
-       19,
-       19,
-       19
-      ]
+      12,
+      12,
+      12,
+      12,
+      12,
+      12
      ],
      [
-      [
-       10,
-       10,
-       10,
-       10,
-       10,
-       10
-      ],
-      [
-       21,
-       21,
-       21,
-       21,
-       21,
-       21
-      ]
+      19,
+      19,
+      47,
+      19,
+      19,
+      19
      ]
     ],
     "gain": [
-     [
-      32607,
-      33678
-     ],
-     [
-      32699,
-      31000
-     ]
+     32607,
+     31000
     ],
     "gain_range": 255,
     "gain_flags": 1,

@@ -22,13 +22,13 @@ extern FONTDATA font_5;
 #define C_COMP      48            //i16 A, B: 1.00o5 core compensations
 #define C_SHIFT     52            //u32 centre, i32 size, i32 value
 #define C_VERSION   72            //correction in use: 3 = v3
-#define C_FLAGS     73            //bit 0 block loaded, 1 bound, 2 gated now, 3 gains measured, 4 gains carried over
-#define C_BLOCK    112            //the v3 channel block (acal_pack_channel)
-#define B_ZERO      12            //i16 [class][core][range], 1/16 code
-#define B_NOISE    108            //u8 [class][core][range], 1/16 code
-#define B_GAIN     132            //u16 [class][core], Q15
+#define C_FLAGS     73            //bit 0 block loaded, 1 bound, 3 gains measured, 4 gains carried over
+#define C_BLOCK    112            //the v3 channel block (acal_pack_channel; its class slot 0)
+#define B_ZERO      12            //i16 [core][range], 1/16 code
+#define B_NOISE    108            //u8 [core][range], 1/16 code
+#define B_GAIN     132            //u16 [core], Q15
 #define B_GRANGE   140            //u8 range the gains were measured on (0xFF never)
-#define C_TRK      256            //u8 flags (bit 0 data, bit 5 class probe data), d, e, q, age, records, ...
+#define C_TRK      256            //u8 flags (bit 0 data), d, e, q, age, records, ...
 #define C_PROV     288            //u8 state, then 292.. the 56 stored bytes
 #define C_ONS      348            //u32 power-ons since the calibration
 
@@ -809,29 +809,28 @@ static const uint8_t *ud_prov(const ud_input *in)
   return (in->cal[0][C_PROV] == ACAL_PROV_VALID) ? in->cal[0] + 292 : 0;
 }
 
-//Class gain ratio full / gated, |ratio - 1| in tenths of a percent; -1 without measured gains
-static int32_t ud_class_tenths(const uint8_t *c)
+//Core gain split |G_A - G_B| / G_B in tenths of a percent (the gain step's check); -1 without measured gains
+static int32_t ud_split_tenths(const uint8_t *c)
 {
   const uint8_t *b = c + C_BLOCK;
-  uint32_t full, gated, d;
+  uint32_t a, gb;
 
   if(!(c[C_FLAGS] & F_LOADED) || !(c[C_FLAGS] & F_GAINS))
     return -1;
 
-  full  = g16(b + B_GAIN) + g16(b + B_GAIN + 2);
-  gated = g16(b + B_GAIN + 4) + g16(b + B_GAIN + 6);
+  a  = g16(b + B_GAIN);
+  gb = g16(b + B_GAIN + 2);
 
-  if(!gated)
+  if(!gb)
     return -1;
 
-  d = (full > gated) ? full - gated : gated - full;
-  return (int32_t)((d * 1000 + gated / 2) / gated);
+  return (int32_t)((((a > gb) ? a - gb : gb - a) * 1000 + gb / 2) / gb);
 }
 
-//Worst noise RMS of a class over both cores and all ranges, hundredths of a code; -1 without a block
-static int32_t ud_noise_hundredths(const uint8_t *c, uint32_t cls)
+//Worst noise RMS over both cores and all ranges, hundredths of a code; -1 without a block
+static int32_t ud_noise_hundredths(const uint8_t *c)
 {
-  const uint8_t *b = c + C_BLOCK + B_NOISE + 12 * cls;
+  const uint8_t *b = c + C_BLOCK + B_NOISE;
   uint32_t i, m = 0;
 
   if(!(c[C_FLAGS] & F_LOADED))
@@ -847,9 +846,7 @@ static int32_t ud_noise_hundredths(const uint8_t *c, uint32_t cls)
 
 static int ud_over_limits(const uint8_t *c)
 {
-  int32_t r = ud_class_tenths(c), g = ud_noise_hundredths(c, ACAL_GATED), f = ud_noise_hundredths(c, ACAL_FULL);
-
-  return (r > UD_LIM_CLASS_TENTHS) || (g > UD_LIM_NOISE_GATED) || (f > UD_LIM_NOISE_FULL);
+  return (ud_split_tenths(c) > UD_LIM_SPLIT_TENTHS) || (ud_noise_hundredths(c) > UD_LIM_NOISE);
 }
 
 void ud_cal_verdict(const ud_input *in, ud_verdict *v)
@@ -994,9 +991,9 @@ static char *s_limit_code(char *p, int32_t hundredths)
 
 static void ud_status_cal(ud_page *pg, const ud_input *in)
 {
-  //fw 0.2.100 (owner 2026-10-20 18:13): the noise rows are the zero step's open-input condition, with its limits
-  static const char *heads[3] = { "Class gain ratio, full / gated", "Noise RMS, inputs open, gated",
-                                  "Noise RMS, inputs open, full" };
+  //fw 0.2.100 (owner 2026-10-20 18:13): the noise row is the zero step's open-input condition, with its limit. fw
+  //0.2.105: one clock class, so the class gain ratio and the gated noise columns became the core gain split and one noise
+  static const char *heads[2] = { "Core gain split, A / B", "Noise RMS, inputs open" };
   ud_verdict v;
   char t[UD_TEXT_LEN], *nl;
   uint32_t ch, i;
@@ -1019,15 +1016,20 @@ static void ud_status_cal(ud_page *pg, const ud_input *in)
 
   ud_txt(pg, 170, y + 10, 608, UD_F_SMALL, UD_C_SOFT, v.reason);
 
-  for(i=0;i<3;i++)
+  for(i=0;i<2;i++)
   {
     x = 80 + 232 * (int)i;
     ud_txt(pg, x, y + 46, 224, UD_F_SMALL, UD_C_DIM, heads[i]);
 
     if(i == 0)
-      s_str(t, "limit 2 %");
+    {
+      char *q = s_str(t, "limit ");
+
+      q = s_fix(q, UD_LIM_SPLIT_TENTHS, 10, 1, 0);
+      s_str(q, " %");
+    }
     else
-      s_limit_code(t, (i == 1) ? UD_LIM_NOISE_GATED : UD_LIM_NOISE_FULL);
+      s_limit_code(t, UD_LIM_NOISE);
 
     ud_txt(pg, x, y + 62, 224, UD_F_SMALL, UD_C_DIM, t);
   }
@@ -1045,9 +1047,8 @@ static void ud_status_cal(ud_page *pg, const ud_input *in)
       continue;
     }
 
-    ud_cell(pg, 80, yy, ud_class_tenths(c), 10, 1, " %", UD_LIM_CLASS_TENTHS, "gains not measured");
-    ud_cell(pg, 312, yy, ud_noise_hundredths(c, ACAL_GATED), 100, 2, " code", UD_LIM_NOISE_GATED, "");
-    ud_cell(pg, 544, yy, ud_noise_hundredths(c, ACAL_FULL), 100, 2, " code", UD_LIM_NOISE_FULL, "");
+    ud_cell(pg, 80, yy, ud_split_tenths(c), 10, 1, " %", UD_LIM_SPLIT_TENTHS, "gains not measured");
+    ud_cell(pg, 312, yy, ud_noise_hundredths(c), 100, 2, " code", UD_LIM_NOISE, "");
   }
 
   ud_cal_provenance(in, t);
@@ -1110,7 +1111,7 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
   const uint8_t *c = in->cal[ch], *b = c + C_BLOCK;
   int x = 12 + 394 * (int)ch, x0 = x + 10, y = UD_CB_Y, loaded = c[C_FLAGS] & F_LOADED, yy;
   char t[UD_TEXT_LEN], *p;
-  uint32_t r, k, m, flags = c[C_TRK];
+  uint32_t r, k, flags = c[C_TRK];
 
   ud_boxa(pg, x, y, UD_CB_W, UD_CB_H, 0);
   ud_txt(pg, x0, y + 6, 40, UD_F_BODY, ch ? UD_C_CH2 : UD_C_CH1, ch ? "CH2" : "CH1");
@@ -1120,8 +1121,7 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
   ud_txt(pg, x0, yy, 52, UD_F_SMALL, UD_C_DIM, "Range");
   ud_txt_r(pg, x0 + 86, yy, 34, UD_F_SMALL, UD_C_DIM, "PWM");
   ud_txt_r(pg, x0 + 144, yy, 52, UD_F_SMALL, UD_C_DIM, "Volts");
-  ud_txt(pg, x0 + 156, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero gated");
-  ud_txt(pg, x0 + 260, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero full");
+  ud_txt(pg, x0 + 156, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero");
 
   for(r=0;r<ACAL_RANGES;r++)
   {
@@ -1145,26 +1145,20 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
                UD_C_WARN : UD_C_TEXT, t);
     }
 
-    for(m=0;m<2;m++)
+    if(loaded)
     {
-      //columns: gated (class 1), then full (class 0)
-      uint32_t cls = m ? ACAL_FULL : ACAL_GATED;
-
-      if(loaded)
+      p = t;
+      for(k=0;k<2;k++)
       {
-        p = t;
-        for(k=0;k<2;k++)
-        {
-          p = s_fix(p, (int16_t)g16(b + B_ZERO + 2 * (12 * cls + 6 * k + r)), 16, 1, 0);
-          if(!k)
-            p = s_str(p, " / ");
-        }
+        p = s_fix(p, (int16_t)g16(b + B_ZERO + 2 * (6 * k + r)), 16, 1, 0);
+        if(!k)
+          p = s_str(p, " / ");
       }
-      else
-        s_str(t, "-");
-
-      ud_txt(pg, x0 + 156 + 104 * (int)m, yy, 100, UD_F_SMALL, loaded ? UD_C_TEXT : UD_C_DIM, t);
     }
+    else
+      s_str(t, "-");
+
+    ud_txt(pg, x0 + 156, yy, 100, UD_F_SMALL, loaded ? UD_C_TEXT : UD_C_DIM, t);
   }
 
   yy = y + 46 + 15 * ACAL_RANGES + 8;
@@ -1176,49 +1170,34 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
   }
   else
   {
-    //Gains per class and core (1.0000 = the gated mean of both cores)
-    for(m=0;m<2;m++)
+    //Gains per core (their mean is the volts calibration's scale)
+    p = s_str(t, "Gains A ");
+    p = s_fix(p, (int32_t)g16(b + B_GAIN), 32768, 4, 0);
+    p = s_str(p, ", B ");
+    p = s_fix(p, (int32_t)g16(b + B_GAIN + 2), 32768, 4, 0);
+
+    if(b[B_GRANGE] == ACAL_GAIN_NONE)
+      s_str(p, ", not measured");
+    else
     {
-      uint32_t cls = m ? ACAL_GATED : ACAL_FULL;
-
-      p = s_str(t, m ? "Gains gated A " : "Gains full A ");
-      p = s_fix(p, (int32_t)g16(b + B_GAIN + 4 * cls), 32768, 4, 0);
-      p = s_str(p, ", B ");
-      p = s_fix(p, (int32_t)g16(b + B_GAIN + 4 * cls + 2), 32768, 4, 0);
-
-      if(m)
-      {
-        if(b[B_GRANGE] == ACAL_GAIN_NONE)
-          s_str(p, ", not measured");
-        else
-        {
-          p = s_str(p, ", range ");
-          p = s_str(p, ud_range_names[b[B_GRANGE] % ACAL_RANGES]);
-          s_str(p, (c[C_FLAGS] & F_KEPT) ? ", carried over" : "");
-        }
-      }
-
-      ud_txt(pg, x0, yy, 362, UD_F_SMALL, (c[C_FLAGS] & F_GAINS) ? UD_C_TEXT : UD_C_DIM, t);
-      yy += 16;
+      p = s_str(p, ", range ");
+      p = s_str(p, ud_range_names[b[B_GRANGE] % ACAL_RANGES]);
+      s_str(p, (c[C_FLAGS] & F_KEPT) ? ", carried over" : "");
     }
 
-    //fw 0.2.100: the zero step's open-input condition and its limits, as on the Status page
-    p = s_str(t, "Noise RMS, inputs open: gated ");
-    p = s_fix(p, ud_noise_hundredths(c, ACAL_GATED), 100, 2, 0);
-    p = s_str(p, ", full ");
-    p = s_fix(p, ud_noise_hundredths(c, ACAL_FULL), 100, 2, 0);
-    s_str(p, " code");
-    ud_txt(pg, x0, yy, 362, UD_F_SMALL, ud_over_limits(c) ? UD_C_WARN : UD_C_TEXT, t);
+    ud_txt(pg, x0, yy, 362, UD_F_SMALL, (c[C_FLAGS] & F_GAINS) ? UD_C_TEXT : UD_C_DIM, t);
     yy += 16;
-    p = s_str(t, "Gated ");
-    p = s_limit_code(p, UD_LIM_NOISE_GATED);
-    p = s_str(p, ", full ");
-    s_limit_code(p, UD_LIM_NOISE_FULL);
-    ud_txt(pg, x0, yy, 362, UD_F_SMALL, UD_C_DIM, t);
+
+    //fw 0.2.100: the zero step's open-input condition and its limit, as on the Status page
+    p = s_str(t, "Noise RMS, inputs open: ");
+    p = s_fix(p, ud_noise_hundredths(c), 100, 2, 0);
+    p = s_str(p, " code, ");
+    s_limit_code(p, UD_LIM_NOISE);
+    ud_txt(pg, x0, yy, 362, UD_F_SMALL, ud_over_limits(c) ? UD_C_WARN : UD_C_TEXT, t);
     yy += 16;
   }
 
-  //Calibration v4 tracking (acal_live.c): the full-rate A - B correction and the full-class offset against gated
+  //Calibration v4 tracking (acal_live.c): the A - B correction from the 200 MSa/s records
   if(flags & 0x01)
   {
     p = s_str(t, "Tracking A-B ");
@@ -1233,21 +1212,6 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
     s_str(t, "Tracking A-B: no full-rate record yet");
 
   ud_txt(pg, x0, yy, 362, UD_F_SMALL, (flags & 0x01) ? UD_C_TEXT : UD_C_DIM, t);
-  yy += 16;
-
-  if(flags & 0x20)
-  {
-    p = s_str(t, "Full-rate offset ");
-    p = s_fix(p, (int16_t)g16(c + C_TRK + 24), 256, 2, 1);
-    p = s_str(p, " code, ");
-    p = s_plural(p, g16(c + C_TRK + 26), "probe, ", "probes, ");
-    p = s_uint(p, g32(c + C_TRK + 28) / 1000);
-    s_str(p, " s ago");
-  }
-  else
-    s_str(t, "Full-rate offset: not probed yet");
-
-  ud_txt(pg, x0, yy, 362, UD_F_SMALL, (flags & 0x20) ? UD_C_TEXT : UD_C_DIM, t);
   yy += 16;
 
   p = s_str(t, "DC shift: centre ");

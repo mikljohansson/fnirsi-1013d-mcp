@@ -1003,6 +1003,101 @@ static uint32_t cnt_pass(uint32_t ms, uint8_t lvl)
   return fm.strobes - s0;
 }
 
+//fw-fullrate (FPGA 0x153D, owner 2026-10-21): the ADC encodes run at 200 MSa/s at every rate. With K = 0 at D > 0 the
+//write clock stays at 100 MHz and a word is stored on every (D + 1)-th edge: the stored pairs are every (D + 1)-th pair
+//of the full-rate stream, core B 5 ns before core A, the record geometry and rate as before (10 (D + 1) ns per word).
+//0x153C divided the write clock itself (and gated the encodes); its words are one per edge
+static void test_fullrate(void)
+{
+  static const uint32_t div[3] = { 0, 4, 399 };
+  uint8_t  a[300], b[300], c2[300];
+  uint32_t i, d, ok;
+
+  for(d=0;d<3;d++)
+  {
+    fm_reset(0x153D, div[d], 77 + d);
+    fm.capture   = 1;
+    fm.raw_words = 1;
+    fm.trig_at   = -1;
+    fm_fill(9);
+    write_0d(div[d]);
+
+    fpga_write_cmd(0x1A);
+    fpga_write_byte(0x00);
+    {
+      fpga_arm_cfg cfg;
+
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.pre_words    = 0;
+      cfg.total_words  = 300;
+      cfg.write_0e     = 1;
+      cfg.auto_timeout = 298;
+      T_EQ(fpga_arm_reset(&cfg), 0);
+    }
+
+    //The ready wait in reset is one write clock (10 ns) at every rate; the capture takes 300 words x 10 (D + 1) ns
+    T_TRUE(fm.ready_polls >= 1);
+    fm_advance_ns(310 * 10 * (div[d] + 1));
+    fpga_write_cmd(0x0A);
+    T_EQ(fpga_read_byte() & 1, 1);
+    T_TRUE(fm.stop_n >= 300);
+    T_TRUE(fm.stop_n <= 302);
+
+    fpga_read_lane(0x20, 0, 300, a, 1, fm.ring);
+    fpga_read_lane(0x21, 0, 300, b, 1, fm.ring);
+    fpga_read_lane(0x23, 0, 300, c2, 1, fm.ring);
+    ok = 1;
+
+    for(i=0;i<300;i++)
+    {
+      uint64_t j = 2ull * i * (div[d] + 1);
+
+      if((a[i] != fm_raw_sample(0, j + 1)) || (b[i] != fm_raw_sample(0, j)) || (c2[i] != fm_raw_sample(1, j)))
+        ok = 0;
+    }
+
+    T_TRUE(ok);
+  }
+
+  //The same stored geometry as the divided write clock of 0x153C: 300 words over 300 x 10 (D + 1) ns
+  fm_reset(0x153C, 4, 5);
+  fm.capture = 1;
+  fm.trig_at = -1;
+  write_0d(4);
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+  {
+    fpga_arm_cfg cfg;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.pre_words    = 0;
+    cfg.total_words  = 300;
+    cfg.write_0e     = 1;
+    cfg.auto_timeout = 298;
+    T_EQ(fpga_arm_reset(&cfg), 0);
+  }
+  fm_advance_ns(150 * 50);
+  T_TRUE((fm.n >= 148) && (fm.n <= 152));
+  fm_reset(0x153D, 4, 5);
+  fm.capture = 1;
+  fm.trig_at = -1;
+  write_0d(4);
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+  {
+    fpga_arm_cfg cfg;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.pre_words    = 0;
+    cfg.total_words  = 300;
+    cfg.write_0e     = 1;
+    cfg.auto_timeout = 298;
+    T_EQ(fpga_arm_reset(&cfg), 0);
+  }
+  fm_advance_ns(150 * 50);
+  T_TRUE((fm.n >= 148) && (fm.n <= 152));
+}
+
 static void test_counter_derive(void)
 {
   uint64_t f, p, w, l;
@@ -1615,6 +1710,7 @@ int main(void)
   test_force_deadline();
   test_trig_ext();
   test_peak();
+  test_fullrate();
   test_counter_derive();
   test_counter();
   test_gen_formulas();
