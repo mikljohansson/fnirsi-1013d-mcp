@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-c5 (2026-10-21): fw 0.2.103 + C5 (version provisional, the coordinator numbers it), protocol 1.26 (row 66, provisional): built for FPGA 0x153C (`PC_FW_FPGA_VERSION`; a scope on 0x153B shows the mismatch notice until C4's bitstream is flashed), caps bits 2 HOLDOFF / 20 TRIG_TYPES, SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112, the trigger extension registers 0x5E / 0x5F / 0x60 / 0x1B / 0x66 in fpga_bus.c with the arm-window writes; section 69.**
 **Branch fw-one (2026-10-20): fw 0.2.103, protocol 1.25 (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
 **Branch fw-diag (2026-10-20): fw 0.2.100, protocol 1.24 unchanged: Diagnostics Restarts tile counts crashes only (type 0 = deliberate), the noise rows use the zero step's limits (gated 1.0, full 3.0 codes, one pair of constants in adc_cal.h; the wizard's gated limit tightened from 3.0); section 66.**
 **Branch fw-floor (2026-10-20): fw 0.2.99, protocol 1.24 unchanged: Frequency response ch2_small points grey (BODE_F_BAD, mcp BAD_FLAGS) and the two-line "CH2 too small above ... kHz" note with its mcp caveat; section 65.**
@@ -5145,3 +5146,108 @@ UI table, test_bode_sweep `test_divider_bound` the planner.
 - `docs/guide/first-run.md` and `docs/guide/screens.md` (docs-one's) still describe the older behaviour; the texts for
   them are in this branch's report.
 - mcp: `server.py` shows the mismatch caveat only once mcp-soft wires `Profile.mismatch_caveat()` in (fw-one-mcp's report).
+
+## 69. fw-c5: trigger types and hold-off (fw 0.2.103 + C5, version provisional, protocol 1.26, row 66 provisional)
+
+Branch `fw-c5` (worktree) from main 38e3aea (fw 0.2.103, protocol 1.25). Brief: item **C5** of `docs/plans/fpga-0x153c.md`
+section 10 (firmware triggers + hold-off) against the merged RTL of fpga-c1 / fpga-c3 (`fpga/al3/src/zaklad.v`; semantics
+and deviations in `fpga/al3/AGENTS.md` "0x153C C1 triggers"). Commits: the bus layer (fpga_bus, fpga_model, test_fpga_bus),
+the session (pc_cmds, pc_hal, mock_hal, test_session), the vectors, the docs. **Nothing benched, nothing flashed**: the
+unit runs 0x153B, which this firmware reports as a mismatch until C4's 0x153C bitstream is flashed; the coordinator
+numbers the version (`PC_FW_VERSION` is still 0.2.103 on the branch) and benches the image.
+
+**What was built**
+- `PC_FW_FPGA_VERSION` 0x153C and `PC_FW_FPGA_VERSION_TEXT` "0x153C" (pc_cmds.h; the E_UNSUPPORTED mismatch text is built
+  from it, no more literal). `PC_PROTO_MINOR` 26. Caps: `PC_CAP_HOLDOFF` (bit 2, now meaningful) and `PC_CAP_TRIG_TYPES`
+  (bit 20) in the fixed word; features word `PC_FEAT_W_TRIG_TYPES` 0x0100 (bit 8: the contract's bit 5 is ENC_CHECK, 6
+  BODE, 7 CAPTURE_STAGES since 1.19-1.24, so C6 PEAK takes 9 and C7 COUNTER 10, i.e. the contract's list shifted by
+  three). Under the one-bitstream rule nothing is gated: the firmware assumes the registers exist.
+- **fpga_bus.c / .h** (block "Trigger types and hold-off"): `fpga_trig_ext fpga_trig` (type, longer, n, h, holdoff) is the
+  firmware's copy; `fpga_trig_write(t, clear)` writes 0x5E = type | longer << 3, then for type != edge 0x5F (u24 N) and
+  0x60 (u24 H), then 0x1B (u32), then 0x66 = 1 when `clear`; `fpga_trig_arm()` writes 0x5E and (type != edge) 0x5F / 0x60
+  and is called by `fpga_arm_reset` inside the 0x01 = 1 window after the second geometry write and before 0x0E, so both
+  arms (UI `fpga_do_conversion`, host `pc_hal_arm`) carry it without any change of their own; `fpga_trig_status(out[4])`
+  reads 0x37 then the 3 bytes of 0x34. `fpga_write_u24` is the 3-byte writer. 0x16 stays the UI's trigger edge
+  (`fpga_set_trigger_edge`): the polarity per type as the FPGA defines it.
+- **pc_hal.h**: `pc_hw_trig_ext` { type, flags, n, h, holdoff }, `PC_TRG_T_*` (0..3; RUNT 4 and WINDOW 5 named for the
+  refusal), `PC_TRG_F_LONGER` 0x01 (RANGE 0x02, BOTH 0x04 named for the refusal), `PC_TRG_N_MAX` 0xFFFFFF, `PC_TRG_NTH_MAX`
+  0xFFFF; `pc_hal_trig_ext_read` (a memory read, any context), `pc_hal_trig_ext_write` ([FPGA], always with the clear
+  request), `pc_hal_trig_status` ([FPGA]). pc_hal_scope.c maps them onto fpga_trig; the settings fingerprint carries the
+  extension (b[64]); `pc_glue_init` writes `fpga_trig` (zeros) with the clear request after `fpga_capture_init`, built-for
+  word only.
+- **pc_cmds.c**: `h_set_trigger2` (SET_TRIGGER2 0x0219, cap TRIG_TYPES, no F_MODAL: it writes the FPGA): validation in
+  byte-offset order (type 0: runt / window "FPGA 0x153E", 6+ "type 0..3"; polarity 1; flags 2: RANGE / BOTH "0x153E",
+  other bits, LONGER with a type other than pulse width; source 3; N 4: pulse width / timeout 1..16777215, Nth edge
+  1..65535, edge 0; H 8: Nth edge 0..16777215, else 0; level 12: 0..255; level2 14: 0), then `pc_hal_trigger_write`
+  (SOURCE | EDGE | LEVEL, edge = the polarity) and `pc_hal_trig_ext_write`; response `pc_trigger_body`. `h_set_trigger`:
+  mask bit 6 writes the hold-off through `pc_hal_trig_ext_write` with the type kept (E_UNSUPPORTED detail 6 is gone).
+  `pc_trigger_body` 52 bytes (12 = holdoff; 28..51 the SET_TRIGGER2 body: type, edge, flags, source, N, H, level, 0,
+  holdoff, 0). `pc_status_body` 52 bytes (48 0x37, 49 0x34 byte 0, 50 u16 edges to count, from `s->trig_st`, read in
+  `pc_acq_service` after `pc_hal_acq_poll` while `!done`, zeroed at ARM). `pc_capture_latch` takes the extension into
+  `pc_capture` (trig_type / flags / n / h / holdoff), `h_get_capture_info` 112 bytes (96 type, 97 flags, 98 u16 0, 100 N,
+  104 H, 108 holdoff). Constants `PC_STATUS_LEN` 52, `PC_TRIGGER_LEN` 52, `PC_CAPTURE_INFO_LEN` 112 (pc_cmds.h).
+- **Host tests**: fpga_model models the latches (fm_len 0x5F / 0x60 = 3, 0x1B = 4), the 0x66 one-shot consumed by 0x01 = 1
+  (`ho_clr_req`), the hold-off on the capture logic (`ho_until_ps` set at a taken trigger, `fm_holdoff_running()` =
+  reg_1b && now < until, a masked trigger counted in `ho_blocked`), reads 0x34 (the qualifier's reset state: edges to
+  count = N16 - 1, counting = H == 0) and 0x37; the 0x153C model joins `versions[]`; `fm_reset` zeroes `fpga_trig`.
+  test_fpga_bus `test_trig_ext` (6 cases x 6 models: the write trace, the arm trace per type, the one-shot, the status
+  reads; the hold-off at 1 ms / 200 us / 50 us: masked re-arm trigger, 0x66 + arm clears, 0x1B = 0 releases, runs out;
+  0x153B unaffected). test_session `test_trigger2` (caps, features, GET_TRIGGER 52, every type's echo and mock state,
+  23 refusals with their details and no write, SET_TRIGGER's hold-off and edge = polarity, settings_seq on a pure
+  extension change, the status bytes of a capture in flight, GET_CAPTURE_INFO 112); test_trigger's hold-off case;
+  test_info's caps and the `other[]` list (0x153B is a mismatch now); `setup(PC_FW_FPGA_VERSION)` everywhere (was
+  0x153B literals); test_diag's report texts. `make -s test` green; GCC 10 build 38 warnings, all upstream and
+  fw-one's two pc_seq_hw.c pointer warnings (none in the files touched here).
+- **Vectors** (gen_vectors.py section 5f, `make vectors`): `req_set_trigger2` (pulse width shorter than 1500, negative,
+  CH2, level 140, hold-off 200000), `req_set_trigger2_nth_edge_ext`, `_pulse_longer_max`, `_timeout`, `_edge`,
+  `resp_get_trigger_1_26`, `resp_get_status_1_26`, `resp_get_capture_info_1_26`, `resp_set_trigger2_e_bad_arg_runt`;
+  115 vectors, check_vectors OK, `python -m fnirsi1013d.vectors --check` (main venv) OK. The host-side (`host_`)
+  vectors for the mcp structs are C8's (`--merge` once protocol.py has `SetTrigger2Req`).
+
+**Decided and why**
+- The hold-off and SET_TRIGGER2's `holdoff` are in **5 ns units** (the raw 0x1B value), not the contract 9.3's
+  `holdoff_ns`: the brief's "the firmware converts nothing" wins, and GET_TRIGGER 12 (documented "raw") stays one unit.
+  The mcp converts (C8).
+- GET_TRIGGER appends the whole SET_TRIGGER2 body (source, level and hold-off duplicated) rather than only the new
+  fields: one struct on the host round-trips the trigger, and the duplicates cost 8 bytes.
+- The type registers are written both at SET time (like 0x15..0x17, so a UI conversion in RUN takes them at its next arm
+  without a UI change) and inside every arm window (the contract 9.3's "as 0x57..0x5C", and the FEL case). 0x1B and
+  0x66 are not part of the arm: the hold-off must survive re-arms, and the clear is a one-shot the FPGA consumes.
+- Edge type with N or H != 0 is refused (fail fast; a host that switches back to edge sends zeros), LONGER only with
+  pulse width, H only with Nth edge: no silently ignored fields.
+- The 0x34 / 0x37 reads got a consumer (GET_STATUS 48..51 while a host capture is in flight) so the host can see "hold-off
+  running" and "N edges still to count"; GET_TRIGGER stays F_MODAL (no FPGA read), so the status is not there.
+- GET_CAPTURE_INFO carries the extension as armed (the contract's "if any"): the mcp's capture metadata would otherwise
+  not know which trigger made the record.
+
+**Deviations from the contract**: holdoff units (above); features bit 8 instead of 5 (taken); SET_TRIGGER2 body field
+names `N` / `H` with `H` reserved for N2 on 0x153E as 9.3 says. Nothing else.
+
+**Bench (coordinator; FEL load after C4's 0x153C is flashed, never without the backup)**
+1. `#VER` proto=1.26, fpga=0x153c; GET_INFO 76 = 0x153C, 78 = 0, caps bits 2 and 20; GET_STATUS 52 bytes, 44 = 0x1FF;
+   GET_TRIGGER 52 bytes with 28 = 0 (edge), 44 = 0. On the 0x153B unit before the flash: 78 = 1 and the notice screen
+   "needs 0x153C" (the F_BASIC set answers).
+2. Edge type unchanged: the 0x153B checks of section 68 repeat (the arm adds 2 strobes: 0x5E = 0).
+3. Pulse width (contract 9.2 check 2): generator 10 kHz 20 % on the post to CH1 at 1 MSa/s (one word per us):
+   `SET_TRIGGER2 type 1 longer N 15` triggers, `longer N 25` does not (auto mode records untriggered, flags bit 1),
+   `shorter N 25` triggers on the falling edge: READ_RAW shows the trailing edge at the pretrigger. GET_STATUS 49 while
+   armed reads type 1 (bit 2 = longer).
+4. Nth edge: the generator gated by a host loop (`scope_generator` on / off), `type 2 N 3 H 100000` at 1 MSa/s (idle
+   100 ms): the trigger sits on the third pulse after a gap; GET_STATUS 50 counts down 2, 1, 0 while armed.
+5. Timeout: `type 3 N 2000` at 1 MSa/s with the generator on, then off: the capture triggers 2 ms after the last edge.
+6. Hold-off (check 5): 1 kHz square, `holdoff 500000` (2.5 ms), segments of 4: timestamps 3 ms apart; `SET_TRIGGER
+   holdoff 0` releases (segments 1 ms apart); GET_STATUS 48 bit 4 while armed right after a trigger.
+7. SET_TRIGGER with mask 0x40 holdoff 200000 on an otherwise edge trigger: accepted, GET_TRIGGER 12 = 200000.
+Regression signs: GET_STATUS 48 bytes or GET_TRIGGER 28 (the old bodies), a UI capture in RUN ignoring a host type
+(the arm window write missing), a trigger taken inside the hold-off after an ARM without a new SET_TRIGGER2 (0x66
+written per arm), E_UNSUPPORTED detail 6 on SET_TRIGGER's hold-off.
+
+**Open**
+- The UI Type row (docs/plans/ui-rows.md): drives `fpga_trig_write` with the menu's time converted to samples; the
+  menu's trigger edge is the polarity for every type already.
+- C6 (peak) and C7 (counter) share `pc_cmds.c`'s dispatch table and `fpga_model.c`'s `fm_apply` / `fm_len` / read switch:
+  append entries; GET_STATUS and GET_CAPTURE_INFO grow by appending after 52 / 112.
+- mcp (C8): `SetTrigger2Req` / the 52-byte `Trigger`, `scope_set_trigger(type=..., width=..., n=..., idle=..., holdoff=...)`
+  converting time to samples from the capture's word period, the simulator's qualifier model, `host_` vectors.
+- Nothing reads 0x34 / 0x37 during a UI capture (the main loop's own conversions): the status bytes describe host
+  captures only.
