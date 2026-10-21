@@ -146,6 +146,10 @@ void scope_acquisition_memory_deep_select(void);
 //----------------------------------------------------------------------
 
 void scope_open_trigger_menu(void);
+void scope_draw_trigger_menu(void);        //ui-type: the menu into the current screen buffer (opening, and a type change in place)
+int  scope_trigger_menu_height(void);      //ui-type: 336, + 94 with the type's parameter rows, + 24 in Frequency response
+void scope_trigger_type_select(void);      //ui-type: the Type row (Edge / Pulse / Nth)
+void scope_trigger_param_select(void);     //ui-type: the type's parameter rows (Pulse: Width, Shorter / Longer; Nth: N, Idle)
 void scope_trigger_mode_select(void);
 void scope_trigger_edge_select(void);
 void scope_trigger_channel_select(void);
@@ -156,7 +160,7 @@ void scope_hold_off_select(void);
 
 void scope_always_trigger50_select(void);
 
-void scope_trigger_symbol(int x, int y);
+void scope_trigger_symbol(int x, int y, uint32 color);   //ui-type: the type's glyph in `color` on the slot filled in the colour set
 //----------------------------------------------------------------------
 void scope_open_generator_menu(void);
 void gen_enable_select(void);

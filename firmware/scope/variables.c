@@ -106,6 +106,7 @@ uint8 triggermenuopen;              //flag for open the trigger menu
 uint8 genmenuopen;                  //flag for open the generator menu
 uint8 freqmenuopen;                 //flag for open the frequency menu
 uint8 dutymenuopen;                 //flag for open the duty menu
+uint8 trignmenuopen;                //ui-type: the keypad for the Nth edge's N is open (under the trigger menu)
 
 uint8 keymenuopen;                  //flag for open the keyboard menu
 

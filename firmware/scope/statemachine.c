@@ -38,6 +38,7 @@
 #include "PC_interface.h"
 
 #include "variables.h"
+#include "trig_ui.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //fw 0.2.54: a drag distance in screen units, divided by 5 when Move is slow
@@ -679,10 +680,10 @@ void scan_for_touch(void)
       //Set the button inactive
       scope_trigger_settings(0);
 
-      //Save the screen rectangle where the menu will be displayed
+      //Save the screen rectangle where the menu will be displayed (ui-type: at its largest height, the type changes
+      //the height inside the menu)
       display_set_destination_buffer(displaybuffer1);
-      //display_copy_rect_from_screen(560, 46, 172, 246);//186
-      display_copy_rect_from_screen(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_HEIGHT);
+      display_copy_rect_from_screen(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_SAVE_H);
 
       //Go and setup the trigger menu
       scope_open_trigger_menu();
@@ -2725,6 +2726,29 @@ void handle_acquisition_menu_touch(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//ui-type: the keypad for the Nth edge's N (1 .. 65535), nested under the trigger menu as the generator's keypad is under
+//its menu: the screen under it saved, the number typed applied on OK, the current value on a touch outside or a host
+//request (handle_keyboard_menu_touch puts it back in the buffer), the keypad closed on every way out
+static void handle_trigger_n_keypad(void)
+{
+  if(trignmenuopen)
+    return;
+
+  tp_i2c_wait_for_touch_release();
+
+  display_set_destination_buffer(displaybuffer2);
+  display_copy_rect_from_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT);
+
+  trignmenuopen = 1;
+  buffer_set_number(trig_ui.n);
+  scope_open_keyboard_menu();
+  handle_keyboard_menu_touch();
+
+  tui_set_n(&trig_ui, buffer_to_int32());
+  close_open_trigger_menus(0);
+  tp_i2c_wait_for_touch_release();
+}
+
 void handle_trigger_menu_touch(void)
 {
   //Stay in the menu as long as there is no touch outside the menu
@@ -2788,8 +2812,8 @@ void handle_trigger_menu_touch(void)
         //Check on trigger edge, and not in waveform view
         else if((ytouch >= TRIGGER_MENU_YPOS+61) && (ytouch <= TRIGGER_MENU_YPOS+107) && (!scopesettings.waveviewmode)) //120 155 ,125-147
         {
-          //Check on rising
-          if((xtouch >= TRIGGER_MENU_XPOS+70) && (xtouch <= TRIGGER_MENU_XPOS+125))    //626-666
+          //Check on rising (ui-type: Positive under Type Pulse, the wider box)
+          if((xtouch >= TRIGGER_MENU_XPOS+66) && (xtouch <= TRIGGER_MENU_XPOS+128))    //626-666
           {
             //Set the trigger edge to rising
             scopesettings.triggeredge = 0;
@@ -2803,8 +2827,8 @@ void handle_trigger_menu_touch(void)
             
             tp_i2c_wait_for_touch_release();
           }
-          //Check on falling
-          else if((xtouch >= TRIGGER_MENU_XPOS+150) && (xtouch <= TRIGGER_MENU_XPOS+205))   //671-716
+          //Check on falling (ui-type: Negative under Type Pulse)
+          else if((xtouch >= TRIGGER_MENU_XPOS+147) && (xtouch <= TRIGGER_MENU_XPOS+209))   //671-716
           {
             //Set the trigger edge to falling
             scopesettings.triggeredge = 1;
@@ -2972,6 +2996,71 @@ void handle_trigger_menu_touch(void)
           
           //Show the state 
           scope_display_slide_button(TRIGGER_MENU_XPOS + 140, TRIGGER_MENU_YPOS + 240, scopesettings.alwaystrigger50, GREEN_COLOR);//298
+        }
+        //ui-type: the Type row (sixth, docs/plans/ui-rows.md 2.2), not in the waveform viewer
+        else if((ytouch >= TRIGGER_MENU_YPOS+283) && (ytouch <= TRIGGER_MENU_YPOS+332) && (!scopesettings.waveviewmode))
+        {
+          int t = -1;
+
+          if((xtouch >= TRIGGER_MENU_XPOS+65) && (xtouch <= TRIGGER_MENU_XPOS+109))
+            t = TUI_EDGE;
+          else if((xtouch >= TRIGGER_MENU_XPOS+113) && (xtouch <= TRIGGER_MENU_XPOS+163))
+            t = TUI_PULSE;
+          else if((xtouch >= TRIGGER_MENU_XPOS+167) && (xtouch <= TRIGGER_MENU_XPOS+207))
+            t = TUI_NTH;
+
+          if((t >= 0) && (t != trig_ui.type))
+          {
+            //The type and its parameter (snapped into the rate's range) armed through the SET_TRIGGER2 path
+            tui_set_type(&trig_ui, (uint8)t, pc_glue_trig_tw5());
+            pc_glue_trig_ui_apply();
+
+            //The menu's height follows the type: the screen under it back, the menu drawn again in place; the chip's glyph
+            display_set_source_buffer(displaybuffer1);
+            display_copy_rect_to_screen(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_SAVE_H);
+            scope_draw_trigger_menu();
+            scope_trigger_settings(0);
+          }
+
+          tp_i2c_wait_for_touch_release();
+        }
+        //ui-type: the type's parameter rows (2.3): Pulse has Width (- / +) and Shorter / Longer (a tap toggles), Nth has
+        //N (- / + by 1, the keypad from its value box) and Idle (- / + with Off below the ladder); not in the viewer
+        else if(pc_glue_trig_params() && (ytouch >= TRIGGER_MENU_YPOS+334) && (ytouch <= TRIGGER_MENU_YPOS+424) &&
+                (!scopesettings.waveviewmode))
+        {
+          int changed = 0;
+
+          if(ytouch <= TRIGGER_MENU_YPOS+378)
+          {
+            if(trig_ui.type == TUI_PULSE)
+              changed = tui_step_width(&trig_ui, (xtouch < TRIGGER_MENU_XPOS+110) ? -1 : 1, pc_glue_trig_tw5());
+            else if((xtouch >= TRIGGER_MENU_XPOS+100) && (xtouch <= TRIGGER_MENU_XPOS+172))
+            {
+              handle_trigger_n_keypad();
+              changed = 1;
+            }
+            else
+              changed = tui_step_n(&trig_ui, (xtouch < TRIGGER_MENU_XPOS+100) ? -1 : 1);
+          }
+          else if(ytouch >= TRIGGER_MENU_YPOS+380)
+          {
+            if(trig_ui.type == TUI_PULSE)
+            {
+              trig_ui.longer ^= 1;
+              changed = 1;
+            }
+            else
+              changed = tui_step_idle(&trig_ui, (xtouch < TRIGGER_MENU_XPOS+110) ? -1 : 1, pc_glue_trig_tw5());
+          }
+
+          if(changed)
+          {
+            pc_glue_trig_ui_apply();
+            scope_trigger_param_select();
+          }
+
+          tp_i2c_wait_for_touch_release();
         }
         //Wait until touch is released before checking on a new position
 
@@ -3247,8 +3336,11 @@ void handle_keyboard_menu_touch(void)
         buffer_set_number(fpgasettings.gen_freq);
       else if(dutymenuopen)
         buffer_set_number(fpgasettings.gen_duty);
+      else if(trignmenuopen)
+        buffer_set_number(trig_ui.n);
 
       if(freqmenuopen || dutymenuopen) close_open_gen_menus(0);
+      if(trignmenuopen) close_open_trigger_menus(0);
       return;
     }
     
@@ -3326,6 +3418,13 @@ void handle_keyboard_menu_touch(void)
               if((xtouch >= x + 115) && (xtouch <= x + 185))  buffer_set_number(50);//display_text(KEY_MENU_XPOS + 230, KEY_MENU_YPOS + 34, "1 kHz");   // Default 150
               if((xtouch >= x + 215) && (xtouch <= x + 285))  buffer_set_number(100);//display_text(KEY_MENU_XPOS + 210, KEY_MENU_YPOS + 34, "5 MHz");   // MAX 250
             }
+            if(trignmenuopen)
+            {
+              //ui-type: N 1 (MIN), 2 (Default), 65535 (MAX)
+              if((xtouch >= x + 15)  && (xtouch <= x + 85))   buffer_set_number(1);
+              if((xtouch >= x + 115) && (xtouch <= x + 185))  buffer_set_number(2);
+              if((xtouch >= x + 215) && (xtouch <= x + 285))  buffer_set_number(65535);
+            }
           } 
           //Check if touch within this bounding box
           else if((ytouch >= y + 345) && (ytouch <= y + 385))//riadok 6  365
@@ -3371,6 +3470,7 @@ void handle_keyboard_menu_touch(void)
         
         
         if(freqmenuopen || dutymenuopen) close_open_gen_menus(0);
+        if(trignmenuopen) close_open_trigger_menus(0);
 
         return;
       }
@@ -4820,12 +4920,20 @@ void close_open_channel_menus(PCHANNELSETTINGS settings, uint32 closemain)
 
 void close_open_trigger_menus( uint32 closemain)
 {
+  //ui-type: the keypad for N under the menu first
+  if(trignmenuopen)
+  {
+    display_set_source_buffer(displaybuffer2);
+    display_copy_rect_to_screen(KEY_MENU_XPOS, KEY_MENU_YPOS, KEY_MENU_WIDTH, KEY_MENU_HEIGHT);
+    trignmenuopen = 0;
+  }
+
   //Check if trigger menu has been opened and needs to be closed
   if(closemain && triggermenuopen)
   {
-    //Restore the screen under the trigger menu when done
+    //Restore the screen under the trigger menu when done (ui-type: the largest height, as saved)
     display_set_source_buffer(displaybuffer1);
-    display_copy_rect_to_screen(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_HEIGHT);//353
+    display_copy_rect_to_screen(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_SAVE_H);
 
     //Clear the flag so it will be opened next time
     triggermenuopen = 0;
