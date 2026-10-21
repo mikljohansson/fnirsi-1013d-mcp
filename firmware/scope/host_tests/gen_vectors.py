@@ -166,6 +166,73 @@ def decim_case(divider, k_req, total, fir_req=0):
     return case
 
 
+# C6 peak detect (FPGA 0x153C, protocol 1.26, docs/plans/fpga-0x153c.md section 4; fw-c6), independent of pc_decim.c.
+# The firmware's capability level is PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES (the 0x153A+ stages add 40 ns to the EXT lag).
+def decim_peak_case(divider, total, k_req, fir_req):
+    n = 2 * (divider // 2 + 1)
+    case = {"divider": divider, "total": total, "k_req": k_req, "fir_req": fir_req}
+    if divider == 0 or total > DECIM_MAX_TOTAL:
+        # legacy record, the filter's own rules (why 2 at 200 MSa/s, 3 for a long record); the FIR request is dropped too
+        case.update({"peak": 0, "k": 0, "n": 0, "why": 2 if divider == 0 else 3, "status": 0, "shift_byte": 0, "cmd56": 0,
+                     "rate": 200000000 // (divider + 1), "settle_us": 0, "ext_shift": 0})
+        return case
+    # K = 1 to 0x53, 0x56 = 2, shift 0, gain 1; the boxcar's latency 120 ns + (N - 1) 2.5 ns + 40 ns (0.5 ns units),
+    # settle (1 + 10) N x 5 ns + 1 us
+    case.update({"peak": 1, "k": 1, "n": n, "why": 0, "status": 0x81, "shift_byte": 0xC0, "cmd56": 2,
+                 "rate": 200000000 // n, "settle_us": -(-(11 * n) // 200) + 1,
+                 "ext_shift": (240 + (n - 1) * 5 + 80 + 5 * n) // (10 * n)})
+    return case
+
+
+PEAK_RAWS = [0, 1, 127, 128, 254, 255]
+PEAK_PAIRS = [(0, 255), (100, 140), (100, 141), (10, 250), (0, 100), (10, 255)]
+
+
+def c_div2(v):
+    """C integer division by 2 (toward zero)."""
+    return -((-v) // 2) if v < 0 else v // 2
+
+
+def clamp8(v):
+    return 0 if v < 0 else (255 if v > 255 else v)
+
+
+def peak_corr_case(gain_a, gain_b, off_a, off_b):
+    gain = (gain_a + gain_b + 1) // 2
+    off = c_div2(off_a + off_b)
+
+    def code(raw):
+        return clamp8((raw * gain + off + (1 << 15)) >> 16)
+
+    def mid(mn, mx):
+        return clamp8(((mn + mx) * gain + 2 * off + (1 << 16)) >> 17)
+
+    def level(c):
+        num = (c << 16) - off
+        if gain == 0 or num <= 0:
+            return 0
+        return min(255, (num + gain // 2) // gain)
+
+    return {"gain_a": gain_a, "gain_b": gain_b, "off_a": off_a, "off_b": off_b, "gain": gain, "off": off,
+            "codes": [code(r) for r in PEAK_RAWS], "mids": [mid(a, b) for a, b in PEAK_PAIRS],
+            "level": [level(v) for v in DECIM_LEVELS],
+            "overload": [(1 if a == 0 else 0) | (0xFE if b == 255 else 0) for a, b in PEAK_PAIRS]}
+
+
+def decim_peak_cases():
+    cases = [decim_peak_case(d, 3000, k, 0) for d in SAMPLE_RATE_DIVIDERS for k in (0, 2)]
+    cases += [decim_peak_case(19, 3000, 2, 1), decim_peak_case(19, 8190, 0, 0), decim_peak_case(19, 8192, 0, 0),
+              decim_peak_case(2, 3000, 0, 0), decim_peak_case(0, 3000, 3, 1)]
+    return cases
+
+
+def peak_corr_cases():
+    # 1.00o5 compensations (gain 1, offsets in whole codes), the calibration v3 example (1.02 / 0.98, -3.5 / +1.5 codes),
+    # a strong gain, a negative mean offset
+    return [peak_corr_case(65536, 65536, 2 * 65536, -1 * 65536), peak_corr_case(66846, 64225, -3 * 65536 - 32768, 65536 + 32768),
+            peak_corr_case(70000, 70000, 0, 0), peak_corr_case(60000, 61000, -200000, -100001), peak_corr_case(65536, 65536, 0, 0)]
+
+
 def decim_cases():
     cases = [decim_case(d, k, 3000) for d in SAMPLE_RATE_DIVIDERS for k in range(4)]
     cases += [decim_case(2, 2, 3000), decim_case(20, 3, 3000), decim_case(10332, 3, 3000), decim_case(10334, 3, 3000),
@@ -619,6 +686,27 @@ def build():
         "14 level2)",
         [decoded(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)])
 
+    # 5h. Protocol 1.26, C6 peak detect (fw-c6, section 14 row 66): the firmware's refusals. The host-side request /
+    # response vectors (host_req_set_decim_peak, host_resp_get_decim_peak, host_req_read_raw_peak, host_resp_read_raw_peak,
+    # host_resp_get_capture_info_1_26_peak) are mcp-c8's (mcp/src/fnirsi1013d/vectors.py --merge) and are kept by main()
+    ep = struct.pack("<H", 1) + b"FIR with peak detect"
+    f = frame(CMDS["SET_DECIM"], 80, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_set_decim_e_bad_arg_fir_peak", f, [],
+        "1.26 SET_DECIM E_BAD_ARG detail 1 for filter 4 with flags bit 3: the FIR is off while peak detect runs (set the "
+        "filter first); filter 5 and above is detail 0 'filter 0..3, 4 peak'",
+        [decoded(CMDS["SET_DECIM"], 80, ep, status=4, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 7) + b"peak detect: averaging refused (SET_DECIM filter first)"
+    f = frame(CMDS["SET_SEQ"], 81, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_set_seq_e_state_peak", f, [],
+        "1.26 SET_SEQ mode 2 (averaging) while the next arm is a peak record: E_STATE detail 7 (the lane sums would mix "
+        "the max and min bytes); GET_SEQ byte 16 reads 9 for an averaging setting that no longer fits, ARM then E_STATE 3",
+        [decoded(CMDS["SET_SEQ"], 81, ep, status=8, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 2) + b"peak-detect record: layout 3"
+    f = frame(CMDS["READ_RAW"], 82, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_read_raw_e_bad_arg_peak_layout2", f, [],
+        "1.26 READ_RAW layout 2 of a peak-detect record: E_BAD_ARG detail 2 (layout 3 reads it); layout 3 of any other "
+        "record is detail 2 'layout 3 needs a peak-detect record'",
+        [decoded(CMDS["READ_RAW"], 82, ep, status=4, flags=FLAG_RESPONSE)])
     # 5g. Protocol 1.26 (fw-c7, section 14 row 66): the FPGA 0x153C hardware counter. GET_COUNTER 0x0213 request 8
     # bytes: 0 u8 what (0 read, 1 configure then read), 1 u8 gate (0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s), 2 u8 source
     # (0 the trigger source, 1 CH1, 2 CH2, 3 EXT), 3 u8 level (0 = follow the UI trigger level), 4 u8 hysteresis, 3 x 0.
@@ -698,6 +786,24 @@ def build():
         },
         "adc_cal_v3": adc_cal_v3_section(),
         "diag_layouts": diag_layouts_section(),
+        "decim_peak": {
+            "notes": "1.26 peak detect (FPGA 0x153C, fw-c6), checked against pc_decim.c by decim_check --peak / --peak-corr. "
+                     "cases: divider total k_req fir_req -> peak (1 = the record is { max, min } words), k (1), n (the "
+                     "window 2 (floor(D / 2) + 1)), why (0; 2 at divider 0, 3 over 8190 samples: legacy record, the FIR "
+                     "request dropped), status (the mode byte 0x81), shift_byte (0xC0: bit 7 peak active, bit 6 peak "
+                     "written, S 0), cmd56 (0x56 = 2), rate 200 MSa/s / N, settle_us = ceil(11 N / 200) + 1, ext_shift = "
+                     "round((120 ns + (N - 1) 2.5 ns + 40 ns) / (N x 5 ns)) (the K = 1 boxcar's latency with the capture "
+                     "stages). corr: gain_a gain_b off_a off_b (Q16, GET_CAL 92..107 at divider 0: the full clock class) -> "
+                     "gain = round((gain_a + gain_b) / 2), off = (off_a + off_b) / 2 (C division); codes = clamp((raw x gain "
+                     "+ off + 2^15) >> 16) for raws, mids = clamp(((min + max) gain + 2 off + 2^16) >> 17) for pairs (the "
+                     "processed trace's sample), level = the raw code whose corrected value is the level (0x55 = level << 8; "
+                     "0 when the level is at or below the offset), overload = (min == 0) | (max == 255 ? 0xFE) for pairs.",
+            "raws": PEAK_RAWS,
+            "pairs": [list(p) for p in PEAK_PAIRS],
+            "levels": DECIM_LEVELS,
+            "cases": decim_peak_cases(),
+            "corr": peak_corr_cases(),
+        },
         "seq": {
             "notes": "1.17 sequencer (FPGA 0x1536), checked against pc_seq.c by seq_check (check_vectors.py --seq-checker). "
                      "fit: args mode flags m count n pre_words total_words wide -> fit code (0 ok, 1 mode, 2 flags, 3 m, "

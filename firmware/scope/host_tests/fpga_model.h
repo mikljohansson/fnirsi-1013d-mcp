@@ -23,6 +23,12 @@
 //     running one at once; the timer survives arms unless 0x66 was written before the 0x01 = 1. The qualifier state
 //     machines (pulse width, Nth edge, timeout) are not modelled: the model triggers at trig_at whatever the type, and
 //     0x34 reports the reset state of the counters (edges to count = N - 1, counting = H == 0).
+//   - fw-c6 (0x153C C6, peak detect, fpga/al3/AGENTS.md "0x153C C2 peak detect"): 0x56 bit 1 is a register; the 16-bit
+//     path is on when K != 0 or peak (one word per output sample, period N x 5 ns, N = 2 (floor(D / 2) + 1)); read 0x29
+//     byte 0 = { dec_on, fir_en, fir_act (0 with peak), 0, 0, swap, K }, byte 1 = { peak_act, peak_en, shift[5:0] } (0x153C;
+//     older bitstreams read the shift alone). With peak on and `capture` set, every word written is { max, min } per
+//     channel of the N synthetic raw samples of its window (fm_raw_sample: a sawtooth with 255 spikes every 1000 and 0
+//     dips every 1777 samples; fm_peak_word is the reference), lanes 0x20 / 0x22 = min, 0x21 / 0x23 = max.
 //   - fw-c7 (0x153C, C7 counter): 0x61 (gate, source), 0x62 (level, hysteresis), the trigger source copy 0x15, read 0x35
 //     (16 bytes from a snapshot taken at the command byte, fpga/al3/AGENTS.md "0x153C C3 counter"). The stream is a
 //     synthetic square wave per source (cnt_sig: period, high time and phase in ps, all multiples of the 5 ns clock, and
@@ -126,6 +132,12 @@ extern fpga_model fm;
 
 void fm_reset(uint16_t version, uint32_t divider, uint32_t seed);
 int  fm_holdoff_running(void);              //0x37 bit 4 as the model sees it now
+//C6 peak detect: the model's state and references
+int     fm_peak_on(void);                   //0x56 bit 1 on a 0x153C model
+int     fm_dec_on(void);                    //the 16-bit path: K != 0 or peak
+uint32_t fm_window(void);                   //N = 2 (floor(D / 2) + 1)
+uint8_t fm_raw_sample(uint32_t ch, uint64_t j);                        //synthetic raw 200 MSa/s sample j of channel ch
+void    fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx); //{ max, min } of word w's window
 void fm_fill(uint32_t salt);                //distinct bytes per word and lane
 void fm_advance_ns(uint32_t ns);            //idle time (e.g. the capture after the release)
 int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the first matching write at or after from, -1

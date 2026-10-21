@@ -130,7 +130,7 @@ typedef struct
   uint8_t  held;
   uint8_t  mode;            //0x53
   uint8_t  shift;           //0x54
-  uint8_t  fir;             //0x56
+  uint8_t  fir;             //0x56 (the whole byte: bit 0 FIR enable, bit 1 peak detect since 0x153C)
   uint32_t divider;         //0x0D
 } fpga_bus_writes;
 
@@ -140,10 +140,11 @@ extern fpga_bus_writes fpga_bus_wr;
 int  fpga_bus_note_write(uint8_t cmd, uint32_t value);
 
 //Decimation registers before a sampling reset (fw 0.2.87, from pc_dec_apply): 0x53 = mode and, with has_fir, 0x56 =
-//fir_en when they differ from what the FPGA holds; with K = mode bits 1:0 >= 1, 0x54 = shift at every call, so a shift
-//written for another divider (or lost, or written by someone else) cannot survive an arm. 1 = the filter must settle:
-//a value differs from what the FPGA held, or the divider changed since the previous call.
-int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift);
+//cmd56 (bit 0 FIR enable, bit 1 peak detect: pc_decim_cmd56) when they differ from what the FPGA holds; with K = mode
+//bits 1:0 >= 1, 0x54 = shift at every call, so a shift written for another divider (or lost, or written by someone else)
+//cannot survive an arm. 1 = the filter must settle: a value differs from what the FPGA held, or the divider changed
+//since the previous call.
+int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bus primitives: fpga_control.c / fpga_control.h on the scope, fpga_model.c in the host test

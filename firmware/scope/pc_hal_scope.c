@@ -687,6 +687,10 @@ static uint8         pc_dec_set_mode[2] = { PC_DECIM_DEFAULT_SCOPE, PC_DECIM_DEF
 #define pc_dec_setting (pc_dec_set_mode[spectrum_mode() != SPECTRUM_MODE_SCOPE])
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
+//C6 peak detect (0x153C, docs/plans/fpga-0x153c.md section 4; the ACQ Sample row of docs/plans/ui-rows.md section 3): one
+//Scope setting, not per mode (the Spectrum always acquires Normal), not saved yet (the UI row item puts it in word 211
+//bit 3). SET_DECIM filter 4 sets it and keeps the Filter's K / FIR for the way back; filter 0..3 clears it
+static uint8         pc_dec_peak;
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
 static uint8         pc_dec_last_ui;                  //the last one was (the full-rate check's re-arm repeats it)
 static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
@@ -714,11 +718,18 @@ uint32_t pc_hal_divider_now(void)
   return (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ? sample_rate_settings[scopesettings.samplerate] : 0;
 }
 
-//set: bits 1:0 K, PC_DECIM_SET_FIR (pc_dec_setting, or 0 for the legacy path)
+//The UI acquisition's setting: the mode on screen's Filter, plus Sample Peak in the Scope view (C6)
+static uint8 pc_dec_ui_set(void)
+{
+  return (uint8)((pc_dec_setting & (PC_DECIM_SET_FIR | 3)) |
+                 ((pc_dec_peak && (spectrum_mode() == SPECTRUM_MODE_SCOPE)) ? PC_DECIM_SET_PEAK : 0));
+}
+
+//set: bits 1:0 K, PC_DECIM_SET_FIR, PC_DECIM_SET_PEAK (pc_dec_ui_set, or 0 for the legacy path)
 static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 {
-  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & PC_DECIM_SET_FIR)), pc_hal_divider_now(), fpgasettings.totalsamples,
-                  pc_decim_has(), c);
+  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & (PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK))), pc_hal_divider_now(),
+                  fpgasettings.totalsamples, pc_decim_has(), c);
 }
 
 //Write c to the FPGA and wait for the filter to settle: 0x53 / 0x56 where they differ from what the FPGA holds, 0x54 and
@@ -732,19 +743,35 @@ static void pc_dec_apply(const pc_decim_cfg *c)
   if(!pc_dec_has())
     return;
 
-  settle = fpga_decim_write(pc_decim_mode(c), pc_dec_has() >= PC_DECIM_HAS_FIR, c->fir_en, c->shift);
+  settle = fpga_decim_write(pc_decim_mode(c), pc_dec_has() >= PC_DECIM_HAS_FIR, pc_decim_cmd56(c), c->shift);
 
-  if(c->k)
+  if(pc_decim_wide(c))
   {
 
     //0x17 is ignored while K >= 1: the UI level (8-bit code in the trace domain, as fpga_set_trigger_level computed it)
     //mapped back through the readout's 16-bit transform (fw 0.2.47): the trigger channel's gain16 folded into the
     //scale and its corr16 zero term, so the level sits where the corrected trace shows it (it ignored both before,
     //about 1 % level error at full rate). EXT has no samples: the plain conversion.
+    //C6 peak detect: the FPGA compares the window max (rising) or min (falling) as the high byte, so 0x55 = raw << 8 with
+    //the raw code whose mean-core full-class correction (pc_glue_decim_read's) gives the UI level
     level = (int16)scopesettings.triggerlevel;
     level = (level < 0) ? 0 : ((level > 255) ? 255 : level);
 
-    if(scopesettings.triggerchannel < 2)
+    if(c->peak)
+    {
+      uint16 raw = (uint16)level;
+
+      if(scopesettings.triggerchannel < 2)
+      {
+        acal_corr k;
+
+        fpga_channel_correction_full(scopesettings.triggerchannel ? &scopesettings.channel2 : &scopesettings.channel1, &k);
+        raw = pc_peak_level((uint8)level, pc_peak_gain(k.gain_a, k.gain_b), pc_peak_off(k.off_a, k.off_b));
+      }
+
+      fpga_set_decim_level((uint16)(raw << 8));
+    }
+    else if(scopesettings.triggerchannel < 2)
     {
       acal_corr k;
 
@@ -888,7 +915,7 @@ void pc_glue_decim_conversion(void)
   pc_decim_cfg c;
   int          ui = pc_dec_ui_arm, seq_run;
 
-  pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
+  pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_ui_set() : 0);
   pc_dec_last_ui = pc_dec_ui_arm;
   pc_dec_ui_arm  = 0;
   pc_dec_apply(&c);
@@ -1006,6 +1033,37 @@ void pc_glue_decim_read(void *settings, uint32 start)
     n = PC_DEC_RING;
 
   fpga_read_decim_data(s->adc1command, s->adc2command, start % PC_DEC_RING, n, pc_dec_raw[ch]);
+
+  if(pc_dec_cur.peak)
+  {
+    //C6 peak record: each word = { max (high byte), min (low byte) } raw codes from either core. Both go through the
+    //mean of the two cores' 8-bit corrections in the full clock class (the ADCs run at 200 MSa/s here, as on the filter
+    //path; fpga_channel_correction_full), and the trace takes the corrected midpoint (the host's READ_TRACE too; the
+    //pairs stay in pc_dec_raw for READ_TRACE WIDE and the Scope view's bars). Overload rule: either byte at a rail
+    //(pc_peak_overload; fpga_read_adc_data's own check sees the midpoint only)
+    acal_corr k;
+    uint32    gain;
+    int32     off;
+    uint8     ov = 0;
+
+    fpga_channel_correction_full(s, &k);
+    gain = pc_peak_gain(k.gain_a, k.gain_b);
+    off  = pc_peak_off(k.off_a, k.off_b);
+
+    for(i=0;i<n;i++)
+    {
+      uint8 mn = (uint8)pc_dec_raw[ch][i], mx = (uint8)(pc_dec_raw[ch][i] >> 8);
+
+      pc_dec_feed[i] = (int16)pc_peak_mid(mn, mx, gain, off);
+      ov |= pc_peak_overload(mn, mx);
+    }
+
+    s->ADoverload |= ov;
+    pc_dec_raw_n[ch]  = n;
+    pc_decim_src      = &pc_dec_feed[1];
+    pc_dec_even_src   = &pc_dec_feed[0];
+    return;
+  }
 
   //Into the 8-bit trace domain with the readout's full-class correction (adc_cal.h): gain16 folded into the scale, corr16
   //added (each output sample weighs both cores equally for even N). fpga_read_adc_data then passes the codes through
@@ -1127,6 +1185,7 @@ void pc_glue_settings_defaults(void)
 {
   pc_dec_set_mode[0] = PC_DECIM_DEFAULT_SCOPE;
   pc_dec_set_mode[1] = PC_DECIM_DEFAULT_SPEC;
+  pc_dec_peak        = 0;                                   //C6: Sample Normal
 
 #if PC_FORCE_CDC
   //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
@@ -1182,15 +1241,16 @@ void pc_glue_decim_tap(void)
 
 uint8_t pc_hal_decim_setting(void)
 {
-  return (uint8_t)((pc_dec_setting & (PC_DECIM_SET_FIR | 3)) | pc_dec_flags);
+  return (uint8_t)(pc_dec_ui_set() | pc_dec_flags);
 }
 
 void pc_hal_decim_set(uint8_t setting)
 {
   pc_dec_setting = setting & (PC_DECIM_SET_FIR | 3);
   pc_dec_flags   = setting & PC_DECIM_FLAGS;
+  pc_dec_peak    = (setting & PC_DECIM_SET_PEAK) ? 1 : 0;                  //C6: the Sample row's state
 
-  if(pc_dec_setting & 3)
+  if((pc_dec_setting & 3) || pc_dec_peak)
   {
     pc_dec_fit_memory();
     acq_view_fit(1);

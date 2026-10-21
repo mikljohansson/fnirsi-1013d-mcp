@@ -225,14 +225,14 @@ int fpga_bus_note_write(uint8_t cmd, uint32_t value)
 //The divider at the previous fpga_decim_write (0xFFFFFFFF: none yet, or no 0x0D written then)
 static uint32_t fpga_decim_div = 0xFFFFFFFF;
 
-int fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift)
+int fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift)
 {
   uint32_t div = (fpga_bus_wr.held & FPGA_HELD_DIVIDER) ? fpga_bus_wr.divider : 0xFFFFFFFF;
   int      settle = (div != fpga_decim_div);
 
   fpga_decim_div = div;
   mode &= 0x1F;
-  fir_en = fir_en ? 1 : 0;
+  cmd56 &= 0x03;                        //bit 0 FIR enable, bit 1 peak detect (0x153C, C6); bits 7..2 write 0
   shift &= 0x3F;
 
   if(!(fpga_bus_wr.held & FPGA_HELD_MODE) || (fpga_bus_wr.mode != mode))
@@ -242,11 +242,11 @@ int fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift)
     settle = 1;
   }
 
-  //0x1535+: FIR enable; older bitstreams never get the command
-  if(has_fir && (!(fpga_bus_wr.held & FPGA_HELD_FIR) || (fpga_bus_wr.fir != fir_en)))
+  //0x1535+: FIR enable (and the 0x153C peak detect bit); older bitstreams never get the command
+  if(has_fir && (!(fpga_bus_wr.held & FPGA_HELD_FIR) || (fpga_bus_wr.fir != cmd56)))
   {
     fpga_write_cmd(0x56);
-    fpga_write_byte(fir_en);
+    fpga_write_byte(cmd56);
     settle = 1;
   }
 

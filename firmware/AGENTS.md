@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (version provisional), protocol 1.26 (row 66 "Peak detect", provisional): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (version provisional), protocol 1.26 (row 66 addition, provisional): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
 **Branch ui-type (2026-10-21): fw 0.2.103 + C5 + ui-type (version provisional), protocol 1.26 unchanged: the trigger menu's Type row (Edge / Pulse / Nth with Width, Shorter / Longer, N, Idle), the chip glyph, the notice queue, the hints, settings words 202 / 203; section 72.**
 **Branch fw-c5 (2026-10-21): fw 0.2.103 + C5 (version provisional, the coordinator numbers it), protocol 1.26 (row 66, provisional): built for FPGA 0x153C (`PC_FW_FPGA_VERSION`; a scope on 0x153B shows the mismatch notice until C4's bitstream is flashed), caps bits 2 HOLDOFF / 20 TRIG_TYPES, SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112, the trigger extension registers 0x5E / 0x5F / 0x60 / 0x1B / 0x66 in fpga_bus.c with the arm-window writes; section 69.**
@@ -5253,6 +5254,100 @@ written per arm), E_UNSUPPORTED detail 6 on SET_TRIGGER's hold-off.
   converting time to samples from the capture's word period, the simulator's qualifier model, `host_` vectors.
 - Nothing reads 0x34 / 0x37 during a UI capture (the main loop's own conversions): the status bytes describe host
   captures only.
+
+## 70. fw-c6: peak detect (fw 0.2.103 + C5 + C6, version provisional, protocol 1.26, row 66 "Peak detect")
+
+Branch `fw-c6` (worktree) from main c432354 (fw-c5 merged), origin/main 1635a1a (mcp-c8, ui-type) merged before the final
+tests. Brief: item **C6** of `docs/plans/fpga-0x153c.md` section 10 (firmware peak detect) against the contract's register
+semantics (sections 2.1, 2.2, 4) and fpga-c2's handoff (`fpga/al3/AGENTS.md` "0x153C C2 peak detect": 0x56 bit 1 alone selects
+the 16-bit path, 0x29 byte 1 = { peak_act, peak_en, shift }, settle as a filter write), with the host's wire format fixed by
+the coordinator (06:2x) to match mcp-c8 byte for byte. Commits: 0291abf (pc_decim, fpga_bus, fpga_model, test_fpga_bus),
+22861f9 (pc_seq fit), 0134049 (pc_cmds, pc_hal_scope, pc_seq_hw, fpga_control, mock, test_session), d16129e (vectors), then
+the docs. **Nothing benched, nothing flashed**: the unit runs 0x153B, the firmware needs C4's 0x153C bitstream; the
+coordinator numbers the version (`PC_FW_VERSION` is still 0.2.103 on the branch).
+
+**What was built**
+- `pc_decim.h/.c`: `PC_DECIM_SET_PEAK` 0x40 in the setting byte (`PC_DECIM_SET_MASK` 0x7F), `pc_decim_cfg.peak`,
+  `pc_decim_wide()` (k != 0 or peak), `pc_decim_shift_byte()` (S | 0xC0 for a peak record: `PC_DECIM_PEAK_ACT` /
+  `_PEAK_EN` as the FPGA's 0x29 byte 1), `pc_decim_cmd56()` (bit 0 FIR, bit 1 peak). `pc_decim_config` with the peak bit:
+  the same divider 0 / total > 8190 fallbacks as the filter (why 2 / 3, legacy, the FIR request dropped too), else
+  `peak` 1, `k` 1, `n` the window, gain 1, shift 0, scale 0, `fir_en` 0, why 0; the status byte 0x81. The peak maths:
+  `pc_peak_gain` / `_off` (the mean of the two cores' Q16 gain / offset), `pc_peak_code`, `pc_peak_mid` (the corrected
+  midpoint, rounded once), `pc_peak_level` (the inverse for 0x55), `pc_peak_overload` (min 0 -> 0x01, max 255 -> 0xFE).
+  `pc_decim_rate` / `_ext_shift` / `_ext_shift_at` / `_settle_us` take `pc_decim_wide`; the EXT lag of a peak record is
+  the K = 1 boxcar's, the settle (1 + 10) N x 5 ns + 1 us.
+- `fpga_bus.c/.h`: `fpga_decim_write(mode, has_fir, cmd56, shift)` takes the whole 0x56 byte (was the FIR flag); `fpga_bus_wr.fir`
+  holds it. With peak: 0x53 = 1 | flags, 0x54 = 0, 0x56 = 2, each where it differs from what the FPGA holds.
+- `pc_hal_scope.c`: `pc_dec_peak` (one Scope setting, not per mode: `pc_dec_ui_set()` adds the bit in the Scope view only,
+  the Spectrum acquires Normal; not saved: the UI row item puts it in word 211 bit 3; `pc_glue_settings_defaults` clears
+  it), `pc_hal_decim_setting` / `_set` carry it, `pc_dec_apply` writes 0x55 = `pc_peak_level(level) << 8` for CH1 / CH2
+  (level << 8 on EXT), `pc_glue_decim_read` converts { max, min } words with the **full-class mean-core correction**
+  (`fpga_channel_correction_full` in fpga_control.c: `acal_correction` at divider 0 plus `acal_live_apply`) into the
+  midpoint feed, sets `ADoverload` by the either-byte rule, keeps the pairs in `pc_dec_raw` (READ_TRACE WIDE, the UI's bars).
+  `pc_seq_hw.c` `pc_seq_ui_conversion`: no Average while peak (state 0).
+- `pc_seq.h/.c`: `pc_seq_fit_rec(c, pre, total, wide, peak)` = `pc_seq_fit` plus `PC_SEQ_FIT_PEAK` 9 for averaging of a
+  peak record; the three pc_cmds.c callers use it (SET_SEQ E_STATE 7 "peak detect: averaging refused (SET_DECIM filter
+  first)", GET_SEQ 16 = 9, ARM E_STATE 3).
+- `pc_cmds.c`: caps `PC_CAP_PEAK_DETECT` (bit 21), features `PC_FEAT_W_PEAK` 0x0200 (bit 9; C7's counter is 0x0400);
+  `pc_decim_next` passes the peak bit; `h_set_decim` filter 4 (keeps the Filter's K / FIR from `pc_hal_decim_setting`,
+  flags bits 0-2 applied, bit 3 E_BAD_ARG 1 "FIR with peak detect", filter 5+ E_BAD_ARG 0); `pc_decim_body` 0 = 4 while
+  peak (byte 1's FIR bit masked), 3 / 25 the shift byte, 2 / 24 the status; `pc_capture_latch` stores the shift byte;
+  `h_get_capture_info` 79 = (16-bit, also single captures) | peak << 1; `h_read_raw` layout 3 (per channel the core A lane
+  = minima then the core B lane = maxima; `pc_raw_peak` judges the capture in flight while armed, else the latest; layout 2
+  on a peak record and layout 3 on any other E_BAD_ARG 2); `h_set_trigger`'s total rule counts peak as 16-bit. GET_DECIM stays
+  36 bytes and GET_CAPTURE_INFO 112 (the host's structs).
+- Host tests: `fpga_model.c` (0x56 bit 1 on 0x153C, `fm_dec_on` / `fm_peak_on` / `fm_window`, the word period N x 5 ns on
+  the 16-bit path, read 0x29 with the peak bits and the FIR-off rule, `fm_raw_sample` / `fm_peak_word`: synthetic windows
+  with 255 spikes every 1000 and 0 dips every 1777 samples written as { max, min } lanes), `test_fpga_bus` `test_peak`,
+  `test_session` `test_peak_math` / `test_peak_protocol` (the old `filter 4 = E_BAD_ARG` check is now filter 5, the flags
+  0xE3 case is 0xA3: bit 6 means peak; features 0x3FF), `test_seq` the fit, `mock_hal` (peak trace = midpoint with the
+  1.00o5 compensations' mean, the pairs in trace16, the overload rule, the shift byte in `decim_rb`, the setting mask 0x7F).
+  `make -s test` green after the merge of 1635a1a (test_ui_diag's four 0x153b-text failures seen on c432354 are gone on
+  main). GCC 10 build 38 warnings, all upstream and fw-one's two pc_seq_hw.c pointer warnings.
+- Vectors: `gen_vectors.py` 5g (`resp_set_decim_e_bad_arg_fir_peak`, `resp_set_seq_e_state_peak`,
+  `resp_read_raw_e_bad_arg_peak_layout2`) and the `decim_peak` maths section (41 configuration cases, 5 corrections) checked by
+  `decim_check --peak` / `--peak-corr`; mcp-c8's `host_*_peak` vectors kept; 134 vectors, `check_vectors` OK.
+
+**Decided and why**
+- **The host's bytes win over the contract's wording where they differed** (coordinator 06:2x, mcp-c8 merged first): the
+  peak flags live in the shift byte (bits 7 / 6, mirroring 0x29 byte 1), not in a mode-byte bit; the mode byte reads 0x81 (K
+  1); GET_DECIM / GET_CAPTURE_INFO keep their lengths; `why` is 0 for an active peak record (the mcp's why table has 0..6).
+- **0x53 = 1 is written** under peak (the contract section 4's "the firmware writes 0x53 K = 1 and 0x56 bit 1"), although
+  the one-register switch would not need it: so the FPGA's 0x29 byte 0 bits 1..0 read the K the firmware reports (0x81 on
+  both sides). "Leaves 0x53 / 0x54 as they are (the way back)" of the brief is read as the *setting*: the Filter's K / FIR
+  stay in the setting byte and come back at the next Normal arm; the registers follow every arm anyway.
+- **Full clock class for the mean-core correction**: the ADCs run at 200 MSa/s under peak detect (dec_on, like the filter
+  path), so the gated-class correction the divider would select is the wrong one; `fpga_channel_correction_full`. The
+  contract's "GET_CAL bytes 92..107" are those values at divider 0; at D > 0 GET_CAL reports the gated class, a gap for the
+  mcp's volts conversion of a code or so (noted below).
+- **The processed trace is the corrected midpoint** (the brief: "the midpoint, with min / max only in the raw layout"): one
+  trace for the screen, the measurements and the software trigger; READ_TRACE WIDE and READ_RAW layout 3 give the pairs; the
+  UI item draws the bars from `pc_dec_raw`.
+- **Divider 0 and long records stay legacy with peak requested** (the filter's rules): at 200 MSa/s every sample is stored
+  and the 16-bit path would only halve the word rate; the setting is kept and GET_DECIM says why (2 / 3). The FPGA's bit alone
+  would run peak at D 0 (N 2, 100 MW/s); the firmware does not write it then (the shift byte reads 0x00, not 0x40: the mcp's
+  simulator models "written but not active" at D 0, a cosmetic difference).
+- **SET_DECIM filter 4 keeps the Filter** (ui-rows.md 3.2: greyed, not merged): the host turns peak off by sending the filter
+  it wants (GET_DECIM does not report the kept K: 36 bytes).
+- **GET_CAPTURE_INFO 79 bit 0 for single captures too** (mcp-c8's vector 0x03): row 56 had it for runs only.
+
+**Deviations from the contract**: the peak flags in the shift byte instead of the contract's "GET_CAPTURE_INFO byte 79 bit 1"
+alone (79 bit 1 is set too); why 0 rather than a new code; the correction class (full, above); nothing else. From the brief:
+0x53 written as 1 (above).
+
+**Bench (coordinator; FEL load after C4's 0x153C is flashed, never without the backup)**: `firmware/README.md` "Peak detect"
+bench list. Regression signs: GET_DECIM 2 = 0x81 with 3 = 0x00 (the shift byte without the peak bits: the FPGA did not take
+0x56 bit 1, or an older bitstream), layout 3 refused after a peak arm (`pc_raw_peak` reading the wrong capture), a trace at
+the midpoint while READ_RAW layout 3 shows pairs that do not bracket it (the correction class), Average running with peak
+(GET_STATUS 46 != 0).
+
+**Open**
+- The ACQ Sample row and the Scope view's bars (`docs/plans/ui-rows.md` section 3): `pc_hal_decim_set(setting | PC_DECIM_SET_PEAK)`
+  or a direct `pc_dec_peak` toggle, word 211 bit 3, the Filter / Average boxes greyed, the bars from `pc_hal_trace16`.
+- mcp (C8 follow-up): the volts conversion of peak bytes needs the full-class correction (GET_CAL at D > 0 gives the gated
+  one); the simulator's "peak written but not active at divider 0" differs from the firmware (0x56 bit 1 not written there).
+- GET_DECIM does not report the Filter kept behind Sample Peak; a host restores it by value.
+- pc_seq_hw.c's two upstream pointer warnings (fw-one) are still there.
 
 ## 71. fw-c7: counter (fw 0.2.103 + C7, version provisional, protocol 1.26 row 66 addition, provisional)
 

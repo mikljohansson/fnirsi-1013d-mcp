@@ -319,7 +319,7 @@ static int decim_arm(uint8_t k_req, int fir, pc_decim_cfg *c)
 {
   T_TRUE(fpga_bus_wr.held & FPGA_HELD_DIVIDER);
   pc_decim_config(k_req, fir ? PC_DECIM_SET_FIR : 0, fpga_bus_wr.divider, 4096, PC_DECIM_HAS_FIR, c);
-  return fpga_decim_write(pc_decim_mode(c), 1, c->fir_en, c->shift);
+  return fpga_decim_write(pc_decim_mode(c), 1, pc_decim_cmd56(c), c->shift);
 }
 
 static void write_0d(uint32_t d)
@@ -819,6 +819,127 @@ static void test_trig_ext(void)
   }
 }
 
+//C6 peak detect (0x153C): fpga_decim_write with the peak bit against the model (0x53 = 1, 0x54 = 0, 0x56 = 2, the 0x29
+//bytes), a capture whose words are { max, min } of the model's synthetic windows (read as the firmware reads a 16-bit
+//record and as READ_RAW layout 3 reads the lanes), the overload rule on them, and the way back (0x56 = 0: the filter's
+//registers again; the mode byte follows 0x53)
+static void test_peak(void)
+{
+  pc_decim_cfg c;
+  uint16_t w16[600];
+  uint8_t  mn[600], mx[600];
+  uint32_t i, n, spikes = 0, dips = 0;
+  int ok;
+
+  fm_reset(0x153C, 19, 61);
+  fm.capture = 1;
+  fm.trig_at = -1;
+  fm_fill(5);
+  write_0d(19);
+  n = fm_window();
+  T_EQ(n, 20);
+
+  //The peak arm's writes: K = 1 to 0x53 (the contract's register value), shift 0, 0x56 bit 1; the FIR request is dropped
+  pc_decim_config(PC_DECIM_CIC2, PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 1); T_EQ(c.k, 1); T_EQ(c.n, 20); T_EQ(c.fir_en, 0); T_EQ(c.shift, 0); T_EQ(c.gain, 1);
+  T_EQ(pc_decim_cmd56(&c), 2); T_EQ(pc_decim_status(&c), 0x81); T_EQ(pc_decim_shift_byte(&c), 0xC0);
+  fm.ntrace = 0;
+  T_EQ(fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift), 1);
+  T_EQ(fm.reg_53, 0x01); T_EQ(fm.reg_56, 0x02); T_EQ(fm.reg_54, 0);
+  T_TRUE(fm_peak_on()); T_TRUE(fm_dec_on());
+
+  //0x29 as fpga_get_decim_state reads it: byte 0 = 16-bit path, K 1, no FIR; byte 1 = peak active and written, S 0
+  fpga_write_cmd(0x29);
+  T_EQ(fpga_read_byte(), 0x81);
+  T_EQ(fpga_read_byte(), 0xC0);
+
+  //A capture: 600 words from the release (the auto time-out ends it), then the words as the firmware's 16-bit readout
+  //and READ_RAW layout 3 read them: lane 0x20 = min, 0x21 = max of the window, the reference being fm_peak_word
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+  {
+    fpga_arm_cfg a;
+
+    memset(&a, 0, sizeof(a));
+    a.pre_words    = 0;
+    a.total_words  = 600;
+    a.write_0e     = 1;
+    a.auto_timeout = 598;
+    T_EQ(fpga_arm_reset(&a), 0);
+  }
+  fm_advance_ns(700 * 100);
+  fpga_write_cmd(0x0A);
+  T_EQ(fpga_read_byte() & 1, 1);
+  T_TRUE(fm.stop_n >= 600);
+
+  fpga_read_decim_data(0x20, 0x21, 0, 600, w16);
+  fpga_read_lane(0x20, 0, 600, mn, 1, fm.ring);
+  fpga_read_lane(0x21, 0, 600, mx, 1, fm.ring);
+  ok = 1;
+
+  for(i=0;i<600;i++)
+  {
+    uint8_t rmn, rmx;
+
+    fm_peak_word(0, i, &rmn, &rmx);
+
+    if((mn[i] != rmn) || (mx[i] != rmx) || (w16[i] != (uint16_t)(rmn | (rmx << 8))) || (mn[i] > mx[i]))
+      ok = 0;
+    if(mx[i] == 255) spikes++;
+    if(mn[i] == 0)   dips++;
+  }
+
+  T_TRUE(ok);
+  //The 255 spikes every 1000 samples land in words 0, 50, 100, ..., 550 (12), the 0 dips every 1777 in 6 words (sample
+  //0 is a spike); a window never misses one, which is what sample skipping would do
+  T_EQ(spikes, 12); T_EQ(dips, 6);
+  T_EQ(mx[50], 255); T_EQ(mn[88], 0); T_EQ(mn[50] < 255, 1);
+  T_EQ(pc_peak_overload(mn[50], mx[50]), 0xFE); T_EQ(pc_peak_overload(mn[88], mx[88]), 0x01);
+  T_EQ(pc_peak_overload(mn[1], mx[1]), 0);
+
+  //CH2's lanes hold its own windows
+  fpga_read_lane(0x22, 7, 100, mn, 1, fm.ring);
+  fpga_read_lane(0x23, 7, 100, mx, 1, fm.ring);
+  ok = 1;
+  for(i=0;i<100;i++)
+  {
+    uint8_t rmn, rmx;
+
+    fm_peak_word(1, 7 + i, &rmn, &rmx);
+    if((mn[i] != rmn) || (mx[i] != rmx))
+      ok = 0;
+  }
+  T_TRUE(ok);
+
+  //The way back: the filter's registers again (0x53 = 2 with its shift, 0x56 = FIR as asked); the model's mode byte
+  //follows 0x53 and the peak bits clear
+  pc_decim_config(PC_DECIM_CIC2, PC_DECIM_SET_FIR, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 0); T_EQ(c.k, 2);
+  T_EQ(fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift), 1);
+  T_EQ(fm.reg_53, 0x02); T_EQ(fm.reg_56, 0x01); T_EQ(fm.reg_54, c.shift);
+  T_FALSE(fm_peak_on()); T_TRUE(fm_dec_on());
+  fpga_write_cmd(0x29);
+  T_EQ(fpga_read_byte(), 0xE2);                   //16-bit, FIR enabled and active (N 20), K 2
+  T_EQ(fpga_read_byte(), c.shift);
+
+  //Off: legacy
+  pc_decim_config(PC_DECIM_OFF, 0, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
+  (void)fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift);
+  T_EQ(fm.reg_53, 0); T_EQ(fm.reg_56, 0); T_FALSE(fm_dec_on());
+  fpga_write_cmd(0x29);
+  T_EQ(fpga_read_byte(), 0x00);
+
+  //An older model ignores 0x56 bit 1
+  fm_reset(0x153B, 19, 62);
+  write_0d(19);
+  pc_decim_config(PC_DECIM_OFF, PC_DECIM_SET_PEAK, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
+  (void)fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift);
+  T_EQ(fm.reg_56, 0x02); T_FALSE(fm_peak_on());
+  fpga_write_cmd(0x29);
+  T_EQ(fpga_read_byte(), 0x81);                   //K 1 was written: the filter path
+  T_EQ(fpga_read_byte(), 0x00);
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // C7 counter (fw-c7, FPGA 0x153C, fpga_counter.c): the boot writes, the once-per-pass 0x35 read and its cost, the derived
 // values against the model's synthetic square waves at every gate, the rate-change rule (0x61 = 0 before the read, the
@@ -1080,6 +1201,7 @@ int main(void)
   test_decim_write();
   test_timeout_records();
   test_trig_ext();
+  test_peak();
   test_counter_derive();
   test_counter();
   return t_report("test_fpga_bus");

@@ -72,6 +72,18 @@ static void test_fit(void)
   c.n = 16;
   T_EQ(pc_seq_fit(&c, 50, 2046, 1), PC_SEQ_FIT_OK);
   T_EQ(pc_seq_fit(&c, 50, 2047, 1), PC_SEQ_FIT_TOTAL);
+
+  //C6 peak detect: averaging of peak records is refused (the sums would mix max and min), every other verdict and
+  //segments are unchanged
+  T_EQ(pc_seq_fit_rec(&c, 50, 2046, 1, 1), PC_SEQ_FIT_PEAK);
+  T_EQ(pc_seq_fit_rec(&c, 50, 2046, 1, 0), PC_SEQ_FIT_OK);
+  T_EQ(pc_seq_fit_rec(&c, 50, 2047, 1, 1), PC_SEQ_FIT_TOTAL);
+  {
+    pc_seq_cfg sg = seg(7, 32, 0);
+    pc_seq_cfg off; memset(&off, 0, sizeof(off));
+    T_EQ(pc_seq_fit_rec(&sg, 16, 120, 1, 1), PC_SEQ_FIT_OK);
+    T_EQ(pc_seq_fit_rec(&off, 16, 120, 1, 1), PC_SEQ_FIT_OK);
+  }
   c.count = 2;
   T_EQ(pc_seq_fit(&c, 50, 1024, 1), PC_SEQ_FIT_OK);
   T_EQ(pc_seq_fit(&c, 50, 1025, 1), PC_SEQ_FIT_COUNT);

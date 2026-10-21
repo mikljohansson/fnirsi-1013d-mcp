@@ -175,6 +175,7 @@
 #define PC_CAP_ENC_CHECK              (1u << 18)   //1.19: the FPGA checks the ADC encodes per capture, read 0x33 (0x1538+)
 #define PC_CAP_CAPTURE_STAGES         (1u << 19)   //1.24: per-core ADC capture stage 0x63, outlier counters 0x36 (0x153A+)
 #define PC_CAP_TRIG_TYPES             (1u << 20)   //1.26: trigger types 0x5E / 0x5F / 0x60, read 0x34 / 0x37; SET_TRIGGER2 (0x153C+)
+#define PC_CAP_PEAK_DETECT            (1u << 21)   //1.26 (C6): peak detect 0x56 bit 1; SET_DECIM filter 4, READ_RAW layout 3 (0x153C+)
                                                    //      (bit 2 HOLDOFF: 0x1B is the trigger hold-off in 5 ns units, 0x153C+)
 #define PC_CAP_COUNTER                (1u << 22)   //1.26 (fw-c7): the hardware counter 0x61 / 0x62, read 0x35; GET_COUNTER (0x153C+)
 
@@ -188,6 +189,7 @@
 #define PC_FEAT_W_BODE                0x0040       //1.20: on-device Bode plot (decimation filter and DDS: 0x1534+)
 #define PC_FEAT_W_CAPTURE             0x0080       //1.24: ADC capture stages and outlier counters (0x153A+)
 #define PC_FEAT_W_TRIG_TYPES          0x0100       //1.26: trigger types and hold-off (0x153C+; the contract's bit 5 was taken)
+#define PC_FEAT_W_PEAK                0x0200       //1.26 (C6): peak detect (0x153C+); C7's COUNTER takes 0x0400
 #define PC_FEAT_W_COUNTER             0x0400       //1.26 (fw-c7): the hardware counter (0x153C+; bit 9 is C6's PEAK)
 
 //----------------------------------------------------------------------------------------------------------------------------------
