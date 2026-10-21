@@ -6,6 +6,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Roll mode on the logger** (owner decision 2026-10-21 14:5x, from the three options: logger-based roll in the 0x153D
+  firmware, restore 0x24 / 0x26 in the RTL, or drop roll mode): the long timebases (100 ms/div to 50 s/div) draw real
+  decimated samples from the 0x153D stream, both channels, continuous, instead of averaging 10 or 100 live-pin peeks; no RTL
+  change, no LUT cost; 0x153C + fw 0.2.104 stays a bisect-only pair with roll mode documented as invalid there (fw-roll).
 - **ACQ Average as one behaviour** (owner decision 2026-10-20 21:59, "consistency matters"): the MCU path becomes a true
   mean of N records like the FPGA path (N by the 40 ms budget, about 2 ms per record read), Atlan's running (trace + previous)
   / 2 average goes; same picture whatever the filter and time base. After the 0.3.0 tag unless the owner says otherwise.
@@ -272,6 +276,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-cruft done 14:5x, merged 15:0x: the 0x0F writes gone (check_retired_regs.py in make test), READ_LIVE 0x0206 + cap bit 9
+  retired in row 67, 0x53 carries K alone (SET_DECIM drops flags bits 0..2, GET_DECIM reports 0; mcp DECIM_SWAP / NEG_* gone),
+  fpga_model 0x29 reads bits 4..2 as 0 on 0x153C+. Host tests green, check_vectors OK, ruff clean, 548 mcp tests, gcc10 sha256
+  4ec3bd0f267265270b775fa1183e65ef518de8ba8feaf6e3fa7abdece9c7933e. Found: the roll mode (100 ms/div to 50 s/div,
+  test.c scope_get_long_timebase_data / scope_check_long_trigger via fpga_average_trace_data, averagecommand 0x24 / 0x26)
+  reads the live ADC pins 0x153C removed; the roll trace is invalid on 0x153C (fw 0.2.104 + 0x153C is a bisect pair only).
+- fw-roll (Opus explicitly, dispatched 15:0x, branch fw-roll): roll mode on the streaming logger per the owner's decision
+  below: the long timebases take their points from the 0x153D stream (fpga_log / pc_logring on 0x69 / 0x6A / 0x38) instead
+  of the 0x24 / 0x26 live-pin averages; averagecommand and fpga_average_trace_data(_long) go.
 - fpga-d3 (Fable, dispatched 14:03, branch fpga-d3): 0x153D integration per contract item D3: merge fpga-d1 (pushed) and
   fpga-d2 (when pushed) onto C4's cruft-removed source, version byte 0x3D, contract_0x153D.txt, run.sh (18 steps) ALL PASS
   both seeds, TD build with every clock closed (re-roll by block order first), dist/al3-0x153D.bin + manifest (unbenched,
