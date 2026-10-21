@@ -32,6 +32,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Unnumbered (provisional) - fw-d5 (protocol 1.27, row 67): the generator as a pattern, FPGA 0x153D
+
+Branch `fw-d5`, not benched, not numbered (`PC_FW_VERSION` unchanged, still built for 0x153C until the 0x153D
+integration). Needs bitstream 0x153D: on 0x153C the generator writes go to unused codes. Commits 30fe638 (generator,
+SET_PATTERN, SET_PATTERN_TRIGGER, source 3), 4743591 (Bode on P), 4f12433 (model and bus tests), 5e5545f (vectors).
+
+- The generator is the pattern generator's two-step square on the 200 MHz clock (5 ns edges, every edge within one clock
+  of ideal, the mean frequency exact to 2^-16 of a clock per period); a frequency or duty change while it runs is
+  glitch-free. The DDS writes (0x51 / 0x52) are gone. The menu, the calibration wizard (its static levels and 1 kHz),
+  the boot state and the Frequency response engine use it.
+- SET_GEN: the raw modes are the period P16 and the high time H16 in 1/65536 of a 5 ns clock; GEN is 40 bytes with the
+  pattern status (the pending bit a host chirp paces on), the source byte, P16 and H16. GET_INFO's generator clock is
+  200 MHz; caps bit 1 is renamed GENERATOR.
+- New: SET_PATTERN 0x0217 (up to 8 steps with a marker, single / R bursts / continuous, idle level, gap, start source),
+  SET_PATTERN_TRIGGER 0x021A (the pattern's own trigger engine with the SET_TRIGGER2 vocabulary), capture trigger source
+  3 = the pattern's marker ("PAT" on the trigger button). Caps bits 24 PATTERN_GEN and 27 PATTERN_TRIGGER, features bits
+  12 and 13.
+- Frequency response: the stimulus period is P clocks of 5 ns (P = 4 M of the DDS era), the frequency grid four times
+  finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
+
 #### 0.2.104 - 2026-10-21 (protocol 1.26, row 66): built for FPGA 0x153C
 
 One firmware for bitstream 0x153C: trigger types (pulse width, Nth edge, timeout) with hold-off, peak detect, the
