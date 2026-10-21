@@ -297,7 +297,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fpga-d3 17:0x: 0x153D timing closed (commit ecdc6f0, roll h2x: the hold-off block and the logger block moved, no logic
+- fw-105 (Opus explicitly, dispatched 16:52, branch fw-105): number the 0x153D firmware 0.2.105 (PC_FW_FPGA_VERSION 0x153D),
+  remove the now-dead per-bitstream checks (the logger's -2 path, roll mode's "needs 0x153D"), fold the provisional
+  CHANGELOG blocks into a 0.2.105 section, protocol row 67 numbered, firmware/AGENTS.md section 80 with the bench checklist.
+- fpga-d3 16:4x: 0x153D timing closed (commit ecdc6f0, roll h2x: the hold-off block and the logger block moved, no logic
   change): clk_200MHz 0 errors, 4.945 ns (+0.055 ns), every other clock 0 errors; 6430 LUT (74.4 %) / 5911 reg / 7451 LE
   (86.2 %, 1189 LEs free). 21 rolls; TD 4.6.8 has no placer seed / effort, optimize_place / optimize_route are no-ops,
   moving a clk_200MHz always block re-rolls. Full two-seed run.sh (18 steps) running, about 4-5 h; then dist and push.
