@@ -32,6 +32,24 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Unnumbered (provisional) - fw-small (protocol unchanged): three small fixes
+
+Branch `fw-small`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 76.
+
+- **The auto-mode deadline stops the capture at the deadline**: the forced stop (the host's and the Scope view's
+  auto-mode deadline, FORCE, the Frequency response and Average deadlines) writes 0x0E = 0 before 0x1A = 0. With an
+  explicit SET_TRIGGER `auto_timeout` it wrote 0x1A = 0 alone, the FPGA's own count (0x0E) had not expired, and the
+  record ended up to twice the deadline later; a trigger in between was reported untriggered. Host test
+  `test_fpga_bus` test_force_deadline. (53551d4)
+- **Vmax / Vmin / Vpp with Sample = Peak read the peaks**: the cards take the lowest min byte and the highest max byte of
+  the peak record, as the bars draw them (Vp too); a narrow spike showed at about half its height (the midpoint trace).
+  Vavg, Vrms, the centre the 50 % trigger level takes, Freq, Period, the widths and the duties stay on the midpoint
+  trace. Host test
+  `test_peak_bars` test_extremes. (7c3ced0)
+- **Calibration**: "ADC readout fault near code 128" now says "power-cycle and retry; report it if it persists" instead
+  of "check the FPGA bitstream" (there is one bitstream to run); `docs/guide/calibration.md` explains the message again.
+  (cee3268)
+
 #### Unreleased, provisional (fw-d4, protocol 1.27, row 67): the streaming logger for FPGA 0x153D
 
 Not numbered and not benched: needs the 0x153D bitstream (item D3); the built-for word stays 0x153C until that

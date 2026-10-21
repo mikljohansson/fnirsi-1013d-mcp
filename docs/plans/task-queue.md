@@ -44,17 +44,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **Auto-mode records on 0x1532..0x153A are spliced by the forced stop** (fw 0.2.97, branch fw-arm, bench pending: firmware/AGENTS.md section 64)
 - [x] **Frequency response engine arms normal** (fw 0.2.97, fw-arm, section 64: not taken as written. The engine keeps FPGA auto with its CH1 trigger, 0x0E moved to the stop geometry's W, so a missing trigger gives a contiguous record instead of a forced, spliced one; a trigger more than total words before W completes; spliced / cut records are retaken.)
 
-- [ ] **0x153B+: the deadline force must write 0x0E = 0 too** (fpga-gen13, 10-20 20:27, from the code, not benched): on
-  `PC_STOP_NEWEST` the host poll, `pc_ui_auto_service` and FORCE call `pc_hal_force` (0x1A = 0 alone); the FPGA stops only
-  when `~trigger_mode_s && time_base_timeout` (`time_base_cnt > 0x0E`, zaklad.v). With the default 0x0E = total samples and a
-  deadline of at least two records that is true. With an explicit SET_TRIGGER `auto_timeout` the firmware writes 0x0E = that
-  *sample* count as a *word* count (`pc_auto_timeout` -> `fpga_arm_reset`) and forces at about the time of that many samples
-  (`pc_host_auto_ms` = deadline(cfg) / 2): in the legacy layout (two samples per word) the force comes at half the FPGA's
-  count, nothing stops, the record ends on the FPGA's own time-out up to twice later (0x14 = W - total + pre, contiguous),
-  and a trigger in between is reported untriggered (`host_forced`). Fix: `pc_hal_force_stop` (0x0E = 0, then 0x1A = 0) on
-  0x153B+ too; change 4 of README section 11 makes the 0x0E write before the 0x14 read harmless there. test_fpga_bus: the
-  0x153B model with 0x0E = 2 x the deadline in words, force at the deadline, done within 2 write clocks. The same race
-  existed on every bitstream before fw 0.2.97 (fpga/al3/AGENTS.md "0x153B 'spliced' on the unit", hypothesis (c)).
+- [x] **0x153B+: the deadline force must write 0x0E = 0 too** (fw-small 53551d4: `fpga_force_stop` writes 0x0E = 0, then 0x1A = 0, for every `pc_hal_force` caller; test_fpga_bus test_force_deadline; firmware/AGENTS.md section 76, bench pending)
 
 - [x] **Device sweep flags stricter than the host's** (fw 0.2.87, bench pending)
 
