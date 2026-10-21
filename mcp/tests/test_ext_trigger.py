@@ -28,7 +28,7 @@ def ext_sim(sim_factory, **kw):
 
 def test_caps_and_variant(sim_factory):
     with Scope.connect(ext_sim(sim_factory).url) as s:
-        assert s.info.fpga_version == 0x153B and s.profile().variant == "al3"
+        assert s.info.fpga_version == P.FW_FPGA_VERSION and s.profile().variant == "al3"
         assert s.info.caps & P.Caps.EXT_TRIGGER
     with Scope.connect(sim_factory(caps_clear=int(P.Caps.EXT_TRIGGER)).url) as s:  # a firmware without the cap
         assert not s.info.caps & P.Caps.EXT_TRIGGER
@@ -85,7 +85,7 @@ def test_legacy_ext_shift_puts_the_edge_at_the_pretrigger(sim_factory):
 async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
     async with client_for(ext_sim(sim_factory), tmp_path) as c:
         prof = await c.call("scope_profile")
-        assert prof["live"]["ext_trigger"] is True and "0x1533" in prof["static"]["trigger"]
+        assert prof["live"]["ext_trigger"] is True and "caps EXT_TRIGGER" in prof["static"]["trigger"]
         r = await c.call("scope_set_trigger", source="EXT", edge="rising", level=1.0, mode="normal")
         assert r["applied"]["source"] == "EXT" and r["applied"]["level_volts"] is None
         assert any("3.3 V logic" in x for x in r["caveats"]) and any("level is ignored" in x for x in r["caveats"])
@@ -103,7 +103,7 @@ async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
         assert cap["trigger"] == "fired" and cap["ext_edge_seen"] is True
         assert (await c.call("scope_status"))["ext"]["edge_seen_since_arm"] is True
     async with client_for(sim_factory(caps_clear=int(P.Caps.EXT_TRIGGER)), tmp_path) as c:
-        assert "0x153B" in await c.fails("scope_set_trigger", source="EXT")
+        assert "caps EXT_TRIGGER" in await c.fails("scope_set_trigger", source="EXT")
 
 
 def test_device_refuses_gen_while_ext(sim_factory):

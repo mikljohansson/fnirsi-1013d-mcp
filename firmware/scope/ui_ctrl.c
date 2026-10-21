@@ -183,7 +183,24 @@ const char *ui_scope_warning(const ui_warn_in *w)
     return "CH2 overrange: increase V/div";
 
   if(w->untrig && w->running)
-    return "No trigger: check the trigger level";
+    return ui_no_trigger_hint(w->trig_type, w->trig_idle);
 
   return "";
+}
+
+//ui-type (docs/plans/ui-rows.md 2.6): the firmware knows only that no trigger came, so the hint names the settings
+//of the trigger type to check; the Spectrum's own warning line takes it too (spectrum.c)
+const char *ui_no_trigger_hint(uint8 trig_type, uint8 idle_on)
+{
+  switch(trig_type)
+  {
+    case 1:
+      return "No trigger: check the level and Width";
+
+    case 2:
+      return idle_on ? "No trigger: check the level, N and Idle" : "No trigger: check the level and N";
+
+    default:
+      return "No trigger: check the trigger level";
+  }
 }

@@ -1,6 +1,6 @@
 ---
 name: fnirsi-scope
-description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, decode a serial bus (UART, SPI, I2C) from a capture, test waveforms against a mask (pass / fail), read voltages like a DVM (DC, AC RMS, true RMS), export a capture as CSV, or use the scope's generator / calibration pin, or plot / present a scope result. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
+description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, decode a serial bus (UART, SPI, I2C) from a capture, test waveforms against a mask (pass / fail), read voltages like a DVM (DC, AC RMS, true RMS), export a capture as CSV, trigger on a pulse width / the Nth edge / a timeout or set a trigger hold-off, measure a frequency or duty cycle with the hardware counter, catch glitches with peak detect, or use the scope's generator / calibration pin, or plot / present a scope result. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
 ---
 
 # Measuring with the FNIRSI 1013D
@@ -28,6 +28,10 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
   averaging (trigger jitter is 2 / fs). Window = total_samples / fs: 2-10 periods, or the whole decay.
 - Trigger on the cleanest edge (TX gate on CH2 for detector work), level mid-edge in volts, mode `normal` for
   repetitive signals (`auto` just to find the signal), `pretrigger_fraction` 0.05-0.1 for decays after an edge.
+- Trigger types (caps `TRIG_TYPES`, guide 3c): `scope_set_trigger(type='pulse_width', polarity, width, longer)`,
+  `type='nth_edge'` (`n`, `idle`), `type='timeout'` (`polarity`, `width`); widths in seconds, rounded to one
+  trigger-stream sample (2 / fs legacy, 1 / fs filtered, 5 ns EXT: the result says). `hold_off` (seconds) skips
+  the pulses of a train. Runt / window need the 0x153E bitstream.
 
 ## Take data
 
@@ -43,6 +47,9 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
   variants on a 0x1535 bitstream; cic2 for decays) gives 16-bit, anti-aliased samples (guide section 3a); turn it
   off when done. `scope_spectrum` works while the screen shows the spectrum, waterfall or density view.
   Captures add a caveat while a spectrum or phosphor view is on: pass it on.
+- Frequency, period, width, duty at 5 ns resolution without a capture: `scope_counter` (caps `COUNTER`; quote its
+  `resolution`; set `level` mid-swing; vmin / vmax include noise peaks). Glitches shorter than the sample period
+  at slow rates: `scope_capture(peak=true)` (caps `PEAK_DETECT`; min / max envelopes, no averaging with it).
 - Quick numbers: `scope_measure`. Voltmeter-style readings over several captures: `scope_dvm` (quote its
   `statement`: range, volts per code, noise, uncertainty and digits; absolute accuracy is the calibration's).
 - Serial bus: `scope_decode(protocol='uart'|'spi'|'i2c')` on the last / a saved / a fresh capture (guide section 3:

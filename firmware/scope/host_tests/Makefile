@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_de
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui
 
 $(OUT):
 	mkdir -p $@
@@ -97,6 +97,11 @@ $(OUT)/test_acq_view: test_acq_view.c test_util.h $(SRC)/acq_view.c $(SRC)/acq_v
 $(OUT)/test_spec_zoom: test_spec_zoom.c test_util.h $(SRC)/spec_ladder.c $(SRC)/spec_ladder.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_spec_zoom.c $(SRC)/spec_ladder.c
 
+# ui-type: the trigger menu's Type row as data (trig_ui.c): the ladder, the word period per rate, the ranges, the snap,
+# the registers each type arms, the host round trip, the settings words, the chip glyphs as pixels
+$(OUT)/test_trig_ui: test_trig_ui.c test_util.h $(SRC)/trig_ui.c $(SRC)/trig_ui.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_trig_ui.c $(SRC)/trig_ui.c
+
 # 0x1536 sequencer maths (fw 0.2.58): fit rules, table entries, slot addresses, UI averaging plan, exact mean
 $(OUT)/test_seq: test_seq.c test_util.h $(SRC)/pc_seq.c $(SRC)/pc_seq.h $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_seq.c $(SRC)/pc_seq.c
@@ -171,6 +176,7 @@ test: all
 	$(OUT)/test_slider_ov
 	$(OUT)/test_acq_view
 	$(OUT)/test_spec_zoom
+	$(OUT)/test_trig_ui
 	$(OUT)/test_seq
 	$(OUT)/test_phosphor
 	$(OUT)/test_mmu

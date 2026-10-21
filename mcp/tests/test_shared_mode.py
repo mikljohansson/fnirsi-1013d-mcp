@@ -15,7 +15,7 @@ def test_caps_version_and_status_body(sim, transport):
     assert info.caps & P.Caps.SHARED_MODE and info.proto_minor == P.PROTO_MINOR >= 19
     assert transport.ascii("#VER").split(",")[3] == f"proto=1.{P.PROTO_MINOR}"
     body = transport.request(P.Cmd.GET_STATUS).payload
-    assert len(body) == 48
+    assert len(body) == 52  # 1.26
     st = P.StatusResp.unpack(body)
     assert st.control == P.Control.SHARED and st.run_state == P.RunState.RUN and st.watchdog_remaining_s == 0xFFFF
 
