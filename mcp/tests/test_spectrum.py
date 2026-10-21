@@ -33,7 +33,7 @@ def test_spectrum_header_layout():
 
 def test_status_display_mode_is_byte_43():
     b = P.StatusResp(display_mode=1, ext_flags=4).pack()
-    assert len(b) == 48 and b[42] == 4 and b[43] == 1
+    assert len(b) == 52 and b[42] == 4 and b[43] == 1  # 52 since 1.26
     assert P.StatusResp.unpack(b[:32]).display_mode == 0  # legacy 32-byte status
 
 

@@ -97,7 +97,7 @@ def test_wire_layouts_match_the_firmware_frames():
     status = P.StatusResp.unpack(frame_payload("resp_get_status_1_17"))
     assert (status.features, status.ui_average, status.ui_average_log2n) == (0x1F, 2, 6)
     assert P.feature_names(status.features) == ["ext_trigger", "decim", "fir", "segments", "hw_average"]
-    assert len(status.pack()) == 48 and status.pack() == frame_payload("resp_get_status_1_17")
+    assert len(status.pack()) == 52 and status.pack()[:48] == frame_payload("resp_get_status_1_17")  # 52 since 1.26
     assert P.StatusResp.unpack(status.pack()[:44]).features == 0  # 1.16 firmware: the tail reads 0
 
 
