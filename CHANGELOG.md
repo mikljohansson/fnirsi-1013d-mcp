@@ -89,6 +89,20 @@ SET_PATTERN, SET_PATTERN_TRIGGER, source 3), 4743591 (Bode on P), 4f12433 (model
 - Frequency response: the stimulus period is P clocks of 5 ns (P = 4 M of the DDS era), the frequency grid four times
   finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
 
+#### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
+
+- The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `11b83ce7...bca97`, flash image `f65ca4c2...fa32`, status
+  unbenched, min firmware 0.2.105 as a placeholder: the coordinator numbers the firmware built for it): the streaming
+  logger (fpga-d1, 0x69 / 0x6A / read 0x38, README section 16) and an accurate fractional square generator in place of
+  Atlan4's DDS (0x6C entries 0 / 1, 0x6D, read 0x39; 0x51 / 0x52 retired; every edge within one 5 ns clock of ideal, the
+  mean period exact, glitch-free changes on the run; section 17). The pulse pattern generator with bursts, marker trigger
+  source and its own trigger engine of the fpga-d2 branch was **cut by the owner at integration** (2026-10-21 15:55): the
+  full design filled 96 % of the logic cells and did not close timing; the square keeps 13.8 % of the LEs free
+  (6430 LUT / 7451 LE). Timing closed at 4.945 ns on clk_200MHz after 21 placement rolls (ecdc6f0: two clk_200MHz always
+  blocks moved, no logic change). Contract transcript `tb/contract_0x153D.txt` with fw-d4's logger and fw-d5's SET_GEN
+  sequences; tb_square (14102 checks) and the full `tb/run.sh` (18 steps) on both seeds. Not flashed: the owner flashes
+  from dist per `fpga/al3/AGENTS.md` "0x153D D3 integration".
+
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):

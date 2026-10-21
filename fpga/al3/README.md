@@ -2690,14 +2690,15 @@ and 0x6D = 0. P16 / H16 arithmetic: contract 7.4, `gen_pat.c`: P16 = (2^16 x 2e1
 - **Starts and stops.** The start condition (`go_c` = a 0x6D write with mode 3 while idle) is registered (`go`, one
   clock: its fanout is every state register); at S the accumulator is cleared, `cur` set so that the first boundary
   loads entry 0, `cnt` set to 0 (its sign sets at S + 2) and the boundary masked until S + 4: step 0 begins at S + 5,
-  6 clocks after the write is seen, **TBD_LAT after the 0x6D data strobe's rising edge (tb_square.v, case L)**. A mode-0
+  6 clocks after the write is seen, **35 .. 38 ns (7 .. 8 clocks) after the 0x6D data strobe's rising edge** (tb_square.v case L: 37.69 ns on seed 12345, 35.01 ns on seed 4242; the strobe's phase against the 200 MHz clock is the spread). A mode-0
   write stops at once (the pin at the idle level); modes 1 / 2 act as 0; a mode-3 write while running is ignored. Idle:
   the level follows 0x6D bit 2.
 - **Pin.** `o_1khz_calib = gen_out_enable ? pat_level : 1'bZ`; `pat_level` is a clk_200MHz flop. 0x28 bit 1 still reads
   `gen_out_enable`. The EXT block is 0x153C's again (`ext_pending` from `ext_edge | ext_qev`).
 - **Cost.** Against the C4 + D1 source (b0: 6048 LUT / 5637 reg / 7072 LE) the square generator with the DDS removed is
-  **TBD_COST** (build b1 of the merged source: 6405 LUT / 5928 reg / 7466 LE; fpga-d2's full design was +1119 / +950 /
-  +1239 on its base).
+  **+382 LUT / +274 reg / +379 LE** (the pinned build: 6430 LUT / 5911 reg / 7451 LE; the MCU-side staging 49 flops,
+  the two shadows and the two active entries 4 x 49, the prefetch register 49, acc 16 + 17, cnt 33, the control; fpga-d2's
+  full design was +1119 / +950 / +1239 on its base).
 
 #### Deviations from the contract and from fpga-d2's design (all sent to the coordinator and accepted 2026-10-21, modelled by fw-nopat in `host_tests/fpga_model.c`)
 
@@ -2713,7 +2714,34 @@ and 0x6D = 0. P16 / H16 arithmetic: contract 7.4, `gen_pat.c`: P16 = (2^16 x 2e1
 
 #### Tests (`tb/tb_square.v`, run.sh step 18, `ONLY=square`; derived from fpga-d2's `tb_pattern.v`)
 
-TBD_TESTS
+`tb_square.v` (step 18, `ONLY=square`, about 10 min alone): one instance, the AD9288 model and the bus sequences of
+tb_trigtypes.v, the pad watched for every edge (time and level) while the generator drives it. **14102 checks, 0 failed,
+PASS on seeds 12345 and 4242.**
+- G: 0x50 alone from power-on: the pin hi-Z (`We0`), driven low (`St0`) with 0x50 = 1, unchanged by 0x51 / 0x52 writes
+  and by writes to the cut registers 0x6E / 0x6F / 0x76 .. 0x7D (two 0x6E bytes, four 0x6F, the whole engine sequence);
+  high with 0x6D bit 2; 0x28 bit 1 follows 0x50; 0x39 reads 0 while off; 0x06 = 0x153D.
+- L: the start latency, measured from the rising edge of the 0x6D = 0x33 data strobe to the rising edge of step 0: 37.69 ns
+  (seed 12345), 35.01 ns (seed 4242): 7 .. 8 clocks (fpga-d2's generator: 8 .. 9; fw-nopat models 8).
+- S: the firmware's SET_GEN sequences (`gen_calc` = the P16 / H16 arithmetic of 7.4, `gen_write` = entry 0, entry 1,
+  0x6D = 0x33 / 0x23). 10 MHz, 1 MHz, 7.3 MHz (1000 periods each), 10 kHz 25 %, 1 kHz, 999.5 Hz (3 each), the prototype's
+  3.5 + 2.25 clocks (1000, changed on the run and from a fresh start) and 2 + 2 clocks (1000): every edge against its
+  ideal time. Fresh starts: 0 .. 1 clock early exactly (10 MHz, 1 MHz, 10 kHz, 1 kHz, 2 + 2: deviation 0.000; 3.5 + 2.25
+  from a fresh start -3.750 .. 0.000 ns); after a change on the run the deviations carry the accumulator's residual, their
+  span stays under one clock (7.3 MHz -3.230 .. +1.712 ns, span 4.942 = the worst of all; 999.5 Hz -0.750 .. -0.125;
+  3.5 + 2.25 on the run -2.500 .. +1.250). The mean period equals P16 / 65536 clocks within 1 / periods in every case
+  (1 kHz exactly 1000000.0000 ns, 999.5 Hz 1000500.0000 against 1000500.2501 ideal over 3 periods, 7.3 MHz 136.9850
+  against 136.9863 over 1000, 3.5 + 2.25 clocks 28.7500 exactly); the mean high time within 3 / periods (68.4850 against
+  68.4932 at 7.3 MHz: the high steps' carries are a subsequence of a Kronecker sequence, their count over N periods can
+  miss the ideal by more than one while the period's cannot). The pad equalled the generator's level on every clock while
+  driven (0 mismatches).
+- B: 50 kHz (2000 + 2000) changed to 1500 + 32768/65536 and 1200 + 16384/65536 right after a rising edge: the pair is in
+  the active entries within 50 ns while the old step still counts, pending reads 0, every step is a complete old (2000)
+  or new (1500 / 1501, 1200 / 1201) step, the low step after the commit's step is already new and its carry and the
+  following high step's come from the running accumulator; two commits 18 strobes apart (1700 then 1300): 0 steps of
+  1700 (the 18 strobes fit inside one 10 us step) and the 1300 pair runs; mode 0 stops at once and 0x39 reads 0; mode 1
+  starts nothing and mode 2 written while running stops (both act as 0); a commit while idle is taken at once and a
+  mode-3 start runs the committed 300 / 500 pair from step 0; index 2 is ignored and an entry without a commit stays in
+  the shadow; a mode-3 write while running is not a restart.
 
 The contract step (`tb_seqcontract.v`, scenario G) replays fw-d5's SET_GEN sequences: 10 kHz 25 % from idle (0x6D = 0,
 the two entries, 0x6D = 0x33, 0x50 = 1), the pad's 100 us period with 25 us high, 0x39 running / pending 0 / mode
@@ -2726,7 +2754,43 @@ square on the pin and its source-3 case expects an EXT trigger as up to 0x153C.
 
 #### Build
 
-TBD_BUILD
+TD 4.6.8 SP1 (`build.sh`), the pinned source (commit ecdc6f0; the bitstream of `dist/al3-0x153D.bin`): **6430 LUT (74.4 %)
+/ 5911 reg (68.4 %) / 7451 LE (86.2 % of 8640: 1189 LEs free)**, 48 EMB9K + 2 EMB32K (all), 2 of 3 M18x18, 60 pads;
+`clk_200MHz` **0 errors, minimum period 4.945 ns** (+0.055 ns); `sample_write_clock` 9.718 ns, `i_mcu_clk` 26.482 ns,
+`clkc[1]` 2.68 ns, all 0 errors; `clkc[0]` 40 (the SDC artefact of every build since 0x1532). `tb/capture_report.sh`: encode
+pads 6.88 .. 7.69 ns after their edge; ADC capture margins at the power-on stages 0x08E4 (worst bit, start / end of the
+valid window) CH1 A 1.08 / 4.69, CH1 B 1.71 / 4.07, CH2 A 3.40 / 2.37, CH2 B 1.63 / 4.14 ns: >= 1.08 ns (0x153C: >= 1.31);
+the wizard's training after flashing may move CH1 A to stage 3 (3.58 / 2.19) and CH2 B stays at 4 (stage 3 would be 1.64).
+Against 0x153C (6126 / 5451
+/ 7103) the generation costs +304 LUT / +460 reg / +348 LE: the logger +129 / +186 / +155 (fpga-d1's measurement) and
+the square generator the rest (the DDS it replaces was 61 LUT / 97 reg). 0x153E's E1 items (both-core trigger, runt /
+window, the pulse-width range: contract 1.2 estimated about 400 LUT) would fit the LUTs but not the placement lottery at
+this fill: the owner decided that 0.3.0 ships on 0x153D and that the 13.8 % of free LEs stay free.
+
+The placement lottery at 86 % of the LEs, measured (the worst `clk_200MHz` slack of each roll; every miss is routing, 3 LUT
+levels with 50 .. 65 % of the path in nets, on a different old path each time, so no cycle-identical retiming would have
+helped; TD 4.6.8 has no placer seed or effort option, `create_bound` is its only placement control, and its
+`optimize_place` / `optimize_route` commands after `place` / `route` gave byte-identical bitstreams):
+
+| Roll | Neutral edit (block order) | `clk_200MHz` | Worst path |
+|---|---|---|---|
+| b0 | C4 + D1 only, before the merge | -0.226, 3 errors | the sequencer's `q_pass` increment (zaklad.v `q_pass_nx <= q_pass + 1`) |
+| h1, h2, a2, h3 on C4 + D1 | the hold-off block at four other positions | -0.825 / -1.159 / -1.089 / -0.531 | `q_pass`, a sequencer register, `qual_ext/rem`, `sample_write_enable` |
+| b1 | the merged source, the first sq_gen text | -0.625, 2 errors | a register enable |
+| b2 | the committed sq_gen (a7cf1cf), hold-off block at C4's h4 position | -1.103, 5 errors | `q_pass` |
+| h1 / h2 / a2 / h3 | the hold-off block before "Capture of the trigger address" / "Segmented capture, write clock side" / "Outlier counters" / "Sampling half way detect" | -0.362 / **-0.044** / -1.240 / -0.682 | the logger's `occ` load (`p_wa - rd_200`) / the `q_untrig` saturating add (one path) / `q_pass` / sq_gen's `cnt` load adder |
+| c1 / se / hc / sl | before "Sampling write address counter" / "Sample writing enable control" / the hardware counter / the streaming logger | -0.570 / -1.513 / -0.595 / -0.152 | sq_gen's `cnt` load / a sequencer register / a register enable / sq_gen's `cnt` load |
+| sq / rd | before "Sequencer, clk_200MHz" / "Sampling reset state delay counter" | -0.062 / **-0.015** | the post-pass lane adder (`pp_acc` -> `pp_l*`, C4's restructured carry), one path each |
+| h2m | h2 + the `sq_gen` module definition moved before `trig_qual` | = h2 (byte-identical) | a module's position does not re-roll |
+| h2o / b2o | h2 / b2 with `optimize_place` and `optimize_route` in the flow | = h2 / = b2 (byte-identical) | no-ops on TD 4.6.8 |
+| h2l / rdl / sql | h2 / rd / sq + the logger block before the hardware counter | -1.061 / -0.752 / -0.298 | the post-pass lane adder / `qual_ext/rem` and the ADC capture registers / a sequencer register |
+| rds / sqs / rdx | rd / sq + the logger block before the sequencer, rd + the logger block before the outlier counters | -0.217 / -0.556 / -0.673 | sequencer registers / `pp_l*` / the accumulator RAM address |
+| rdc / h2c | rd / h2 + the hardware counter block before the sequencer | -0.974 / -0.099 | the counter's registers / a sequencer register |
+| **h2x** | **h2 + the logger block before "Outlier counters" = the pinned source** | **+0.055, 0 errors** | `q_untrig` (the 0x1536 path C4's build also had as its worst) |
+
+Lesson for the next integrator (0x153E, if the owner reopens it): at this fill expect 10 to 20 rolls; the knobs that
+re-roll TD's placement are the positions of the clk_200MHz `always` blocks (the hold-off block, the logger block, the
+counter block), not module or instance order, declarations, renames or TD's optimize commands.
 
 #### Bench checks (the owner, contract 9.2 item 10 reduced to the square; fw 0.2.10x built for 0x153D)
 
