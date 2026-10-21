@@ -49,6 +49,8 @@ KINDS = {
     "dvm": ("DVM readings", "scope_dvm"),
     "peak": ("Peak-detect capture", "scope_capture"),
     "counter": ("Hardware counter", "scope_counter"),
+    "log": ("Streaming log", "scope_log"),
+    "pattern": ("Pulse pattern", "scope_pattern"),
 }
 #: series colours (validated categorical palette slots 1-2; channel identity is also named in the legend)
 COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#6250d6")
@@ -367,6 +369,31 @@ def _rows(r: Result) -> tuple[list[dict[str, Any]], list[str]]:
             summ.append(f"{m.get('passed', 0)} passed, {m.get('failed', 0)} failed of {m.get('n_tested', 0)} captures"
                         + (f", {m['dropped']} dropped" if m.get("dropped") else ""))
         return rows, summ
+    if r.kind == "log":
+        rows = []
+        for c in m.get("channels") or []:
+            lo, hi = np.asarray(a[f"{c}_min_volts"], np.float64), np.asarray(a[f"{c}_max_volts"], np.float64)
+            me = np.asarray(a[f"{c}_mean_volts"], np.float64)
+            rows.append({"channel": c, "min": _si(float(np.nanmin(lo)), "V") if lo.size else "-",
+                         "max": _si(float(np.nanmax(hi)), "V") if hi.size else "-",
+                         "mean": _si(float(np.nanmean(me)), "V") if me.size else "-"})
+        rate = float(m.get("sample_rate") or 0)
+        n = int(m.get("samples") or 0)
+        summ.append(f"{n} samples per channel at {_si(rate, 'Sa/s')} ({m.get('format')}), "
+                    f"{_si(n / rate if rate else 0.0, 's')} of data over {_si(m.get('elapsed_s') or 0.0, 's')}, "
+                    f"state {m.get('state')}")
+        summ.append(f"{m.get('gaps', 0)} gap(s), {m.get('lost_samples', 0)} samples per channel lost; the plot shows "
+                    f"the min .. max of {m.get('samples_per_bin', '?')} samples per point; raw files in "
+                    f"{m.get('directory')}")
+        return rows, summ
+    if r.kind == "pattern":
+        p = m.get("pattern") or {}
+        rows = [{"step": i, "level": st.get("level"), "duration": _si(st.get("seconds"), "s", 7),
+                 "clocks": f"{st.get('clocks')} + {st.get('fraction')}/65536", "marker": "yes" if st.get("mark")
+                 else ""} for i, st in enumerate(p.get("steps") or [])]
+        summ.append(f"mode {p.get('mode')}, repeat {p.get('repeat')}, gap {_si((p.get('gap_ns') or 0) * 1e-9, 's')}, "
+                    f"burst {_si(p.get('burst_s'), 's', 7)}, start {p.get('start_source')}")
+        return rows, summ
     if r.kind == "dvm":
         rows = []
         for c, s in (m.get("readings") or {}).items():
@@ -485,6 +512,30 @@ def _plot(r: Result, title: str) -> bytes:
                 ax.plot(t[idx], v[idx], "x", color="#e34948", markersize=4, label=f"{c} clipped")
         ax.set_xlabel(f"time ({unit})")
         ax.set_ylabel("volts at the probe tip")
+    elif r.kind == "log":
+        t, unit = _time_axis(np.asarray(a["t"], np.float64))
+        scale = float(t[-1] / a["t"][-1]) if a["t"].size and a["t"][-1] else 1.0
+        for i, c in enumerate(m.get("channels") or []):
+            col = COLOURS[i]
+            ax.fill_between(t, a[f"{c}_min_volts"], a[f"{c}_max_volts"], color=col, alpha=0.3, linewidth=0,
+                            label=f"{c} min .. max")
+            ax.plot(t, a[f"{c}_mean_volts"], color=col, linewidth=0.8, label=f"{c} mean")
+        for k, tg in enumerate(np.asarray(a.get("gap_t", []), np.float64)):
+            ax.axvline(tg * scale, color="#e34948", linewidth=0.9, linestyle="--", label="gap" if k == 0 else None)
+        ax.set_xlabel(f"time since the start ({unit})")
+        ax.set_ylabel("volts at the probe tip")
+    elif r.kind == "pattern":
+        t, unit = _time_axis(np.asarray(a["t"], np.float64))
+        lv = np.asarray(a["level"], np.float64)
+        ax.step(t, np.append(lv, lv[-1]) if lv.size == t.size - 1 else lv, where="post", color=COLOURS[0],
+                label="pin level")
+        scale = float(t[-1] / a["t"][-1]) if a["t"].size and a["t"][-1] else 1.0
+        for k, tm in enumerate(np.asarray(a.get("marks", []), np.float64)):
+            ax.axvline(tm * scale, color=COLOURS[1], linewidth=0.9, linestyle=":", label="marker" if k == 0 else None)
+        ax.set_ylim(-0.2, 1.3)
+        ax.set_yticks([0, 1])
+        ax.set_xlabel(f"time from the start ({unit})")
+        ax.set_ylabel("logic level")
     elif r.kind == "counter":
         tc = np.asarray(a["capture_t_s"], np.float64)
         f = np.asarray(a["frequency_hz"], np.float64)
