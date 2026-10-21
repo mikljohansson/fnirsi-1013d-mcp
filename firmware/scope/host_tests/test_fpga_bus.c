@@ -326,7 +326,7 @@ static int decim_arm(uint8_t k_req, int fir, pc_decim_cfg *c)
 {
   T_TRUE(fpga_bus_wr.held & FPGA_HELD_DIVIDER);
   pc_decim_config(k_req, fir ? PC_DECIM_SET_FIR : 0, fpga_bus_wr.divider, 4096, PC_DECIM_HAS_FIR, c);
-  return fpga_decim_write(pc_decim_mode(c), 1, pc_decim_cmd56(c), c->shift);
+  return fpga_decim_write(pc_decim_mode(c), pc_decim_cmd56(c), c->shift);
 }
 
 static void write_0d(uint32_t d)
@@ -387,9 +387,9 @@ static void test_decim_write(void)
 
   //fw-cruft: 0x53 bits 4..2 (the swap / falling-edge bits 0x153C ignores) never reach the bus, whatever the caller passes
   fm.ntrace = 0;
-  (void)fpga_decim_write(0x1E, 1, 0, 0);
+  (void)fpga_decim_write(0x1E, 0, 0);
   T_EQ(fm.reg_53, 0x02); T_EQ(fm_trace_find(0x53, 0x1E, 0), -1);
-  (void)fpga_decim_write(0x00, 1, 0, 0);
+  (void)fpga_decim_write(0x00, 0, 0);
 
   //Bode-engine-like sequence (pc_bode.c bh_arm): a UI legacy conversion at D 19, then per step the engine's rate write,
   //its mode (CIC3 + FIR at N = 16 x 2^k, legacy at D 0) and the arm; between the steps the UI writes its own rate.
@@ -891,7 +891,7 @@ static void test_peak(void)
   T_EQ(c.peak, 1); T_EQ(c.k, 1); T_EQ(c.n, 20); T_EQ(c.fir_en, 0); T_EQ(c.shift, 0); T_EQ(c.gain, 1);
   T_EQ(pc_decim_cmd56(&c), 2); T_EQ(pc_decim_status(&c), 0x81); T_EQ(pc_decim_shift_byte(&c), 0xC0);
   fm.ntrace = 0;
-  T_EQ(fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift), 1);
+  T_EQ(fpga_decim_write(pc_decim_mode(&c), pc_decim_cmd56(&c), c.shift), 1);
   T_EQ(fm.reg_53, 0x01); T_EQ(fm.reg_56, 0x02); T_EQ(fm.reg_54, 0);
   T_TRUE(fm_peak_on()); T_TRUE(fm_dec_on());
 
@@ -962,7 +962,7 @@ static void test_peak(void)
   //follows 0x53 and the peak bits clear
   pc_decim_config(PC_DECIM_CIC2, PC_DECIM_SET_FIR, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
   T_EQ(c.peak, 0); T_EQ(c.k, 2);
-  T_EQ(fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift), 1);
+  T_EQ(fpga_decim_write(pc_decim_mode(&c), pc_decim_cmd56(&c), c.shift), 1);
   T_EQ(fm.reg_53, 0x02); T_EQ(fm.reg_56, 0x01); T_EQ(fm.reg_54, c.shift);
   T_FALSE(fm_peak_on()); T_TRUE(fm_dec_on());
   fpga_write_cmd(0x29);
@@ -971,7 +971,7 @@ static void test_peak(void)
 
   //Off: legacy
   pc_decim_config(PC_DECIM_OFF, 0, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
-  (void)fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift);
+  (void)fpga_decim_write(pc_decim_mode(&c), pc_decim_cmd56(&c), c.shift);
   T_EQ(fm.reg_53, 0); T_EQ(fm.reg_56, 0); T_FALSE(fm_dec_on());
   fpga_write_cmd(0x29);
   T_EQ(fpga_read_byte(), 0x00);
@@ -980,7 +980,7 @@ static void test_peak(void)
   fm_reset(0x153B, 19, 62);
   write_0d(19);
   pc_decim_config(PC_DECIM_OFF, PC_DECIM_SET_PEAK, fm.divider, 3000, PC_DECIM_HAS_FIR, &c);
-  (void)fpga_decim_write(pc_decim_mode(&c), 1, pc_decim_cmd56(&c), c.shift);
+  (void)fpga_decim_write(pc_decim_mode(&c), pc_decim_cmd56(&c), c.shift);
   T_EQ(fm.reg_56, 0x02); T_FALSE(fm_peak_on());
   fpga_write_cmd(0x29);
   T_EQ(fpga_read_byte(), 0x81);                   //K 1 was written: the filter path
