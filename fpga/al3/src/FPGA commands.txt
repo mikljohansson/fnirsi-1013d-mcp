@@ -35,6 +35,11 @@
 //    period, width and duty of CH1 / CH2 / EXT over a 10 ms / 100 ms / 1 s gate, the source's raw min and max over the
 //    gate). With 0x61 = 0 (power-on) nothing runs; the counter never touches the capture. Write 0x35 (CH2 offset) is
 //    unchanged (docs/plans/fpga-0x153c.md section 5, fpga/al3/README.md section 13).
+//  - 0x6C, 0x6D, 0x6E, 0x6F (new writes), 0x39 (new read), 0x51 / 0x52 retired, 0x15 value 3 (0x153D D2, docs/plans/
+//    fpga-0x153c.md section 7, fpga/al3/README.md section 15): the pulse pattern generator is the generator. Atlan4's
+//    DDS is gone; 0x50 = 1 drives the calibration pin with the pattern's level (power-on: the idle level 0). The square
+//    wave is a two-step continuous pattern; a step flagged mark is the capture's trigger source 3. 0x76 .. 0x7D (new
+//    writes), 0x42 (new read): the pattern trigger engine, the capture trigger's layouts on its own qualifier.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
@@ -213,6 +218,20 @@
                   //frequency = E / (T x 5 ns), period = T x 5 ns / E, +width = W x 5 ns / E, duty = W / T. One read per
                   //screen pass: the command byte plus 16 data strobes.
 //---------------------------------------------------------------------------------------
+            8'h39: //Pattern status (0x153D), 4 bytes; asynchronous (the generator runs on the 200 MHz clock)
+                  4'h0:  o_mcu_data <= { running, in_gap, pending, 2'b00, step[2:0] };
+                    //bit7 a burst or gap is in progress; bit6 in the gap between bursts; bit5 a commit (0x6D bit 5) not yet
+                    //taken; bits 2..0 the step in progress (0 when idle)
+                  4'h1..4'h2: bursts[15:0]           //bursts completed since the last start, high byte first (wraps)
+                  4'h3:  o_mcu_data <= { 6'd0, marker_seen, mode_active };
+                    //bit1 a marked step started since the last 0x01 = 1; bit0 0x6D mode != 0
+
+            8'h42: //Pattern trigger engine status (0x153D), 3 bytes laid out as 0x34
+                  4'h0:  o_mcu_data <= { 1'b1, event_seen, counting, pulse_began, pt_src[1], pt_long, pt_type[1:0] };
+                    //bit7 = 1: own engine (a second qualifier; 0 would be the contract's routed fallback); bit6 an event
+                    //since the last 0x7D bit 2; bits 5..0 as 0x34 for the engine's registers 0x76 / 0x7A
+                  4'h1..4'h2: rem[15:8], rem[7:0]  //Nth edge: edges still to count before the qualifying one
+
             8'h41: //Reading of the touch panel address needs loading of high byte first
                   4'h0:
                     o_mcu_data <= touch_panel_address[15:8];
@@ -264,7 +283,7 @@
             8'h0F: //Setting start of the conversion
                     sample_read_enable <= io_mcu_data[0];
 
-            8'h15: //Setting the trigger source: 0 = CH1, 1 = CH2, 2 = EXT, 3 = reserved (acts as EXT)
+            8'h15: //Setting the trigger source: 0 = CH1, 1 = CH2, 2 = EXT, 3 = PATTERN (0x153D: the pattern's marker)
                     trigger_channel <= io_mcu_data[0];
                     trigger_ext     <= io_mcu_data[1] & (0x5E type is edge);   //0x153C: the EXT edge path for the edge
                     trig_src_ext    <= io_mcu_data[1];                         //type; a qualified type on EXT runs the
@@ -272,6 +291,10 @@
                     //EXT: calibration pin P133, 3.3 V logic, generator must be off (cmd 0x50 = 0).
                     //Edge from cmd 0x16, mode/pretrigger/total/time-out unchanged, level (0x17) unused.
                     //trigger_address (cmd 0x14) = last sample written before the EXT edge, as for CH1/CH2.
+                    //PATTERN (0x153D): the capture triggers on the first clock of a pattern step flagged mark, when
+                    //0x6D bit 3 is set too (either alone never triggers: an auto capture times out); CH1 / CH2 / EXT
+                    //and the qualified types are off; the position convention is EXT's (the marker is applied on the
+                    //next write clock rise, 0x14 = the last word written before it). 0x16 / 0x5E are irrelevant.
 
             8'h16: //Setting the trigger edge (0x153C: the polarity per type, see 0x5E; edge type unchanged)
                     trigger_edge <= io_mcu_data[0] ^ (0x5E type is pulse width);   //the detect direction: the
@@ -336,26 +359,12 @@
                     
             8'h50: //Setting the output on or tristate (off = pin usable as EXT trigger input)
                    gen_out_enable <= io_mcu_data[0];
-                    
-            8'h51: //Loading of the four bytes of the clk out divider high byte first 
-                  4'h0:
-                    clk_out_divider[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_divider[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_divider[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_divider[7:0] <= io_mcu_data;
-            
-            8'h52: //Loading four bytes of the clk_out_duty divider high byte first
-                  4'h0:
-                    clk_out_duty[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_duty[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_duty[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_duty[7:0] <= io_mcu_data;               
+                    //0x153D: 1 = the pin carries the pattern generator's level (0x6C .. 0x6F below; with the pattern
+                    //off, the idle level of 0x6D bit 2, power-on 0). Every data byte writes bit 0 (the firmware's
+                    //4-byte write ends with the low byte).
+
+            8'h51, 8'h52: //Retired in 0x153D (the DDS phase increment and duty of 0x1532 .. 0x153C): no decoder entry,
+                          //the bytes are ignored. The square wave is the two-step pattern of 0x6C / 0x6D.
 
 //---------------------------------------------------------------------------------------
 // Decimation filter (0x1534). Details: fpga/al3/README.md "Changes" section 3.
@@ -492,6 +501,79 @@
             8'h66: //Hold-off clear request, 1 byte
                     ho_clr_req <= io_mcu_data[0];      //1: the next 0x01 = 1 also clears the hold-off timer of 0x1B
                                                        //(one-shot, consumed by that 0x01 = 1)
+
+//---------------------------------------------------------------------------------------
+// Pulse pattern generator (0x153D, D2). Details: fpga/al3/README.md "Changes" section 15, docs/plans/fpga-0x153c.md
+// section 7. The generator since the DDS went: 0x50 = 1 drives the calibration pin with the pattern's level. A table of
+// 8 steps (0x6C), each a level, a marker flag, an end flag and a duration of n + f / 65536 clocks of 5 ns (n >= 2; the
+// edges land within one clock of their ideal time, the mean duration is exact: one Bresenham accumulator, cleared at
+// every burst start only). A burst = steps 0 .. the first end (entry 7 acts as end). Modes (0x6D): 1 one burst per
+// start, 2 R bursts (0x6E) with a gap (0x6F) between them, 3 continuous (gap after every burst; gap 0 = seamless), 0 off.
+// A start = 0x6D bit 4, the pattern trigger engine's event (0x76 .. 0x7D) or the write of mode 3 while idle; a start
+// while a burst or gap runs is ignored. Entries 0 and 1 are double-buffered: their writes land in shadows, 0x6D bit 5
+// marks them pending, the first step boundary after that (a start counts) takes them; the step starting at that boundary
+// was already queued, so the new values apply from the step after it (at a start: from step 0), glitch-free and with the
+// accumulator kept. The square wave of the generator menu: entry 0 = high (n_h, f_h), entry 1 = low with end (n_l, f_l),
+// mode 3: f = 200 MHz x 65536 / P16, P16 = the period in 1/65536 clocks (section 7.4's P16 / H16 arithmetic). Power-on:
+// everything 0 (mode off, the pin hi-Z until 0x50 = 1, then the idle level 0).
+
+            8'h6C: //Pattern step, 7 bytes
+                  4'h0:
+                    { end, mark, level, index[4:0] } <= io_mcu_data;   //index 0 .. 7 (8 .. 31: the write is ignored)
+                  4'h1..4'h4:
+                    n[31:0] <= io_mcu_data;         //integer duration, 5 ns clocks, high byte first; >= 2
+                  4'h5..4'h6:
+                    f[15:0] <= io_mcu_data;         //fraction, 1/65536 clock, high byte first; the entry is handed to the
+                                                    //generator on this byte (index 0 / 1: into the shadow)
+
+            8'h6D: //Pattern control, 1 byte
+                    mode      <= io_mcu_data[1:0];  //0 off (the pin at the idle level; a running burst is abandoned at
+                                                    //once), 1 single burst, 2 R bursts, 3 continuous (starts by itself
+                                                    //when written while idle)
+                    idle      <= io_mcu_data[2];    //the level between bursts and in mode 0
+                    mark_trig <= io_mcu_data[3];    //the marker is the capture's trigger source (with 0x15 = 3)
+                    start     <= io_mcu_data[4];    //start now (self-clearing; ignored while a burst or gap runs and in
+                                                    //mode 0, and when bits 7..6 = 1 or 3)
+                    commit    <= io_mcu_data[5];    //the shadow entries 0 / 1 become pending (self-clearing; a second
+                                                    //commit before they are taken replaces them)
+                    source    <= io_mcu_data[7:6];  //who starts a burst: 0 the MCU (bit 4), 1 the pattern trigger
+                                                    //engine, 2 both, 3 the engine
+                    //A 0x6D write takes effect 3 .. 4 clocks (15 .. 20 ns) after the data strobe's rising edge; step 0 of a
+                    //burst it starts begins 5 clocks after that (about 40 .. 45 ns after the strobe). A commit is taken at
+                    //the next step boundary (or the start): the two steps already queued keep the old entries, the new
+                    //ones apply from the third boundary after the commit (at a start: from step 0).
+
+            8'h6E: //Bursts per start in mode 2, 2 bytes high byte first (0 = 65536)
+
+            8'h6F: //Gap between bursts, 4 bytes high byte first, 5 ns clocks (0 = none); at the idle level
+
+//---------------------------------------------------------------------------------------
+// Pattern trigger engine (0x153D, D2). A third trigger qualifier (module trig_qual, as the capture's two) on the same
+// streams the capture's qualifiers watch, with its own level: CH1 / CH2 = the trigger stream sample of every memory word
+// (legacy core A of the channel, K >= 1 the 16-bit output word), EXT = the filtered pin level at 5 ns. Units of N and H
+// as the capture's (words for CH1 / CH2, 5 ns for EXT). Its event starts a burst when 0x6D bits 7..6 allow it and sets
+// 0x42 bit 6 either way. Latency: the burst's step 0 begins 6 clocks (30 ns) after the event clock, which is 7.5 ns
+// after the write clock edge of the qualifying sample (CH1 / CH2: 37.5 ns after that word's write edge; the ADC pipeline
+// before it is the capture's) or about 5 clocks after the pad edge (EXT: pad edge to burst 51 .. 60 ns in simulation).
+// The engine never touches the capture's timed path; the capture may use any trigger at the same time (own engine,
+// 0x42 bit 7 = 1).
+// Power-on: everything 0 (disarmed).
+
+            8'h76: //Source, 1 byte: bits 1..0 = 0 CH1, 1 CH2, 2 / 3 EXT (as 0x15; 3 is EXT here, not the marker)
+            8'h77: //Polarity per type, 1 byte: bit 0 (as 0x16)
+            8'h78: //Level, 1 byte, raw ADC code (as 0x17; the legacy stream)
+            8'h79: //Level, 2 bytes high byte first, 16-bit (as 0x55; K >= 1)
+            8'h7A: //Type, 1 byte: bits 2..0 = 0 edge, 1 pulse width, 2 Nth edge, 3 timeout (4 .. 7 act as edge); bit 3
+                   //pulse width longer than N (as 0x5E)
+            8'h7B: //N, 3 bytes high byte first (as 0x5F)
+            8'h7C: //Idle time H, 3 bytes high byte first (as 0x60)
+            8'h7D: //Engine control, 1 byte
+                    armed  <= io_mcu_data[0];       //1 = the engine watches (writing 1 restarts its state, as 0x01 does
+                                                    //for the capture's qualifier); one shot: the event clears it
+                    rearm  <= io_mcu_data[1];       //1 = re-arm after each burst: the qualifier is held in reset while
+                                                    //the burst runs and restarts when it ends
+                    clear  <= io_mcu_data[2];       //1 = clear the event flag (0x42 bit 6), self-clearing
+                    //Firmware order: 0x7D = 0, then 0x76 .. 0x7C, then 0x7D = armed | rearm << 1 | 4.
 
 //---------------------------------------------------------------------------------------
 // Hardware counter with min / max (0x153C, C3). Details: fpga/al3/README.md "Changes" section 13, the contract

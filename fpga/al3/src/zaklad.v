@@ -64,6 +64,14 @@
 //    trigger_previous). Trigger hold-off: 0x1B (Atlan4 stored it unused) is a u32 in 5 ns units; from the trigger of
 //    a record no trigger is accepted until it has elapsed, across sequencer restarts and MCU re-arms (0x66 bit 0 lets
 //    the next 0x01 = 1 clear it). With 0x5E = 0 and 0x1B = 0 (power-on) the capture is cycle-identical to 0x153B.
+//  - 0x153D (D2, docs/plans/fpga-0x153c.md section 7): the pulse pattern generator is the generator. Atlan4's DDS
+//    (freq_generator_dds_pwm, 0x51 / 0x52) is removed; module pat_gen drives the calibration pin (0x50 = 1) with an
+//    8-step table (0x6C: level, marker, end, u32 + u16/65536 clocks of 5 ns per step; entries 0 / 1 double-buffered
+//    behind 0x6D bit 5), run as a single burst, R bursts with a gap (0x6E, 0x6F) or continuously (0x6D), started by the
+//    MCU or by its own trigger engine (0x76-0x7D, a third trig_qual on the capture's streams with its own level, read
+//    0x42). A step flagged mark is a capture trigger source (0x15 = 3 with 0x6D bit 3, through ext_pending). Read 0x39.
+//    The square wave of the generator menu is the two-step continuous pattern (f = 200 MHz / P, P in 1/65536 clocks).
+//    With 0x6D = 0 and 0x7D = 0 (power-on) the pin, when driven, holds the idle level and the capture is unchanged.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -119,24 +127,6 @@ reg [15:0] count = 0;
 
           pwm <= count < pulsewidth;
         end
-    end
-
-endmodule
-
-//-------------------------------------------------------------------------------------
-
-module freq_generator_dds_pwm(
-    input  wire        clk_in,         // 50 MHz
-    input  wire [31:0] phase_inc,      // DDS krok vypočítaný v uP
-    input  wire [31:0] duty_threshold, // duty v rozsahu 0..2^32-1 vypočítaný v uP
-    output reg         clk_out
-);
-
-    reg [31:0] phase_acc = 0;
-
-    always @(posedge clk_in) begin
-        phase_acc <= phase_acc + phase_inc;
-        clk_out   <= (phase_acc < duty_threshold);
     end
 
 endmodule
@@ -505,6 +495,259 @@ assign rem_o = rem;
 endmodule
 
 //-------------------------------------------------------------------------------------
+//Pulse pattern generator (0x153D, docs/plans/fpga-0x153c.md section 7.2), clk_200MHz: the generator since the DDS went.
+//Table of STEPS entries (0x6C), each { end, mark, level, n[31:0], f[15:0] }: the step holds level for n + f / 65536
+//clocks of 5 ns on average. A burst is entries 0 .. the first end (entry STEPS - 1 acts as end). Mode (0x6D bits 1..0):
+//0 off (pin at the idle level), 1 one burst per start, 2 R bursts (0x6E, 0 = 65536) with gap clocks (0x6F) between them,
+//3 continuous (burst, gap, burst, ...; gap 0 = seamless). A start is 0x6D bit 4 (sources 0 / 2), the trigger engine's
+//event (sources 1 / 2 / 3) or the write of mode 3 while the engine is idle; a start while a burst or gap runs is ignored.
+//  Durations: cnt is a 33-bit down counter with a frozen sign loaded at each boundary with n - 2 + carry; the sign sets
+//  n + carry - 1 clocks later and the next boundary is the clock after that: the step lasts exactly n + carry clocks.
+//  Fraction (Bresenham, one accumulator): at the start of step k, acc <= acc + f_k and carry = the overflow of that add;
+//  acc is cleared at every burst start, never at a pending take or a wrap, so the mean period is exact and every edge
+//  lies within one clock of its ideal time (the cumulative actual time is floor(the cumulative ideal)).
+//  Pipeline (section 7.2, two clocks per step at least): three segment registers, cur (in progress), nx (next; its entry
+//  nx_e feeds the boundary's one 33-bit add with a carry-in and acc_sum = acc + nx_e.f, registered during the step) and
+//  nxp (the one after; a prefetch register loaded every clock from the one-hot AND-OR read of the table by nn_oh). At a
+//  boundary cur <= nx, nx <= nxp, and nn (the segment after nxp: kind, index, one-hot) is decided from registers alone;
+//  one clock later nxp holds its entry. So every path is register to register with at most three LUT levels on the
+//  wide data (the first build's 8:1 mux with the shadow bypass and the gap mux in one clock missed by 2.75 ns).
+//  Bursts: d = R - 1 - (bursts started), 18-bit signed; its sign and the registered zero / one flags decide, at a boundary,
+//  whether the segment after nxp is idle (the burst of nxp is the last) when nxp is an end step.
+//  Double buffer: 0x6C writes to index 0 / 1 land in the shadows sh0 / sh1; 0x6D bit 5 marks them pending; the first
+//  boundary after that, or a start, copies them into the table and clears pending. At a boundary the prefetch register
+//  already holds the next-but-one segment from the old table, so the two queued segments complete with the old entries
+//  and the new ones apply from the third boundary after the commit; at a start step 0 is new. Entries 2 .. STEPS - 1 are
+//  written directly (a complete entry at a time: the 7 bytes are staged on the MCU side and handed over on the last one).
+//  MCU side (i_mcu_clk): the staged 0x6C entry, the 0x6D byte, 0x6E and 0x6F are registers there; wr_t / ctl_t toggle on
+//  the last byte of a 0x6C / on every 0x6D write and are synchronised here, so the data they refer to is settled when the
+//  toggle is seen (the next bus strobe is >= 50 ns away). rep is read at a start, gap when a gap is prefetched.
+//  Start: the start condition is registered (go, one clock: its fanout is every state register); that clock (S) copies
+//  pending shadows and loads nothing else; S + 1 refreshes nxp = entry 0 from the (new) table, S + 2 loads nx from it and
+//  decides nn, S + 3 registers acc_sum, S + 4 is the first boundary: step 0 begins 5 clocks after the start condition
+//  (the 0x6D write seen, or the engine's registered event). Marker: a one-clock pulse on the first clock of a mark step; mark_seen is sticky until clr.
+
+module pat_gen
+#(parameter STEPS = 8)
+(
+  input  wire        clk,
+  input  wire        clr,            //clears mark_seen (the MCU sampling reset)
+  input  wire        wr_t,           //toggles when the 7th byte of a 0x6C write has landed
+  input  wire [4:0]  wr_idx,
+  input  wire [2:0]  wr_flg,         //{ end, mark, level }
+  input  wire [31:0] wr_n,
+  input  wire [15:0] wr_f,
+  input  wire        ctl_t,          //toggles on every 0x6D write
+  input  wire [7:0]  ctl,            //the 0x6D byte: { start source, commit, start, marker enable, idle level, mode }
+  input  wire [15:0] rep,            //0x6E
+  input  wire [31:0] gap,            //0x6F
+  input  wire        ev_start,       //the pattern trigger engine's event
+  output reg         level = 0,      //what the pin carries while 0x50 = 1
+  output reg         marker = 0,
+  output reg         running = 0,    //a burst or gap is in progress
+  output wire        in_gap,
+  output reg         pending = 0,    //a commit not yet taken
+  output wire [2:0]  step,
+  output reg  [15:0] bursts = 0,     //bursts completed since the last start
+  output reg         mark_seen = 0,
+  output wire        mode_on,
+  output wire        mark_en_o
+);
+localparam EW = 51;                                        //entry: [50] end, [49] mark, [48] level, [47:16] n, [15:0] f
+localparam K_TAB = 2'd0, K_GAP = 2'd1, K_IDLE = 2'd2;      //segment kinds
+
+reg [STEPS*EW-1:0] tab = 0;
+reg [EW-1:0] sh0 = 0, sh1 = 0;
+reg [2:0]  wr_s = 0, ct_s = 0;
+reg [1:0]  mode = 0, start_src = 0;
+reg        idle_lv = 0, mark_en = 0, gap_nz = 0;
+reg [1:0]  cur_k = K_IDLE;                                 //the segment in progress
+reg [2:0]  cur_i = 0;
+reg        cur_end = 0;
+reg [1:0]  nx_k = K_IDLE;                                  //the next segment
+reg [2:0]  nx_i = 0;
+reg [EW-1:0] nx_e = 0;
+reg [1:0]  nxp_k = K_IDLE;                                 //the segment after the next one (prefetch register)
+reg [2:0]  nxp_i = 0;
+reg [EW-1:0] nxp_e = 0;
+reg [1:0]  nn_k = K_TAB;                                   //the segment after nxp: kind, index, one-hot table select
+reg [2:0]  nn_i = 0;
+reg [STEPS-1:0] nn_oh = 1;
+reg        nn_gap = 0;
+reg [32:0] cnt = 0;
+reg [15:0] acc = 0;
+reg [16:0] acc_sum = 0;
+reg [17:0] d = 0;                                          //R - 1 - (bursts started): sign = the current burst is the last
+reg        dz = 0, d1 = 0;                                 //d == 0, d == 1 (registered: d changes at boundaries only)
+reg [2:0]  go_d = 0;                                       //the start sequence S + 1 .. S + 3
+reg        go = 0;                                         //the start, registered (its fanout is every state register)
+
+wire wr_ev = wr_s[2] ^ wr_s[1];
+wire ct_ev = ct_s[2] ^ ct_s[1];
+wire [EW-1:0] wr_e = { wr_flg, wr_n, wr_f };
+wire [EW-1:0] gap_e = { 2'b00, idle_lv, gap, 16'd0 };
+
+//the one-hot AND-OR read of the table (and the gap pseudo-entry)
+reg  [EW-1:0] rd_e;
+integer ri;
+always @*
+  begin
+    rd_e = {EW{nn_gap}} & gap_e;
+    for(ri = 0; ri < STEPS; ri = ri + 1)
+      rd_e = rd_e | ({EW{nn_oh[ri]}} & tab[ri*EW +: EW]);
+  end
+
+wire bd = running & cnt[32] & ~(|go_d);                    //boundary: the segment in progress ends on this clock
+wire ld = bd | go_d[1];                                    //nx <= nxp (and nn decided): at a boundary and at S + 2
+wire [1:0]  mode_nx = ct_ev ? ctl[1:0] : mode;
+wire        go_c = ((ct_ev & ctl[4] & ~ctl[6]) | (ct_ev & (ctl[1:0] == 2'd3)) | (ev_start & (|start_src)))
+                   & ~running & ~go & ~(|go_d) & (mode_nx != 2'd0);
+wire        stop = ct_ev & (ctl[1:0] == 2'd0);
+
+//the decision for the segment after nxp, at a load: nx (becoming cur) and nxp (becoming nx) are registers
+wire k_new   = bd & (nx_k == K_TAB) & (nx_i == 3'd0);      //the segment becoming cur starts a burst (not at S + 2)
+wire p_tab   = (nxp_k == K_TAB);
+wire p_end   = p_tab & (nxp_e[50] | (nxp_i == STEPS - 1));
+wire p_new   = p_tab & (nxp_i == 3'd0);                    //the segment becoming nx starts a burst
+wire last_b  = (k_new & p_new) ? (d[17] | dz | d1) : (k_new | p_new) ? (d[17] | dz) : d[17];
+wire to_idle = (mode == 2'd1) | ((mode == 2'd2) & last_b);
+wire nx_end  = (nx_k == K_TAB) & (nx_e[50] | (nx_i == STEPS - 1));
+
+assign in_gap    = running & (cur_k == K_GAP);
+assign step      = cur_i;
+assign mode_on   = (mode != 2'd0);
+assign mark_en_o = mark_en;
+
+integer wi;
+  always @(posedge clk)
+    begin
+      wr_s <= { wr_s[1:0], wr_t };
+      ct_s <= { ct_s[1:0], ctl_t };
+      gap_nz <= (gap != 32'd0);
+      dz <= (d == 18'd0);
+      d1 <= (d == 18'd1);
+      acc_sum <= { 1'b0, acc } + { 1'b0, nx_e[15:0] };
+      go   <= go_c;
+      go_d <= { go_d[1:0], go };
+
+      //table writes: entries 0 / 1 through the shadows (taken at a boundary or a start), the others directly
+      if(wr_ev & (wr_idx == 5'd0))
+        sh0 <= wr_e;
+      if(wr_ev & (wr_idx == 5'd1))
+        sh1 <= wr_e;
+      for(wi = 2; wi < STEPS; wi = wi + 1)
+        if(wr_ev & (wr_idx == wi))
+          tab[wi*EW +: EW] <= wr_e;
+      if((pending | (ct_ev & ctl[5])) & (bd | go))         //a commit in the same 0x6D byte as the start is taken at once
+        begin
+          tab[EW-1:0]    <= sh0;
+          tab[2*EW-1:EW] <= sh1;
+          pending        <= 0;
+        end
+      else if(ct_ev & ctl[5])
+        pending <= 1;
+
+      if(ct_ev)
+        begin
+          mode      <= ctl[1:0];
+          idle_lv   <= ctl[2];
+          mark_en   <= ctl[3];
+          start_src <= ctl[7:6];
+        end
+
+      //the prefetch register follows the table read every clock (consumed at loads only, 2 or more clocks after nn moved)
+      nxp_e <= rd_e;
+      nxp_k <= nn_k;
+      nxp_i <= nn_i;
+
+      marker <= 0;
+      if(clr)
+        mark_seen <= 0;
+      else if(marker)
+        mark_seen <= 1;
+
+      if(stop)
+        begin
+          running <= 0;
+          cur_k   <= K_IDLE;
+          level   <= ctl[2];
+        end
+      else if(go)
+        begin
+          running <= 1;
+          cnt     <= 33'd0;                                 //the sign sets at S + 1; bd is masked until S + 3
+          acc     <= 16'd0;
+          bursts  <= 16'd0;
+          d       <= { 2'b00, rep - 16'd1 };                //R - 1 (rep 0 = 65536)
+          nn_k    <= K_TAB;
+          nn_i    <= 3'd0;
+          nn_oh   <= { {STEPS-1{1'b0}}, 1'b1 };
+          nn_gap  <= 0;
+          cur_k   <= K_IDLE;
+          level   <= idle_lv;
+        end
+      else if(running)
+        begin
+          if(bd)
+            begin
+              if((cur_k == K_TAB) & cur_end)
+                bursts <= bursts + 16'd1;
+              if(nx_k == K_IDLE)
+                begin
+                  running <= 0;
+                  cur_k   <= K_IDLE;
+                  level   <= idle_lv;
+                end
+              else
+                begin
+                  cnt     <= { 1'b0, nx_e[47:16] } + { {32{1'b1}}, acc_sum[16] };   //n - 2 + carry
+                  acc     <= acc_sum[15:0];
+                  level   <= nx_e[48];
+                  marker  <= (nx_k == K_TAB) & nx_e[49];
+                  cur_k   <= nx_k;
+                  cur_i   <= nx_i;
+                  cur_end <= nx_end;
+                  if(k_new)
+                    d <= d - 18'd1;
+                end
+            end
+          else if(~cnt[32])
+            cnt <= cnt - 33'd1;
+
+          if(ld)
+            begin
+              nx_e <= nxp_e;
+              nx_k <= nxp_k;
+              nx_i <= nxp_i;
+              nn_gap <= 0;
+              nn_oh  <= {STEPS{1'b0}};
+              if(nxp_k == K_GAP)
+                begin nn_k <= K_TAB; nn_i <= 3'd0; nn_oh[0] <= 1'b1; end
+              else if(p_end)
+                begin
+                  nn_i <= 3'd0;
+                  if(to_idle)
+                    nn_k <= K_IDLE;
+                  else if(gap_nz)
+                    begin nn_k <= K_GAP; nn_gap <= 1; end
+                  else
+                    begin nn_k <= K_TAB; nn_oh[0] <= 1'b1; end
+                end
+              else
+                begin
+                  nn_k <= K_TAB;
+                  nn_i <= nxp_i + 3'd1;
+                  nn_oh[nxp_i + 3'd1] <= 1'b1;
+                end
+            end
+        end
+      else
+        level <= idle_lv;
+    end
+
+endmodule
+
+//-------------------------------------------------------------------------------------
 //Sequencer RAMs (0x1536), TD logic block RAM macros as the IP generator writes them.
 //Accumulator / segment table: 2048 x 64, written and read on clk_200MHz, read output registered.
 //Record mirror: 2048 x 32 copy of the sample memory's write side (written on the write clock),
@@ -651,7 +894,6 @@ module fnirsi_1013D
   //wire clk_ADC0;
   
   wire clk_50MHz;
-  wire clk_1KHz;//
   wire clk_out;
 
   wire sample_clock_enable;
@@ -705,12 +947,38 @@ module fnirsi_1013D
 
   //input wire       i_mcu_rws, 
   //Initial values in this file are for simulation only: TD 4.6.8 configures every flop to 0 (0x153A notes), so on the
-  //hardware the generator is off and silent until the firmware writes 0x50..0x52 (it does, at boot), and
+  //hardware the pin is hi-Z and the pattern off until the firmware writes 0x50 and the pattern (it does, at boot), and
   //pretrigger_samples / total_samples / seq_count / seg_m / avg_n are 0 until written (the firmware writes them before
   //every capture that uses them).
-  reg gen_out_enable = 1;
-  reg [31:0] clk_out_divider = 85899;      //For controlling the clk out frekvency  1kHz
-  reg [31:0] clk_out_duty = 32'h80000000;  //For controlling the clk out duty       50%
+  reg gen_out_enable = 0;                  //Command 0x50 bit 0: 1 = the pin is driven with the pattern's level, 0 = hi-Z (EXT)
+
+  //Pattern generator (0x153D), MCU-side registers; pat_gen takes them over through the toggles
+  reg [4:0]  pat_wr_idx = 0;               //Command 0x6C byte 0 bits 4..0: entry index
+  reg [2:0]  pat_wr_flg = 0;               //Command 0x6C byte 0 bits 7..5: { end, mark, level }
+  reg [31:0] pat_wr_n = 0;                 //Command 0x6C bytes 1..4: integer duration, 5 ns clocks
+  reg [15:0] pat_wr_f = 0;                 //Command 0x6C bytes 5..6: fraction, 1/65536 clock
+  reg        pat_wr_t = 0;                 //toggles on byte 6 of 0x6C: the entry is complete
+  reg [7:0]  pat_ctl = 0;                  //Command 0x6D as written
+  reg        pat_ctl_t = 0;                //toggles on every 0x6D write
+  reg [15:0] pat_rep = 0;                  //Command 0x6E: bursts per start in mode 2 (0 = 65536)
+  reg [31:0] pat_gap = 0;                  //Command 0x6F: gap between bursts, 5 ns clocks
+  reg        trig_src_pat = 0;             //Command 0x15 = 3: the pattern marker is the capture's trigger source (own copy)
+  wire       pat_level, pat_marker, pat_running, pat_in_gap, pat_pending, pat_mark_seen, pat_mode_on, pat_mark_en;
+  wire [2:0] pat_step;
+  wire [15:0] pat_bursts;
+  wire       pq_take;                      //the pattern trigger engine's event (see "Pattern trigger engine")
+
+  //Pattern trigger engine (0x153D, 0x76-0x7D): the capture trigger's layouts, field for field
+  reg [1:0]  pt_src = 0;                   //Command 0x76 bits 1..0: 0 CH1, 1 CH2, 2 / 3 EXT
+  reg        pt_pol = 0;                   //Command 0x77 bit 0: polarity per type (as 0x16)
+  reg [7:0]  pt_lvl = 0;                   //Command 0x78: level, 8-bit (legacy stream)
+  reg [15:0] pt_lvl16 = 0;                 //Command 0x79: level, 16-bit (K >= 1)
+  reg [2:0]  pt_type = 0;                  //Command 0x7A bits 2..0: type as 0x5E (4..7 act as edge)
+  reg        pt_long = 0;                  //Command 0x7A bit 3: pulse width longer than N
+  reg [23:0] pt_n = 0;                     //Command 0x7B: N
+  reg [23:0] pt_h = 0;                     //Command 0x7C: idle time H
+  reg [7:0]  pt_ctl = 0;                   //Command 0x7D as written: bit 0 armed, bit 1 re-arm, bit 2 clear the event flag
+  reg        pt_ctl_t = 0;                 //toggles on every 0x7D write
 
   reg relay1_1 = 0;                        //Relay control for channel 1
   reg relay1_2 = 0;
@@ -854,20 +1122,38 @@ module fnirsi_1013D
   );
 
 //-------------------------------------------------------------------------------------
-// frequency generator
+// Generator (0x153D): the pulse pattern generator drives the calibration pin while 0x50 = 1. Atlan4's DDS
+// (freq_generator_dds_pwm on clk_50MHz, 0x51 / 0x52) was here up to 0x153C; the square wave is now the two-step
+// continuous pattern the firmware programs (module pat_gen above the sequencer RAMs).
 
-freq_generator_dds_pwm u_freq
+  pat_gen #(.STEPS(8)) u_pat
   (
-    .clk_in(clk_50MHz),
-    .phase_inc(clk_out_divider),    // DDS step calculated in uP
-    .duty_threshold(clk_out_duty),  // duty in the range 0..2^32-1
-    .clk_out(clk_1KHz)
+    .clk       (clk_200MHz),
+    .clr       (sample_system_reset),
+    .wr_t      (pat_wr_t),
+    .wr_idx    (pat_wr_idx),
+    .wr_flg    (pat_wr_flg),
+    .wr_n      (pat_wr_n),
+    .wr_f      (pat_wr_f),
+    .ctl_t     (pat_ctl_t),
+    .ctl       (pat_ctl),
+    .rep       (pat_rep),
+    .gap       (pat_gap),
+    .ev_start  (pq_take),
+    .level     (pat_level),
+    .marker    (pat_marker),
+    .running   (pat_running),
+    .in_gap    (pat_in_gap),
+    .pending   (pat_pending),
+    .step      (pat_step),
+    .bursts    (pat_bursts),
+    .mark_seen (pat_mark_seen),
+    .mode_on   (pat_mode_on),
+    .mark_en_o (pat_mark_en)
   );
 
 //Control of the bidirectional bus for input and output
-  assign o_1khz_calib = gen_out_enable ? clk_1KHz : 1'bZ; 
-
-  //assign o_1khz_calib = clk_1KHz;
+  assign o_1khz_calib = gen_out_enable ? pat_level : 1'bZ;
 
 //-------------------------------------------------------------------------------------
 //External trigger input on the calibration pin
@@ -932,9 +1218,11 @@ freq_generator_dds_pwm u_freq
       else if(ext_rise | ext_fall)
         ext_activity <= 1;
 
+      //0x153C: or the EXT qualifier's event; 0x153D: with 0x15 = 3 the pattern's marker instead (0x6D bit 3 enables it),
+      //and nothing from the pin: the marker is applied on the next write clock rise like an EXT edge
       if(cap_rst200 == 1)
         ext_pending <= 0;
-      else if(trigger_check_enable & (ext_edge | ext_qev))   //0x153C: or the EXT qualifier's event
+      else if(trigger_check_enable & (trig_src_pat ? (pat_marker & pat_mark_en) : (ext_edge | ext_qev)))
         ext_pending <= 1;
     end
 
@@ -1566,6 +1854,107 @@ assign sampling_enable = ~(
   always @(posedge clk_200MHz)
     ext_qev_r <= ~cap_rst200 & q_on & trig_src_ext & q_fire_ext & (ext_level ^ trigger_edge);
   assign ext_qev = ext_qev_r;
+
+//-------------------------------------------------------------------------------------
+//Pattern trigger engine (0x153D, docs/plans/fpga-0x153c.md section 7.5): a third trig_qual on clk_200MHz with the capture
+//trigger's vocabulary (source 0x76, polarity 0x77, level 0x78 / 0x79, type 0x7A, N 0x7B, H 0x7C) on the same streams the
+//capture's qualifiers see, but compared against its own level: CH1 / CH2 = the trigger stream sample of every memory word
+//(legacy core A of the channel, K >= 1 the 16-bit output word), taken on the write clock edge that writes the word (pq_s,
+//exactly when trigger_data loads) and processed on the clk_200MHz edge 7.5 ns after the rise (swc_rise_q & adv_d, the
+//sequencer's settled crossing); EXT = ext_level_prev at every clock. The event: edge type = the edge in the polarity's
+//direction (the previous sample pre-side, this one post-side); pulse width and Nth edge = the qualifier's fire for the
+//previous sample with this sample on the post side (what trigger_previous does for the capture); timeout = fire itself.
+//0x7D: bit 0 armed (writing 1 restarts the qualifier), bit 1 re-arm (the qualifier is held in reset while the burst runs
+//and restarts when it ends; 0 = one shot: the event clears armed), bit 2 clears the event flag. An event while a burst or
+//gap runs is ignored. The event starts a burst when 0x6D bits 7..6 allow it (pat_gen) and sets 0x42 bit 6 either way.
+//The engine never touches the capture's timed path; its only consumers are pat_gen and read 0x42.
+
+  wire [1:0]  pq_typ2 = pt_type[2] ? 2'd0 : pt_type[1:0];
+  wire        pq_edge = pt_pol ^ (pq_typ2 == 2'd1);        //detect direction (the pulse width triggers on its trailing edge)
+  wire        pq_ext  = pt_src[1];
+  wire [24:0] pq_rld_w = { 1'b0, pt_n } - (((pq_typ2 == 2'd1) & pt_long) ? 25'd1 : 25'd2);
+  wire [15:0] pq_n16   = (pt_n[15:0] == 16'd0) ? 16'd1 : pt_n[15:0];
+  wire [15:0] pq_nm1   = pq_n16 - 16'd1;
+  wire        pq_nm1_z = (pq_n16 == 16'd1);
+  wire        pq_nm1_1 = (pq_n16 == 16'd2);
+  wire [24:0] pq_rld_h = { 1'b0, pt_h } - 25'd2;
+  wire        pq_h_z   = (pt_h == 24'd0);
+
+  //write clock side: the newest stream sample against the engine's own level, on the pre-detect side (as q_a_adc)
+  wire [7:0]  pq_raw8  = pt_src[0] ? adc2A_w : adc1A_w;
+  wire [15:0] pq_raw16 = pt_src[0] ? dec_out2 : dec_out1;
+  reg         pq_s = 0;
+  always @(posedge sample_write_clock)
+    if(swc_adv)
+      pq_s <= (dec_on ? (pq_raw16 >= pt_lvl16) : (pq_raw8 >= pt_lvl)) ~^ pq_edge;
+
+  reg [2:0]   pt_cs = 0;
+  wire        pt_cev = pt_cs[2] ^ pt_cs[1];                //a 0x7D write landed
+  reg         pq_armed = 0, pq_rearm = 0, pq_evf = 0;
+  reg         pq_ap = 0, pq_fp = 0;                        //the previous sample's side and the qualifier's fire for it
+  wire        pq_ce  = pq_ext ? 1'b1 : (swc_rise_q & adv_d);
+  wire        pq_a   = pq_ext ? (ext_level_prev ~^ pq_edge) : pq_s;
+  wire        pq_rst = (pt_cev & pt_ctl[0]) | (pq_rearm & pat_running);
+  wire        pq_fire, pq_vld, pq_cv;
+  wire [15:0] pq_rem;
+
+  trig_qual qual_pat
+  (
+    .clk    (clk_200MHz),
+    .ce     (pq_ce),
+    .rst    (pq_rst),
+    .typ    (pq_typ2),
+    .pw_long(pt_long),
+    .rld_w  (pq_rld_w),
+    .nm1    (pq_nm1),
+    .nm1_z  (pq_nm1_z),
+    .nm1_1  (pq_nm1_1),
+    .rld_h  (pq_rld_h),
+    .h_zero (pq_h_z),
+    .arm    (pq_armed),
+    .a      (pq_a),
+    .fire   (pq_fire),
+    .vld_o  (pq_vld),
+    .cv_o   (pq_cv),
+    .rem_o  (pq_rem)
+  );
+
+  wire pq_ev = pq_ce & ~pq_rst & ((pq_typ2 == 2'd0) ? (pq_ap & ~pq_a) :
+                                  (pq_typ2 == 2'd3) ? pq_fire : (pq_fp & ~pq_a));
+  wire pq_take_c = pq_ev & pq_armed & ~pat_running;
+  reg  pq_take_r = 0;                                      //the event, registered: the qualifier's decision logic and
+                                                           //pat_gen's start do not fit one clock (build b4: -1.2 ns)
+  assign pq_take = pq_take_r;
+
+  always @(posedge clk_200MHz)
+    begin
+      pt_cs <= { pt_cs[1:0], pt_ctl_t };
+      if(pq_rst)
+        begin
+          pq_ap <= 0;
+          pq_fp <= 0;
+        end
+      else if(pq_ce)
+        begin
+          pq_ap <= pq_a;
+          pq_fp <= pq_fire;
+        end
+
+      pq_take_r <= pq_take_c;
+      if(pt_cev)
+        begin
+          pq_armed <= pt_ctl[0];
+          pq_rearm <= pt_ctl[1];
+          if(pt_ctl[2])
+            pq_evf <= 0;
+        end
+      else if(pq_take_c)
+        begin
+          pq_evf <= 1;
+          if(~pq_rearm)
+            pq_armed <= 0;
+        end
+    end
 
 //-------------------------------------------------------------------------------------
 //Outlier counters (0x153A, read 0x36): per core, the sample of each write clock edge (adc*_w) against the one of the
@@ -2289,15 +2678,18 @@ assign sampling_enable = ~(
       else if((((mcu_command == 8'h0B) | (mcu_command == 8'h0C) | (mcu_command == 8'h0D) | (mcu_command == 8'h0E) 
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
-              | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
+              | (mcu_command == 8'h55)                                                               //0x153D: 0x51 / 0x52 retired
               | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)
               | (mcu_command == 8'h5F) | (mcu_command == 8'h60)                                     //0x153C triggers
               | (mcu_command == 8'h62)                                                               //0x153C counter
+              | (mcu_command == 8'h6C) | (mcu_command == 8'h6E) | (mcu_command == 8'h6F)             //0x153D pattern
+              | (mcu_command == 8'h79) | (mcu_command == 8'h7B) | (mcu_command == 8'h7C)             //0x153D pattern trigger
               ) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
               | (mcu_command == 8'h2A) | (mcu_command == 8'h36)
               | (mcu_command == 8'h34)                                                               //0x153C triggers
               | (mcu_command == 8'h35)                                                               //0x153C counter
+              | (mcu_command == 8'h39) | (mcu_command == 8'h42)                                      //0x153D pattern
               ) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
@@ -2518,39 +2910,10 @@ assign sampling_enable = ~(
                 endcase
               end
 
-            //Setting the output on or tristate
+            //Setting the output on or tristate (0x153D: the pattern's level is what is driven; 0x51 / 0x52, the DDS phase
+            //increment and duty of 0x1532..0x153C, are retired: no decoder entry, writes are ignored)
             8'h50:
               gen_out_enable <= io_mcu_data[0];
-
-            //Loading of the four bytes of the clk out divider high byte first 
-            8'h51:
-              begin
-                case(mcu_state)
-                  4'h0:
-                    clk_out_divider[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_divider[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_divider[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_divider[7:0] <= io_mcu_data;
-                endcase
-              end
-
-            //Loading of the four bytes of the clk out duty divider high byte first
-            8'h52:
-              begin
-                case(mcu_state)
-                  4'h0:
-                    clk_out_duty[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_duty[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_duty[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_duty[7:0] <= io_mcu_data;
-                endcase
-              end
 
             //Decimation filter order and core order (0x1534); bits 3 / 4 have no effect since 0x153A
             8'h53:
@@ -2712,9 +3075,143 @@ assign sampling_enable = ~(
                 endcase
               end
 
+            //Pattern step (0x153D), 7 bytes: { end, mark, level, index[4:0] }, u32 integer duration in 5 ns clocks (>= 2),
+            //u16 fraction in 1/65536 clock, high byte first; the entry is handed to the generator on the last byte
+            //(index 0 / 1: into the shadow, taken at the first step boundary after a commit; 2..7: at once; >= 8: ignored)
+            8'h6C:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    begin
+                      pat_wr_flg <= io_mcu_data[7:5];
+                      pat_wr_idx <= io_mcu_data[4:0];
+                    end
+                  4'h1:
+                    pat_wr_n[31:24] <= io_mcu_data;
+                  4'h2:
+                    pat_wr_n[23:16] <= io_mcu_data;
+                  4'h3:
+                    pat_wr_n[15:8] <= io_mcu_data;
+                  4'h4:
+                    pat_wr_n[7:0] <= io_mcu_data;
+                  4'h5:
+                    pat_wr_f[15:8] <= io_mcu_data;
+                  4'h6:
+                    begin
+                      pat_wr_f[7:0] <= io_mcu_data;
+                      pat_wr_t     <= ~pat_wr_t;
+                    end
+                endcase
+              end
+
+            //Pattern control (0x153D), 1 byte: bits 1..0 mode (0 off, 1 single burst, 2 R bursts, 3 continuous), bit 2
+            //idle level, bit 3 marker is the capture's trigger source (with 0x15 = 3), bit 4 start now, bit 5 commit the
+            //shadow entries 0 / 1, bits 7..6 start source (0 MCU, 1 the pattern trigger engine, 2 both, 3 engine)
+            8'h6D:
+              begin
+                pat_ctl   <= io_mcu_data;
+                pat_ctl_t <= ~pat_ctl_t;
+              end
+
+            //Bursts per start in mode 2 (0x153D), two bytes high byte first, 0 = 65536
+            8'h6E:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    pat_rep[15:8] <= io_mcu_data;
+                  4'h1:
+                    pat_rep[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Gap between bursts (0x153D), four bytes high byte first, 5 ns clocks (0 = none)
+            8'h6F:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    pat_gap[31:24] <= io_mcu_data;
+                  4'h1:
+                    pat_gap[23:16] <= io_mcu_data;
+                  4'h2:
+                    pat_gap[15:8] <= io_mcu_data;
+                  4'h3:
+                    pat_gap[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //Pattern trigger engine (0x153D), the capture trigger's layouts: source (as 0x15: 0 CH1, 1 CH2, 2 / 3 EXT)
+            8'h76:
+              pt_src <= io_mcu_data[1:0];
+
+            //polarity per type (as 0x16)
+            8'h77:
+              pt_pol <= io_mcu_data[0];
+
+            //level, 8-bit (as 0x17)
+            8'h78:
+              pt_lvl <= io_mcu_data;
+
+            //level, 16-bit, two bytes high byte first (as 0x55; used with K >= 1)
+            8'h79:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    pt_lvl16[15:8] <= io_mcu_data;
+                  4'h1:
+                    pt_lvl16[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //type (as 0x5E: bits 2..0 type, 4..7 act as edge; bit 3 longer)
+            8'h7A:
+              begin
+                pt_type <= io_mcu_data[2:0];
+                pt_long <= io_mcu_data[3];
+              end
+
+            //N, three bytes high byte first (as 0x5F)
+            8'h7B:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    pt_n[23:16] <= io_mcu_data;
+                  4'h1:
+                    pt_n[15:8] <= io_mcu_data;
+                  4'h2:
+                    pt_n[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //idle time H, three bytes high byte first (as 0x60)
+            8'h7C:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    pt_h[23:16] <= io_mcu_data;
+                  4'h1:
+                    pt_h[15:8] <= io_mcu_data;
+                  4'h2:
+                    pt_h[7:0] <= io_mcu_data;
+                endcase
+              end
+
+            //engine control, 1 byte: bit 0 armed (1 restarts the qualifier), bit 1 re-arm after each burst, bit 2 clear
+            //the event flag (0x42 bit 6)
+            8'h7D:
+              begin
+                pt_ctl   <= io_mcu_data;
+                pt_ctl_t <= ~pt_ctl_t;
+              end
+
           endcase
         end
     end
+
+  //0x153D: own copy of 0x15 = 3 (the pattern marker as the capture's trigger source), like the counter's k_t15_*; the
+  //trigger logic's trigger_ext / trig_src_ext then keep the CH1 / CH2 compare off and the EXT paths are gated here
+  always @(posedge i_mcu_clk)
+    if((i_mcu_dcs == 0) & i_mcu_rws & (mcu_command == 8'h15))
+      trig_src_pat <= io_mcu_data[1] & io_mcu_data[0];
 
 //-------------------------------------------------------------------------------------
 //For reading data the requested byte is loaded into a register on the falling edge of the i_mcu_clk
@@ -2910,6 +3407,32 @@ assign sampling_enable = ~(
                   4'hD:  o_mcu_data <= m_w[7:0];
                   4'hE:  o_mcu_data <= ~m_mn_n;
                   4'hF:  o_mcu_data <= m_mx;
+                endcase
+              end
+
+            //Pattern status (0x153D), 4 bytes: { running, in gap, pending commit, 0, step[3:0] }, bursts completed since
+            //the last start (16 bits, high byte first), { 0, 0, 0, 0, 0, 0, marker seen since 0x01 = 1, mode active }.
+            //Asynchronous (the generator runs on clk_200MHz): read twice if a count matters.
+            8'h39:
+              begin
+                case(mcu_state)
+                  4'h0:  o_mcu_data <= { pat_running, pat_in_gap, pat_pending, 2'b00, pat_step };
+                  4'h1:  o_mcu_data <= pat_bursts[15:8];
+                  4'h2:  o_mcu_data <= pat_bursts[7:0];
+                  4'h3:  o_mcu_data <= { 6'd0, pat_mark_seen, pat_mode_on };
+                  default: o_mcu_data <= 8'h00;
+                endcase
+              end
+
+            //Pattern trigger engine status (0x153D), 3 bytes laid out as 0x34: { own engine (1), event seen since 0x7D
+            //bit 2, counting, pulse began, source EXT, longer, type[1:0] }, then the edges still to count (Nth edge)
+            8'h42:
+              begin
+                case(mcu_state)
+                  4'h0:  o_mcu_data <= { 1'b1, pq_evf, pq_cv, pq_vld, pt_src[1], pt_long, pt_type[1:0] };
+                  4'h1:  o_mcu_data <= pq_rem[15:8];
+                  4'h2:  o_mcu_data <= pq_rem[7:0];
+                  default: o_mcu_data <= 8'h00;
                 endcase
               end
 
