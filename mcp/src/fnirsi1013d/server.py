@@ -893,13 +893,11 @@ def _trigger_summary(s: Scope) -> dict[str, Any]:
             d["width_samples"] = t2.n
         elif t2.type == P.TRIG_NTH_EDGE:
             d["n"] = t2.n
-            d["idle_s"] = _r6(t2.n2_or_h * per)
-            d["idle_samples"] = t2.n2_or_h
+            d["idle_s"] = _r6(t2.h * per)
+            d["idle_samples"] = t2.h
         elif t2.type == P.TRIG_TIMEOUT:
             d["held_s"] = _r6(t2.n * per)
             d["held_samples"] = t2.n
-        if t2.flags & P.TRIG2_F_CLEAR_HOLDOFF:
-            d["clear_holdoff_pending"] = True
         out["type"] = d
     return out
 
@@ -1232,6 +1230,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         segments, hw_average; enc_check 1.19; bode 1.20; capture_stages 1.24; trig_types, peak, counter 1.26) and the
         acquisition menu's Average (ui_averaging off / mcu / hardware: since fw 0.2.103 every displayed record is the
         mean of ui_averaging_records records, summed by the MCU or by one FPGA run; hardware_averaging says which),
+        from 1.26 trigger_status (the qualifier: type, hold-off running, counting, pulse began, edges left),
         run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
         the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
         battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
@@ -1265,6 +1264,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     extra["hardware_averaging"] = st.ui_average == 2
                     if st.ui_average in (1, 2):
                         extra["ui_averaging_records"] = 1 << st.ui_average_log2n
+                if s.info.proto_minor >= 26:  # 1.26: the trigger qualifier's status words (0x37, 0x34)
+                    extra["trigger_status"] = st.trigger_status()
             else:
                 extra = {"mode": "exclusive (legacy firmware)"}
             return {"ok": True, **extra, **extra_ext, "control": _control_name(st),
@@ -1894,9 +1895,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                         "long without an edge (seconds, same units as width; 0 = count from the arm)")] = None,
         hold_off: Annotated[float | str | None, Field(description="trigger hold-off (seconds, caps HOLDOFF): from one "
                            "record's trigger no trigger is accepted until it has elapsed, across re-arms and segments; "
-                           "5 ns steps up to 21 s; 0 = off")] = None,
-        clear_hold_off: Annotated[bool, Field(description="the next capture also clears a hold-off still running "
-                                                           "from an earlier trigger")] = False,
+                           "5 ns steps up to 21 s; 0 = off. Every trigger change through this tool also clears a "
+                           "hold-off still running at the next capture (a new definition is a new session)")] = None,
         level: Annotated[float | str | None, Field(description="trigger level in volts at the probe tip, "
                                                                "converted to a raw core-A code")] = None,
         level_code: Annotated[int | None, Field(ge=0, le=255, description="raw core-A code 0..255; alternative "
@@ -1921,8 +1921,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         Level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed. Widths and idle times
         resolve to one trigger-stream sample (2 / fs legacy, 1 / fs filtered, 5 ns on EXT); the hold-off to 5 ns."""
         args = {k: v for k, v in dict(source=source, edge=edge, type=type, polarity=polarity, width=width, longer=longer,
-                                      n=n, idle=idle, hold_off=hold_off, clear_hold_off=clear_hold_off or None,
-                                      level=level, level_code=level_code, mode=mode,
+                                      n=n, idle=idle, hold_off=hold_off, level=level, level_code=level_code, mode=mode,
                                       pretrigger_fraction=pretrigger_fraction, pretrigger_samples=pretrigger_samples,
                                       total_samples=total_samples, auto_timeout=auto_timeout).items() if v is not None}
 
@@ -1939,7 +1938,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if type in ("runt", "window"):
                 raise ValueError(f"trigger type {type!r} needs FPGA bitstream 0x153E (caps TRIG_RUNT_WINDOW, protocol "
                                  "1.28); this generation has edge, pulse_width, nth_edge and timeout")
-            typed = any(v is not None for v in (type, polarity, width, longer, n, idle, hold_off)) or clear_hold_off
+            typed = any(v is not None for v in (type, polarity, width, longer, n, idle, hold_off))
             if typed and (cur.trigger2 is None or not prof.has(P.Caps.TRIG_TYPES)):
                 raise ValueError("trigger types and the hold-off need protocol 1.26 with caps TRIG_TYPES (FPGA 0x153C, "
                                  "fw 0.2.104+); this firmware has the edge trigger only")
@@ -1988,7 +1987,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                           mode=None if mode is None else P.TRIG_MODES.index(mode), pretrigger_samples=pre,
                           total_samples=total, auto_timeout=ato)
             if typed:
-                cav += _apply_trigger_type(s, type, polarity, width, longer, n, idle, hold_off, clear_hold_off)
+                cav += _apply_trigger_type(s, type, polarity, width, longer, n, idle, hold_off)
             summ = _trigger_summary(s)
             if src == 2 and gen_was_on:
                 cav.append("the generator was switched off: the calibration pin is now the EXT trigger input")
@@ -2001,11 +2000,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         return await run("scope_set_trigger", 1, args, go)
 
     def _apply_trigger_type(s: Scope, type_: str | None, polarity: str | None, width: float | str | None,
-                            longer: bool | None, n: int | None, idle: float | str | None, hold_off: float | str | None,
-                            clear_hold_off: bool) -> list[str]:
+                            longer: bool | None, n: int | None, idle: float | str | None, hold_off: float | str | None
+                            ) -> list[str]:
         """Protocol 1.26: the SET_TRIGGER2 block from the tool's arguments; seconds become samples of the trigger
         stream in effect (one word on CH1 / CH2, 5 ns on EXT), rounded to the nearest and clamped to the FPGA's
-        ranges, which the returned caveats name."""
+        ranges, which the returned caveats name; the hold-off becomes 5 ns units."""
         cav: list[str] = []
         cur = s.get_trigger(cached=False)
         t2 = cur.trigger2
@@ -2014,6 +2013,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         tname = type_ if type_ is not None else t2.type_name
         ttype = P.TRIG_TYPE_NAMES.index(tname)
         kw: dict[str, Any] = {"type": ttype}
+        if longer and ttype != P.TRIG_PULSE_WIDTH:
+            raise ValueError("longer applies to the pulse_width type")
         if polarity is not None:
             names = P.TRIG_POLARITY_NAMES[ttype]
             alias = {"rising": 0, "positive": 0, "high": 0, "falling": 1, "negative": 1, "low": 1}
@@ -2048,22 +2049,14 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if ttype != P.TRIG_NTH_EDGE:
                 raise ValueError("idle applies to the nth_edge type")
             kw["h"] = to_samples("idle", idle, 0, P.TRIG2_MAX_N)
-        if ttype == P.TRIG_NTH_EDGE and "n" not in kw and not 1 <= t2.n <= P.TRIG2_MAX_NTH:
-            kw["n"] = 1
-        if ttype in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT) and "n" not in kw and t2.n < 1:
-            kw["n"] = 1
         if hold_off is not None:
             v = parse_quantity(hold_off, "s")
-            ns = int(round(v * 1e9))
-            units = P.trig2_holdoff_units(ns)
-            if units > P.TRIG2_MAX_HOLDOFF_UNITS:
-                units = P.TRIG2_MAX_HOLDOFF_UNITS
+            units = P.holdoff_units(v)
+            if v > P.TRIG2_MAX_HOLDOFF_UNITS * 5e-9:
                 cav.append(f"hold_off clamped to {fmt_si(units * 5e-9, 's')}")
-            kw["holdoff_ns"] = units * P.TRIG2_HOLDOFF_UNIT_NS
-            if kw["holdoff_ns"] != ns:
-                cav.append(f"hold_off rounded up to {units} x 5 ns = {fmt_si(units * 5e-9, 's')}")
-        if clear_hold_off:
-            kw["clear_holdoff"] = True
+            elif abs(units * 5e-9 - v) > 1e-12:
+                cav.append(f"hold_off rounded to {units} x 5 ns = {fmt_si(units * 5e-9, 's')}")
+            kw["holdoff"] = units
         s.set_trigger2(**kw)
         if ttype != P.TRIG_EDGE:
             cav.append(f"{tname} trigger: widths and counts resolve to one trigger-stream sample ({fmt_si(per, 's')}); "
@@ -3735,15 +3728,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         referenced to the USB ground; the probe ground is VRF1, +1.24 V above it, so it reads about -1.24 / +1.9 V.
         Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source and not a power driver: buffer
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
-        switches real coil current. On the stock FPGA the pin always outputs a fixed 1 kHz and this tool is
-        unavailable."""
+        switches real coil current. Needs caps GENERATOR_DDS (every supported firmware has it)."""
         args = {"enabled": enabled, "frequency": frequency, "duty_percent": duty_percent}
 
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             if not s.profile().has_generator:
-                raise ToolError("scope_generator: this FPGA bitstream has no programmable generator (stock FPGA: "
-                                "fixed 1 kHz on the calibration pin)")
+                raise ToolError("scope_generator: no programmable generator in this firmware's caps (GENERATOR_DDS)")
             f = parse_quantity(frequency, "Hz") if frequency is not None else None
             if f is not None:
                 if not 0 < f <= min(cfg.gen_max_hz, 25e6):
