@@ -2188,7 +2188,7 @@ end's 30 MHz (the logic takes 100 MHz: one high and one low clock); T and W are 
 - **Trigger-source follow.** Source 0 follows a private copy of 0x15 as written (`k_t15_ext`, `k_t15_ch2`, loaded by an
   own always block on the 0x15 data strobe), not `trigger_ext` / `trigger_channel`: the trigger-type logic of C1 may
   redefine what those mean for the qualified types (gen8 made `trigger_ext` the edge type's EXT only), and the counter
-  must follow the source the firmware named. 0x15 = 3 (the 0x153D pattern marker) reads as EXT here.
+  must follow the source the firmware named. 0x15 = 3 reads as EXT here (as in the capture: the fpga-d2 pattern marker source was cut).
 - **Snapshot** (`m_*`). The 0x35 command byte toggles `m_req` on `i_mcu_clk`; a two-flop synchroniser on clk_200MHz
   detects the toggle and copies `k_rt`, `k_rw`, `k_re`, `k_rmn_n`, `k_rmx`, `k_rcfg`, `k_seq` into `m_*` and sets
   `m_new` = (`k_seq` != the previous `m_seq`), 3 .. 4 clocks (15 .. 20 ns) after the command strobe's rising edge. The
@@ -2340,7 +2340,7 @@ seeds 12345 and 4242** (15 s); every word of every peak capture matched its wind
 1-13 are unchanged in result (0x56 bit 1 = 0 in all of them); `tb_long.v` connects the new `decim_chan` inputs.
 
 **Bench checks** (contract 9.2 item 6, with the owner): peak detect at 1 MSa/s on a 100 kHz square and on a narrow DDS
-duty (or the 0x153D pattern generator's 6 ns spikes): every spike visible, the min / max envelope stable over 50 records;
+duty: every spike visible, the min / max envelope stable over 50 records;
 0x29 reads byte 0 = 0x80 and byte 1 = 0xC0 with 0x53 = 0x54 = 0; a falling trigger at the envelope's low edge triggers
 where the Scope view shows the band's lower edge crossing the marker.
 ### 15. Integration build 0x153C and the cruft removal (fpga-c4, 2026-10-21)
@@ -2460,8 +2460,8 @@ of those scenarios still passes.
 ### 16. Streaming logger; version 0x153D, item D1 (fpga-d1, 2026-10-21)
 
 Contract: `docs/plans/fpga-0x153c.md` sections 2.1 (0x69, 0x6A), 2.2 (0x38), 2.4 (0x0A / 0x14 / 0x18 while streaming), 6
-(the sample ring is the FIFO) and 9.1 (step 17). The pattern generator with its trigger engine (D2) is documented by its
-own agent; D3 integrates them and sets the version byte 0x3D. With 0x69 = 0 (power-on) nothing here touches the capture:
+(the sample ring is the FIFO) and 9.1 (step 17). The fractional square generator (D2 reduced by the owner's cut, section 17) is documented
+there; D3 integrates both and sets the version byte 0x3D. With 0x69 = 0 (power-on) nothing here touches the capture:
 it is cycle-identical to 0x153C (the equivalence steps of `tb/run.sh` and the normal captures of `tb_stream.v`).
 
 #### Register map
