@@ -32,6 +32,18 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.103 + fw-c6 + ui-sample (provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26 unchanged)
+
+- **ACQ Sample row** (`docs/plans/ui-rows.md` section 3; commits 7098449, 4a93304, acc1884, 09dac96): the ACQ menu is 478 px
+  wide with the Memory column moved right by 98 px and **Sample** ("Normal" / "Peak") as the fourth box of the Roll /
+  Average / Filter row. Peak runs peak detect (SET_DECIM filter 4's path) in the Scope view, greys the Filter and Average
+  boxes with their values kept and says "Peak:" / "Filter and" / "Average" / "not applied" in the Memory column; the depths
+  above 6000 go as with a filter; Normal brings the Filter back. Grey in roll mode ("Not in" / "roll mode"), no box in the
+  Spectrum analyser. Saved in settings word 211 bit 3; Restore default settings sets Normal.
+- **Peak records on screen**: one vertical bar per column from the lowest min to the highest max (integer column walk,
+  `peak_bars.c`), red when either byte is at 0 or 255; phosphor accumulates the bars; X-Y and the cards use the midpoints.
+  Trace style greys while Peak; its value "Peak" is renamed **"Bars"**.
+
 #### 0.2.103 + fw-c6 (version provisional, the coordinator numbers it) - 2026-10-21 (protocol 1.26, row 66 "Peak detect", provisional)
 
 - **Peak detect** on FPGA 0x153C (`docs/plans/fpga-0x153c.md` section 4, item C6): **SET_DECIM filter 4** sets Sample Peak
