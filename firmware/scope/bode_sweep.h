@@ -71,8 +71,6 @@ typedef struct
   uint8         fir;          //the FIR was active in this capture
   uint8         check;        //BODE_CHK_* of this capture (fw 0.2.83; no state of an earlier capture)
   uint8         triggered;    //fw 0.2.91: the capture started on a trigger (0: on the FPGA's auto time-out or FORCE)
-  uint8         spliced;      //fw 0.2.97: the record may be joined from two ring passes (forced, or a trigger cut by the
-                              //time-out on FPGA 0x1532..0x153A): taken again like an untriggered one
 } bode_cap;
 
 typedef struct

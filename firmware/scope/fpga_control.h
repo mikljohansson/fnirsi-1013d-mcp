@@ -58,7 +58,6 @@ void   fpga_set_translated_brightness(void);
 
 uint16 fpga_get_version(void);
 
-void   fpga_check_ready(void);
 
 void   fpga_enable_system(void);
 
@@ -103,7 +102,6 @@ extern uint8 fpga_trace_level;  //fw 0.2.72: 1 = every traced write as event 22,
 extern uint32 fpga_divider;     //last 0x0D value written (clock class of the zero correction)
 //fw 0.2.97: the 0x0E value of the next fpga_do_conversion, set by pc_glue_decim_conversion for every conversion (the
 //auto-mode stop geometry on AL3 0x1532..0x153A, pc_decim.h); 0 = 1.00o5's scopesettings.samplecount
-extern uint32 fpga_conv_0e;
 //fw 0.2.67, CAL_PROBE A/B tests of the sample readout (fpga_read_adc_data), both 0 normally: extra reads of the data port
 //after each sample strobe before the sampled one; a data-write strobe (bus not driven, ignored by the FPGA) before each
 //sample strobe, so the sample memory's read register settles on the address before the strobe that takes it
@@ -113,8 +111,6 @@ void   fpga_read_adc_data(PCHANNELSETTINGS settings);
 
 uint16 fpga_average_trace_data(PCHANNELSETTINGS settings);  //For long time base
 uint16 fpga_average_trace_data_long(PCHANNELSETTINGS settings);
-
-//void   fpga_set_battery_level(void);
 
 void   fpga_delay(uint32 usec);
 

@@ -41,8 +41,8 @@ def test_reports_for_every_kind(sim_factory, tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("FNIRSI_MCP_HOME", str(home))
     srv = sim_factory(signal="decay:tau=80us,amp=0.3,period=1ms,width=200us", noise_lsb=1.0)
-    seg = sim_factory(variant="al3s", signal="square:freq=10kHz,amp=0.3")
-    bode = sim_factory(variant="al3f", noise_lsb=0.5)
+    seg = sim_factory(signal="square:freq=10kHz,amp=0.3")
+    bode = sim_factory(noise_lsb=0.5)
     bode.device.cfg.signals = (parse_signal("dut_in:r=1.6k,c=1n"), parse_signal("dut_out:r=1.6k,c=1n"))
 
     async def main():

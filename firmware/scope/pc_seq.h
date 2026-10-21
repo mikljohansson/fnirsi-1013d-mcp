@@ -113,17 +113,30 @@ uint64_t pc_seq_entry_encode(const pc_seq_entry *d);       //host tests and the 
 uint32_t pc_seq_seg_word(uint8_t m, uint32_t s, uint16_t offset, uint32_t pre_words, uint32_t j);
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// UI hardware averaging (the acquisition menu's Average with a 0x1536 bitstream)
+// UI averaging (the acquisition menu's Average; fw-one: one behaviour, owner decision 2026-10-20). Every displayed record
+// is the mean of N records. N comes from one planner for both paths: the largest power of two in 2..64 whose N records
+// fit the 40 ms budget, each record costed at its acquisition time (the record plus the sequencer's dead time) plus, on
+// the MCU path, its readout (4 bus bytes per word at about 0.3 us each: both cores of both channels in the legacy
+// layout, both bytes of both channels in the 16-bit layout). A legacy record that fits the accumulator (<= 2046 words)
+// is averaged by the FPGA's sequencer (one run of N records); every other record (16-bit, deeper memory) by the MCU,
+// which arms and sums N records within the same pass. Below two records in the budget N = 1: single records.
 
 //Records per UI run budget and limits
-#define PC_SEQ_UI_BUDGET_US   40000u    //N records plus their dead time fit in this
+#define PC_SEQ_UI_BUDGET_US   40000u    //N records plus their dead time (and the MCU path's readout) fit in this
 #define PC_SEQ_UI_MAX_N       64u
 #define PC_SEQ_UI_MIN_N       2u
+#define PC_SEQ_UI_READ_NS     300u      //one bus byte (research/notes: about 0.3 us per sample byte)
+#define PC_SEQ_UI_READ_BYTES  4u        //bus bytes read per ring word on the MCU path
 
-//Records for one UI averaging run of a legacy record (total / pre words, divider D: one word = 10 (D + 1) ns): the largest
-//power of two N in 2..64 with N x (record + dead time) <= the budget; 0 = do not use the hardware (record too long for
-//the accumulator, or for two records in the budget). *run_us = N x (record + dead time), rounded up.
+//The common rule: the largest power of two N in 2..64 with N x per_record_ns <= the budget; 0 when two do not fit.
+//*run_us = N x per_record_ns, rounded up (0 with N = 0)
+uint32_t pc_seq_ui_plan_n(uint64_t per_record_ns, uint32_t *run_us);
+//The hardware run of a legacy record (total / pre words, divider D: one word = 10 (D + 1) ns): per record = the record +
+//the dead time; 0 also when the record does not fit the accumulator or pre >= total
 uint32_t pc_seq_ui_plan(uint32_t total_words, uint32_t pre_words, uint32_t divider, uint32_t *run_us);
+//The MCU path for any record (wide: 16-bit layout, one word = 5 (D + 1) ns, else 10 (D + 1)): per record = the record +
+//the dead time + its readout; 0 when pre >= total or two do not fit
+uint32_t pc_seq_ui_plan_mcu(uint32_t total_words, uint32_t pre_words, uint32_t divider, int wide, uint32_t *run_us);
 //Dead time per averaged record in ns: post-pass (total x 5 ns + 40 ns) + restart (2 words) + pretrigger fill + 100 ns
 uint32_t pc_seq_dead_ns(uint32_t total_words, uint32_t pre_words, uint32_t word_ns);
 

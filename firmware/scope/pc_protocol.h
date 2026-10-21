@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            24    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            25    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -51,6 +51,9 @@
                                         //      instead of E_BUSY; E_BUSY details 2-5, GET_LINK_STATS 70 (fw 0.2.78)
                                         //1.24 (provisional numbering): FPGA 0x153A capture stages: caps bit 19,
                                         //      GET_HEALTH 124 bytes (layout 2), GET_CAL 364, event 23 (fw 0.2.79)
+                                        //1.25 (provisional numbering): one built-for bitstream (fw-one): GET_INFO 80
+                                        //      bytes (76 built-for word, 78 mismatch flag), GET_HEALTH 128 (layout 3),
+                                        //      E_UNSUPPORTED detail 1 on a mismatch; caps fixed per firmware
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

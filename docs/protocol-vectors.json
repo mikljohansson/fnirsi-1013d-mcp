@@ -7406,6 +7406,57 @@
    ],
    "device_events": [],
    "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_25",
+   "description": "GET_INFO response, protocol 1.25 (80 bytes): FPGA 0x153B = the built-for word at 76, flags 78 = 0",
+   "hex": "a513010102000400000050000000ee4301190002000401003b1502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b1500004bddf751",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 4,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "01190002000401003b1502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b150000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_25_mismatch",
+   "description": "GET_INFO response, protocol 1.25: the FPGA reports 0x1532, the firmware is built for 0x153B (76), flags 78 bit 0 FPGA_MISMATCH; caps and geometry are the firmware's fixed ones",
+   "hex": "a5130101020005000000500000003d040119000200040100321502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b150100f930ea96",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 5,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "0119000200040100321502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b150100"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_unsupported_fpga_mismatch",
+   "description": "E_UNSUPPORTED detail 1 with the mismatch text: every command outside the basic set on such a scope",
+   "hex": "a51301010002060005003500000033720100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353342e27655c8",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 6,
+     "status": 5,
+     "flags": 1,
+     "len": 53,
+     "payload": "0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353342"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
   }
  ]
 }

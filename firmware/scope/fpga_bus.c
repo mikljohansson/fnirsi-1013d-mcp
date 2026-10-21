@@ -4,24 +4,6 @@
 
 #include "fpga_bus.h"
 
-fpga_bus_contract fpga_bus = { 1, 0, 0 };
-
-void fpga_bus_contract_for(uint16_t version, fpga_bus_contract *c)
-{
-  //Every known read path latches on i_mcu_clk: one dummy strobe after 0x1F (stock measured, AL3 simulated through
-  //0x1539, EF2 / EP4 by their shared Atlan4 Verilog). A future bitstream that drops the lag gets its own entry here.
-  c->read_dummy = 1;
-
-  //Programmable geometry: AL3 family, EF2, EP4 (protocol.md 5.1); written before the reset on all of them
-  c->prog = (uint8_t)((((version & 0xFFF0) == 0x1530) && (version >= 0x1532)) || (version == 0x1632) || (version == 0x1732));
-  c->geometry_early = c->prog;
-}
-
-void fpga_bus_init(uint16_t version)
-{
-  fpga_bus_contract_for(version, &fpga_bus);
-}
-
 void fpga_read_start(uint8_t cmd, uint16_t start_word)
 {
   uint32_t i;
@@ -32,7 +14,7 @@ void fpga_read_start(uint8_t cmd, uint16_t start_word)
 
   fpga_io_read_mode();
 
-  for(i=0;i<fpga_bus.read_dummy;i++)
+  for(i=0;i<FPGA_READ_DUMMY;i++)
     (void)fpga_io_strobe_read();
 }
 
@@ -90,12 +72,9 @@ static void fpga_arm_geometry(const fpga_arm_cfg *c)
 int fpga_arm_reset(const fpga_arm_cfg *c)
 {
   uint32_t n = 0;
-  int geometry = c->geometry && fpga_bus.prog;
 
-  //Before the reset: the write clock edges the 0x05 poll waits for load 0x0B into the trigger read address (0x1532..0x1536
-  //load it only on edges while 0x01 = 1)
-  if(geometry && fpga_bus.geometry_early)
-    fpga_arm_geometry(c);
+  //Before the reset: the write clock edges the 0x05 poll waits for load 0x0B into the trigger read address
+  fpga_arm_geometry(c);
 
   //Reset the sample system and wait for ready
   fpga_write_cmd(0x01);
@@ -120,8 +99,7 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   }
 
   //Inside the window as 1.00o5 ("send when the system is in reset")
-  if(geometry)
-    fpga_arm_geometry(c);
+  fpga_arm_geometry(c);
 
   if(c->write_0e)
   {

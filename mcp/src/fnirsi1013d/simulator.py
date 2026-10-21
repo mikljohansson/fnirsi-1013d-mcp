@@ -2,14 +2,14 @@
 
 It models what the host can observe through docs/protocol.md:
 
-- FPGA variants (section 5.1): ``stock`` 0x1432 (4096-word ring, fixed 1500/3000 geometry, no generator,
-  only part of the ring fresh after a capture), ``al3`` 0x1532 (8192-word ring, 16382 samples per channel,
-  programmable pre-trigger/total, DDS generator), ``ef2`` 0x1632 (6144 words), ``ep4`` 0x1732; the AL3 line
-  ``al3x`` 0x1533 (EXT), ``al3d`` 0x1534 (decimation), ``al3f`` 0x1535 (FIR), ``al3s`` 0x1536 (sequencer),
-  ``al3e`` 0x1538 (the per-capture encode check, protocol 1.19: GET_HEALTH 88..103, event 21; hooks
-  ``Device.enc_bad_next`` / ``enc_unrecovered_next``), ``al3c`` 0x153A (the ADC capture stages, protocol 1.24:
-  GET_HEALTH 104..123, GET_CAL 356..363, event 23, longer EXT shifts; hooks ``Device.cap_counts_next``,
-  ``cap_stored`` + ``cap_boot()``).
+- One FPGA bitstream (section 5.1, fw 0.2.102 / protocol 1.25): the firmware is built for AL3 0x153B
+  (``FPGA_VERSION``: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, DDS generator, EXT
+  trigger, decimation filter with 16-bit samples, CIC compensation FIR, sequencer, the per-capture encode check
+  (GET_HEALTH 88..103, event 21; hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``) and the ADC capture
+  stages (GET_HEALTH 104..123, GET_CAL 356..363, event 23; hooks ``Device.cap_counts_next``, ``cap_stored`` +
+  ``cap_boot()``)). ``SimConfig.fpga_version`` (``--fpga-version 0x1532``) is the word the simulated FPGA reports:
+  any other value is a mismatch, flagged in GET_INFO 78 / GET_HEALTH 126, and every command outside
+  ``P.BASIC_CMDS`` answers E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153B".
 - The on-device Bode plot (protocol 1.20, BODE_CTRL / READ_BODE, display mode 5) on every bitstream with the filter
   and the generator: ``SimBode`` runs the host tool's ``bode.BodeRunner`` against this device through an in-process
   link (the firmware's bode_sweep.c is a port of it), so device and host sweeps of a ``dut_in`` / ``dut_out`` DUT
@@ -40,7 +40,7 @@ low-pass (``r``, ``c``) or, with ``l`` > 0, a series RLC (output across C), driv
 ``dut_in`` on both.
 Noise is Gaussian, ``--noise`` LSB rms per core (default 1.0, i.e. about 2 LSB as on the real unit).
 
-Run: ``fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us``.
+Run: ``fnirsi1013d-sim --port 5555 --signal decay:tau=80us`` (``--variant al3`` is accepted and the only choice).
 """
 
 from __future__ import annotations
@@ -66,71 +66,27 @@ from .units import parse_quantity
 log = logging.getLogger("fnirsi1013d.sim")
 
 # ---------------------------------------------------------------------------------------------------------
-# Variants
+# The bitstream (fw 0.2.102, protocol 1.25: the firmware supports FW_FPGA_VERSION only; the simulated scope is an
+# AL3A10 running it unless SimConfig.fpga_version says otherwise, which models the mismatch)
 
-
-@dataclass(frozen=True)
-class VariantSpec:
-    name: str
-    version_word: int
-    variant: P.FpgaVariant
-    ring_words: int
-    max_total_samples: int
-    programmable: bool
-    generator: bool
-    #: stock FPGA: words before/after the trigger that are fresh after a capture (acqprobe, 7.5)
-    fresh_before: int = 0
-    fresh_after: int = 0
-    #: bitstream 0x1533: trigger source 2 = EXT on the calibration pin (shared with the generator)
-    ext_trigger: bool = False
-    #: bitstream 0x1534: decimation filter (boxcar / CIC2 / CIC3) with 16-bit samples (protocol 1.9)
-    decim: bool = False
-    #: bitstream 0x1535: plus the CIC compensation FIR (protocol 1.11)
-    fir: bool = False
-    #: bitstream 0x1536: plus the sequencer, segmented capture and hardware averaging (protocol 1.17)
-    seq: bool = False
-    #: bitstream 0x1538: plus the per-capture encode self-check, FPGA read 0x33 (protocol 1.19)
-    enc_check: bool = False
-    #: bitstream 0x153A: plus the per-core ADC capture stages (0x63) and outlier counters (0x36) (protocol 1.24)
-    capture_stages: bool = False
-
-    @property
-    def enc_mode(self) -> int:
-        """GET_HEALTH 88 (protocol 1.19): 2 the FPGA's 0x33 check (0x1538+), 1 the record data check (AL3
-        0x1532..0x1537), 0 none."""
-        if self.enc_check:
-            return 2
-        return 1 if self.variant == P.FpgaVariant.AL3 and 0x1532 <= self.version_word <= 0x1537 else 0
-
+#: the version word the simulated firmware is built for and the geometry that goes with it (AL3 0x153B)
+FPGA_VERSION = P.FW_FPGA_VERSION
+RING_WORDS = 8192
+MAX_TOTAL_SAMPLES = 16382
+#: the only --variant / SimConfig.variant value (kept so existing command lines work)
+VARIANT_NAMES = ("al3",)
 
 #: EXT trigger path latency from the pin (fpga-gen2 simulation: 20-25 ns)
 EXT_LATENCY_S = 22e-9
 #: decimation filter: fixed latency from pin to memory (12 write clocks) for every K and N (row 47); 25 write clocks
-#: with the 0x1535 FIR (row 49)
+#: with the FIR (row 49)
 DECIM_LATENCY_S = 120e-9
 FIR_LATENCY_S = 250e-9
-#: 0x153A: the IOB capture and the stage pick, 40 ns more from pin to memory (4 words at the full-rate write clock)
+#: 0x153A+: the IOB capture and the stage pick, 40 ns more from pin to memory (4 words at the full-rate write clock)
 CAP_EXTRA_LATENCY_S = 40e-9
 #: decimation model: sub-samples per output period (exact for N <= this)
 DECIM_SUBSAMPLES = 64
 EXT_THRESHOLD_V = 1.65
-
-VARIANTS = {
-    "stock": VariantSpec("stock", 0x1432, P.FpgaVariant.STOCK, 4096, 3000, False, False, 910, 2000),
-    "al3": VariantSpec("al3", 0x1532, P.FpgaVariant.AL3, 8192, 16382, True, True),
-    "al3x": VariantSpec("al3x", 0x1533, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True),
-    "al3d": VariantSpec("al3d", 0x1534, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True),
-    "al3f": VariantSpec("al3f", 0x1535, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
-                        fir=True),
-    "al3s": VariantSpec("al3s", 0x1536, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
-                        fir=True, seq=True),
-    "al3e": VariantSpec("al3e", 0x1538, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
-                        fir=True, seq=True, enc_check=True),
-    "al3c": VariantSpec("al3c", 0x153A, P.FpgaVariant.AL3, 8192, 16382, True, True, ext_trigger=True, decim=True,
-                        fir=True, seq=True, enc_check=True, capture_stages=True),
-    "ef2": VariantSpec("ef2", 0x1632, P.FpgaVariant.EF2, 6144, 12286, True, True),
-    "ep4": VariantSpec("ep4", 0x1732, P.FpgaVariant.EP4, 6144, 12286, True, True),
-}
 
 # ---------------------------------------------------------------------------------------------------------
 # Signals
@@ -509,7 +465,12 @@ class Calibration:
 
 @dataclass
 class SimConfig:
+    #: the only value is "al3" (one bitstream since fw 0.2.102; kept so existing command lines and tests work)
     variant: str = "al3"
+    #: the version word the simulated FPGA reports (command 0x06). Anything but FPGA_VERSION models a scope whose
+    #: bitstream was not flashed for this firmware: GET_INFO 78 / GET_HEALTH 126 bit 0 set, every command outside
+    #: P.BASIC_CMDS answers E_UNSUPPORTED detail 1
+    fpga_version: int = FPGA_VERSION
     signals: tuple[Signal, Signal] = (Signal("sine", {"freq": 10e3, "amp": 0.3}), Signal("zero"))
     noise_lsb: float = 1.0
     #: physical offset of core B against core A, codes, per channel (compensated by -offset in GET_CAL)
@@ -538,7 +499,7 @@ class SimConfig:
     zero_error: tuple[tuple[float, float], tuple[float, float]] = ((0.0, 0.0), (0.0, 0.0))
     #: true codes per offset-PWM count (None: the firmware formula -100 / dc_shift_value)
     offset_slope: float | None = None
-    #: signal on the calibration pin used as EXT trigger input (variant al3x); None: CH2's signal
+    #: signal on the calibration pin used as EXT trigger input; None: CH2's signal
     ext_signal: Signal | None = None
     #: drop (never send) responses with a larger payload, like firmware 0.1.0 on hardware (> 5 KiB failed)
     fail_responses_over: int | None = None
@@ -661,21 +622,16 @@ class Device:
 
     def __init__(self, cfg: SimConfig | None = None, clock: Callable[[], float] = time.monotonic):
         self.cfg = cfg or SimConfig()
-        self.spec = VARIANTS[self.cfg.variant]
+        if self.cfg.variant not in VARIANT_NAMES:
+            raise ValueError(f"variant {self.cfg.variant!r}: the firmware supports one bitstream, use 'al3' and "
+                             f"fpga_version for the word the FPGA reports")
         self.clock = clock
         self.rng = np.random.default_rng(self.cfg.seed)
         self.pyrng = random.Random(self.cfg.seed)
         self.t_boot = clock()
         self.settings = Settings()
-        if not self.spec.programmable:
-            self.settings.trigger.pretrigger_samples = 1500
-            self.settings.trigger.total_samples = 3000
-        else:
-            self.settings.trigger.pretrigger_samples = 1500
-            self.settings.trigger.total_samples = 3000
-        if not self.spec.generator:
-            # stock: fixed 1 kHz, 50 %, always driven
-            self.settings.gen = GenState(1, P.gen_phase_inc(1_000_000), P.gen_threshold(5000))
+        self.settings.trigger.pretrigger_samples = 1500
+        self.settings.trigger.total_samples = 3000
         self.cal = [Calibration(adc_b_comp=-round(self.cfg.core_b_offset[0])),
                     Calibration(adc_b_comp=-round(self.cfg.core_b_offset[1]))]
         self.snapshot: Settings | None = None
@@ -701,7 +657,7 @@ class Device:
         self.auto_timeout_flag = False
         self.arm_time = clock()
         self.overload = [False, False]
-        R = self.spec.ring_words
+        R = RING_WORDS
         self.ring = self.rng.integers(100, 156, size=(4, R), dtype=np.int64).astype(np.uint8)
         self._pending_capture: dict | None = None
         self.capture_divider = self.settings.divider
@@ -823,52 +779,49 @@ class Device:
     def caps(self) -> int:
         if self.cfg.caps_override is not None:
             return self.cfg.caps_override
+        # The firmware's fixed word for FPGA_VERSION (pc_variant_init) plus what only the simulator implements
+        # (ACQUIRE_AVG, READ_LIVE, DEBUG_FPGA, FORCE; the averaging model is 8-bit, ACQUIRE_AVG refuses decimated records)
         c = P.Caps.SCREENSHOT | P.Caps.DEVICE_AVERAGE | P.Caps.DEBUG_RAW | P.Caps.LIVE_READ | P.Caps.ENTER_FEL
-        c |= P.Caps.READ_LAG_UNVERIFIED | P.Caps.INTERLEAVE_UNVERIFIED | P.Caps.FORCE_TRIGGER
-        if not self.cfg.legacy:
+        c |= P.Caps.READ_LAG_UNVERIFIED | P.Caps.FORCE_TRIGGER
+        c |= P.Caps.PROG_TRIGGER_POS | P.Caps.GENERATOR_DDS | P.Caps.EXT_TRIGGER | P.Caps.DECIM | P.Caps.FIR
+        c |= P.Caps.SEQ | P.Caps.ENC_CHECK
+        if self.cfg.legacy:  # the 1.2 model: before fw 0.2.72 read 0x33 at boot, the core order was unverified
+            c |= P.Caps.INTERLEAVE_UNVERIFIED
+        else:
             c |= P.Caps.SHARED_MODE | P.Caps.SD_SECTORS
-        if self.spec.programmable:
-            c |= P.Caps.PROG_TRIGGER_POS
-        if self.spec.generator:
-            c |= P.Caps.GENERATOR_DDS
-        if self.spec.ext_trigger:
-            c |= P.Caps.EXT_TRIGGER
-        if self.spec.decim:
-            c |= P.Caps.DECIM
-        if self.spec.fir:
-            c |= P.Caps.FIR
-            c &= ~P.Caps.DEVICE_AVERAGE  # the averaging model is 8-bit only (the firmware has no ACQUIRE_AVG)
-        if self.spec.seq:
-            c |= P.Caps.SEQ
-        if self.spec.enc_check:
-            c |= P.Caps.ENC_CHECK
-            if not self.cfg.legacy:  # fw 0.2.72 (1.22): read 0x33 at boot reported convention 1, the order is known
-                c &= ~P.Caps.INTERLEAVE_UNVERIFIED
         if self.cap_on:
             c |= P.Caps.CAPTURE_STAGES
         return int(c) & ~self.cfg.caps_clear
 
     @property
+    def mismatch(self) -> bool:
+        """Protocol 1.25: the FPGA reported another version word than the firmware is built for (GET_INFO 78 bit 0)."""
+        return self.cfg.fpga_version != FPGA_VERSION
+
+    @property
+    def fpga_flags(self) -> int:
+        return P.FPGA_F_MISMATCH if self.mismatch else 0
+
+    #: GET_HEALTH 88: the FPGA's 0x33 self-check (the built-for bitstream; mode 1 would need a boot 0x33 with an unknown
+    #: convention, which the model does not produce)
+    enc_mode = 2
+
+    @property
     def features(self) -> int:
         """GET_STATUS 44-45 (protocol 1.17): from the bitstream, not the caps."""
-        sp = self.spec
-        return ((P.Features.EXT_TRIGGER if sp.ext_trigger else 0) | (P.Features.DECIM if sp.decim else 0) |
-                (P.Features.FIR if sp.fir else 0) | (P.Features.SEGMENTS | P.Features.HW_AVERAGE if sp.seq else 0) |
-                (P.Features.ENC_CHECK if sp.enc_check else 0) |
-                (P.Features.CAPTURE_STAGES if self.cap_on else 0) |
-                (P.Features.BODE if sp.decim and sp.generator else 0))
+        return int(P.Features.EXT_TRIGGER | P.Features.DECIM | P.Features.FIR | P.Features.SEGMENTS |
+                   P.Features.HW_AVERAGE | P.Features.ENC_CHECK | P.Features.BODE |
+                   (P.Features.CAPTURE_STAGES if self.cap_on else 0))
 
     def ui_average_state(self) -> tuple[int, int]:
-        """GET_STATUS 46 / 47 (protocol 1.17): the acquisition menu's Average (``ui_average`` test hook): 0 off; 2 with
-        log2 N when a 0x1536 bitstream averages the UI's legacy record in hardware (pc_seq_ui_plan); else 1."""
-        if not self.ui_average:
+        """GET_STATUS 46 / 47 (protocol 1.17, one behaviour since fw 0.2.102): the acquisition menu's Average
+        (``ui_average`` test hook): 0 off; else the mean of N records, 2 by the sequencer (a legacy record that fits
+        the accumulator), 1 by the MCU (16-bit records, deeper legacy records), log2 N 0 when two records do not fit
+        the 40 ms budget (single records). Off in single trigger mode (the UI averages RUN records only)."""
+        if not self.ui_average or self.settings.trigger.mode == 2:
             return 0, 0
         Pw, Tw, _ = self.geometry()
-        if self.spec.seq and not self.decim_config().k:
-            n, _us = P.seq_ui_plan(Tw, Pw, self.settings.divider)
-            if n:
-                return 2, n.bit_length() - 1
-        return 1, 0
+        return P.ui_average_plan(Tw, Pw, self.settings.divider, bool(self.decim_config().k))
 
     # --- time ---------------------------------------------------------------------------------------
 
@@ -1070,14 +1023,14 @@ class Device:
         else:
             # Legacy layout: the AD9288 outputs a sample 4 encode cycles (words) after taking it, so the EXT edge is
             # seen that many words before the data show it (modelled as the firmware's legacy EXT shift, 1.22)
-            lag_words = P.ext_shift_legacy(settings.divider, self.spec.capture_stages) // 2
+            lag_words = P.ext_shift_legacy(settings.divider, True) // 2
             t = t0 + 2 * (k + lag_words) * dt + dt - EXT_LATENCY_S
         return np.where(sig.eval(t, settings.gen) > EXT_THRESHOLD_V, 255, 0).astype(np.uint8)
 
     def decim_config(self, settings: Settings | None = None) -> P.DecimConfig:
         """The decimation an arm with these settings writes (pc_decim_next)."""
         s = settings or self.settings
-        has = P.DECIM_HAS_FIR if self.spec.fir else (P.DECIM_HAS_CIC if self.spec.decim else P.DECIM_HAS_NONE)
+        has = P.DECIM_HAS_FIR
         if self.cap_on:
             has |= P.DECIM_HAS_CAPSTAGES
         return P.decim_config(s.decim & 3, s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR), s.divider,
@@ -1101,8 +1054,7 @@ class Device:
         L = w.size
         per = 2 * Q if dec.fir else Q  # grid points per output sample
         step = C * 5e-9 / Q
-        t_end0 = t0 + k0 * N * 5e-9 - (FIR_LATENCY_S if dec.fir else DECIM_LATENCY_S) - \
-            (CAP_EXTRA_LATENCY_S if self.spec.capture_stages else 0.0)
+        t_end0 = t0 + k0 * N * 5e-9 - (FIR_LATENCY_S if dec.fir else DECIM_LATENCY_S) - CAP_EXTRA_LATENCY_S
         g = t_end0 - (L - 1) * step + np.arange((n - 1) * per + L) * step
         c = np.clip(self._analog(ch, g, None, settings), 0.0, 255.0)
         mean = np.convolve(c, w, "valid")[::per][:n]
@@ -1149,8 +1101,6 @@ class Device:
         the EXT source the pretrigger words are lowered by the EXT latency shift (row 47)."""
         s = settings or self.settings
         tr = s.trigger
-        if not self.spec.programmable:
-            return 750, 1500, tr.auto_timeout or 1500
         dec = self.decim_config(s)
         shift = self.ext_shift_for(dec, s.divider, tr.source, tr.pretrigger_samples)
         if dec.k:
@@ -1170,7 +1120,7 @@ class Device:
     def simulate_capture(self, settings: Settings, forced: bool = False) -> dict:
         """Run one capture through the FPGA model. Returns a dict with the new ring, trigger address, the
         modelled durations and flags. Normal mode without a trigger returns triggered=False, never_done."""
-        R = self.spec.ring_words
+        R = RING_WORDS
         Pw, Tw, auto_to = self.geometry(settings)
         dt = self.dt(settings.divider)
         dec = self.decim_config(settings)
@@ -1217,27 +1167,17 @@ class Device:
                 k += n
         res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw,
                      "settings": settings.copy(), "seq": self.settings_seq, "decim": dec,
-                     "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples)
-                     if self.spec.programmable else (1500, 3000)}
-        if self.spec.ext_trigger:  # did the pin toggle during the capture window (GET_CAPTURE_INFO bit 5)?
-            e = self._ext_words(t0, Pw, Tw + Pw, dt, settings, dec)
-            res["ext_edge"] = bool(np.any(np.diff(e.astype(np.int16)) != 0))
+                     "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples)}
+        # did the pin toggle during the capture window (GET_CAPTURE_INFO bit 5)?
+        e = self._ext_words(t0, Pw, Tw + Pw, dt, settings, dec)
+        res["ext_edge"] = bool(np.any(np.diff(e.astype(np.int16)) != 0))
         if kt >= 0:
             end = kt + (Tw - Pw)
             k_first = end - R
             words = make_words(k_first, R)
             addr = (w0 + np.arange(k_first, end)) % R
             ring = self.ring.copy()
-            if self.spec.fresh_before:
-                lo = kt - self.spec.fresh_before
-                hi = kt + self.spec.fresh_after
-                sel = (np.arange(k_first, end) >= lo) & (np.arange(k_first, end) < hi)
-                ring[:, addr[sel]] = words[:, sel]
-                # stale part keeps the old ring contents, but the fresh window must cover the capture
-                win = (np.arange(k_first, end) >= kt - Pw)
-                ring[:, addr[win]] = words[:, win]
-            else:
-                ring[:, addr] = words
+            ring[:, addr] = words
             trig_addr = (w0 + kt + self.cfg.trigger_align_offset) % R
             res.update(ring=ring, trigger_addr=trig_addr, triggered=True, auto_timeout=False,
                        t_trigger=kt * wp, t_done=end * wp)
@@ -1324,7 +1264,7 @@ class Device:
         hold_w = math.ceil(P.seq_holdoff_units(sq.holdoff_ns) * 5e-9 / wp - 1e-9)
         base = {"divider": settings.divider, "Pw": Pw, "Tw": Tw, "settings": settings.copy(), "seq": self.settings_seq,
                 "decim": dec, "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples),
-                "auto_timeout": False, "trigger_addr": Pw % self.spec.ring_words}
+                "auto_timeout": False, "trigger_addr": Pw % RING_WORDS}
         if sq.mode == P.SEQ_SEGMENTS:
             return self._simulate_segments(sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide)
         return self._simulate_average(sq, base, make_words, find, auto, auto_to, Pw, Tw, wp, hold_w, wide)
@@ -1611,7 +1551,7 @@ class Device:
         """A capture reached DONE. ``origin``: host (acq_state DONE) or UI (acq_state unchanged); ``n``: captures
         counted (the UI may have finished several since the last poll; only the latest is in the ring)."""
         self.ring = pc["ring"]
-        R = self.spec.ring_words
+        R = RING_WORDS
         self.trigger_addr = pc["trigger_addr"]
         self.capture_start_word = (self.trigger_addr - pc["Pw"]) % R
         self.capture_geometry = (pc["Pw"], pc["Tw"])
@@ -1643,14 +1583,12 @@ class Device:
                 self.run_state = P.RunState.STOP  # a host single leaves the UI in STOP (collaborative plan)
 
     def cap_boot(self) -> None:
-        """fw 0.2.79 at boot: 0x63 = the stored value when it was trained on this bitstream, else 0x08E4."""
-        if not self.spec.capture_stages:
-            self.cap_value, self.cap_flags = 0, 0
-            return
+        """fw 0.2.79 at boot: 0x63 = the stored value when it was trained on this bitstream (the word the FPGA
+        reports), else 0x08E4."""
         self.cap_flags = P.CAPF_HAS
         self.cap_value = P.CAP_POWER_ON
         if self.cap_stored is not None:
-            if self.cap_stored[1] == self.spec.version_word:
+            if self.cap_stored[1] == self.cfg.fpga_version:
                 self.cap_value = self.cap_stored[0]
                 self.cap_flags |= P.CAPF_TRAINED
             else:
@@ -1678,9 +1616,7 @@ class Device:
         """Protocol 1.19: the firmware checks every 200 MSa/s capture (legacy layout) before anything reads it; a
         garbled one is re-armed (up to 16 times) and only the accepted capture is seen. Counters, the 0x33 byte and
         event 21 as the firmware keeps them (the capture data in the model is always clean)."""
-        mode = self.spec.enc_mode
-        if not mode:
-            return
+        mode = self.enc_mode
         self.enc_checked += 1
         bad = 0x77  # 0x33 with CH2 A wrong (the mock HAL's enc33_bad)
         caller = 0 if origin != P.CaptureOrigin.HOST else 1
@@ -1815,15 +1751,14 @@ class Device:
         self.fpga_done = False
         self.auto_timeout_flag = False
         self.run_held = False
-        if self.spec.seq and self.seq_setting.mode != P.SEQ_OFF:
+        if self.seq_setting.mode != P.SEQ_OFF:
             self._start_run(self.settings.copy(), self.seq_setting)
         else:
             self._pending_capture = self.simulate_capture(self.settings)
             if self.flat_next and self._pending_capture.get("ring") is not None:
                 self.flat_next -= 1
                 self._pending_capture["ring"] = np.full_like(self._pending_capture["ring"], 0xFF)
-        if self.spec.decim:
-            self.decim_written = self.decim_config()
+        self.decim_written = self.decim_config()
         self.tick()
 
     def _start_run(self, settings: Settings, sq: P.SetSeqReq) -> None:
@@ -1872,10 +1807,7 @@ class Device:
             self._abort_deferred = True
         keep = bool(self.remote_flags & P.SetRemoteReq.KEEP_SETTINGS) if keep is None else keep
         if not keep and self.snapshot is not None:
-            gen_keep = self.settings.gen if not self.spec.generator else None
             self.settings = self.snapshot
-            if gen_keep is not None:
-                self.settings.gen = gen_keep
         self.snapshot = None
         self.control = P.Control.LOCAL
         self.acq_state = P.AcqState.IDLE
@@ -1963,8 +1895,7 @@ class Device:
     def cap_on(self) -> bool:
         """Protocol 1.24 (fw 0.2.79): the firmware drives the 0x153A capture stages (caps bit 19, features bit 7, the
         longer EXT shifts). From the config, not ``proto_minor`` (which needs ``shared``, which needs the caps)."""
-        return self.spec.capture_stages and not self.cfg.legacy and \
-            (self.cfg.proto_minor is None or self.cfg.proto_minor >= 24)
+        return not self.cfg.legacy and (self.cfg.proto_minor is None or self.cfg.proto_minor >= 24)
 
     @property
     def proto_minor(self) -> int:
@@ -2018,13 +1949,19 @@ class Device:
                             r["requested"], r["n"], r["holdoff_ns"])
 
     def info(self) -> P.InfoResp:
-        sp = self.spec
-        return P.InfoResp(proto_minor=self.proto_minor,
-            fpga_version=sp.version_word, fpga_variant=int(sp.variant), ring_words=sp.ring_words,
-            caps=self.caps, gen_clock_hz=P.GEN_CLOCK_HZ if sp.generator else 0,
-            max_total_samples=sp.max_total_samples, min_total_samples=80 if sp.programmable else 3000,
+        """GET_INFO: the firmware's fixed geometry and caps whatever word the FPGA reports (fw 0.2.102); 1.25 adds the
+        built-for word and the mismatch flag in 76..79 (a model of older firmware answers 76 bytes)."""
+        i = P.InfoResp(proto_minor=self.proto_minor,
+            fpga_version=self.cfg.fpga_version, fpga_variant=int(P.FpgaVariant.AL3), ring_words=RING_WORDS,
+            caps=self.caps, gen_clock_hz=P.GEN_CLOCK_HZ, max_total_samples=MAX_TOTAL_SAMPLES, min_total_samples=80,
             read_lag=self.cfg.fw_read_lag, interleave_order=0, fw_version=self.cfg.fw_version.encode(),
             fw_build=SIM_BUILD, serial=self.cfg.serial.encode())
+        if self.proto_minor >= 25:
+            i.fw_fpga_version, i.fpga_flags = FPGA_VERSION, self.fpga_flags
+        return i
+
+    def info_bytes(self) -> bytes:
+        return self.info().pack()[: 80 if self.proto_minor >= 25 else 76]
 
     def timebase(self) -> P.Timebase:
         s = self.settings
@@ -2037,7 +1974,7 @@ class Device:
     def trigger(self) -> P.Trigger:
         tr = self.settings.trigger
         Pw, Tw, auto_to = self.geometry()
-        pre, total = (tr.pretrigger_samples, tr.total_samples) if self.spec.programmable else (1500, 3000)
+        pre, total = tr.pretrigger_samples, tr.total_samples
         per = 1 if self.decim_config().k else 2
         return P.Trigger(source=tr.source, edge=tr.edge, level=tr.level, mode=tr.mode,
                          pretrigger_samples=pre, total_samples=total, holdoff=tr.holdoff,
@@ -2045,8 +1982,6 @@ class Device:
 
     def gen(self) -> P.Gen:
         g = self.settings.gen
-        if not self.spec.generator:  # 14.13: stock bitstream, fixed 1 kHz, no DDS registers
-            return P.Gen(enable=1, phase_inc=0, duty_threshold=0, freq_mhz_actual=1_000_000, duty_bp_actual=5000)
         return P.Gen(enable=g.enable, phase_inc=g.phase_inc, duty_threshold=g.duty_threshold,
                      freq_mhz_actual=P.gen_freq_mhz(g.phase_inc), duty_bp_actual=P.gen_duty_bp(g.duty_threshold))
 
@@ -2054,7 +1989,7 @@ class Device:
 
     def read_ring(self, core: int, start: int, count: int, *, lag_applied: int | None = None) -> np.ndarray:
         """READ_RAW semantics: exact addresses when the firmware's read_lag equals the FPGA's."""
-        R = self.spec.ring_words
+        R = RING_WORDS
         fw = self.cfg.fw_read_lag if lag_applied is None else lag_applied
         shift = fw - self.cfg.hw_read_lag
         idx = (start + shift + np.arange(count)) % R
@@ -2142,6 +2077,11 @@ class Device:
                                            P.Cmd.FFT_BENCH, P.Cmd.GET_DECIM, P.Cmd.SET_DECIM):
                 # protocol 1.2 firmware does not know the 1.3 commands
                 return self._done(req, self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}"))
+            if self.mismatch and cmd not in P.BASIC_CMDS:
+                # 1.25 (fw 0.2.102): the scope does not run the bitstream the firmware is built for; nothing that would
+                # configure or read the acquisition runs (pc_dispatch), the basic set keeps the link and the diagnostics
+                return self._done(req, self._err(req, P.Status.E_UNSUPPORTED, P.UNSUP_FPGA_MISMATCH,
+                                                 P.FPGA_MISMATCH_TEXT))
             if self.deferred is not None and self.deferred.frame.seq == req.seq and                     self.deferred.frame.cmd == req.cmd:
                 return None  # retransmission of the pending deferred request: its response follows
             if self.deferred is not None and cmd not in P.CONTROL_CMDS:
@@ -2215,7 +2155,7 @@ class Device:
         return self._ok(req, req.payload)
 
     def _cmd_get_info(self, req: P.Frame) -> P.Frame:
-        return self._ok(req, self.info().pack())
+        return self._ok(req, self.info_bytes())
 
     def _cmd_get_status(self, req: P.Frame) -> P.Frame:
         return self._ok(req, self.status_bytes())
@@ -2372,7 +2312,7 @@ class Device:
         r = P.SetDecimReq.unpack(req.payload)
         if r.filter > 3:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3")
-        if r.flags & ~(0x0F if self.spec.fir else 0x07):  # bit 3 FIR needs caps FIR (1.11)
+        if r.flags & ~0x0F:  # bits 0-2 the swap and NEG bits, bit 3 the FIR (1.11)
             raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
         if r.filter and self.settings.trigger.total_samples > P.DECIM_MAX_TOTAL:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
@@ -2635,7 +2575,7 @@ class Device:
                 raise _DevErr(P.Status.E_UNSUPPORTED, 0, "EXT trigger needs an FPGA with EXT_TRIGGER")
             if r.source > 2:
                 raise _DevErr(P.Status.E_BAD_ARG, 0, f"source {r.source}")
-            if r.source == 2 and self.spec.generator:
+            if r.source == 2:
                 self.settings.gen.enable = 0  # fw 0.2.9: selecting EXT switches the generator off
             new.source = r.source
         if r.mask & M.M_EDGE:
@@ -2652,7 +2592,7 @@ class Device:
             new.pretrigger_samples = r.pretrigger_samples
         if r.mask & M.M_TOTAL:
             new.total_samples = r.total_samples
-            if self.spec.decim and self.settings.decim & 3 and new.total_samples > P.DECIM_MAX_TOTAL:
+            if self.settings.decim & 3 and new.total_samples > P.DECIM_MAX_TOTAL:
                 raise _DevErr(P.Status.E_BAD_ARG, 5, "total > 8190 with the filter on")
         if r.mask & M.M_HOLDOFF:
             if r.holdoff and not (self.caps & P.Caps.HOLDOFF):
@@ -2661,28 +2601,23 @@ class Device:
         if r.mask & M.M_AUTO_TIMEOUT:
             new.auto_timeout = r.auto_timeout
         if r.mask & (M.M_PRETRIGGER | M.M_TOTAL):
-            if not self.spec.programmable:
-                if new.pretrigger_samples != 1500 or new.total_samples != 3000:
-                    raise _DevErr(P.Status.E_UNSUPPORTED, 4, "stock FPGA: pretrigger 1500, total 3000 only")
-            else:
-                if new.total_samples % 2:
-                    raise _DevErr(P.Status.E_BAD_ARG, 5, f"total_samples {new.total_samples} must be even")
-                if new.pretrigger_samples % 2:
-                    raise _DevErr(P.Status.E_BAD_ARG, 4,
-                                  f"pretrigger_samples {new.pretrigger_samples} must be even")
-                if not 80 <= new.total_samples <= self.spec.max_total_samples:
-                    raise _DevErr(P.Status.E_BAD_ARG, 5, f"total_samples {new.total_samples} not in 80.."
-                                                         f"{self.spec.max_total_samples}")
-                if new.pretrigger_samples > new.total_samples - 2:
-                    raise _DevErr(P.Status.E_BAD_ARG, 4, f"pretrigger {new.pretrigger_samples} > total - 2 "
-                                                         f"({new.total_samples - 2})")
+            if new.total_samples % 2:
+                raise _DevErr(P.Status.E_BAD_ARG, 5, f"total_samples {new.total_samples} must be even")
+            if new.pretrigger_samples % 2:
+                raise _DevErr(P.Status.E_BAD_ARG, 4, f"pretrigger_samples {new.pretrigger_samples} must be even")
+            if not 80 <= new.total_samples <= MAX_TOTAL_SAMPLES:
+                raise _DevErr(P.Status.E_BAD_ARG, 5, f"total_samples {new.total_samples} not in 80.."
+                                                     f"{MAX_TOTAL_SAMPLES}")
+            if new.pretrigger_samples > new.total_samples - 2:
+                raise _DevErr(P.Status.E_BAD_ARG, 4, f"pretrigger {new.pretrigger_samples} > total - 2 "
+                                                     f"({new.total_samples - 2})")
         self.settings.trigger = new
         return self._ok(req, self.trigger().pack())
 
     def _cmd_arm(self, req: P.Frame) -> P.Frame:
         if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
             raise _DevErr(P.Status.E_STATE, 0, "already ARMED; STOP first")
-        if self.spec.seq and self.seq_setting.mode != P.SEQ_OFF and self._seq_fit(self.seq_setting) != P.SEQ_FIT_OK:
+        if self.seq_setting.mode != P.SEQ_OFF and self._seq_fit(self.seq_setting) != P.SEQ_FIT_OK:
             raise _DevErr(P.Status.E_STATE, 3, "sequencer setting no longer fits the geometry (GET_SEQ byte 16)")
         if not self._internal and self.bode.running:
             self.bode.host_armed()  # 1.20: the PC took over the acquisition (reason 5)
@@ -2761,7 +2696,7 @@ class Device:
         return None
 
     def _resolve_start(self, mode: int, address: int) -> int:
-        R = self.spec.ring_words
+        R = RING_WORDS
         if mode == 0:
             return address % R
         if mode == 1:
@@ -2772,10 +2707,10 @@ class Device:
 
     def _cmd_read_raw(self, req: P.Frame) -> P.Frame:
         r = P.ReadRawReq.unpack(req.payload)
-        R = self.spec.ring_words
+        R = RING_WORDS
         if not 1 <= r.core_mask <= 15:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"core_mask 0x{r.core_mask:X}")
-        if r.layout > 2 or (r.layout == 2 and not self.spec.decim):
+        if r.layout > 2:
             raise _DevErr(P.Status.E_BAD_ARG, 2, f"layout {r.layout}")
         if r.layout >= 1:
             for ch in (0, 1):
@@ -2901,6 +2836,8 @@ class Device:
 
     def _cmd_acquire_avg(self, req: P.Frame) -> P.Frame | None:
         r = P.AcquireAvgReq.unpack(req.payload)
+        if self.decim_config().k:  # the simulator's averaging model reads the legacy 8-bit layout only
+            raise _DevErr(P.Status.E_STATE, 2, "ACQUIRE_AVG needs the decimation filter off")
         if not 1 <= r.n <= 4096:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"n {r.n}")
         if not 1 <= r.ch_mask <= 3:
@@ -3052,7 +2989,7 @@ class Device:
             fb[4:24, 700:756] = 0x07E0  # green "MCP" chip (collaborative mode)
         Pw, Tw = self.capture_geometry
         for ch, colour in ((0, 0xFFE0), (1, 0x07FF)):
-            a = self.ring[2 * ch, (self.capture_start_word + np.arange(Tw)) % self.spec.ring_words]
+            a = self.ring[2 * ch, (self.capture_start_word + np.arange(Tw)) % RING_WORDS]
             x = np.linspace(0, len(a) - 1, 800).astype(int)
             y = (479 - a[x].astype(int) * 479 // 255)
             fb[y, np.arange(800)] = colour
@@ -3115,13 +3052,16 @@ class Device:
                          cp15=0x0005107D, power_on=self.power_on, minutes=self.minutes_stored + up // 60000,
                          uptime_ms=up & 0xFFFFFFFF, life_flags=self.life_flags, last_end=self.last_end,
                          settings_flags=1 if self.settings_changed else 0, settings_eval_ms=400,
-                         enc_mode=self.spec.enc_mode, enc_last33=self.enc_last33, enc_flags=self.enc_flags,
-                         enc_boot33=P.ENC33_GOOD if self.spec.enc_mode == 2 else 0, enc_bad=self.enc_bad,
+                         enc_mode=self.enc_mode, enc_last33=self.enc_last33, enc_flags=self.enc_flags,
+                         enc_boot33=P.ENC33_GOOD, enc_bad=self.enc_bad,
                          enc_recovered=self.enc_recovered, enc_checked=self.enc_checked,
                          cap_value=self.cap_value, cap_flags=self.cap_flags, cap_flagged=self.cap_flagged,
-                         cap_counts=self.cap_counts, cap_reads=self.cap_reads, cap_flagged_n=self.cap_flagged_n)
+                         cap_counts=self.cap_counts, cap_reads=self.cap_reads, cap_flagged_n=self.cap_flagged_n,
+                         fw_fpga_version=FPGA_VERSION, fpga_flags=self.fpga_flags)
         if self.proto_minor < 24:  # 1.19-1.23: layout 1, 104 bytes
             r.layout, r.length = 1, 104
+        elif self.proto_minor < 25:  # 1.24: layout 2, 124 bytes
+            r.layout, r.length = 2, 124
         rec = self.restart_record
         if rec is not None:
             r.rec_flags = 1 | (2 if self.restart_record_this_power_on else 0)
@@ -3221,7 +3161,7 @@ class Device:
         except P.ProtocolError as e:
             raise _DevErr(P.Status.E_BAD_ARG, 0, str(e)[:60]) from e
         out = bytearray()
-        R = self.spec.ring_words
+        R = RING_WORDS
         for op, arg in ops:
             if op == P.DBG_WRITE_CMD:
                 self._dbg_cmd = int(arg)  # type: ignore[arg-type]
@@ -3249,9 +3189,9 @@ class Device:
         return self._ok(req, bytes(out))
 
     def _dbg_read_byte(self, c: int) -> int:
-        R = self.spec.ring_words
+        R = RING_WORDS
         if c == 0x06:
-            v = self.spec.version_word
+            v = self.cfg.fpga_version
             b = (v >> 8) & 0xFF if self._dbg_first else v & 0xFF
             self._dbg_first = not self._dbg_first
             return b
@@ -3296,7 +3236,7 @@ class Device:
             cmd = line.strip().upper()
             if cmd == "#VER":
                 return (f"#OK,FNIRSI-1013D-AI,fw={self.cfg.fw_version},proto={P.PROTO_MAJOR}.{self.proto_minor},"
-                        f"fpga=0x{self.spec.version_word:04X}")
+                        f"fpga=0x{self.cfg.fpga_version:04X}")
             if cmd == "#LOCAL":
                 self.go_local(P.ExitReason.HOST_RELEASE)
                 return "#OK"
@@ -3900,7 +3840,7 @@ def start_simulator(cfg: SimConfig | None = None, host: str = "127.0.0.1", port:
 def build_config(args: argparse.Namespace) -> SimConfig:
     ch1 = parse_signal(args.ch1 or args.signal)
     ch2 = parse_signal(args.ch2) if args.ch2 else companion_signal(ch1)
-    return SimConfig(variant=args.variant, signals=(ch1, ch2), noise_lsb=args.noise,
+    return SimConfig(variant=args.variant, fpga_version=args.fpga_version, signals=(ch1, ch2), noise_lsb=args.noise,
                      hw_read_lag=args.hw_read_lag, fw_read_lag=args.fw_read_lag, true_order=args.true_order,
                      trigger_align_offset=args.trigger_align_offset, time_scale=args.time_scale,
                      seed=args.seed, fail_responses_over=args.fail_responses_over, caps_override=args.caps,
@@ -3910,7 +3850,12 @@ def build_config(args: argparse.Namespace) -> SimConfig:
 
 def make_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="fnirsi1013d-sim", description="FNIRSI 1013D protocol v1 device simulator")
-    ap.add_argument("--variant", choices=sorted(VARIANTS), default="al3")
+    ap.add_argument("--variant", choices=VARIANT_NAMES, default="al3",
+                    help="the simulated scope (one since fw 0.2.102: an AL3A10 running the firmware's bitstream)")
+    ap.add_argument("--fpga-version", type=lambda x: int(x, 0), default=FPGA_VERSION, metavar="WORD",
+                    help=f"the version word the FPGA reports (default 0x{FPGA_VERSION:04X}); another word, e.g. "
+                         "0x1532, simulates a scope whose bitstream was not flashed for this firmware: GET_INFO / "
+                         "GET_HEALTH flag the mismatch and everything but the basic commands answers E_UNSUPPORTED")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=5555)
     ap.add_argument("--signal", default="sine:freq=10kHz,amp=0.3",
@@ -3929,7 +3874,7 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--caps", type=lambda x: int(x, 0), metavar="MASK",
                     help="capability mask override, e.g. 0x1803 = firmware 0.1.0 on AL3 (no device averaging, "
                          "screenshot, FORCE, DEBUG_FPGA); default: everything the simulator implements")
-    ap.add_argument("--ext", help="signal on the calibration pin for the EXT trigger (variant al3x), default CH2's")
+    ap.add_argument("--ext", help="signal on the calibration pin for the EXT trigger, default CH2's")
     ap.add_argument("--legacy", action="store_true",
                     help="firmware without collaborative mode (protocol 1.2, exclusive LOCAL/REMOTE)")
     ap.add_argument("--ui-period", type=parse_quantity, default=0.05, metavar="S",
@@ -3955,7 +3900,8 @@ def main(argv: list[str] | None = None) -> None:
                         format="%(asctime)s %(name)s %(message)s")
     cfg = build_config(args)
     srv = SimServer(Device(cfg), args.host, args.port)
-    print(f"fnirsi1013d-sim: variant {cfg.variant} (0x{VARIANTS[cfg.variant].version_word:04X}) on {srv.url}; "
+    mismatch = f", a mismatch: the firmware needs 0x{FPGA_VERSION:04X}" if cfg.fpga_version != FPGA_VERSION else ""
+    print(f"fnirsi1013d-sim: FPGA 0x{cfg.fpga_version:04X}{mismatch} on {srv.url}; "
           f"CH1 {cfg.signals[0].kind} {cfg.signals[0].params}, CH2 {cfg.signals[1].kind} {cfg.signals[1].params}",
           flush=True)
     try:

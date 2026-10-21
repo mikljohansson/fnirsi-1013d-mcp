@@ -9,6 +9,7 @@ import anyio
 import numpy as np
 import pytest
 
+from fnirsi1013d import protocol as P
 from fnirsi1013d.simulator import parse_signal
 from test_server import client_for
 
@@ -16,7 +17,6 @@ FAST_IN, FAST_OUT = "dut_in:r=1.6k,c=1n", "dut_out:r=1.6k,c=1n"
 
 
 def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):
-    kw.setdefault("variant", "al3f")
     kw.setdefault("noise_lsb", 0.5)
     srv = sim_factory(**kw)
     srv.device.cfg.signals = (parse_signal(ch1), parse_signal(ch2))
@@ -109,7 +109,7 @@ def test_bode_tool_refusals(sim_factory, tmp_path):
             assert "estimated" in msg and "max_duration_s" in msg
             assert "settle" in await c.fails("scope_bode_sweep", settle="slow")
             assert "ch2_range" in await c.fails("scope_bode_sweep", ch2_range="-1")
-        async with client_for(_sim(sim_factory, variant="al3x"), tmp_path) as c:
+        async with client_for(_sim(sim_factory, caps_clear=int(P.Caps.DECIM)), tmp_path) as c:  # no cap
             assert "decimation filter" in await c.fails("scope_bode_sweep", start="10kHz", stop="100kHz",
                                                         points=3)
         async with client_for(_sim(sim_factory), tmp_path, gen_max_hz=100e3) as c:

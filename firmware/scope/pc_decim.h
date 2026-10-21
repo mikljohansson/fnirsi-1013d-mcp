@@ -36,9 +36,13 @@
 #define PC_DECIM_CIC3         3
 
 #define PC_DECIM_SWAP         0x04      //0x53 / 0x29 bit 2: core A is the earlier sample of each pair
-#define PC_DECIM_NEG_A        0x08      //0x53 / 0x29 bit 3: A cores captured on the falling write-clock edge
-#define PC_DECIM_NEG_B        0x10      //0x53 / 0x29 bit 4: B cores captured on the falling write-clock edge
-#define PC_DECIM_FLAGS        (PC_DECIM_SWAP | PC_DECIM_NEG_A | PC_DECIM_NEG_B)
+//0x53 bits 3 / 4 (the falling-edge capture of the A / B cores up to 0x1539) select nothing since 0x153A and are written 0
+//(fw-one; the 0x153C cruft audit removes them from the FPGA); SET_DECIM flags bits 1 / 2 are accepted and dropped
+#define PC_DECIM_FLAGS        PC_DECIM_SWAP
+
+//The largest divider (0x0D) the firmware writes: the FPGA compares 20 bits (0x153C cruft audit, docs/plans/fpga-0x153c.md
+//section 13). The UI's table reaches 399,999 (500 Sa/s), a host raw divider above this is E_BAD_ARG
+#define PC_DIVIDER_MAX        0xFFFFFu
 #define PC_DECIM_WIDE         0x80      //0x29 bit 7: 16-bit layout active (K >= 1)
 #define PC_DECIM_FIR_EN       0x40      //0x29 bit 6: 0x56 FIR enable as written (0x1535+)
 #define PC_DECIM_FIR_ACT      0x20      //0x29 bit 5: FIR active now (enable, K >= 1, N >= 16, N % 4 == 0)
@@ -84,7 +88,7 @@
 typedef struct
 {
   uint8_t  k;                 //effective order: 0 legacy, 1..3
-  uint8_t  flags;             //0x53 bits 2-4: PC_DECIM_SWAP, PC_DECIM_NEG_A, PC_DECIM_NEG_B (written for every K)
+  uint8_t  flags;             //0x53 bit 2: PC_DECIM_SWAP (written for every K); bits 3 / 4 always 0
   uint8_t  shift;             //S (0 when k = 0)
   uint8_t  why;               //PC_DECIM_WHY_*
   uint8_t  fir_en;            //0x56 bit 0 as written: FIR requested on a 0x1535+ bitstream (any K)
@@ -150,46 +154,6 @@ uint32_t pc_decim_rate(const pc_decim_cfg *c, uint32_t divider);
 //Filter settling after a change of 0x0D, 0x53, 0x54 or 0x56, in microseconds, rounded up: (K + 2) output periods,
 //with the FIR (K + 10) N x 5 ns + 1 us
 uint32_t pc_decim_settle_us(const pc_decim_cfg *c);
-
-//----------------------------------------------------------------------------------------------------------------------------------
-// Auto-mode stop geometry (fw 0.2.97, fpga/al3/README.md section 11, firmware/AGENTS.md section 64). On AL3 0x1532..0x153A
-// the FPGA's auto time-out (0x0E, 32 bit, counted in written words from the sampling reset at every K) stops the write
-// pointer after W = 0x0E + 2 words and latches 0x14 = pretrigger, so the record read is ring words 0 .. total - 1. That is
-// contiguous only when the stop lands at W mod ring >= total (the last pass wrote all of them). The firmware's forced stop
-// (0x1A = 0 at its own deadline) lands at a random W and splices the record whenever W mod ring < total; 0x153B latches
-// the newest total words on an untriggered stop, so a force is safe there.
-
-#define PC_STOP_NONE     0      //stock / unknown: the FPGA's own auto mode as 1.00o5 (fw auto mode not used)
-#define PC_STOP_SPLICE   1      //EF2 / EP4: Atlan4's time-out logic (inference), a forced record may be spliced: flagged
-#define PC_STOP_RING0    2      //AL3 0x1532..0x153A: the record of an untriggered stop is ring words 0 .. total - 1
-#define PC_STOP_NEWEST   3      //AL3 0x153B..0x153F: the record of an untriggered stop is the newest total words
-
-#define PC_STOP_LAG      2      //words written after 0x0E's count: W = 0x0E + 2 (fpga-gen11 tb_timeout A1)
-#define PC_STOP_MARGIN   4      //words kept between W mod ring and the edges of the allowed range (when they fit)
-
-uint8_t  pc_stop_kind(uint16_t version);
-
-//The stop word W (words written since the reset) for an FPGA time-out on PC_STOP_RING0: the smallest W >= min_words
-//(and >= total) with total + m <= W mod ring <= ring - 1 - m (m = PC_STOP_MARGIN when the range allows it, else 0), so the
-//record 0 .. total - 1 is the last pass's. Clamped to what 0x0E can count (0xFFFFFFFF + 2 words: 43 s at 100 MHz). The
-//value to write to 0x0E is W - PC_STOP_LAG. Overshoot against min_words: at most total + 2 m words.
-uint32_t pc_auto_stop_word(uint32_t min_words, uint32_t total_words, uint32_t ring_words);
-
-//A triggered record (0x14 = addr, record start addr - pre) that the stop at word W would cut: W mod ring lies inside
-//the record after its first word (the record crosses the write pointer's stop position). 1 = may be cut.
-int      pc_auto_cut(uint32_t addr, uint32_t pre_words, uint32_t total_words, uint32_t stop_word, uint32_t ring_words);
-
-//fw 0.2.98: the Frequency response engine's record (pc_bode.c bh_read) under any stop kind: *triggered = 0x18 seen in
-//a poll (as 0.2.91..0.2.96), returns "may be spliced" = forced on a bitstream whose forced record is not the newest
-//words. The 0.2.97 host rules do not apply to the engine (pretrigger 0, a two-record time-out):
-//  - 0x14 == pretrigger is no time-out sign there: with pretrigger 0 the trigger check runs from the first word, and
-//    the reset clears trigger_previous to 0 (zaklad.v), so a first sample at or above the level is a rising edge at
-//    ring word 0 = the pretrigger: about half the arms with the level at CH1's mean, each a complete, contiguous record;
-//  - the cut check flags every early trigger: the engine's W lands at ring word total + 4 of a later pass whenever two
-//    records exceed the ring (legacy above 2047 words), so W's ring word lies inside every record that starts after
-//    word 4, and the ms timing cannot tell a capture that lasts microseconds from one W cut.
-//A record without a trigger is contiguous under the stop geometry, so a late edge read as "triggered" costs nothing.
-uint8_t  pc_engine_record(uint8_t stop_kind, int trig_seen, int forced, uint8_t *triggered);
 
 //Words written in ms at divider D (a word is 10 (D + 1) ns in the legacy layout, 5 (D + 1) ns with K >= 1; clamped to
 //0xFFFFFFFF), and the ms that words take (rounded up)

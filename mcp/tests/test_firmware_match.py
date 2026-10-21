@@ -89,13 +89,6 @@ def test_keep_settings_flag_of_release_request(sim_factory):
         assert s.get_timebase(cached=False).divider == 3
 
 
-def test_stock_gen_and_min_total(sim_factory):
-    with Scope.connect(sim_factory(variant="stock").url) as s:
-        g = s.get_gen()
-        assert (g.enable, g.phase_inc, g.freq_mhz_actual, g.duty_bp_actual) == (1, 0, 1_000_000, 5000)
-        assert s.info.min_total_samples == s.info.max_total_samples == 3000
-
-
 def test_ascii_counts_for_watchdog(legacy_transport):
     transport = legacy_transport
     transport.request(P.Cmd.SET_REMOTE, P.SetRemoteReq(1, 0, 1).pack())

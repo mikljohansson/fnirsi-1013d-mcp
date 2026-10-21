@@ -27,12 +27,11 @@ typedef struct
   uint32_t arms;
   uint16_t arm_pre, arm_total;
   uint32_t arm_auto;
-  int      arm_prog, arm_normal;
+  int      arm_normal;
   int      polls_to_trigger;      //acq_poll calls until 0x18 reads 1 (-1 never)
   int      polls_to_done;         //acq_poll calls until 0x0A reads 1
   uint16_t trigger_addr;
   uint32_t forces;
-  uint32_t force_stops;           //fw 0.2.97: pc_hal_force_stop (0x0E = 0, then the force: counted in forces too)
   uint8_t  ext_status;            //FPGA 0x28
   uint32_t ext_reads;
   uint32_t read_calls;
@@ -140,7 +139,7 @@ typedef struct
   int        enc_bad_arms;          //the next arms whose capture is garbled (-1: every one)
   uint8_t    enc_cur_bad;           //the capture of the last arm is garbled
   uint8_t    enc33_bad;             //0x33 of a garbled capture (0x1538+), else EH_33_GOOD
-  uint32_t   enc_status_reads, enc_retries, enc_notes, enc_events;
+  uint32_t   enc_status_reads, enc_notes, enc_events;
   uint8_t    enc_last_why;
   eh_note    enc_last_note;
   pc_hw_enc  enc;                   //what pc_hal_enc_state answers (counted as the target counts)
@@ -155,6 +154,7 @@ typedef struct
 extern mock_state mock;
 
 void mock_reset(uint16_t fpga_version);
+uint32_t mock_sr_div(uint32_t i);        //the mock's copy of variables.c's sample_rate_settings[i]
 void mock_rx_push(const uint8_t *data, uint32_t len);
 
 //1.23: one iteration of the innermost modal loop (see ui_modal): BUSY poll, then leave by the cancel path when a host

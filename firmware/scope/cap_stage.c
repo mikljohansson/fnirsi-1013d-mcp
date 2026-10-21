@@ -5,11 +5,6 @@
 #include "cap_stage.h"
 #include "adc_cal.h"
 
-int cs_has(uint16_t fpga_version)
-{
-  return (fpga_version >= 0x153A) && (fpga_version <= 0x153F);
-}
-
 uint8_t cs_stage(uint16_t v, uint32_t core)
 {
   return (uint8_t)((v >> (3 * core)) & 7);

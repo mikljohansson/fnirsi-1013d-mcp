@@ -32,6 +32,35 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### 0.2.103 (provisional, branch fw-one) - 2026-10-20 (protocol 1.25, provisional; row 65)
+
+- One supported FPGA bitstream (owner 2026-10-20 21:52): the firmware runs on `PC_FW_FPGA_VERSION` (0x153B) only; the
+  capability word, the geometry and every feature decision come from that constant, the version word is read once at
+  boot and compared. A mismatch (older or newer) boots into a full-screen notice ("This firmware needs FPGA bitstream
+  0x153B. This scope has 0x1532. Flash it as the guide says, or remove the card to run the stock firmware") with
+  Diagnostics, Settings and USB drive reachable; the acquisition, the views and the generator never run. GET_INFO 80
+  bytes (76 built-for word, 78 flags bit 0 mismatch), GET_HEALTH 128 (layout 3, 124 / 126 the same), E_UNSUPPORTED
+  detail 1 for every command outside the basic set; the Diagnostics FPGA line and the report say it.
+- Removed: the stock 0x1432 / Atlan 0x1532 / EF2 / EP4 code (fixed geometry, no generator, `fw_FPGA`), the 0x1532..0x1537
+  encode-heal and core-order workarounds, the fw 0.2.97 stop geometry and GET_CAPTURE_INFO flags bit 6 ("may be
+  spliced", never set now), the per-bitstream bus contract and every branch on the version word or on a capability bit
+  that cannot be false on 0x153B (62 sites in 11 files, 14 files of variant code).
+- Average is one behaviour (owner 2026-10-20 21:59): every displayed record is the mean of N records on both paths, N
+  from one planner (2..64, a power of two, within the 40 ms budget; the MCU path counts its readout at 0.3 us per bus
+  byte). Legacy records that fit the accumulator stay hardware runs; 16-bit and deeper records are armed N times and
+  summed by the MCU within the pass (3000 16-bit samples at 1 MSa/s: N 4, about 27 ms; 6000 legacy at 200 MSa/s: N 8;
+  10 kSa/s: single records). Atlan's running (trace + previous) / 2 average is gone. GET_STATUS 46: 0 off, 1 the MCU's
+  mean, 2 hardware; 47 log2 N.
+- FPGA cruft audit (coordinator 23:29, docs/plans/fpga-0x153c.md section 13): 0x53 bits 3 / 4 (dead since 0x153A) are
+  written 0 (`PC_DECIM_FLAGS` is the swap bit only; SET_DECIM still accepts flags bits 1 / 2), the commented-out 0x3C
+  writer (`fpga_set_battery_level`) is deleted (no 0x41 reader exists), and a raw divider above 2^20 - 1 is E_BAD_ARG
+  detail 4 (`PC_DIVIDER_MAX`; the UI table's largest is 399,999 at 500 Sa/s, the Bode planner's 524,287 at 1 Hz; host
+  tests assert both).
+- Host tests: the tests of the removed paths are gone (test_auto_stop_geometry, test_seq_older_bitstreams, test_contract,
+  the per-bitstream halves of test_info / test_enc_check / test_capture_stages / test_decim_*, test_spliced_retake);
+  test_info covers the fixed caps and the mismatch on six other words, test_ui_diag the notice screen, test_seq the
+  planner for both paths.
+
 #### 0.2.102 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Diagnostics: the Firmware tile's OK case reads just "Running 0.2.102"; "the image the card starts" was clutter (owner

@@ -38,7 +38,6 @@ def test_reason_readout_fault():
 
 
 def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):
-    kw.setdefault("variant", "al3f")
     kw.setdefault("noise_lsb", 1.0)
     srv = sim_factory(**kw)
     srv.device.cfg.signals = (parse_signal(ch1), parse_signal(ch2))
@@ -252,8 +251,7 @@ def test_stop_abort_host_arm_and_errors(sim_factory):
         srv.device.ui_hold = 0
         assert s.bode_ctrl().hdr is not None  # a menu alone closes for it
         assert s.status().ui_busy == 0
-    with Scope.connect(_sim(sim_factory, variant="al3x").url) as s:
-        assert not s.status().features & P.Features.BODE
+    with Scope.connect(_sim(sim_factory, caps_clear=int(P.Caps.DECIM)).url) as s:  # a firmware without the cap
         with pytest.raises(B.BodeError, match="decimation filter"):
             B.device_sweep(s, 30e3, 1e6, 3)
     with pytest.raises(ValueError, match="presets"):

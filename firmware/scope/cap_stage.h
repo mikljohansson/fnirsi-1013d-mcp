@@ -55,9 +55,6 @@
 #define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
 #define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner
 
-//1 for bitstreams with the capture stage registers (AL3 0x153A..0x153F)
-int      cs_has(uint16_t fpga_version);
-
 //Stage of core (CS_CORES order) in a 0x63 value, and the value with it replaced
 uint8_t  cs_stage(uint16_t v, uint32_t core);
 uint16_t cs_with(uint16_t v, uint32_t core, uint8_t stage);

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ui_diag.h"
+#include "pc_cmds.h"
 #include "pc_hal.h"
 #include "ui_fmt.h"
 #include "adc_cal.h"
@@ -45,7 +46,7 @@ static void dump_tile(int i)
       printf("tile %d y %d: %s\n", i, pg.text[k].y, pg.text[k].text);
 }
 
-//A healthy, calibrated unit as the owner's: fw from RAM equal to the card, AL3 0x1535, USB configured
+//A healthy, calibrated unit as the owner's: fw from RAM equal to the card, AL3 0x153B, USB configured
 static void healthy(ud_input *in)
 {
   uint32_t ch, r, k, m;
@@ -121,7 +122,7 @@ static void healthy(ud_input *in)
     //Provenance (both channels carry the same)
     c[288] = ACAL_PROV_VALID;
     memcpy(c + 292 + 12, "0.2.59", 6);
-    p16(c + 292 + 28, 0x1535);
+    p16(c + 292 + 28, 0x153B);
     p32(c + 292 + 32, 12 * 60000);
     p32(c + 292 + 36, 11);
     p32(c + 348, 1);
@@ -136,9 +137,10 @@ static void healthy(ud_input *in)
   in->run           = &run;
   in->card          = &card;
   in->sd_sectors    = 15523840;           //7.9 GB
-  in->fpga          = 0x1535;
+  in->fpga          = 0x153B;
   in->variant       = 2;
-  in->caps          = PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR;
+  in->caps          = PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR | PC_CAP_SEQ | PC_CAP_ENC_CHECK |
+                      PC_CAP_CAPTURE_STAGES;
   in->battery       = 18;
   in->charging      = 1;
   in->rtc           = 1;
@@ -274,46 +276,35 @@ static void test_pages(void)
   //Status as the mockup reads
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("fw 0.2.59, git 1234abcd, 2026-10-19 08:44 UTC, protocol 1.16, serial 1013D-0001, MMU and caches on"));
-  //fw 0.2.61: 0x1532..0x1536 have the ADC capture timing race (amber); fw 0.2.62: 0x1537 the other core order
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x153B"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1535"), UD_C_WARN);
-  in.fpga = 0x1537;
-  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  check_layout("0x1537", 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1537: ADC core order differs: recalibrate after flashing 0x153B"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1537"), UD_C_WARN);
-
-  //0x1538: the line reads GET_HEALTH 88..103 (the FPGA's 0x33 after the last full-rate capture)
-  in.fpga = 0x1538;
+  //The FPGA line reads GET_HEALTH 88..103 (the FPGA's 0x33 after the last full-rate capture)
   health[88] = 2;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check, no 200 MSa/s capture yet"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_SOFT);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: encode check, no 200 MSa/s capture yet"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x153b"), UD_C_SOFT);
   health[89] = 0xF6; health[90] = 0x01; health[91] = 0xF6;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check OK"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_SOFT);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: encode check OK"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x153b"), UD_C_SOFT);
   p32(health + 92, 3);
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check OK, 3 captures re-taken"));
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: encode check OK, 3 captures re-taken"));
   p32(health + 92, 1);
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check OK, 1 capture re-taken"));
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: encode check OK, 1 capture re-taken"));
   health[89] = 0x67; health[90] = 0x05;                         //CH2 A and CH1 B wrong, accepted after the re-arms
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   check_layout("0x1538 failed", 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check failed on CH2 A, CH1 B"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_WARN);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: encode check failed on CH2 A, CH1 B"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x153b"), UD_C_WARN);
   health[89] = 0xF7;                                            //failed, pins right (an asynchronous write)
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: encode check failed"));
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: encode check failed"));
   T_TRUE(!has_text("failed on"));
   health[90] = 0x03; health[91] = 0xFA;                         //boot: convention bits 10
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA AL3A10 bitstream 0x1538: unknown encode convention, 0x33 = 0xfa"));
-  T_EQ(text_colour("FPGA AL3A10 bitstream 0x1538"), UD_C_WARN);
+  T_TRUE(has_text("FPGA AL3A10 bitstream 0x153b: unknown encode convention, 0x33 = 0xfa"));
+  T_EQ(text_colour("FPGA AL3A10 bitstream 0x153b"), UD_C_WARN);
   memset(health + 88, 0, 16);
-  in.fpga = 0x1535;
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   T_TRUE(has_text("Running 0.2.59"));
   T_TRUE(!has_text("the image the card"));   //owner 2026-10-20: the OK tile says only "Running <version>"
@@ -329,7 +320,7 @@ static void test_pages(void)
   T_TRUE(has_text("1.2 %"));
   T_TRUE(has_text("0.13 code"));
   T_TRUE(has_text("0.75 code"));
-  T_TRUE(has_text("Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."));
+  T_TRUE(has_text("Calibrated on fw 0.2.59, FPGA 0x153b, 12 min after power-on, 1 power-on ago."));
   T_TRUE(has_text("Updates every second"));
   T_EQ(text_colour("18 of 20"), UD_C_OK);
 
@@ -530,11 +521,10 @@ static void test_stress(void)
   T_TRUE(has_text("data abort at 0x8001234c"));
   T_TRUE(has_text("fault status 0x00f, address 0xc0dec0de"));
 
-  //Stock bitstream, no card, no calibration, no RTC, USB off
+  //Another bitstream (the firmware refuses to run on it), no card, no calibration, no RTC, USB off
   healthy(&in);
-  in.variant = 1;
-  in.fpga = 0x1432;
-  in.caps = 0;
+  in.mismatch = 1;
+  in.fpga = 0x1532;
   in.sd_sectors = 0;
   in.rtc = 0;
   health[4] = 2;
@@ -545,12 +535,12 @@ static void test_stress(void)
   for(p=0;p<UD_PAGES;p++)
   {
     ud_build(&pg, p, &in, 0);
-    check_layout("stock", 0);
+    check_layout("mismatch", 0);
   }
 
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA stock bitstream 0x1432: no generator, no filter; gain calibration not possible"));
-  T_EQ(text_colour("FPGA stock bitstream"), UD_C_WARN);
+  T_TRUE(has_text("FPGA bitstream 0x1532: this firmware needs 0x153b"));
+  T_EQ(text_colour("FPGA bitstream 0x1532"), UD_C_WARN);
   T_TRUE(has_text("from RAM. No SD card:"));
   T_TRUE(has_text("No PC"));
   T_TRUE(has_text("Uncalibrated: readings may be several % off. Run Calibrate."));
@@ -649,17 +639,14 @@ static void test_verdicts(void)
   p32(cal[0] + 292 + 32, 3 * 60000 + 59000);
   verdict(&in, UD_V_CHECK, "Calibrated 3 min after power-on: recalibrate after 5 minutes of warm-up.");
 
-  //Gains carried over, not measured (open bitstream, stock bitstream)
+  //Gains carried over, not measured
   healthy(&in);
   cal[1][73] |= 0x10;
   verdict(&in, UD_V_CHECK, "Gains carried over from an earlier calibration: run Calibrate.");
   cal[1][73] &= (uint8_t)~0x08;
   verdict(&in, UD_V_CHECK, "Gains not measured: run Calibrate with the probes on the post.");
-  in.variant = 1;
   in.fpga = 0x1432;
-  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x1535 to 0x1432): recalibrate.");
-  p16(cal[0] + 292 + 28, 0x1432);
-  verdict(&in, UD_V_CHECK, "FPGA stock 0x1432: no generator, gain calibration not possible.");
+  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x153b to 0x1432): recalibrate.");
 
   //fw 0.2.81: a 0x153A core flagged 3 times within a minute: amber, calibrate (the last capture may be clean)
   healthy(&in);
@@ -668,12 +655,12 @@ static void test_verdicts(void)
   health[106] |= PC_CAPF_REPEAT;
   verdict(&in, UD_V_CHECK, "ADC capture flagged 3 times within a minute: run Calibrate.");
   in.fpga = 0x1536;
-  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x1535 to 0x1536): recalibrate.");
+  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x153b to 0x1536): recalibrate.");
 
   //FPGA changed
   healthy(&in);
   in.fpga = 0x1536;
-  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x1535 to 0x1536): recalibrate.");
+  verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x153b to 0x1536): recalibrate.");
 
   //Not bound, then no block
   healthy(&in);
@@ -688,20 +675,20 @@ static void test_verdicts(void)
 
   //Provenance
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x153b, 12 min after power-on, 1 power-on ago.");
   p32(cal[0] + 348, 0);
   p32(cal[0] + 292 + 32, 59999);
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, under a minute after power-on, this power-on.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x153b, under a minute after power-on, this power-on.");
   p32(cal[0] + 348, 7);
   cal[0][292 + 31] = 1;
   cal[0][292 + 44] = 26; cal[0][292 + 45] = 10; cal[0][292 + 46] = 19;
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, 2026-10-19, under a minute after power-on, 7 power-ons ago.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x153b, 2026-10-19, under a minute after power-on, 7 power-ons ago.");
   p32(cal[0] + 348, 0xFFFFFFFF);
   cal[0][292 + 31] = 0;
   ud_cal_provenance(&in, t);
-  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x1535, under a minute after power-on.");
+  T_STR(t, "Calibrated on fw 0.2.59, FPGA 0x153b, under a minute after power-on.");
   cal[0][288] = ACAL_PROV_NONE;
   ud_cal_provenance(&in, t);
   T_STR(t, "Calibrated before fw 0.2.52: no record of when.");
@@ -874,8 +861,8 @@ static void test_first_run(void)
   cal[0][73] = cal[1][73] = 0;
   ud_build_first_run(&pg, &in, 1, 0);
   check_layout("first run", 0);
-  T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. FPGA bitstream 0x1535."));
-  T_TRUE(has_text(UD_ICON_WARN "FPGA AL3A10 bitstream 0x1535: ADC capture timing race, fixed in 0x153B"));
+  T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. FPGA bitstream 0x153b."));
+  T_TRUE(has_text(UD_ICON_OK "FPGA recognised: AL3A10 bitstream 0x153b: encode check, no 200 MSa/s capture yet"));
   T_TRUE(has_text(UD_ICON_OK "No saved settings on the card: defaults used."));
   T_TRUE(has_text(UD_ICON_WARN "Calibration missing: readings may be several % off."));
   T_TRUE(!has_text("Volts calibration"));
@@ -883,18 +870,79 @@ static void test_first_run(void)
   T_EQ(ud_hit(&pg, 700, 450), UD_ID_CAL_NOW);
   T_EQ(ud_hit(&pg, 400, 430), UD_ID_NONE);
 
-  //Stock bitstream, settings loaded, a block that does not bind, volts factors missing too
-  in.variant = 1;
-  in.fpga = 0x1432;
+  //Settings loaded, a block that does not bind, volts factors missing too
   cal[0][73] = cal[1][73] = 0x01;
   ud_build_first_run(&pg, &in, 0, 1);
-  check_layout("first run stock", 0);
-  T_TRUE(has_text(UD_ICON_WARN "FPGA stock bitstream 0x1432: no generator, no filter; gain calibration not possible"));
+  check_layout("first run bound", 0);
   T_TRUE(has_text(UD_ICON_OK "Settings loaded from the card."));
   T_TRUE(has_text("Saved calibration does not match the current offsets: calibrate again."));
   T_TRUE(has_text("Volts calibration missing too: it needs a DC supply up to 15 V."));
-  T_TRUE(has_text("The gain step needs the open FPGA bitstream: this one keeps the gains."));
+  T_TRUE(has_text("The gain step needs a probe on the calibration post, one channel at a time."));
   T_EQ(ud_hit(&pg, 700, 450), UD_ID_CAL_NOW);
+}
+
+//fw-one: the notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for
+static void test_fpga_mismatch(void)
+{
+  ud_input in;
+  char     need[16];
+
+  sprintf(need, "0x%04X", PC_FW_FPGA_VERSION);
+  healthy(&in);
+  in.mismatch = 1;
+  in.fpga     = 0x1532;
+  ud_build_fpga_mismatch(&pg, &in);
+  check_layout("fpga mismatch", 0);
+  T_TRUE(has_text("FPGA bitstream"));
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153B."));
+  T_TRUE(has_text("This scope has 0x1532."));
+  T_EQ(text_colour("This firmware needs"), UD_C_WARN);
+  T_EQ(text_colour("This scope has"), UD_C_WARN);
+  T_TRUE(has_text("Flash it as the guide says (docs/guide/prepare.md),"));
+  T_TRUE(has_text("or remove the card to run the stock firmware."));
+  T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. The scope, the spectrum analyser, the frequency response and the generator do not run"));
+  T_TRUE(has_text("Diagnostics shows the version word and saves a report to the card."));
+  T_TRUE(strstr(need, "0x153B") != NULL);                      //the constant the texts quote
+  T_EQ(pg.nbtn, 3);
+  T_EQ(ud_hit(&pg, 30, 410), UD_ID_DIAG);
+  T_EQ(ud_hit(&pg, 400, 450), UD_ID_SETTINGS);
+  T_EQ(ud_hit(&pg, 700, 450), UD_ID_USB);
+  T_EQ(ud_hit(&pg, 260, 430), UD_ID_NONE);
+
+  //A newer word is a mismatch too (the next bitstream ships with its own firmware)
+  in.fpga = 0x153C;
+  ud_build_fpga_mismatch(&pg, &in);
+  check_layout("fpga mismatch newer", 0);
+  T_TRUE(has_text("This scope has 0x153C."));
+
+  //On the Diagnostics pages of a mismatched scope nothing measures: no Calibrate, DC shift trim or Volts calibration;
+  //Save report, Clear calibration, the log and FEL stay
+  ud_build(&pg, UD_PAGE_STATUS, &in, 0);
+  check_layout("mismatch status", 0);
+  T_EQ(ud_hit(&pg, 20, 430), UD_ID_NONE);
+  T_EQ(ud_hit(&pg, 200, 430), UD_ID_REPORT);
+  T_TRUE(has_text("FPGA bitstream 0x153c: this firmware needs 0x153b"));
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  check_layout("mismatch cal", 0);
+  {
+    uint32_t i, ids = 0;
+
+    for(i=0;i<pg.nbtn;i++)
+      ids |= 1u << pg.btn[i].id;
+
+    T_EQ(ids & ((1u << UD_ID_CALIBRATE) | (1u << UD_ID_DCSHIFT) | (1u << UD_ID_VOLTS)), 0);
+    T_EQ(ids & (1u << UD_ID_CLEAR), 1u << UD_ID_CLEAR);
+  }
+  ud_build(&pg, UD_PAGE_DEV, &in, 0);
+  check_layout("mismatch dev", 0);
+  {
+    uint32_t i, fel = 0;
+
+    for(i=0;i<pg.nbtn;i++)
+      fel |= (pg.btn[i].id == UD_ID_FEL);
+
+    T_EQ(fel, 1);
+  }
 }
 
 int main(void)
@@ -904,5 +952,6 @@ int main(void)
   test_verdicts();
   test_tiles();
   test_first_run();
+  test_fpga_mismatch();
   return t_report("test_ui_diag");
 }

@@ -128,28 +128,50 @@ uint32_t pc_seq_dead_ns(uint32_t total_words, uint32_t pre_words, uint32_t word_
   return total_words * 5 + 40 + (2 + pre_words) * word_ns + 100;
 }
 
+uint32_t pc_seq_ui_plan_n(uint64_t per_record_ns, uint32_t *run_us)
+{
+  uint32_t n = PC_SEQ_UI_MAX_N;
+  uint64_t run;
+
+  *run_us = 0;
+
+  if(per_record_ns == 0)
+    return 0;
+
+  while((n >= PC_SEQ_UI_MIN_N) && ((uint64_t)n * per_record_ns > (uint64_t)PC_SEQ_UI_BUDGET_US * 1000))
+    n >>= 1;
+
+  if(n < PC_SEQ_UI_MIN_N)
+    return 0;
+
+  run     = (uint64_t)n * per_record_ns;
+  *run_us = (uint32_t)((run + 999) / 1000);
+  return n;
+}
+
 uint32_t pc_seq_ui_plan(uint32_t total_words, uint32_t pre_words, uint32_t divider, uint32_t *run_us)
 {
   uint64_t word_ns = 10ull * ((uint64_t)divider + 1);
-  uint64_t rec_ns, run;
-  uint32_t n = PC_SEQ_UI_MAX_N;
 
   *run_us = 0;
 
   if((total_words == 0) || (total_words > PC_SEQ_AVG_MAX_TOTAL) || (pre_words >= total_words) || (word_ns > 1000000))
     return 0;
 
-  rec_ns = (uint64_t)total_words * word_ns + pc_seq_dead_ns(total_words, pre_words, (uint32_t)word_ns);
+  return pc_seq_ui_plan_n((uint64_t)total_words * word_ns + pc_seq_dead_ns(total_words, pre_words, (uint32_t)word_ns), run_us);
+}
 
-  while((n >= PC_SEQ_UI_MIN_N) && ((uint64_t)n * rec_ns > (uint64_t)PC_SEQ_UI_BUDGET_US * 1000))
-    n >>= 1;
+uint32_t pc_seq_ui_plan_mcu(uint32_t total_words, uint32_t pre_words, uint32_t divider, int wide, uint32_t *run_us)
+{
+  uint64_t word_ns = (wide ? 5ull : 10ull) * ((uint64_t)divider + 1);
 
-  if(n < PC_SEQ_UI_MIN_N)
+  *run_us = 0;
+
+  if((total_words == 0) || (pre_words >= total_words) || (word_ns > 1000000))
     return 0;
 
-  run     = (uint64_t)n * rec_ns;
-  *run_us = (uint32_t)((run + 999) / 1000);
-  return n;
+  return pc_seq_ui_plan_n((uint64_t)total_words * word_ns + pc_seq_dead_ns(total_words, pre_words, (uint32_t)word_ns) +
+                          (uint64_t)total_words * PC_SEQ_UI_READ_BYTES * PC_SEQ_UI_READ_NS, run_us);
 }
 
 uint32_t pc_seq_recip(uint32_t c)

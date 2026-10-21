@@ -109,115 +109,39 @@ void pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// FPGA variants (P-5.1). Capabilities fail closed: only what the bitstream is known to implement.
+// The bitstream this firmware is built for (P-5.1, PC_FW_FPGA_VERSION). One geometry, one capability word, derived from
+// the constant: AL3A10 0x153B has the programmable geometry and the DDS generator (0x1532), the EXT trigger (0x1533), the
+// decimation filter with 16-bit samples (0x1534, cmds 0x53-0x55, read 0x29), the CIC compensation FIR (0x1535, 0x56),
+// the sequencer (0x1536, cmds 0x57-0x5D, reads 0x2A-0x32), the encode self-check with the guaranteed core order (0x1538,
+// read 0x33) and the per-core capture stages (0x153A, 0x63 / 0x36). The version word read at boot decides only the
+// mismatch flag; a mismatched scope answers the F_BASIC commands and refuses the rest (pc_dispatch).
 
-void pc_variant_from_version(uint16_t version, pc_variant *v)
+void pc_variant_init(uint16_t version, pc_variant *v)
 {
-  uint32_t unverified = PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED;   //BENCH: T3, T4
-
-  v->version  = version;
-  v->read_lag = 0;                                                                   //BENCH: T3
-
-  switch(version)
-  {
-    case 0x1432:
-      v->variant    = 1;
-      v->ring_words = 4096;
-      v->max_total  = 3000;
-      v->caps       = unverified;
-      break;
-
-    case 0x1532:
-      v->variant    = 2;
-      v->ring_words = 8192;
-      v->max_total  = 16382;
-      v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS;
-      break;
-
-    case 0x1533:
-    case 0x1534: case 0x1535: case 0x1536: case 0x1537: case 0x1538: case 0x1539:
-    case 0x153A: case 0x153B: case 0x153C: case 0x153D: case 0x153E: case 0x153F:
-      //AL3 family, later minors: 0x1533 adds the EXT trigger on the calibration pin (fpga/al3/README.md), 0x1534 the
-      //decimation filter with 16-bit samples (cmds 0x53-0x55, read 0x29; pc_decim.h), 0x1535 the CIC compensation FIR
-      //(cmd 0x56), 0x1536 the sequencer, 0x1538 the encode check (read 0x33)
-      v->variant    = 2;
-      v->ring_words = 8192;
-      v->max_total  = 16382;
-      v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER;   //BENCH: EXT
-
-      if(version >= 0x1534)
-        v->caps |= PC_CAP_DECIM;                                                     //BENCH: DECIM
-
-      if(version >= 0x1535)
-        v->caps |= PC_CAP_FIR;                                                       //BENCH: FIR
-
-      //0x1536: the sequencer (segmented capture, hardware averaging; cmds 0x57-0x5D, reads 0x2A-0x32; pc_seq.h)
-      if(version >= 0x1536)
-        v->caps |= PC_CAP_SEQ;                                                       //BENCH: SEQ
-
-      //0x1538: encodes from the write clock, core order guaranteed B first, checked per capture (read 0x33, enc_heal.h)
-      if(version >= 0x1538)
-        v->caps |= PC_CAP_ENC_CHECK;                                                 //BENCH: 0x1538
-
-      //0x153A: ADC pins through IOB registers, per-core capture stage (0x63), outlier counters (0x36), 4 / 3 words more
-      //ADC latency against EXT (cap_stage.h, pc_decim_ext_shift_at)
-      if(cs_has(version))
-        v->caps |= PC_CAP_CAPTURE_STAGES;                                            //BENCH: 0x153A
-      break;
-
-    case 0x1632:
-      v->variant    = 3;
-      v->ring_words = 6144;
-      v->max_total  = 12286;
-      v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS;
-      break;
-
-    case 0x1732:
-      //EP4: no ring wrap logic in the Verilog, captures above 6143 words may be corrupt [U]
-      v->variant    = 4;
-      v->ring_words = 6144;
-      v->max_total  = 12286;
-      v->caps       = unverified | PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS;
-      break;
-
-    default:
-      v->variant    = 0;
-      v->ring_words = 4096;
-      v->max_total  = 3000;
-      v->caps       = 0;
-      return;
-  }
-
-  //Reboot into the boot ROM's FEL mode: touches no FPGA, works on every known bitstream          BENCH: plan 11.3 step 1
-  v->caps |= PC_CAP_ENTER_FEL;
-
-  //Protocol 1.3: shared control with the UI, no LOCAL/REMOTE; SD sector access (no FPGA involved)
-  v->caps |= PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS;
-
-  //fw 0.2.70: READ_SCREEN reads the framebuffer (no FPGA involved)                                BENCH: T9
-  v->caps |= PC_CAP_SCREENSHOT;
+  v->version    = version;
+  v->mismatch   = (uint8_t)(version != PC_FW_FPGA_VERSION);
+  v->variant    = PC_FPGA_VARIANT;
+  v->ring_words = PC_FPGA_RING_WORDS;
+  v->max_total  = PC_FPGA_MAX_TOTAL;
+  v->caps       = PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED |          //BENCH: T3, T4
+                  PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR |
+                  PC_CAP_SEQ | PC_CAP_ENC_CHECK | PC_CAP_CAPTURE_STAGES |
+                  PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
 
 #if PC_DEBUG
-  v->caps |= PC_CAP_DEBUG_RAW;
-
   //FORCE relies on the Atlan4 stop condition; enabled in bench builds so test T7 can run
-  if(v->variant >= 2)
-    v->caps |= PC_CAP_FORCE_TRIGGER;                                                 //BENCH: T7
+  v->caps |= PC_CAP_DEBUG_RAW | PC_CAP_FORCE_TRIGGER;                                  //BENCH: T7
 #endif
 }
 
 //Core order within a word (P-7.3, rows 58 and 62): the firmware's fixed convention (PC_INTERLEAVE_ORDER 0, core B the
-//earlier sample: READ_RAW / READ_TRACE interleave, acal_track's A - B model, the 0x53 swap bit clear) is verified only on
-//a bitstream that reports it: 0x1538+ whose read 0x33 at boot had bits 3:2 = 01 (enc_heal_hw.c, before the session
-//starts). Everywhere else caps bit 12 INTERLEAVE_UNVERIFIED stays set: 0x1532..0x1536 can flip the order on a rate write
-//(their full-rate captures are checked by the order-independent data residual), 0x1537 has chip 1 the other way round
-//(GET_HEALTH 90 bit 3), a 0x1538+ with another convention is flagged (90 bit 1) and checked by its data.
+//earlier sample: READ_RAW / READ_TRACE interleave, acal_track's A - B model, the 0x53 swap bit clear) is verified by the
+//FPGA's own report: read 0x33 at boot with bits 3:2 = 01 (enc_heal_hw.c, before the session starts). A bitstream that
+//reports another convention keeps caps bit 12 INTERLEAVE_UNVERIFIED set, is flagged (GET_HEALTH 90 bit 1) and has its
+//full-rate captures judged by their data.
 void pc_variant_core_order(pc_variant *v)
 {
   pc_hw_enc e;
-
-  if(!(v->caps & PC_CAP_ENC_CHECK))
-    return;
 
   pc_hal_enc_state(&e);
 
@@ -301,16 +225,15 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
 {
   uint8_t set = pc_hal_decim_setting();
 
-  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), pc_hal_divider_now(), total,
-                  pc_decim_has_caps(s->var.caps), c);
+  (void)s;
+  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), pc_hal_divider_now(), total, pc_decim_has(), c);
 }
 
-//PC_DECIM_HAS_* for pc_decim_config from the caps, with PC_DECIM_HAS_CAPSTAGES on 0x153A+ (the EXT shifts and 0x53 bits 3 / 4)
-int pc_decim_has_caps(uint32_t caps)
+//What pc_decim_config gets on the built-for bitstream: the CIC filter with the compensation FIR and the capture stages
+//(the EXT shifts of 0x153A+ and 0x53 bits 3 / 4)
+int pc_decim_has(void)
 {
-  int has = (caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : ((caps & PC_CAP_DECIM) ? PC_DECIM_HAS_CIC : PC_DECIM_HAS_NONE);
-
-  return (caps & PC_CAP_CAPTURE_STAGES) ? (has | PC_DECIM_HAS_CAPSTAGES) : has;
+  return PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES;
 }
 
 //EXT trigger: samples by which the stored data lag the edge (pc_decim_ext_shift_at: the filter's latency with K >= 1, the
@@ -360,16 +283,11 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
     int written;
 
     memset(&d, 0, sizeof(d));
-
-    if(s->var.caps & PC_CAP_DECIM)
-    {
-      pc_hal_decim_current(&d, &written);
-      c->decim       = pc_decim_status(&d);
-      c->decim_shift = d.shift;
-      c->decim_n     = d.n;
-    }
-
-    c->ext_shift = pc_ext_shift(c->source, &d, c->divider, pretrigger);
+    pc_hal_decim_current(&d, &written);
+    c->decim       = pc_decim_status(&d);
+    c->decim_shift = d.shift;
+    c->decim_n     = d.n;
+    c->ext_shift   = pc_ext_shift(c->source, &d, c->divider, pretrigger);
   }
 }
 
@@ -390,13 +308,10 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   c->flags |= triggered ? 0x01 : 0x02;
 
   //1.4: an EXT edge was seen during this capture (0x28 bit 2 is cleared by every sampling reset)
-  if(s->var.caps & PC_CAP_EXT_TRIGGER)
-  {
-    s->ext_flags = pc_hal_ext_status() & 0x07;
+  s->ext_flags = pc_hal_ext_status() & 0x07;
 
-    if(s->ext_flags & 0x04)
-      c->flags |= 0x20;
-  }
+  if(s->ext_flags & 0x04)
+    c->flags |= 0x20;
 
   //Overload flags of this readout
   for(i=0;i<2;i++)
@@ -504,21 +419,12 @@ static uint8_t pc_run_state(pc_session *s)
   return (t.ui_mode == 1) ? PC_RUN_SINGLE : PC_RUN_RUN;
 }
 
-//1.17: what the running bitstream has (GET_STATUS 44, GET_DECIM 32)
+//1.17: what the built-for bitstream has (GET_STATUS 44, GET_DECIM 32): everything the word names
 static uint16_t pc_features(const pc_session *s)
 {
-  uint16_t f = 0;
-
-  if(s->var.caps & PC_CAP_EXT_TRIGGER) f |= PC_FEAT_W_EXT_TRIGGER;
-  if(s->var.caps & PC_CAP_DECIM)       f |= PC_FEAT_W_DECIM;
-  if(s->var.caps & PC_CAP_FIR)         f |= PC_FEAT_W_FIR;
-  if(s->var.caps & PC_CAP_SEQ)         f |= PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE;
-  if(s->var.caps & PC_CAP_ENC_CHECK)   f |= PC_FEAT_W_ENC_CHECK;
-  if(s->var.caps & PC_CAP_CAPTURE_STAGES) f |= PC_FEAT_W_CAPTURE;
-  if((s->var.caps & PC_CAP_DECIM) && (s->var.caps & PC_CAP_GENERATOR_DDS))
-                                       f |= PC_FEAT_W_BODE;
-
-  return f;
+  (void)s;
+  return PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR | PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE |
+         PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE;
 }
 
 //1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
@@ -677,11 +583,6 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider)
   return (2 * rec > PC_AUTO_MIN_MS) ? (uint32_t)(2 * rec) : PC_AUTO_MIN_MS;
 }
 
-uint32_t pc_auto_net_ms(uint32_t stop_ms)
-{
-  return stop_ms + PC_AUTO_NET_MS + stop_ms / 8;
-}
-
 //The host's auto-mode deadline: max(100 ms, two records) at divider, or an explicit auto_timeout (samples) converted to
 //time when it is longer
 static uint32_t pc_host_auto_ms(pc_session *s, uint32_t total, uint32_t divider)
@@ -741,12 +642,6 @@ static uint32_t pc_gen_body(pc_session *s, uint8_t *p)
   uint64_t mhz;
   uint16_t bp;
 
-  if(!(s->var.caps & PC_CAP_GENERATOR_DDS))
-  {
-    //Stock bitstream: fixed 1 kHz square wave on the calibration pin, always driven [U duty]
-    en = 1; phase = 0; thr = 0; mhz = 1000000; bp = 5000;
-  }
-  else
   {
     uint32_t hz;
     uint8_t  pct;
@@ -800,7 +695,7 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
   (void)req; (void)len;
 
-  memset(resp, 0, 76);
+  memset(resp, 0, PC_INFO_LEN);
   resp[0] = PC_PROTO_MAJOR;
   resp[1] = PC_PROTO_MINOR;
   pc_put_u16(resp + 2,  PC_MAX_REQUEST_FRAME);
@@ -813,11 +708,10 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   resp[15] = 2;
   pc_put_u32(resp + 16, 200000000u);
   pc_put_u32(resp + 20, s->var.caps);
-  pc_put_u32(resp + 24, (s->var.caps & PC_CAP_GENERATOR_DDS) ? 50000000u : 0);
+  pc_put_u32(resp + 24, 50000000u);
   pc_put_u16(resp + 28, s->var.max_total);
-  //Stock geometry is fixed at 3000, so min = max there
-  pc_put_u16(resp + 30, (s->var.caps & PC_CAP_PROG_TRIGGER_POS) ? 80 : s->var.max_total);
-  resp[32] = s->var.read_lag;
+  pc_put_u16(resp + 30, 80);
+  resp[32] = 0;                                                                      //read_lag, BENCH: T3
   resp[33] = 7;
   resp[34] = 6;
   resp[35] = PC_INTERLEAVE_ORDER;
@@ -832,7 +726,11 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
   pc_put_u16(resp + 72, PC_SCREEN_WIDTH);
   pc_put_u16(resp + 74, PC_SCREEN_HEIGHT);
-  *rl = 76;
+
+  //1.25 (fw-one): the bitstream this firmware is built for and whether the scope runs it
+  pc_put_u16(resp + 76, PC_FW_FPGA_VERSION);
+  resp[78] = s->var.mismatch ? PC_FPGA_F_MISMATCH : 0;
+  *rl = PC_INFO_LEN;
   return PC_OK;
 }
 
@@ -948,7 +846,7 @@ void pc_health_body(uint8_t *p)
   pc_hal_enc_state(&e);
 
   memset(p, 0, PC_HEALTH_LEN);
-  p[0] = 2;                                //layout 2 since 1.24 (124 bytes)
+  p[0] = 3;                                //layout 3 since 1.25 (128 bytes); 2 in 1.24 (124)
   pc_put_u16(p + 2, PC_HEALTH_LEN);
   p[4] = u.state;
   p[5] = u.flags;
@@ -1009,6 +907,10 @@ void pc_health_body(uint8_t *p)
     pc_put_u32(p + 116, c.reads);
     pc_put_u32(p + 120, c.flagged_n);
   }
+
+  //1.25 (fw-one): the built-for bitstream and the mismatch flag, as GET_INFO 76..79
+  pc_put_u16(p + 124, PC_FW_FPGA_VERSION);
+  p[126] = (pc_hal_fpga_version() != PC_FW_FPGA_VERSION) ? PC_FPGA_F_MISMATCH : 0;
 }
 
 #if PC_DEBUG
@@ -1246,6 +1148,10 @@ static int h_set_timebase(pc_session *s, const uint8_t *req, uint32_t len, uint8
   }
   else if(mode == 1)
   {
+    //The FPGA compares 20 bits of 0x0D (pc_decim.h PC_DIVIDER_MAX)
+    if(value > PC_DIVIDER_MAX)
+      return pc_error(s, PC_E_BAD_ARG, 4, "divider > 1048575");
+
     t.divider = value;
     pc_hal_timebase_write(&t, 1);
     s->tb_raw     = 1;
@@ -1276,7 +1182,6 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   uint32_t tot  = pc_get_u32(req + 12);
   uint32_t hold = pc_get_u32(req + 16);
   uint32_t ato  = pc_get_u32(req + 20);
-  int      prog = (s->var.caps & PC_CAP_PROG_TRIGGER_POS) != 0;
   pc_hw_trigger t;
   uint8_t  hwmask = 0;
 
@@ -1290,7 +1195,6 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   //detail = bit number of the offending field (P-8.3)
   if(mask & 0x01)
   {
-    if((req[2] == 2) && !(s->var.caps & PC_CAP_EXT_TRIGGER)) return pc_error(s, PC_E_UNSUPPORTED, 0, "EXT trigger");
     if(req[2] > 2)   return pc_error(s, PC_E_BAD_ARG, 0, "source");
     t.source = req[2];
     hwmask |= PC_TRG_SOURCE;
@@ -1336,16 +1240,13 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   //Geometry checks on the resulting values
   if(mask & 0x30)
   {
-    if(!prog && ((t.pretrigger != 1500) || (t.total != 3000)))
-      return pc_error(s, PC_E_UNSUPPORTED, (mask & 0x10) ? 4 : 5, "fixed 1500/3000");
-
     if(t.total & 1)                                    return pc_error(s, PC_E_BAD_ARG, 5, "total odd");
     if((t.total < 80) || (t.total > s->var.max_total)) return pc_error(s, PC_E_BAD_ARG, 5, "total out of range");
     if(t.pretrigger & 1)                               return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger odd");
     if(t.pretrigger + 2 > t.total)                     return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger > total - 2");
 
     //1.9: the 16-bit layout holds one sample per word
-    if((s->var.caps & PC_CAP_DECIM) && (pc_hal_decim_setting() & 3) && (t.total > PC_DECIM_MAX_TOTAL))
+    if((pc_hal_decim_setting() & 3) && (t.total > PC_DECIM_MAX_TOTAL))
       return pc_error(s, PC_E_BAD_ARG, 5, "total > 8190 with the filter on");
   }
 
@@ -1361,21 +1262,14 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition handlers
 
-//Geometry the next host ARM writes: the trigger settings (stock: fixed 1500 / 3000), the decimation filter for them,
-//the EXT latency shift, and the pretrigger / total words (one sample per word in the 16-bit layout)
+//Geometry the next host ARM writes: the trigger settings, the decimation filter for them, the EXT latency shift, and the
+//pretrigger / total words (one sample per word in the 16-bit layout)
 static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, uint16_t *pre_w, uint16_t *tot_w,
                             uint16_t *ext_shift)
 {
   int wide;
 
   pc_hal_trigger_read(t);
-
-  if(!(s->var.caps & PC_CAP_PROG_TRIGGER_POS))
-  {
-    //Stock: fixed 750 / 1500 word geometry
-    t->pretrigger = 1500;
-    t->total      = 3000;
-  }
 
   //1.9: decimation filter for this capture; the 16-bit layout has one sample per ring word
   pc_decim_next(s, t->total, dc);
@@ -1394,8 +1288,7 @@ static void pc_arm_geometry(pc_session *s, pc_hw_trigger *t, pc_decim_cfg *dc, u
 //The arm h_arm set up (also the full-rate check's re-arm, pc_enc_rearm)
 static int pc_arm_hw(pc_session *s, uint16_t pre_w, uint16_t tot_w)
 {
-  return pc_hal_arm(pre_w, tot_w, s->arm_auto, s->arm_prog, s->arm_normal,
-                    (s->var.caps & PC_CAP_DECIM) ? &s->arm_dc : NULL, (s->var.caps & PC_CAP_SEQ) ? &s->arm_seq : NULL);
+  return pc_hal_arm(pre_w, tot_w, s->arm_auto, s->arm_normal, &s->arm_dc, &s->arm_seq);
 }
 
 static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
@@ -1404,8 +1297,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   pc_hw_ui u;
   pc_decim_cfg dc;
   uint16_t pre_w, tot_w, ext;
-  int prog = (s->var.caps & PC_CAP_PROG_TRIGGER_POS) != 0;
-  int seq  = (s->var.caps & PC_CAP_SEQ) && (s->seq.mode != PC_SEQ_OFF);
+  int seq = (s->seq.mode != PC_SEQ_OFF);
 
   (void)req; (void)len;
 
@@ -1445,42 +1337,18 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->cap_wide      = dc.k != 0;
   s->cap_ext_shift = ext;
 
-  //2.-5. conversion start with a bounded ready wait                                  BENCH: T6 (stock 0x0F semantics)
-  //A sequencer run in auto mode uses the FPGA's own time-out (0x0E): untriggered segments are recorded as such, and
-  //averaging skips untriggered records; the firmware auto time-out would end the whole run
+  //2.-5. conversion start with a bounded ready wait                                  BENCH: T6
+  //A single capture in auto mode arms normal and the firmware's time-out forces it (fw 0.2.41; a forced stop on 0x153B
+  //reads the newest total words, never spliced). A sequencer run in auto mode uses the FPGA's own time-out (0x0E):
+  //untriggered segments are recorded as such, and averaging skips untriggered records; the firmware auto time-out would
+  //end the whole run
   s->ring_valid = 0;
   s->seq_stop   = 0;
   s->arm_dc     = dc;
   s->arm_seq    = s->seq;
   s->arm_auto   = pc_auto_timeout(s, t.total);
-  s->arm_prog   = (uint8_t)prog;
-  s->arm_normal = (uint8_t)((t.ui_mode != 0) || (prog && !seq));
-  s->auto_geom   = 0;
-  s->cap_spliced = 0;
+  s->arm_normal = (uint8_t)((t.ui_mode != 0) || !seq);
   eh_cap_reset(&s->enc_cap);
-
-  //fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A auto mode arms the FPGA's own time-out with
-  //0x0E = W - 2, W the first word at or after the deadline whose stop leaves ring words 0 .. total - 1 to the last pass:
-  //an untriggered record is never spliced, and the firmware's own time-out is only a safety net after W. 0x153B+ keeps
-  //the firmware time-out (a forced stop there reads the newest total words). A segment run's untriggered segments stop on
-  //0x0E in their 2^m slot the same way: its 0x0E is moved to the next such word.
-  if(prog && (t.ui_mode == 0) && (pc_stop_kind(s->var.version) == PC_STOP_RING0))
-  {
-    uint32_t div  = pc_hal_divider_now();
-    int      wide = dc.k != 0;
-
-    if(!seq)
-    {
-      s->auto_stop    = pc_auto_stop_word(pc_ms_to_words(pc_host_auto_ms(s, t.total, div), div, wide), tot_w,
-                                          s->var.ring_words);
-      s->auto_stop_ms = pc_words_to_ms(s->auto_stop, div, wide);
-      s->arm_auto     = s->auto_stop - PC_STOP_LAG;
-      s->arm_normal   = 0;
-      s->auto_geom    = 1;
-    }
-    else if(s->seq.mode == PC_SEQ_SEGMENTS)
-      s->arm_auto = pc_auto_stop_word(s->arm_auto + PC_STOP_LAG, tot_w, 1u << s->seq.m) - PC_STOP_LAG;
-  }
 
   if(pc_arm_hw(s, pre_w, tot_w))
   {
@@ -1516,11 +1384,10 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   s->cap_total_words  = tot_w;
   s->cap_divider      = s->cap_next.divider;
 
-  //Auto mode in firmware on Atlan bitstreams (armed normal above): an explicit host time-out (samples) counts too.
-  //fw 0.2.97: with the stop geometry the FPGA ends it at auto_stop; the firmware's time-out is the safety net after it
-  s->fw_auto     = (uint8_t)(prog && (t.ui_mode == 0) && !seq);
+  //Auto mode in firmware (armed normal above): an explicit host time-out (samples) counts too
+  s->fw_auto     = (uint8_t)((t.ui_mode == 0) && !seq);
   s->host_forced = 0;
-  s->auto_ms     = s->auto_geom ? pc_auto_net_ms(s->auto_stop_ms) : pc_host_auto_ms(s, t.total, s->cap_divider);
+  s->auto_ms     = pc_host_auto_ms(s, t.total, s->cap_divider);
 
   *rl = pc_status_body(s, resp);
   return PC_OK;
@@ -1533,16 +1400,7 @@ static int h_force(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *res
   if(s->acq_state != PC_ACQ_ARMED)
     return pc_error(s, PC_E_STATE, 0, "not armed");
 
-  //fw 0.2.97: an FPGA-auto arm (the stop geometry) stops on 0x0E = 0; on bitstreams whose stop latches 0x14 = pretrigger
-  //(and EF2 / EP4) the forced record is ring words 0 .. total - 1 across a random stop: flagged as maybe spliced
-  if(s->auto_geom)
-    pc_hal_force_stop();
-  else
-    pc_hal_force();                                                                  //BENCH: T7
-
-  if(!s->cap_next.seq_mode && ((pc_stop_kind(s->var.version) == PC_STOP_RING0) ||
-                               (pc_stop_kind(s->var.version) == PC_STOP_SPLICE)))
-    s->cap_spliced = 1;
+  pc_hal_force();                                                                    //BENCH: T7
 
   *rl = pc_status_body(s, resp);
   return PC_OK;
@@ -1691,7 +1549,7 @@ static void pc_raw_core(pc_session *s, uint8_t core, uint32_t start, uint32_t co
 
   if(!slot_len)
   {
-    pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words, s->var.read_lag);
+    pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words);
     return;
   }
 
@@ -1699,10 +1557,10 @@ static void pc_raw_core(pc_session *s, uint8_t core, uint32_t start, uint32_t co
   if(n > count)
     n = count;
 
-  pc_hal_read_core(core, slot_base + start, n, dst, stride, s->var.ring_words, s->var.read_lag);
+  pc_hal_read_core(core, slot_base + start, n, dst, stride, s->var.ring_words);
 
   if(count > n)
-    pc_hal_read_core(core, slot_base, count - n, dst + n * stride, stride, s->var.ring_words, s->var.read_lag);
+    pc_hal_read_core(core, slot_base, count - n, dst + n * stride, stride, s->var.ring_words);
 }
 
 //Segment table entry (accumulator word idx) of the latest segment run
@@ -1740,8 +1598,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   (void)len;
 
   if((mask == 0) || (mask & 0xF0)) return pc_error(s, PC_E_BAD_ARG, 0, "core_mask");
-  if((mode > 3) || ((mode == 3) && !(s->var.caps & PC_CAP_SEQ)))
-                                   return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
+  if(mode > 3)                     return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
   if(layout > 2)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
   if(flags & ~0x01)                return pc_error(s, PC_E_BAD_ARG, 3, "flags");
   if((count == 0) || (count > ring)) return pc_error(s, PC_E_BAD_ARG, 8, "count 1..ring_words");
@@ -1839,7 +1696,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   resp[12] = mask;
   resp[13] = layout;
   resp[14] = s->acq_state;
-  resp[15] = s->var.read_lag;
+  resp[15] = 0;                                                                      //read_lag
 
   d = resp + 16;
 
@@ -2078,7 +1935,7 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
 
   memset(p, 0, 36);
   p[0] = set & 3;                                       //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
-  p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2
+  p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2 always 0 (fw-one),
                                                         //falling-edge A / B, bit 3 FIR (1.11)
   p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout)
   p[3] = next.shift;
@@ -2115,9 +1972,6 @@ static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 
   if(req[0] > 3)     return pc_error(s, PC_E_BAD_ARG, 0, "filter 0..3");
   if(req[1] & ~0x0F) return pc_error(s, PC_E_BAD_ARG, 1, "flags");
-
-  if((req[1] & 0x08) && !(s->var.caps & PC_CAP_FIR))
-    return pc_error(s, PC_E_BAD_ARG, 1, "FIR needs FPGA 0x1535+");
 
   pc_hal_trigger_read(&t);
 
@@ -3140,11 +2994,11 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SAVE_REPORT,  F_BASIC,                      PC_CAP_SD_SECTORS, h_save_report },
   { PC_CMD_GET_GEN,      F_MODAL,                      0, h_get_gen },
   { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR_DDS, h_set_gen },
-  { PC_CMD_GET_CAL,      F_MODAL,                      0, h_get_cal },
+  { PC_CMD_GET_CAL,      F_MODAL | F_BASIC,            0, h_get_cal },      //sector 708: no FPGA
   { PC_CMD_READ_SCREEN,  F_BASIC | F_MODAL,            PC_CAP_SCREENSHOT, h_read_screen },   //BENCH: T9
   { PC_CMD_CAL_PROBE,    0,                            0, h_cal_probe },
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
-  { PC_CMD_ENTER_FEL,    0,                            PC_CAP_ENTER_FEL, h_enter_fel },
+  { PC_CMD_ENTER_FEL,    F_BASIC,                      PC_CAP_ENTER_FEL, h_enter_fel },
   { PC_CMD_FFT_BENCH,    F_BASIC,                      0, h_fft_bench },
 };
 
@@ -3441,9 +3295,11 @@ static int pc_dispatch(pc_session *s, int ctx)
   {
     st = pc_error(s, PC_E_UNKNOWN_CMD, 0, "cmd");
   }
-  else if((s->var.variant == 0) && !(e->flags & F_BASIC))
+  else if(s->var.mismatch && !(e->flags & F_BASIC))
   {
-    st = pc_error(s, PC_E_UNSUPPORTED, 0, "unknown FPGA");
+    //The scope does not run the bitstream this firmware is built for: nothing that would configure or read the
+    //acquisition runs (the notice screen says what to do); the F_BASIC commands keep the link, the diagnostics and FEL
+    st = pc_error(s, PC_E_UNSUPPORTED, PC_UNSUP_FPGA_MISMATCH, "FPGA bitstream mismatch: this firmware needs 0x153B");
   }
   else if((e->cap && !(s->var.caps & e->cap)) || (e->handler == 0))
   {
@@ -3517,7 +3373,7 @@ static void pc_enc_read(void *ctx, uint8_t core, uint32_t start, uint32_t count,
 {
   pc_session *s = (pc_session *)ctx;
 
-  pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words, s->var.read_lag);
+  pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words);
 }
 
 //1: the capture was discarded (re-armed, or ABORTED when the re-arm failed)
@@ -3547,14 +3403,10 @@ static int pc_enc_rearm(pc_session *s, uint32_t start)
 
   if(act != EH_REARM)
   {
-    //fw 0.2.79: 0x153A's outlier counters of the accepted capture (the self-check, cap_stage.h)
-    if(s->var.caps & PC_CAP_CAPTURE_STAGES)
-      pc_hal_cap_check();
-
+    //fw 0.2.79: the outlier counters of the accepted capture (the self-check, cap_stage.h)
+    pc_hal_cap_check();
     return 0;
   }
-
-  pc_hal_enc_retry();
 
   if(pc_arm_hw(s, s->cap_pre_words, s->cap_total_words))
   {
@@ -3566,7 +3418,6 @@ static int pc_enc_rearm(pc_session *s, uint32_t start)
   s->fpga_done      = 0;
   s->fpga_triggered = 0;
   s->host_forced    = 0;
-  s->cap_spliced    = 0;
   s->arm_ms         = pc_hal_ms();
   return 1;
 }
@@ -3592,20 +3443,12 @@ static void pc_acq_service(pc_session *s)
   //Only 0x0A and 0x18: no touch scan, unlike fpga_done_conversion
   pc_hal_acq_poll(&done, &trig);
 
-  //Firmware auto mode: no trigger in time ends the capture now (0x1A = 0; the FPGA's sample time-out is long past)
+  //Firmware auto mode: no trigger in time ends the capture now (0x1A = 0; the FPGA's sample time-out is long past).
+  //0x153B latches the newest total words at a stop, so the forced record is contiguous
   if(s->fw_auto && !s->host_forced && !done && !trig && (s->acq_state == PC_ACQ_ARMED) &&
      ((pc_hal_ms() - s->arm_ms) >= s->auto_ms))
   {
-    //fw 0.2.97: with the stop geometry the FPGA should have stopped at auto_stop: this is the last resort (0x0E = 0)
-    //and the record, ring words 0 .. total - 1 across a random stop, may be spliced. 0x153B+ reads the newest words.
-    if(s->auto_geom)
-      pc_hal_force_stop();
-    else
-      pc_hal_force();
-
-    if(pc_stop_kind(s->var.version) != PC_STOP_NEWEST)
-      s->cap_spliced = 1;
-
+    pc_hal_force();
     s->host_forced = 1;
     pc_hal_acq_poll(&done, &trig);
   }
@@ -3649,28 +3492,8 @@ static void pc_acq_service(pc_session *s)
     uint32_t pre_samples = (s->cap_wide ? (uint32_t)s->cap_pre_words : (uint32_t)s->cap_pre_words * 2) + s->cap_ext_shift;
     uint8_t  mask;
 
-    //fw 0.2.97, FPGA auto with the stop geometry (0x1532..0x153A): 0x18 also counts an edge after the stop, which
-    //leaves 0x14 at the pretrigger, so a record is triggered only with 0x14 != pretrigger (a real trigger on exactly that
-    //ring word, 1 in 8192, reads untriggered with a correct record). A trigger in the last total - pre words before
-    //the stop is cut by it: such a record (the stop inside it, done near the stop's time) is flagged
-    if(s->auto_geom && !s->cap_next.seq_mode)
-    {
-      if(addr == s->cap_pre_words)
-        trig = 0;
-      else if(trig && !s->host_forced &&
-              pc_auto_cut(addr, s->cap_pre_words, s->cap_total_words, s->auto_stop, s->var.ring_words) &&
-              ((pc_hal_ms() - s->arm_ms) + 2 + pc_words_to_ms(s->cap_total_words - s->cap_pre_words, s->cap_divider,
-                                                            s->cap_wide) >= s->auto_stop_ms))
-        s->cap_spliced = 1;
-
-      s->fpga_triggered = (uint8_t)trig;
-    }
-
     if(pc_enc_rearm(s, start))
       return;
-
-    if(s->cap_spliced)
-      s->cap_next.flags |= PC_CAPTURE_F_SPLICED;
 
     //Into the trace buffers for the enabled channels, so the UI shows the capture (it redraws every pass). An averaging
     //run leaves its last record in the ring as a normal capture; a segment run has none (the screen keeps its traces)
@@ -3762,7 +3585,7 @@ void pc_session_init(pc_session *s)
   pc_parser_init(&s->parser);
   s->tx = pc_hal_tx_buffer(&s->tx_cap);
   s->sd_stage = pc_hal_sd_stage(&s->sd_stage_cap);
-  pc_variant_from_version(pc_hal_fpga_version(), &s->var);
+  pc_variant_init(pc_hal_fpga_version(), &s->var);
   pc_variant_core_order(&s->var);
   s->acq_state    = PC_ACQ_IDLE;
   s->last_main_ms = pc_hal_ms();
@@ -3842,8 +3665,8 @@ void pc_poll(pc_session *s, int ctx)
         s->ring_valid = 0;
     }
 
-    //EXT pin status for GET_STATUS (FPGA read, MAIN only)
-    if(s->var.caps & PC_CAP_EXT_TRIGGER)
+    //EXT pin status for GET_STATUS (FPGA read, MAIN only; not on a bitstream this firmware does not know)
+    if(!s->var.mismatch)
       s->ext_flags = pc_hal_ext_status() & 0x07;
 
     pc_acq_service(s);

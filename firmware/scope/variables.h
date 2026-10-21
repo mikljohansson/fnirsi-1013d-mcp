@@ -678,7 +678,6 @@ struct tagFPGASettings
   uint16    settriggerpoint;        //Set start triger point in FPGA
   
   
-  uint8     fw_FPGA;              //1- firmware in fpga is fnirsi, 2 is AL3-PECO, 3 is EF2-PECO
 
 };
 
@@ -901,7 +900,6 @@ extern SCOPESETTINGS    savedscopesettings2;
 
 extern uint32 channel1tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern uint32 channel1tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 //extern uint32 channel1_ref1_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 //extern uint32 channel1_ref2_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
@@ -914,7 +912,6 @@ extern DISPLAYPOINTS channel1pointsbuffer[TRACE_POINTS_MAX];
 //-------------------------------------------------------------
 extern uint32 channel2tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern uint32 channel2tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 //extern uint32 channel2_ref1_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 //extern uint32 channel2_ref2_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
@@ -958,8 +955,6 @@ extern double disp_sample_step;
 
 extern int32 disp_first_sample;
 
-extern uint32 AVG_trigger;
-extern uint32 AVG_trigger1;
 extern uint32 disp_have_trigger;
 extern uint32 disp_trigger_index;
 

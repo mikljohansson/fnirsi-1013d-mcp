@@ -28,7 +28,7 @@ def frame_payload(name: str) -> bytes:
 
 
 def ssim(sim_factory, signal=SQUARE, **kw):
-    return sim_factory(variant="al3s", signal=signal, **kw)
+    return sim_factory(signal=signal, **kw)
 
 
 def legacy_segments_setup(s: Scope, mode: int = 1) -> None:
@@ -123,25 +123,19 @@ def test_status_features_and_ui_average(sim_factory):
     s = Scope.connect(srv.url)
     try:
         st = s.status()
-        assert st.features == 0x5F and st.ui_average == 0 and s.info.proto_minor >= 17  # + 1.20 BODE (bit 6)
+        assert st.features == 0xFF and st.ui_average == 0 and s.info.proto_minor >= 17  # 1.20 BODE, 1.24 CAPTURE_STAGES
         assert s.info.caps & P.Caps.SEQ
         s.set_timebase(divider=0)
         s.set_trigger(pretrigger_samples=1500, total_samples=3000)
         srv.device.ui_average = True
         st = s.status()
         assert (st.ui_average, st.ui_average_log2n) == (2, 6)  # 1500 words at 200 MSa/s: 64 records in 40 ms
-        assert s.get_decim().features == 0x5F and s.get_decim().ui_average == 2
+        assert s.get_decim().features == 0xFF and s.get_decim().ui_average == 2
         s.set_timebase(divider=19)
-        s.set_decim("cic2")  # 16-bit records never fit the accumulator: software averaging
-        assert s.status().ui_average == 1
+        s.set_decim("cic2")  # 16-bit records never fit the accumulator: the MCU sums them (fw 0.2.102)
+        assert (s.status().ui_average, s.status().ui_average_log2n) == (1, 3)  # 3000 words, 3.6 ms readout: 8
     finally:
         s.close()
-    old = sim_factory(variant="al3f")
-    with Scope.connect(old.url) as s:
-        assert s.status().features == 0x47
-        with pytest.raises(DeviceError) as e:
-            s.get_seq()
-        assert e.value.status == P.Status.E_UNSUPPORTED
 
 
 def test_segment_run_timestamps_and_records(sim_factory):
@@ -296,7 +290,8 @@ def test_segment_and_hardware_averaging_tools(sim_factory, tmp_path):
     async def main():
         async with client_for(srv, tmp_path) as c:
             st = await c.call("scope_status")
-            assert st["features"] == ["ext_trigger", "decim", "fir", "segments", "hw_average", "bode"]
+            assert st["features"] == ["ext_trigger", "decim", "fir", "segments", "hw_average", "enc_check", "bode",
+                                      "capture_stages"]
             assert st["ui_averaging"] == "off" and st["hardware_averaging"] is False
             await c.call("scope_set_timebase", sample_rate="200MS/s")
             await c.call("scope_set_trigger", source="CH1", edge="rising", level=0.0, mode="normal",
@@ -313,7 +308,7 @@ def test_segment_and_hardware_averaging_tools(sim_factory, tmp_path):
             await c.call("scope_set_trigger", total_samples=6000)
             assert "2046 words" in await c.fails("scope_averaged_capture", n=16, hardware=True)
             assert "needs FPGA bitstream 0x1536" not in await c.fails("scope_capture_segments", count=100)
-        async with client_for(sim_factory(variant="al3f"), tmp_path) as c:
+        async with client_for(sim_factory(caps_clear=int(P.Caps.SEQ)), tmp_path) as c:  # a firmware without the cap
             assert "needs FPGA bitstream 0x1536" in await c.fails("scope_capture_segments", count=4)
             assert "needs FPGA bitstream 0x1536" in await c.fails("scope_averaged_capture", n=4, hardware=True)
     anyio.run(main)

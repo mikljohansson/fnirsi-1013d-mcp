@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-one (2026-10-20): fw 0.2.103 provisional, protocol 1.25 provisional (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
 **Branch fw-diag (2026-10-20): fw 0.2.100, protocol 1.24 unchanged: Diagnostics Restarts tile counts crashes only (type 0 = deliberate), the noise rows use the zero step's limits (gated 1.0, full 3.0 codes, one pair of constants in adc_cal.h; the wizard's gated limit tightened from 3.0); section 66.**
 **Branch fw-floor (2026-10-20): fw 0.2.99, protocol 1.24 unchanged: Frequency response ch2_small points grey (BODE_F_BAD, mcp BAD_FLAGS) and the two-line "CH2 too small above ... kHz" note with its mcp caveat; section 65.**
 **Branch fw-arm2 (2026-10-20): fw 0.2.98, protocol 1.24 unchanged: the Frequency response engine reads its records as 0.2.96 did (0.2.97's 0x14 / cut rules counted half its captures as time-outs); section 64 addendum.**
@@ -207,6 +208,9 @@ Plan: `docs/plans/collaborative-mode.md`; wire format agreed with the MCP agent 
 
 ## 7. FPGA layer and capture geometry
 
+**Since fw-one (section 68) there is no variant table**: `pc_variant_init` (pc_cmds.c) sets the one geometry (ring 8192,
+max 16382) and the one capability word of the bitstream the firmware is built for (`PC_FW_FPGA_VERSION`, pc_cmds.h); the
+version word read at boot only sets `pc_variant.mismatch`. The paragraph below is the history up to fw 0.2.102.
 Variant table from the 0x06 word in `pc_variant_from_version` (0x1432 stock: ring 4096, fixed 1500/3000;
 0x1532 AL3: ring 8192, max 16382; 0x1533..0x153F AL3 family, same geometry, 0x1533+ adds EXT_TRIGGER (cmd 0x15 = 2,
 status cmd 0x28; `fpga_get_version` maps the family to fw_FPGA 2 under PC_PROTOCOL); 0x1632 EF2 / 0x1732 EP4: ring 6144, max 12286; unknown: caps 0). The maintainer's
@@ -5030,3 +5034,114 @@ mode" in the menu, FEL-load 0.2.101, and either report the error and sector numb
 `fnirsi1013d-flash --restore backups/sd_750-2262_<time>.bin`. Removing the card starts the stock firmware.
 Bug indicators: a refusal on the 8192 card; a backup range other than 750..2261; SD_INFO check 3 on the new image; the
 Firmware tile not OK after step 2.
+
+## 68. fw-one: one bitstream, one Average (fw 0.2.103 provisional, protocol 1.25 provisional, row 65)
+
+Branch `worktree-agent-aab3f2c1fc0fe37cd` (worktree) from main a02cc21 (fw 0.2.102). Brief: the two owner decisions of
+2026-10-20 (21:52 "every firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner";
+21:59 "the ACQ Average is one behaviour ... consistency matters"). Commits: 6b02d8b (the constant, fixed caps, the
+mismatch flag and wire fields, the removal of the compatibility code, host tests), 2891a3d (the notice screen), a014f16
+(Average on both paths), then the mcp (fw-one-mcp) and the docs. **Nothing benched, nothing flashed**; the coordinator
+numbers the version (`PC_FW_VERSION` is still 0.2.102 on the branch) and benches the image.
+
+**What was built**
+- `PC_FW_FPGA_VERSION` 0x153B (pc_cmds.h) is the one constant. `pc_variant_init` (was `pc_variant_from_version`) sets ring
+  8192, max 16382, variant byte 2 and the fixed caps (PROG_TRIGGER_POS, GENERATOR_DDS, EXT_TRIGGER, DECIM, FIR, SEQ,
+  ENC_CHECK, CAPTURE_STAGES, ENTER_FEL, SHARED_MODE, SD_SECTORS, SCREENSHOT, READ_LAG_UNVERIFIED; INTERLEAVE_UNVERIFIED
+  cleared by `pc_variant_core_order` from the boot 0x33 as before) and `mismatch = version != PC_FW_FPGA_VERSION`.
+  `pc_decim_has()` (FIR | CAPSTAGES) replaces `pc_decim_has_caps(caps)`; `pc_features` is a constant.
+- Mismatch: GET_INFO 80 bytes (76 u16 built-for word, 78 u8 flags bit 0 `PC_FPGA_F_MISMATCH`), GET_HEALTH 128 (layout 3,
+  124 / 126); the dispatch gate answers E_UNSUPPORTED detail `PC_UNSUP_FPGA_MISMATCH` (1) "FPGA bitstream mismatch: this
+  firmware needs 0x153B" for everything without `F_BASIC` (GET_CAL and ENTER_FEL joined the basic set); the MAIN poll does
+  not read 0x28; `pc_glue_init` skips `fpga_encode_init` / `fpga_capture_init` (no feature-register writes). The screen:
+  `ud_build_fpga_mismatch` (ui_diag.c; texts in the row 65 entry and the CHANGELOG), `ui_fpga_mismatch_open` / `_pass`
+  (ui_diag_view.c): a main-loop display mode after `ui_diag_pass`, three buttons (Diagnostics over it, Settings and USB
+  drive as modal screens, redrawn after), the first-run screen skipped (`fnirsi_1013d_scope.c`). The Diagnostics FPGA line
+  is one of two: "FPGA AL3A10 bitstream 0x153b: <the 0x33 line>" or amber "FPGA bitstream 0x1532: this firmware needs
+  0x153b"; on a mismatch the pages drop Calibrate / DC shift trim / Volts calibration (Clear calibration, Save report,
+  Enter FEL stay); the report says "firmware built for 0x153b: MISMATCH, the acquisition does not run".
+- Removed (delete, not `#if 0`): `fpgasettings.fw_FPGA` and its users (fpga_control.c time base / arm, cal_wiz_ui.c
+  `cw_init(.., 1)`, pc_hal_scope.c), `fpga_check_ready`, `fpga_conv_0e`; enc_heal: `eh_mode`, `eh_affected`,
+  `eh_order_differs`, `pc_hal_enc_retry` (the 0x0D re-write), `PC_ENCF_ORDER`, `fpga_encode_init(void)`; cap_stage:
+  `cs_has`; fpga_bus: `fpga_bus_contract_for` / `fpga_bus_init` / `fpga_bus` and `fpga_arm_cfg.geometry` (`FPGA_READ_DUMMY`
+  1, the geometry always written early and inside the window); pc_decim: `PC_STOP_*`, `pc_stop_kind`, `pc_auto_stop_word`,
+  `pc_auto_cut`, `pc_engine_record`; pc_cmds: `auto_geom` / `auto_stop` / `cap_spliced` / `arm_prog` / `pc_auto_net_ms` /
+  `PC_CAPTURE_F_SPLICED` (bit 6 never set), the stock arms of SET_TRIGGER / GET_INFO / GET_GEN / pc_arm_geometry, the EXT
+  / FIR / SEQ cap checks; pc_hal: `pc_hal_force_stop`, `pc_hal_arm`'s `prog`, `pc_hal_read_core`'s `read_lag`; pc_bode:
+  `bh_geom` / `bh_forced` and `bode_cap.spliced`; pc_hal_scope.c: the fw 0.2.97 UI geometry (`pc_ui_geom` / `_rules` /
+  `_spliced` / `_stop`), the fw_FPGA switch in `pc_glue_ui_read_start`, the cap tests in `pc_glue_ui_has` /
+  `pc_dec_has` / `pc_dec_config` / `pc_ui_fix_settings`. Kept because 0x153B needs it: the 0x33 self-check with the data
+  check after a rate write (`eh_capture_mode`) and after a bad boot convention, the capture stages, the dummy strobe, the
+  early geometry (harmless on 0x153B and the one order).
+- Average (pc_seq_hw.c, pc_seq.c): `pc_seq_ui_plan_n(per_record_ns)` is the one rule; `pc_seq_ui_plan` (hardware) and
+  `pc_seq_ui_plan_mcu` (+ `PC_SEQ_UI_READ_BYTES` 4 x `PC_SEQ_UI_READ_NS` 300 per word) feed it. `pc_seq_ui_conversion`
+  picks the path (hardware for a legacy record <= 2046 words, else MCU: `ui_mcu`), `pc_seq_ui_done(triggered, addr)` runs
+  `ui_mcu_collect` for a triggered record 1: `pc_glue_decim_rearm` + `fpga_do_conversion` (`ui_rearm` keeps the plan) N -
+  1 times, `fpga_done_conversion` polled with `PC_BUSY_POLL` until `ui_deadline` (max(100 ms, two records) + N records
+  from record 1), lanes into `ui_sum[2][8192]` (uint32; legacy [2w] B / [2w + 1] A, 16-bit [w]) through `ui_mcu_add`, a
+  late record discarded with `pc_hal_force` and the mean of what it holds shown; `pc_seq_ui_feed` converts the mean
+  (`pc_seq_avg_code` per core, or `pc_seq_udiv` + `pc_decim_to_code` with `acal_scale(scale_q24, gain16)` / corr16).
+  `pc_seq_sw_average`, `pc_seq_trace_replaced`, `PC_SW_AVERAGE`, `channel1tracebufferAVG` and friends are gone;
+  scope_display_trace_data draws the record as it is. `pc_hal_ui_average`: state 0 off / 1 MCU mean / 2 hardware, log2n (0
+  = single records). Memory: + 64 KB sums + 16 KB temp (DDR).
+- Host tests: test_info (fixed caps, GET_INFO 80, GET_HEALTH 128 layout 3, six other words: flags, basic set OK,
+  SET_REMOTE / GET_CHANNEL / GET_TRIGGER / GET_DECIM / ARM E_UNSUPPORTED detail 1, 0x28 never read); test_ui_diag
+  `test_fpga_mismatch` (the notice's texts, colours, hit areas; a newer word; the pages without the measuring buttons);
+  test_seq (`pc_seq_ui_plan_n`, `pc_seq_ui_plan_mcu` at 1 MSa/s 16-bit N 4, 200 MSa/s 6000 samples N 8, 16382 N 4, 10
+  kSa/s 0); test_fpga_bus on the model's 0x1535..0x153B (the 0x153A cases show the fault 0x153B fixed); deleted:
+  test_auto_stop_geometry, test_seq_older_bitstreams, test_contract, test_spliced_retake, the per-bitstream halves of
+  test_enc_check / test_capture_stages / test_decim_* / test_ext_trigger / test_bode, test_enc_heal's `test_modes`
+  version checks, test_cap_stage's `cs_has`. mock_hal: ring 8192, enc FLAG + boot33 good, cap HAS always, `pc_hal_arm`
+  without `prog`, no `force_stops` / `enc_retries`. All `make -s test` green; GCC 10 builds (upstream warnings only).
+
+**Decided and why**
+- A newer word is a mismatch too: the next bitstream ships with its own firmware (brief).
+- The MCU path's records 2..N are armed synchronously inside the pass (not spread over passes): the hardware run shows one
+  mean per 40 ms, so the MCU path does too, and the budget already bounds the pass; the first record keeps the main
+  loop's wait semantics (normal mode waits across passes, auto mode is forced at the deadline), so "no record yet" never
+  blocks. Records 2..N in normal mode wait at most the deadline, then the mean of what is held is shown (the hardware
+  run's rule for a run with at least one record).
+- N = 1 (single records) when two records do not fit 40 ms, on either path, reported as state 1 / log2n 0: a running
+  average across passes would again be a second behaviour.
+- READ_RAW of a UI capture sees the last of the N records (the ring), as a hardware run leaves its last record.
+- `PC_CAPTURE_F_SPLICED` is gone from the firmware; the protocol keeps bit 6 documented as never set (the mcp decodes it
+  harmlessly).
+- GET_CAL and ENTER_FEL are `F_BASIC`: a mismatched scope must still give its calibration to the report and a way out.
+
+**Bench (coordinator; FEL load, nothing flashed; the unit runs 0x153B)**
+1. `#VER` fw=<version>, proto=1.25, fpga=0x153b; GET_INFO 80 bytes, 76 = 0x153B, 78 = 0; GET_HEALTH 128, byte 0 = 3,
+   126 = 0; caps as section 68 above (bit 12 clear after a good boot 0x33). Diagnostics Status: "FPGA AL3A10 bitstream
+   0x153b: encode check ..." as before; the Calibration page's four buttons present.
+2. Scope view at 200 MSa/s with Average on: GET_STATUS 46 = 2, 47 = 6; the trace as on 0.2.102.
+3. Average on, Filter CIC2 (the Scope default), 1 MSa/s, 3000 samples, the 1 kHz square on CH1: GET_STATUS 46 = 1, 47 = 2
+   (N 4); the trace visibly less noisy than with Average off; `pass_ms` about 30 ms more than with Average off; edges
+   where they were. 10 MSa/s: 47 = 3 or 4. 10 kSa/s: 47 = 0 (single records, pass_ms as Average off). Filter off, 6000
+   samples at 200 MSa/s: 46 = 1, 47 = 3.
+4. Auto mode, probe unplugged, Average on at 1 MSa/s: the trace free-runs (single untriggered records, the UI responsive);
+   plug the signal in: 47 stays 2 and the mean comes back. Normal mode, no signal: waits as before; with a signal that
+   stops after one record: the pass ends within about 140 ms and shows one record's mean.
+5. The mismatch screen (optional, needs 0x153A back in the flash, or any other bitstream): boot shows the notice with
+   the two words; Diagnostics opens and Back returns to it; Settings and USB drive work and the notice comes back; over
+   USB `s.info` shows fpga_mismatch, `s.capture()` fails with E_UNSUPPORTED detail 1, GET_HEALTH / READ_SCREEN / SAVE_REPORT
+   work. Rollback to 0x153B as docs/hardware-status.md says.
+Regression signs: 46 = 1 with 47 = 0 at 1 MSa/s (the plan not reaching the MCU path), a pass over 100 ms with a signal
+present (the deadline wait instead of the record), a shifted edge between Average on / off (the mean built from a wrong
+record start), GET_INFO 76 bytes.
+
+**Cruft audit addendum (coordinator 23:29, docs/plans/fpga-0x153c.md section 13).** 0x53 bits 3 / 4 are written 0
+(`PC_DECIM_FLAGS` = `PC_DECIM_SWAP`; the NEG defines, the settings-word bits and `pc_decim_config`'s per-bitstream mask are
+gone; SET_DECIM accepts flags bits 1 / 2 and drops them). The 0x3C writer was only a commented-out `fpga_set_battery_level`
+(and its commented call and prototype): deleted; no 0x41 reader exists in the tree (touchpanel.c's 0x3C / 0x41 are GT911
+configuration bytes). Dividers: the UI table's largest is **399,999** (500 Sa/s, indices 17..28; the audit's 199,999 is the
+short time bases' maximum), the Bode planner's largest is 524,287 (1 Hz), the auto-setup table smaller; all within the 20
+bits the FPGA compares. `PC_DIVIDER_MAX` 0xFFFFF (pc_decim.h): SET_TIMEBASE mode 1 refuses more with E_BAD_ARG detail 4
+(the one path that took any u32); test_session `test_timebase` asserts the bound, the refusal and the mock's copy of the
+UI table, test_bode_sweep `test_divider_bound` the planner.
+
+**Open**
+- Queue item "0x153B+: the deadline force must write 0x0E = 0 too" (fpga-gen13): `pc_hal_force` is still 0x1A = 0 alone;
+  `pc_hal_force_stop` was removed with the geometry, so the fix is now two lines in `pc_hal_force` (0x0E = 0 first) plus
+  the test_fpga_bus model check. Not done here (not in the brief).
+- `docs/guide/first-run.md` and `docs/guide/screens.md` (docs-one's) still describe the older behaviour; the texts for
+  them are in this branch's report.
+- mcp: `server.py` shows the mismatch caveat only once mcp-soft wires `Profile.mismatch_caveat()` in (fw-one-mcp's report).
