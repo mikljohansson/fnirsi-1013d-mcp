@@ -55,7 +55,7 @@ the 8 MiB start. Copy your files back after the card is written.
     On Windows, `Get-FileHash -Algorithm SHA256 <file>` in PowerShell (or `certutil -hashfile <file> SHA256`) prints
     the hash to compare with the file's line in `SHA256SUMS`.
 
-2. Flash the FPGA bitstream, **0x153B**. [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each
+2. Flash the FPGA bitstream, **0x153D**. [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each
    release, names the file, the programmer wiring, the backup, the write, the check and the way back. The config flash
    is wired only to the FPGA, so this needs the SPI programmer on the 2x3 header. A wrong pin or 5 V logic can damage
    the board. The FPGA comes before the card: with any other bitstream in it, this firmware only shows a banner.
@@ -91,7 +91,7 @@ the 8 MiB start. Copy your files back after the card is written.
 
 ## Which bitstream
 
-This release runs with bitstream 0x153B only. An older or newer bitstream shows a banner that names the one needed
+This release runs with bitstream 0x153D only. An older or newer bitstream shows a banner that names the one needed
 ([First run](first-run.md)). The hashes are in [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md).
 
 ## The MCP server (optional)

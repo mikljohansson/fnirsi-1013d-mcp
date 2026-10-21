@@ -33,7 +33,7 @@ Sources, which you should open when you need the detail: [Install](install.md) (
     - Ask for a photo of the area around the flash chip and the header, and have them read the chip marking.
       [Hardware preparation](../hardware-prep.md), sections 1.2 and 3a, has the detail.
 3. **Which 3.3 V SPI programmer do they have?** The FPGA bitstream is required: the firmware runs only with the
-   bitstream of its release (0x153B) and shows a banner on any other. Flashing it needs six pins soldered to the 2x3
+   bitstream of its release (0x153D) and shows a banner on any other. Flashing it needs six pins soldered to the 2x3
    header from the back of the board, the pinout found by continuity, and a 3.3 V programmer: the FT2232D route in
    `BITSTREAMS.md` is the tested one; a plain CH341A can drive 5 V on the data lines and has killed a flash
    ([Hardware preparation](../hardware-prep.md), section 2.2).
@@ -70,7 +70,7 @@ prints the hash; compare it by eye with the line for that file in `SHA256SUMS`.
 
 ## The bitstream
 
-Only on an AL3A10 board, only with a 3.3 V programmer. The firmware runs only with bitstream **0x153B** and shows a
+Only on an AL3A10 board, only with a 3.3 V programmer. The firmware runs only with bitstream **0x153D** and shows a
 banner on any other, so the FPGA comes before the card. The config flash is wired only to the FPGA, so the scope
 cannot write it itself. Follow [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "How to flash", step by step; in
 short, with the FT2232D tool from a checkout of the release tag (on Windows, with the FTDI driver that comes with the
@@ -103,7 +103,7 @@ python firmware/tools/spiflash_d2xx.py wiring
     reports the chip identical to the file. **On any error do not power-cycle the scope**: write the backup from
     step 3 back first (Rollback below).
 5. Disconnect the programmer and switch the scope off. Do not start the stock firmware now: it needs the stock
-   bitstream. Go on with the card; after the first boot, Menu > Diagnostics, Status, shows FPGA 0x153B with its
+   bitstream. Go on with the card; after the first boot, Menu > Diagnostics, Status, shows FPGA 0x153D with its
    features. A bootloader older than v0.8 hangs on any custom bitstream; the card from step 4 below carries v0.8.
 
 ## The card

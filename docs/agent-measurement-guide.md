@@ -160,7 +160,7 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 | 20000 (10 kSa/s) | 15.1 | 15.4 | CIC2: 15.4 |
 | 100000 (2 kSa/s) | 15.6 (storage) | 15.2 (storage) | CIC2: 15.2 |
 
-## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C)
+## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C and later; 0x153D is the bitstream of release 0.3.0)
 
 `scope_info` caps `TRIG_TYPES`, `HOLDOFF`, `COUNTER`, `PEAK_DETECT` (`scope_status` features `trig_types`, `counter`,
 `peak`). Not yet benched on the unit when this was written: say so with numbers from them.
@@ -176,7 +176,7 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   at 10 MSa/s is 75 words: fine; at 1 kSa/s it is below one word). `hold_off` (seconds, 5 ns steps) blocks every
   trigger for that long after a record's trigger, across re-arms and segments: with `scope_capture_segments` on a
   pulse train, hold-off 2.5 ms on 1 kHz pulses keeps every third one. Every change through `scope_set_trigger`
-  clears a hold-off still running at the next capture. Runt / window triggers need the 0x153E bitstream.
+  clears a hold-off still running at the next capture.
 - **The counter** (`scope_counter`): frequency, period, positive width, duty and the raw min / max of CH1, CH2 or EXT,
   counted by the FPGA at 200 MHz over a gate of 10 ms, 100 ms (boot) or 1 s; no capture needed and it does not
   disturb one. Resolution is one 5 ns clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s); the 50 MHz crystal
@@ -197,7 +197,7 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 ## 3d. The logger and chirps (protocol 1.27, FPGA 0x153D)
 
 `scope_info` caps `LOGGER` (`scope_status` features `logger`). Simulator only when this was written: say so with numbers
-from them. There is no pulse-pattern tool: the 0x153D pattern generator was cut (it did not fit the FPGA); the
+from them. There is no pulse-pattern tool: a pattern generator was cut (it did not fit the FPGA); the
 calibration pin gives the square of `scope_generator` only.
 
 - **Log for a long time** (`scope_log`, `scope_log_status`, `scope_log_stop`): when a record of 16,382 samples is not
