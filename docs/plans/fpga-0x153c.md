@@ -2,7 +2,8 @@
 
 > **Owner decisions 2026-10-21:** the pattern generator, its trigger engine and the marker source were cut from 0x153D at
 > 15:55 (the design did not fit; the generator is the fractional square only). 0x153E is not built for 0.3.0 (16:15): runt,
-> window and the pulse-width range are dropped; both-core triggering stays a later candidate. The rest of this document is
+> window and the pulse-width range are dropped; both-core triggering stays a later candidate, planned with the compaction
+> candidates in `docs/plans/roadmap.md` section 6 "A future FPGA 0x153E". The rest of this document is
 > the design record as planned.
 
 Design and contract document for the bitstream generations after 0x153B (fpga-spec, 2026-10-20). It lets several
