@@ -297,6 +297,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-left and fw-diag merged 17:4x (99d38c8): fw-left removed the always-true capability tests (bode has_fir, pc_dec_has,
+  the GEN_DDS / EXT_TRIGGER / DECIM menu features, SET_DECIM's peak caps test), ACAL_E_GAIN_NONE (17 reserved), FORCE on a
+  sequencer run answers E_STATE 0; open: pc_decim_config's capability levels with the mcp. fw-diag: the mismatch notice
+  rebuilds its page after Diagnostics (the taps hit the Diagnostics page's areas; not an FPGA wait), the calibration class
+  probe off under the notice. Host tests green, check_vectors OK. 0.2.105 re-pinned from 99d38c8: 810,496 B, sha256
+  d7935f94064061f46dd6cc3eebdfaf29d68aca07d62894c5c33c2fba066edb43, backups/fw-0.2.105_d7935f94.bin (supersedes 8f92c748).
+  docs-153d merged 17:3x (991b2da): the user docs name 0x153D as the release's bitstream.
 - docs-153d (Sonnet, dispatched 17:31, branch docs-153d) and fw-left (Opus, dispatched 17:31, branch fw-left), owner 17:31 "do the
   leftovers with Sonnet and Opus agents": docs-153d makes the user-facing docs name 0x153D as the release's bitstream (install,
   agent-runbook, first-run, skills, README; no invented hashes; no patterns / runt / window / 0x153E); fw-left removes
