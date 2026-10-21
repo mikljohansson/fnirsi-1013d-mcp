@@ -263,7 +263,7 @@ module tb;
       end
       $display("%0s  K %0d fir %0d D %0d S %0d order %0d  done %0d ta %0d  words %0d  bad %0d (first %0d last %0d)  0xFFFF %0d  expect %04h/%04h  w0 %04h/%04h  wN %04h/%04h  0x29 %04h",
                label, k, fir, cur_d, cur_sh, order, done, ta, tot_w, nbad, first_bad, last_bad, nsat, e1, e2,
-               y1[0], y2[0], y1[tot_w - 1], y2[tot_w - 1], {dut.dec_on, dut.fir_en, dut.fir_act, dut.dec_neg_b, dut.dec_neg_a, dut.dec_swap, dut.dec_order, 2'b0, dut.dec_shift});
+               y1[0], y2[0], y1[tot_w - 1], y2[tot_w - 1], {dut.dec_on, dut.fir_en, dut.fir_act, 3'b000, dut.dec_order, 2'b0, dut.dec_shift});
       check(done == 1, "capture completed");
       if (expect_clean) check(nbad == 0, "record exact from word 0");
     end

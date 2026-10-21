@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x153B, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153C, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -64,6 +64,20 @@
 //    trigger_previous). Trigger hold-off: 0x1B (Atlan4 stored it unused) is a u32 in 5 ns units; from the trigger of
 //    a record no trigger is accepted until it has elapsed, across sequencer restarts and MCU re-arms (0x66 bit 0 lets
 //    the next 0x01 = 1 clear it). With 0x5E = 0 and 0x1B = 0 (power-on) the capture is cycle-identical to 0x153B.
+//  - 0x153C (C2, section 4): peak detect, 0x56 bit 1. Each 16-bit word per channel holds { max, min } of the raw codes
+//    of the K = 1 boxcar's window (N = 2 (floor(0x0D / 2) + 1) samples, both cores) at the boxcar's latency; the bit alone
+//    selects the 16-bit path (dec_on carries it, 0x53 may stay 0), the FIR is off while it is set, and the 16-bit trigger
+//    compares the window max (rising) / min (falling) against 0x55 = level << 8. Read 0x29 byte 1 bits 7 / 6.
+//  - 0x153C (C3, section 5): hardware counter, 0x61 gate / source, 0x62 level / hysteresis, read 0x35 (16 bytes: flags,
+//    sequence, E, T, W, min, max from one snapshot). It runs beside the capture and never touches it.
+//  - 0x153C (C0, section 13, the one-bitstream rule): registers our firmware never writes or reads are gone: the touch
+//    panel address (0x3C / 0x41), the live ADC reads 0x24..0x27, 0x53 bits 4..2 (dec_swap, dec_neg_a / dec_neg_b; 0x29
+//    bits 4..2 read 0), 0x0F (sample_read_enable), trigger_detect_enable with trigger_rise / fall_enable, and the
+//    sample-rate divider is taken on 20 bits (div20: 0x0D keeps 4 bytes, bits 31..20 are ignored; the firmware caps the
+//    divider at 0xFFFFF). w_last exists for the testbenches only (`ifdef SIM). A firmware that never wrote those
+//    registers sees no change (the equivalence steps of tb/run.sh).
+//  - 0x153C (C4): version byte 0x3C. Capability bits the firmware derives from the word (docs/plans/fpga-0x153c.md 2.3):
+//    2 HOLDOFF, 20 TRIG_TYPES, 21 PEAK_DETECT, 22 COUNTER, and 1 GENERATOR (the DDS stays until 0x153D).
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -167,7 +181,6 @@ module decim_chan
   input  wire [7:0]  in_a,        //ADC core A
   input  wire [7:0]  in_b,        //ADC core B
   input  wire [1:0]  order,       //K, 1..3 (0 behaves as 1; its output is not used unless peak)
-  input  wire        swap,        //0: core B is the earlier sample of a pair, 1: core A
   input  wire [5:0]  shift,
   input  wire [5:0]  sv,          //valid chain s0 .. s5
   input  wire        peak,        //0x153C: out = { max, min } of the window's raw samples instead of the filter
@@ -186,8 +199,8 @@ reg [W-1:0] i1 = 0, i2 = 0, i3 = 0;
 reg [W-1:0] d0 = 0, d0p = 0, c1 = 0, c1p = 0, c2 = 0, c2p = 0, c3 = 0;
 reg [W-1:0] sh = 0;
 
-wire [7:0] xe = swap ? qa : qb;   //earlier sample of the pair
-wire [7:0] xl = swap ? qb : qa;   //later sample of the pair
+wire [7:0] xe = qb;               //earlier sample of the pair: core B (B first by T/2 since 0x1538; the 0x53 swap bit
+wire [7:0] xl = qa;               //later sample: core A                 went in 0x153C)
 
 assign pair_e = xe;
 assign pair_l = xl;
@@ -703,8 +716,6 @@ module fnirsi_1013D
   wire time_base_timeout;
 
   wire trigger_check_enable;
-  wire trigger_rise_enable;
-  wire trigger_fall_enable;
 
   wire cur_greater_equal_lev;      //Signal active when the current sample is less then or equal to the set trigger level
   wire prev_less_equal_lev;        //Signal active when the previous sample is less then or equal to the set trigger level
@@ -733,9 +744,8 @@ module fnirsi_1013D
 
   reg [15:0] display_brigthness = 0;       //Display brightness control
 
-  reg [15:0] touch_panel_address = 0;      //Data written with command 0x3C and read with 0x41
-
-  reg [31:0] sample_rate_divider = 0;      //For controlling the sample rate a large divider
+  reg [31:0] sample_rate_divider = 0;      //For controlling the sample rate a large divider (0x0D, 4 bytes; 0x153C: only
+                                           //bits 19..0 are used, div20)
 
   reg [31:0] time_base_set = 0;            //Set by the MCU a value to count up to before trigger can get valid?
   reg [31:0] time_base_cnt = 0;            //Counter running on the sample write clock to count up to the set value?
@@ -762,11 +772,10 @@ module fnirsi_1013D
   reg relay2_3 = 0;
   reg ac_dc_2  = 0;
 
-  reg [31:0] sample_rate_counter = 0;      //Counter for making the sample rate
+  reg [19:0] sample_rate_counter = 0;      //Counter for making the sample rate (0x153C: 20 bits, as the compared divider)
 
   reg sample_write_clock = 0;              //Free running clock on which the samples are taken
   reg sample_write_enable = 0;             //Flag to allow writing the samples or not (Read with command 0x0A)
-  reg sample_read_enable = 0;              //Flag to allow reading of the samples by the MCU. (Written with command 0x0F)
   reg sample_system_reset = 0;             //Set by the MCU to force a reset of the sampling system
   reg sample_system_state = 0;             //Flag read by the MCU to check the reset state
 
@@ -777,7 +786,6 @@ module fnirsi_1013D
   reg [12:0] sample_read_offset = 0;       //An address offset for the reading of the data set by the MCU command 0x1F
 
   reg sampling_triggered = 0;              //Set when a trigger has occured
-  reg trigger_detect_enable = 0;           //Set when a falling edge trigger occurs
   reg sampling_half_way = 0;               //Set when half the memory has been filled with samples
 
   reg trigger_mode = 0;                    //0 == auto mode and 1 == normal mode.
@@ -803,9 +811,7 @@ module fnirsi_1013D
 
   //Decimation filter (0x1534)
   reg [1:0]  dec_order = 0;                //Command 0x53 bits 1..0: 0 = sample skipping (0x1533), 1 = boxcar, 2 = CIC2, 3 = CIC3
-  reg        dec_swap = 0;                 //Command 0x53 bit 2: 1 = core A is the earlier sample of a pair
-  reg        dec_neg_a = 0;                //Command 0x53 bit 3: read back in 0x29, no effect since 0x153A
-  reg        dec_neg_b = 0;                //Command 0x53 bit 4: read back in 0x29, no effect since 0x153A
+                                           //0x153C: 0x53 bits 4..2 (dec_swap, dec_neg_a, dec_neg_b) are gone, 0x29 reads 0
   reg [5:0]  dec_shift = 0;                //Command 0x54: output = min(65535, filter >> dec_shift)
   reg [15:0] trigger_level16 = 0;          //Command 0x55: trigger level on the 16-bit samples (K >= 1)
 
@@ -1252,14 +1258,18 @@ freq_generator_dds_pwm u_freq
   //Without it the maximum output would be 50MHz.
   //With the decimation filter on, the ADCs and the write clock always run at full rate
   //(divider forced to 0 on the static side of the compare, off the timed counter path).
-  wire [31:0] sample_rate_divider_eff = dec_on ? 32'd0 : sample_rate_divider;
+  //0x153C (div20): the compare, the decimator's P count and the FIR eligibility take the divider's low 20 bits; bits
+  //31..20 of 0x0D are ignored (the firmware's largest divider is 199,999 and it rejects values above 0xFFFFF). The
+  //compare chain is 12 bits shorter: it was the clk_200MHz lottery path of 0x1532 and later.
+  wire [19:0] div20 = sample_rate_divider[19:0];
+  wire [19:0] sample_rate_divider_eff = dec_on ? 20'd0 : div20;
 
   assign sample_clock_enable = sample_rate_divider_eff < (sample_rate_counter);
 
   //0x1538: the enable of the cycle after this edge is divider < counter after this edge, where the counter becomes
   //1 (enable now) or counter + 1, so: enable now ? divider == 0 : divider <= counter
   always @(negedge clk_200MHz)
-    sce_q <= sample_clock_enable ? (sample_rate_divider_eff == 32'd0) : (sample_rate_divider_eff <= sample_rate_counter);
+    sce_q <= sample_clock_enable ? (sample_rate_divider_eff == 20'd0) : (sample_rate_divider_eff <= sample_rate_counter);
 
 //-------------------------------------------------------------------------------------
 //Decimation filter control and data path (0x1534)
@@ -1268,7 +1278,7 @@ freq_generator_dds_pwm u_freq
 //which the output sample is written to memory and the capture logic advances (swc_adv).
 //With K = 0 swc_adv is constant 1, so every capture register behaves as in 0x1533.
 
-  reg [30:0] dec_pc = 0;
+  reg [18:0] dec_pc = 0;                   //0x153C: 19 bits (P from div20)
   reg [6:0]  dec_sv = 0;
 
   //CIC compensation FIR (0x1535). fir_act: 0x56 bit 0, K >= 1 and N = 2P a multiple of 4 with
@@ -1278,16 +1288,16 @@ freq_generator_dds_pwm u_freq
   //CIC sample they make is the newest one of an output pair. dec_wr then comes from the FIR,
   //still once per P write clocks. With fir_act = 0 every 0x1534 register and output is unchanged.
   //0x153C: the FIR is off while peak detect is on (peak_act): the words are { max, min }, not filter outputs.
-  wire        fir_ok = fir_en & ~peak_en & dec_on & sample_rate_divider[1] & (sample_rate_divider >= 32'd14);
+  wire        fir_ok = fir_en & ~peak_en & dec_on & div20[1] & (div20 >= 20'd14);
   wire        peak_act = peak_en & dec_on;   //0x153C: peak detect replaces the filter (CIC and FIR); = peak_en, since dec_on carries it
   reg         fir_act = 0;
-  reg [30:0]  fir_hp = 0;
+  reg [18:0]  fir_hp = 0;
   reg [7:0]   dec_t = 0;
   wire [15:0] cic_out1, cic_out2, fir_out1, fir_out2;
   wire [7:0]  pair_e1, pair_l1, pair_e2, pair_l2;   //0x153C: the captured pairs (earlier, later) for the counter
   wire        fir_done1, fir_done2;
 
-  wire [30:0] dec_ph = sample_rate_divider[31:1];
+  wire [18:0] dec_ph = div20[19:1];
   wire dec_wr  = fir_act ? fir_done1 : dec_sv[6];
   assign swc_adv = ~dec_on | dec_wr;
 
@@ -1305,7 +1315,7 @@ freq_generator_dds_pwm u_freq
       swc_adv_q   <= swc_adv;
 
       fir_act     <= fir_ok;
-      fir_hp      <= dec_ph[30:1] + 31'd1;
+      fir_hp      <= dec_ph[18:1] + 19'd1;
       dec_t       <= { dec_t[6:0], (dec_pc == 0) };
     end
 
@@ -1315,7 +1325,6 @@ freq_generator_dds_pwm u_freq
     .in_a  (adc1A_w),
     .in_b  (adc1B_w),
     .order (dec_order),
-    .swap  (dec_swap),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
     .peak  (peak_act),
@@ -1331,7 +1340,6 @@ freq_generator_dds_pwm u_freq
     .in_a  (adc2A_w),
     .in_b  (adc2B_w),
     .order (dec_order),
-    .swap  (dec_swap),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
     .peak  (peak_act),
@@ -1499,10 +1507,6 @@ assign sampling_enable = ~(
   assign cur_greater_equal_lev = trigger_data >= trigger_level_eff;
   assign cur_less_equal_lev = trigger_data < trigger_level_eff;
 
-// Enable signals
-  assign trigger_rise_enable = (~trigger_edge & prev_less_equal_lev) | trigger_detect_enable;
-  assign trigger_fall_enable =  (trigger_edge & ~prev_less_equal_lev) | trigger_detect_enable;
-
 // Rising edge: previous ≤ level, current ≥ level (ADC trigger, not when EXT is selected)
   assign trigger_rise_detect = (~trigger_ext & ~trigger_edge & prev_less_equal_lev & cur_greater_equal_lev);
 
@@ -1511,13 +1515,10 @@ assign sampling_enable = ~(
 
 
   always @(posedge clk_200MHz) begin			//clk_RAM  sample_write_clock
-    if(cap_rst200 == 1) begin
+    if(cap_rst200 == 1)
         sampling_triggered <= 0;
-        trigger_detect_enable <= 0;
-    end else if(trigger_check_enable == 1) begin
+    else if(trigger_check_enable == 1)
         sampling_triggered <= sampling_triggered | trigger_rise_detect | trigger_fall_detect | ext_trigger_detect;
-        trigger_detect_enable <= trigger_rise_detect | trigger_fall_detect | ext_trigger_detect;
-    end
   end
 
 //------------------------------------------------
@@ -1689,13 +1690,16 @@ assign sampling_enable = ~(
 //The address is latched on the stop edge itself (sample_write_enable still 1, the last word written on this edge at
 //sample_write_address, so W = sample_write_address + 1) and frozen afterwards, like a triggered record's: a 0x0E or
 //0x1A write before the firmware reads 0x14 no longer moves it (0x1532..0x153A followed trigger_read_address again).
-//The write address counter runs on as before. w_last (the address after the last word written) is for the testbenches.
+//The write address counter runs on as before. w_last (the address after the last word written) is for the testbenches
+//(0x153C: `ifdef SIM, tb/run.sh compiles with -DSIM; not in the bitstream).
 
+`ifdef SIM
   reg  [12:0] w_last = 0;
 
   always @(posedge sample_write_clock)
     if(swc_adv && sample_write_enable)
       w_last <= sample_write_address + 13'd1;
+`endif
 
   always @(posedge sample_write_clock)
     begin
@@ -1749,7 +1753,7 @@ assign sampling_enable = ~(
       else if(seq_rst_c)
         seg_base_s <= seq_wrap_s ? 13'd0 : seg_base_s + seg_mask_s + 13'd1;
 
-      ts_inc <= { {1'b0, sample_rate_divider_eff} + 33'd1, 1'b0 };
+      ts_inc <= { {13'd0, sample_rate_divider_eff} + 33'd1, 1'b0 };
       if(sample_system_reset == 1)
         ts_cnt <= 0;
       else
@@ -2301,7 +2305,7 @@ assign sampling_enable = ~(
 
   assign sample_read_address = sample_read_addr_n;
 
-  assign sample_read_clock   = sample_read_enable ? i_mcu_clk : i_mcu_clk;
+  assign sample_read_clock   = i_mcu_clk;    //0x153C: 0x0F (sample_read_enable) is gone; both arms of its mux were i_mcu_clk
 
 //-------------------------------------------------------------------------------------
 //Sampling reset state delay counter
@@ -2336,8 +2340,8 @@ assign sampling_enable = ~(
 
 //-------------------------------------------------------------------------------------
 //State machine for the multiple byte write and read of data
-//Only used when writing data for the commands 0x0D, 0x0E, 0x1F, 0x32, 0x35, 0x38 and 0x3C
-//Or when reading data for the commands 0x06, 0x14 and 0x41
+//Used when writing data for the multi-byte commands listed below
+//Or when reading data for the multi-byte reads 0x06, 0x14, 0x29, 0x2A, 0x34, 0x35 and 0x36
 
   always @(posedge i_mcu_clk)
     begin
@@ -2345,13 +2349,13 @@ assign sampling_enable = ~(
         mcu_state <= 3'h0;
       else if((((mcu_command == 8'h0B) | (mcu_command == 8'h0C) | (mcu_command == 8'h0D) | (mcu_command == 8'h0E) 
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
-              | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38) | (mcu_command == 8'h3C)
+              | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38)
               | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
               | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)
               | (mcu_command == 8'h5F) | (mcu_command == 8'h60)                                     //0x153C triggers
               | (mcu_command == 8'h62)                                                               //0x153C counter
               ) & i_mcu_rws) |
-              (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29) | (mcu_command == 8'h41)
+              (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29)
               | (mcu_command == 8'h2A) | (mcu_command == 8'h36)
               | (mcu_command == 8'h34)                                                               //0x153C triggers
               | (mcu_command == 8'h35)                                                               //0x153C counter
@@ -2425,7 +2429,7 @@ assign sampling_enable = ~(
                 endcase
               end
 
-            //Loading of the four bytes of the sample rate divider high byte first
+            //Loading of the four bytes of the sample rate divider high byte first (0x153C: bits 31..20 are ignored, div20)
             8'h0D:
               begin
                 case(mcu_state)
@@ -2454,10 +2458,6 @@ assign sampling_enable = ~(
                     time_base_set[7:0] <= io_mcu_data;
                 endcase
               end
-
-            //Setting start of the conversion
-            8'h0F:
-              sample_read_enable <= io_mcu_data[0];
 
             //Setting the trigger source: 0 = channel 1, 1 = channel 2, 2 = EXT (3 reserved, acts as EXT)
             //0x153C: the EXT edge path (trigger_ext) is taken for the edge type only; a qualified type on EXT goes through
@@ -2564,17 +2564,6 @@ assign sampling_enable = ~(
                 endcase
               end
 
-            //Loading of the two bytes of the touch panel read address high byte first
-            8'h3C:
-              begin
-                case(mcu_state)
-                  4'h0:
-                    touch_panel_address[15:8] <= io_mcu_data;
-                  4'h1:
-                    touch_panel_address[7:0] <= io_mcu_data;
-                endcase
-              end
-
             //Setting the output on or tristate
             8'h50:
               gen_out_enable <= io_mcu_data[0];
@@ -2609,14 +2598,9 @@ assign sampling_enable = ~(
                 endcase
               end
 
-            //Decimation filter order and core order (0x1534); bits 3 / 4 have no effect since 0x153A
+            //Decimation filter order (0x1534); bits 7..2 are ignored (0x153C: the swap and falling-edge bits are gone)
             8'h53:
-              begin
-                dec_order <= io_mcu_data[1:0];
-                dec_swap  <= io_mcu_data[2];
-                dec_neg_a <= io_mcu_data[3];
-                dec_neg_b <= io_mcu_data[4];
-              end
+              dec_order <= io_mcu_data[1:0];
 
             //Decimation filter output shift
             8'h54:
@@ -2802,7 +2786,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h3B;
+                    o_mcu_data <= 8'h3C;
                 endcase
               end
 
@@ -2845,36 +2829,20 @@ assign sampling_enable = ~(
             8'h23:
               o_mcu_data <= o_adc2B_d;
 
-            //Reading of the sample data for channel 1 ADC 1 
-            8'h24:
-              o_mcu_data <= adc_q1[7:0];               //0x153A: the pin as the IOB register took it
-
-            //Reading of the sample data for channel 1 ADC 2
-            8'h25:
-              o_mcu_data <= adc_q1[15:8];               //0x153A: the pin as the IOB register took it
-
-            //Reading of the sample data for channel 2 ADC 1
-            8'h26:
-              o_mcu_data <= adc_q1[23:16];               //0x153A: the pin as the IOB register took it
-
-            //Reading of the sample data for channel 2 ADC 2
-            8'h27:
-              o_mcu_data <= adc_q1[31:24];               //0x153A: the pin as the IOB register took it
-
             //Reading of the external trigger status
             //bit0 = filtered EXT pin level, bit1 = generator drives the pin, bit2 = EXT edge since the last reset
             8'h28:
               o_mcu_data <= { 5'b0, ext_activity, gen_out_enable, ext_level };
 
             //Reading of the decimation geometry, two bytes
-            //byte 0: bit7 = 16-bit samples (K >= 1), bit4/bit3 = 0x53 bits 4/3 as written (no effect since 0x153A),
-            //bit2 = core order swap, bits 1..0 = K as written (0 with peak detect at K = 0, bit7 then still 1);
+            //byte 0: bit7 = 16-bit samples (K >= 1, or peak detect), bit6 = 0x56 bit 0, bit5 = FIR active, bits 4..2 = 0
+            //(0x153C: the 0x53 swap / falling-edge bits are gone), bits 1..0 = K as written (0 with peak detect at K = 0);
             //byte 1: bit7 = peak detect active, bit6 = 0x56 bit 1 as written (0x153C), bits 5..0 = shift
             8'h29:
               begin
                 case(mcu_state)
                   4'h0:
-                    o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
+                    o_mcu_data <= { dec_on, fir_en, fir_act, 3'b000, dec_order };
                   4'h1:
                     o_mcu_data <= { peak_act, peak_en, dec_shift };
                 endcase
@@ -2992,16 +2960,6 @@ assign sampling_enable = ~(
             8'h32:
               o_mcu_data <= seq_lat[63:56];
 
-            //Reading of the touch panel address needs loading of high byte first
-            8'h41:
-              begin
-                case(mcu_state)
-                  4'h0:
-                    o_mcu_data <= touch_panel_address[15:8];
-                  4'h1:
-                    o_mcu_data <= touch_panel_address[7:0];
-                endcase
-              end
           endcase
         end
     end

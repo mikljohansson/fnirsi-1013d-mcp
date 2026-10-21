@@ -12,7 +12,7 @@ DUT=${DUT:-$REPO/fpga/al3/src/zaklad.v}
 REF1538_REV=${REF1538_REV:-ce943bf}
 mkdir -p "$WORK"
 comp() {  # <out.vvp> <design.v>
-  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$1" "$HERE/sim_models.v" "$2" "$HERE/tb_mcuread.v" \
+  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$1" "$HERE/sim_models.v" "$2" "$HERE/tb_mcuread.v" \
     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
 }
 RC=0

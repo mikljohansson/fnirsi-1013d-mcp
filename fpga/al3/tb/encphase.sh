@@ -43,7 +43,7 @@ EOF
 }
 run() {  # <name> <dut.v> <plusargs...>
   local name=$1 dut=$2; shift 2
-  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/$name.vvp" "$HERE/sim_models.v" "$dut" "$HERE/tb_encphase.v" \
+  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/$name.vvp" "$HERE/sim_models.v" "$dut" "$HERE/tb_encphase.v" \
     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits|is not used' || true
   vvp -n "$WORK/$name.vvp" +seed=$SEED "$@" > "$WORK/$name.log"
   echo "== $name: $(grep -E 'polarity changed' "$WORK/$name.log") $(grep RESULT "$WORK/$name.log")"
