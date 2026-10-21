@@ -15,12 +15,13 @@ import pytest
 
 from fnirsi1013d import protocol as P
 from fnirsi1013d.scope import Scope
-from fnirsi1013d.simulator import SimConfig, TrigQual, TriggerState, gate_count, parse_signal, signal_edges
+from fnirsi1013d.simulator import (SimConfig, TrigQual, TriggerState, gate_count, parse_signal, peak_mid_codes,
+                                   signal_edges)
 from fnirsi1013d.transport import DeviceError
 from test_server import client_for
 
-VECTORS = {v["name"]: v for v in json.loads(
-    (Path(__file__).resolve().parents[2] / "docs" / "protocol-vectors.json").read_text())["vectors"]}
+VECTOR_FILE = json.loads((Path(__file__).resolve().parents[2] / "docs" / "protocol-vectors.json").read_text())
+VECTORS = {v["name"]: v for v in VECTOR_FILE["vectors"]}
 
 
 def payload(name: str) -> bytes:
@@ -357,6 +358,41 @@ def test_counter_on_the_simulator(sim_factory):
         s.close()
 
 
+def test_counter_level_follows_the_trigger_level(sim_factory):
+    """fw-c7: level 0 follows the UI trigger level (the boot state; hysteresis may exceed it), the response's level is
+    the one in effect; a pinned level stays until level 0; Scope.read_counter keeps the follow state across gate /
+    source changes instead of pinning the level it read back."""
+    s, srv = _scope(sim_factory, signal="square:freq=10kHz,amp=1,duty=0.2")
+    try:
+        s.set_channel(0, range_index=1)
+        s.set_trigger(source=0, level=128)
+        r = s.read_counter()
+        assert r.level == 128 and r.hysteresis == P.COUNTER_DEFAULT_HYST and r.valid and srv.device.counter_level == 0
+        s.set_trigger(level=135)  # the marker moved: the counter follows (the firmware's next pass)
+        assert s.read_counter().level == 135
+        resp = P.CounterResp.unpack(s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 0, 200).pack()).payload)
+        assert (resp.level, resp.hysteresis) == (135, 200)  # hysteresis > level is fine while following
+        r = s.read_counter(hysteresis=6)
+        assert (r.level, r.hysteresis) == (135, 6) and r.valid and s.counter_level_cfg == P.COUNTER_LEVEL_FOLLOW
+        r = s.read_counter(level=140)  # pinned
+        assert r.level == 140 and s.counter_level_cfg == 140
+        s.set_trigger(level=132)
+        assert s.read_counter().level == 140
+        r = s.read_counter(gate=3)  # a gate change keeps the pin
+        assert (r.gate, r.level) == (3, 140)
+        r = s.read_counter(level=P.COUNTER_LEVEL_FOLLOW)
+        assert r.level == 132 and r.valid
+        r = s.read_counter(gate=2, source="CH1")  # and keeps following: the level read back is not pinned
+        assert r.level == 132 and srv.device.counter_level == P.COUNTER_LEVEL_FOLLOW
+        s.set_trigger(level=130)
+        assert s.read_counter().level == 130
+        with pytest.raises(DeviceError) as e:  # a non-zero level still refuses hysteresis above it
+            s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 10, 20).pack())
+        assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 4)
+    finally:
+        s.close()
+
+
 def test_peak_detect_on_the_simulator(sim_factory):
     """10 ns spikes every 1 us at 1 MSa/s: legacy sampling misses most, peak detect keeps every one; the layouts."""
     s, srv = _scope(sim_factory, signal="gate:period=1us,width=10ns,high=1,low=0", noise_lsb=0.5)
@@ -409,7 +445,7 @@ def test_peak_detect_on_the_simulator(sim_factory):
         assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 0)
         s.set_timebase(divider=0)  # 200 MSa/s: peak requested stays legacy (why 2)
         st = s.set_decim("peak")
-        assert st.filter_setting == "peak" and not st.next.peak and st.why == 2 and st.next_shift & P.DECIM_PEAK_EN
+        assert st.filter_setting == "peak" and not st.next.peak and st.why == 2 and st.next_shift == 0  # not written
     finally:
         s.close()
 
@@ -422,6 +458,81 @@ def test_peak_refused_without_the_cap(sim_factory):
         with pytest.raises(DeviceError) as e:
             s.t.request(P.Cmd.SET_DECIM, P.SetDecimReq(4, 0).pack())
         assert e.value.status == P.Status.E_UNSUPPORTED
+    finally:
+        s.close()
+
+
+def test_peak_with_the_fir_filter_as_the_firmware(sim_factory):
+    """fw-c6 h_set_decim: filter 4 with the FIR bit is E_BAD_ARG 1 (vector resp_set_decim_e_bad_arg_fir_peak); filter 4
+    keeps the Filter's K and FIR behind it while GET_DECIM masks the FIR bit; Scope.set_decim(4) drops the bit it
+    read back."""
+    s, srv = _scope(sim_factory)
+    try:
+        s.set_trigger(total_samples=3000, pretrigger_samples=100)
+        s.set_timebase(divider=19)
+        st = s.set_decim("cic2+fir")
+        assert st.flags & P.SetDecimReq.FIR and st.next.fir
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.SET_DECIM, P.SetDecimReq(P.DECIM_PEAK, P.SetDecimReq.FIR).pack())
+        assert (e.value.status, e.value.detail, e.value.text) == (P.Status.E_BAD_ARG, 1, "FIR with peak detect")
+        st = s.set_decim(P.DECIM_PEAK)
+        assert st.filter == P.DECIM_PEAK and not st.flags & P.SetDecimReq.FIR and st.next.peak and not st.next.fir_en
+        assert st.next_mode == 0x81 and st.next_shift == 0xC0
+        assert srv.device.settings.decim & P.DECIM_SET_FIR and srv.device.settings.decim & 3 == 2  # kept behind
+        with pytest.raises(DeviceError) as e:
+            s.t.request(P.Cmd.SET_DECIM, P.SetDecimReq(5, 0).pack())
+        assert e.value.text == "filter 0..3, 4 peak"
+    finally:
+        s.close()
+
+
+def test_peak_config_matches_the_firmware_vectors():
+    """docs/protocol-vectors.json "decim_peak" (gen_vectors.py from fw-c6's pc_decim.c): the configuration an arm
+    writes with peak requested. At divider 0 and over 8190 samples the record stays legacy and 0x56 bit 1 is not
+    written (shift byte 0x00, why 2 / 3); the FIR request is dropped; the settle is 11 N x 5 ns + 1 us."""
+    d = VECTOR_FILE["decim_peak"]
+    assert len(d["cases"]) >= 40 and {c["why"] for c in d["cases"]} == {0, 2, 3}
+    for c in d["cases"]:
+        fl = P.DECIM_SET_FIR if c["fir_req"] else 0
+        x = P.decim_config(P.DECIM_PEAK, fl, c["divider"], c["total"], P.DECIM_HAS_FIR | P.DECIM_HAS_CAPSTAGES)
+        got = (int(x.peak), x.k, x.n, x.why, x.status, x.shift_byte)
+        assert got == (c["peak"], c["k"], c["n"], c["why"], c["status"], c["shift_byte"]), c
+        assert (x.rate(c["divider"]), x.settle_us, x.ext_shift) == (c["rate"], c["settle_us"], c["ext_shift"]), c
+        assert (2 if x.peak_en else 0) == c["cmd56"], c
+    # the processed trace's midpoint (pc_peak_mid) through the mean of the two cores' Q16 correction
+    mn = np.array([p[0] for p in d["pairs"]])
+    mx = np.array([p[1] for p in d["pairs"]])
+    for k in d["corr"]:
+        got = peak_mid_codes(mn, mx, k["gain_a"], k["gain_b"], k["off_a"], k["off_b"])
+        assert got.tolist() == k["mids"], k
+
+
+def test_peak_volts_use_the_full_clock_class(sim_factory):
+    """fw-c6: a peak record's two bytes come from the 200 MSa/s stream, so the full class's correction applies while
+    GET_CAL at a divider > 0 reports the gated class (CAL_GATED, gain_a .. off_b). The host converts layout 3 with the
+    full class: 0.25 V reads 0.25 V where the gated class would be codes off, and the scope's midpoint trace (the full
+    correction, pc_peak_mid) agrees with the host's codes."""
+    unit = dict(zero_error=((-3.0, -5.0), (1.0, 2.0)), gated_zero_shift=((-0.8, -3.6), (0.4, -1.0)),
+                core_gain=(((1.020, 0.988), (1.002, 0.998)), ((0.995, 1.010), (1.0, 1.0))), noise_lsb=0.8)
+    s, srv = _scope(sim_factory, signal="dc:v=0.25", cal_v3=True, v4=((0.6, 0.002, 0.0, 0.4), (0.0, 0.0, 0.0, 0.0)),
+                    **unit)
+    try:
+        s.set_timebase(divider=19)
+        s.set_trigger(total_samples=4000, pretrigger_samples=100, mode=0)
+        s.set_decim("peak")
+        cal = s.get_cal(0, cached=False)
+        assert cal.cal_flags & P.CAL_GATED and s.current_clock_class() == P.CAL_CLASS_FULL
+        cap = s.capture(["CH1"], timeout_s=2)
+        c = cap.channels["CH1"]
+        assert cap.peak and "full clock" in c.scale.source
+        lsb = c.volts_per_lsb
+        assert abs(float(c.volts.mean()) - 0.25) / lsb < 0.3
+        assert float(c.min_volts.mean()) < 0.25 < float(c.max_volts.mean())
+        gated = s.scale(0, c.config, P.CAL_CLASS_GATED)
+        mid_raw = (c.min_codes.astype(float) + c.max_codes) / 2
+        assert abs(float(gated.volts_mean_raw(mid_raw).mean()) - 0.25) / lsb > 1.0
+        _hdr, data = s.read_trace(["CH1"])
+        assert abs(float(data[0][1].astype(float).mean()) - float(c.codes.mean())) < 0.5
     finally:
         s.close()
 
@@ -478,11 +589,14 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             assert r["duty"] == pytest.approx(0.2) and r["period_s"] == pytest.approx(100e-6) and r["valid"]
             assert r["vmax"] > r["vmin"] and r["vpp"] > 1.5 and "5 ns clock" in r["resolution"]
             assert r["gate_s"] == 0.1 and r["readings"][0]["edges"] == 1000 and Path(r["file"]).is_file()
+            assert r["level_follows_trigger"]
             r = await c.call("scope_counter", gate="1s", source="CH2", level=1.5, readings=2)
             assert r["source"] == "CH2" and len(r["readings"]) == 2 and r["frequency_hz"] == pytest.approx(10e3)
-            assert r["frequency_spread_hz"] == 0
+            assert r["frequency_spread_hz"] == 0 and not r["level_follows_trigger"]
             rep = await c.call("scope_report", source=r["file"])
             assert rep["kind"] == "counter" and rep["table"][0]["frequency"].startswith("10 kHz")
+            r = await c.call("scope_counter", level="trigger")
+            assert r["level_follows_trigger"] and r["level_code"] == srv.device.settings.trigger.level
             # peak detect through scope_capture: one shot, the Filter restored
             await c.call("scope_set_timebase", sample_rate="1MS/s")
             await c.call("scope_set_trigger", source="CH1", mode="auto", total_samples=3000)

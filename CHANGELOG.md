@@ -1519,6 +1519,13 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-10-21 (mcp-c8b): the host matches fw 0.2.104. `scope_counter`'s level follows the trigger level as the
+  firmware does at boot (a volts level pins it, `level='trigger'` follows again, `level_follows_trigger` in the
+  result); `Scope.read_counter` no longer pins the level it read back on a gate or source change (7360b62). Peak
+  detect: at divider 0 and over 8190 samples nothing is written (shift byte 0x00), the FIR request is dropped, the
+  settle is the firmware's; filter 4 with the FIR bit is refused as the firmware refuses it and `set_decim('peak')`
+  never sends it; the simulator's midpoint trace uses the full clock class (717ca16, 6fbd0ff). README: 35 tools in
+  the default profile (6a59730).
 - 2026-10-21 (mcp-c8, provisional, protocol 1.26 / FPGA 0x153C, docs/plans/fpga-0x153c.md item C8): the host side
   of the 0x153C generation. Trigger types (SET_TRIGGER2, byte-exact with fw-c5: `scope_set_trigger` gains `type`
   edge / pulse_width / nth_edge / timeout, `polarity`, `width`, `longer`, `n`, `idle` in seconds converted to
