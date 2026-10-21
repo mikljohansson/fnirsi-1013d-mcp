@@ -297,6 +297,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-c4's rerun on the final 0x153C source bd24bdf finished 16:5x: ALL PASS on both seeds (16 steps each, tb_fir 158 / 162
+  checks, counter 115); the run text in the manifest, fpga/al3/README.md and fpga/al3/AGENTS.md updated by the coordinator
+  (fpga-c4 was cut off by the 15:10 session limit and is retired). 0x153C stays unbenched until the owner's batch.
 - fw-105 (Opus explicitly, dispatched 16:52, branch fw-105): number the 0x153D firmware 0.2.105 (PC_FW_FPGA_VERSION 0x153D),
   remove the now-dead per-bitstream checks (the logger's -2 path, roll mode's "needs 0x153D"), fold the provisional
   CHANGELOG blocks into a 0.2.105 section, protocol row 67 numbered, firmware/AGENTS.md section 80 with the bench checklist.
