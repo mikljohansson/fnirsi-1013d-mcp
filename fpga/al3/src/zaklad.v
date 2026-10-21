@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x153C, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153D, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -2941,7 +2941,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h3C;
+                    o_mcu_data <= 8'h3D;
                 endcase
               end
 

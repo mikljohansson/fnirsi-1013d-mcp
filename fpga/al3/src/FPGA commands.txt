@@ -1,6 +1,7 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x3C (0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
+//  - 0x06 returns 0x15 0x3D (0x153D = 0x153C with the streaming logger, the pattern generator in place of the DDS
+//    and its trigger engine, see the 0x153D bullets below; 0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
 //    the cruft removal listed last below; 0x153B = 0x153A with records that end on the auto time-out or the forced stop
 //    reported at the write pointer; 0x153A = 0x1539 with the ADC data captured through IOB registers at a per-core stage
 //    (write 0x63, read 0x36 with outlier counters, write 0x64), B first by T/2 at every rate; 0x1539 = 0x1538 with the

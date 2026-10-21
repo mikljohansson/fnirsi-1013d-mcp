@@ -514,7 +514,7 @@ module tb;
     // Version word and geometry register
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153C, "cmd 0x06 reads 0x153C");
+    check(rd16_d == 16'h153D, "cmd 0x06 reads 0x153D");
     check(rd16_r == 16'h1533, "reference cmd 0x06 reads 0x1533");
     wr1(8'h53, 8'h00); wr1(8'h54, 8'h00);
     rd2(8'h29);

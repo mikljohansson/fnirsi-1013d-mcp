@@ -161,7 +161,7 @@ module tb;
         t_gap = 20.0 + (($random(seed) & 32'h7FFFFFFF) % 100);
         // version word: two bytes through mcu_state
         wr_cmd(8'h06); rd_byte; got = rd_d; rd_byte;
-        nd = ((got === 8'h15) && (rd_d === 8'h3C || rd_d === 8'h3B || rd_d === 8'h3A || rd_d === 8'h39 || rd_d === 8'h38)) ? 0 : 1;
+        nd = ((got === 8'h15) && (rd_d === 8'h3D || rd_d === 8'h3C || rd_d === 8'h3B || rd_d === 8'h3A || rd_d === 8'h39 || rd_d === 8'h38)) ? 0 : 1;
         // every lane, with and without the dummy strobe, 48 words from a random start
         for (rep = 0; rep < 2; rep = rep + 1)
           for (lane = 0; lane < 4; lane = lane + 1) begin

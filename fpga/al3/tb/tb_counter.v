@@ -255,7 +255,7 @@ module tb;
     wr1(8'h50, 8'h00);                                   // generator off: EXT is the pad
     ext_en = 1;
     rd2(8'h06);
-    check(rd16 == 16'h153B || rd16 == 16'h153C, "cmd 0x06 reads 0x153B or 0x153C");
+    check(rd16 == 16'h153B || rd16 == 16'h153C || rd16 == 16'h153D, "cmd 0x06 reads 0x153B .. 0x153D");
     check(dut.k_seq == 0 && dut.cnt_gate == 0 && dut.cnt_lvl == 0 && dut.cnt_hys == 0, "counter off at power-on, thresholds 0");
     // power-on read: nothing published, min reads 255, everything else 0
     rd_counter;
