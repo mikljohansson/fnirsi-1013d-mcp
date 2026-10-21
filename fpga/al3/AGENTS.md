@@ -4,6 +4,13 @@ Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
+- fpga-c1 (2026-10-20 night, branch `fpga-c1`): **0x153C item C1** (trigger types + hold-off, `docs/plans/fpga-0x153c.md`
+  section 10) implemented in `src/zaklad.v` and `tb/tb_trigtypes.v` (run.sh step 14), version byte still 0x3B until C4
+  integrates with C2 (peak detect) and C3 (counter). Section "0x153C C1 triggers, fpga-c1" below. **Not built for dist, not
+  flashed.**
+- fpga-c3 (2026-10-20, branch `fpga-c3`, not merged): 0x153C item C3, the hardware counter with min / max (0x61, 0x62,
+  read 0x35 = 16 bytes) as a block after `seq_lat`, `tb/tb_counter.v` = run.sh step 16, README section 13 (counter).
+  Version byte still 0x3B (C4 sets 0x3C). Section "0x153C C3 counter, fpga-c3" below.
 - fpga-gen13 (2026-10-20 evening): 0x153B was **flashed at 19:31** (verified `1391978c...3b88`; rollback = the pre-write
   backup `backups/fpga-flash_pre-0x153B_20261020-1931.bin` = the 0x153A padded image) and the bench of 19:52 read "every
   record spliced". The saved records hold **no signal** (code 128 +- 1 on both channels, probes off the post after the
@@ -259,7 +266,9 @@ References:
   `phase_acc < duty_threshold`), and `decim_chan` (0x1534 filter per channel: capture on either write-clock edge,
   polyphase (1+z^-1)^K prefilter, 3 integrators, decimation strobe, 3 combs, shift and saturation, all 48 bit),
   and `fir_chan` (0x1535 FIR per channel: 15 x 16-bit delay line, symmetric pre-add into an 8-entry shift register,
-  one inferred M18x18 with input and product registers, 37-bit accumulator, rounding, clamp; taps per K in `tap()`).
+  one inferred M18x18 with input and product registers, 37-bit accumulator, rounding, clamp; taps per K in `tap()`),
+  and `trig_qual` (0x153C trigger qualifier: pulse width / Nth edge / timeout state machine on one trigger stream;
+  one instance on the write clock for CH1 / CH2, one on `clk_200MHz` for EXT).
 - `pll main_clock`: 50 MHz `i_xtal` to `clk_200MHz` (clk0) and `clk_ADC` (clk1, 200 MHz at 90 degrees).
   IP in `al_ip/pll.v`.
 - Clock dividers: 50 MHz peripheral clock, PWM counters for the offsets (25 kHz) and the backlight.
@@ -301,7 +310,9 @@ References:
 - Command codes still free in the decoders (checked 2026-10-19, after 0x1536): writes 0x02-0x0A, 0x10-0x14, 0x18,
   0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x5E and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
   0x19-0x1F, 0x33-0x40, 0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26
-  differently, so prefer 0x2A and up, or 0x57 and up, for new codes.
+  differently, so prefer 0x2A and up, or 0x57 and up, for new codes. Since then: 0x63, 0x64 / read 0x36 (0x153A);
+  0x5E, 0x5F, 0x60, 0x66 / reads 0x34, 0x37 and the 0x1B meaning (0x153C C1); the 0x153C..0x153E allocation is the
+  table in `docs/plans/fpga-0x153c.md` section 2.
 
 ## Wanted next (priority order)
 
@@ -348,6 +359,164 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x153C C1 triggers, fpga-c1 (2026-10-20)
+
+Brief (coordinator): item C1 of `docs/plans/fpga-0x153c.md` section 10, exactly as its sections 2.1-2.4, 3 and 9.1
+specify: cherry-pick the trigger-type design of branch `gen8-features-wip` (commit 9de82ca, built on 0x1539) onto the
+0x153B source, move "longer" to 0x5E bit 3, add the 0x1B hold-off (3.6), 0x66 and read 0x37, gate the qualifier's fire
+with the 0x153B stop, rebase `tb_trigtypes.v` as run.sh step 14 with hold-off and stop cases, docs. The owner accepted
+the meaning change of 0x1B (contract question 1). RTL and testbench only; no flash, no dist, no version byte change.
+Branch `fpga-c1` from main 4b29d01. The full write-up is `README.md` "Changes" section 12; the registers are in
+`src/FPGA commands.txt`.
+
+**What is in `src/zaklad.v`** (C1 owns these blocks; C2 owns `decim_chan`, `dec_on` and the decimator control, C3 adds
+a block after `seq_lat`): module `trig_qual` after `fir_chan`; the registers `trig_type[2:0]`, `trig_pw_long`,
+`trig_pol`, `trig_src_ext`, `trig_n`, `trig_h`, `trig_typ2` / `q_on`, `ho_clr_req`, `ho_clr_t`, `ho_act` in the
+declarations (after `fir_en`); `trig_holdoff` replaces Atlan4's unused `hold_on_divider` (the 0x1B register); the EXT
+block gets the wires `ext_qev` / `q_fire_adc` after `ext_edge` and `(ext_edge | ext_qev)` in the `ext_pending` set; in
+the capture logic the hold-off block sits right before "Sampling write address counter" (its place matters only to
+TD's placer, see Build), `trigger_check_enable` carries `& ~ho_act`, `trigger_previous` loads the qualifier's decision
+for a qualified type, and the qualifier section (`q_hr_adc`, the two `trig_qual` instances, `ext_qev_r`) follows the
+`trigger_previous` block; the decoder gets 0x5E / 0x5F / 0x60 / 0x66 after 0x64, the 0x01 case consumes the 0x66
+request, 0x15 / 0x16 recompute `trigger_ext` / `trigger_edge`, the `mcu_state` list has separate lines for 0x5F / 0x60
+(writes) and 0x34 (read); the read mux gets 0x34 (3 bytes) and 0x37 after 0x36. The shared `dec_trig_sample` lines
+(about 1155) are **unchanged** on this branch: C2 carries its two-line peak compare there (its text references
+`peak_act`, which only C2 declares), so the merge takes C2's version without a conflict.
+
+**Semantics implemented** (deviations from the contract marked): 0x5E bits 2..0 type (0 edge, 1 pulse width, 2 Nth
+edge, 3 timeout; 4..7 act as edge, bit 2 read back in 0x37 bit 3), bit 3 longer; 0x5F u24 N; 0x60 u24 H; 0x16 the
+polarity per type; 0x15 bit 1 = EXT for the edge path only when the type is edge, else the EXT qualifier; read 0x34 =
+gen8's { 0, 0, counting, pulse began, EXT, longer, type[1:0] } + rem; 0x1B u32 hold-off in 5 ns clocks, loaded at the
+rise of `sampling_triggered`, masking `trigger_check_enable` for exactly 0x1B clocks, not reset by `cap_rst` or 0x01 = 1
+alone; 0x66 bit 0 = 1 makes the next 0x01 = 1 clear it (one-shot, consumed; a toggle handshake into clk_200MHz); read
+0x37 = { 0, 0, 0, hold-off running, type bit 2, 0, 0, 0 }. *Deviation 1*: 0x1B = 0 also releases a running timer at
+once (`ho_act = ho_run & ho_en`); the contract's 0x1B row says "0 = off" and names 0x66 as the only clear, so this is a
+superset (a firmware that turns the hold-off off is not held off for up to 21 s). *Deviation 2* (rebase note of 3.2
+taken further): the ADC qualifier stays in reset until the first `swc_adv` edge after a capture reset (`q_hr_adc`), so
+the type registers written inside the 0x01 = 1 window apply at every rate (the contract's 3.5 "no 0x01 = 1 window";
+gen8 kept a stale N at slow rates) and the first processed sample is word 0 of the capture in legacy and K >= 1 mode
+alike (gen8 processed the reset value of `trigger_data` first; observable only for a pulse that begins at word 0,
+before the pretrigger fills). The fire into `trigger_previous` is gated with `sample_write_enable` (3.2). `gap` in
+`trig_qual` is a register computed from the next value of `h` (identical on every `ce` clock; build b1 missed timing on
+the combinational chain).
+
+**Tests**: `tb/run.sh` step 14 `tb_trigtypes.v` (`ONLY=trigtypes`, about 200 s): 1293 checks per seed, PASS on seeds
+12345 and 4242; mutants caught: hold-off mask removed (9 failures), 0x66 clear not consumed (2), "longer" on bit 2
+(45), gen8's qualifier reset (1, the late-write case). The hold-off cases measure the trigger spacing on a 4 us square:
+8000 ns per segment without the hold-off, 20000 ns with 4.5 periods of it (segments, MCU re-arms, EXT, pulse width),
+12000 ns after the 0x66 clear and after 0x1B = 0. **Full `tb/run.sh`, 14 steps, ALL PASS on seeds 12345 (7538 s) and
+4242 (7355 s)**, finished 2026-10-21 00:35: ext 39, decim 98 + cic_model 1876 / 1873 samples, fir 163 / 165 + cic_model
+1612 / 1638, long 8, seg 53 + seg_model 22 runs, trigpos 882, contract 12 (transcript = contract_0x153B.txt), encphase
+PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, trigtypes 1293; every equivalence phase 0 mismatches, so a
+firmware writing none of the new registers sees 0x153B. One caveat, stated rather than hidden: the two runs started
+after the `gap_r` change but before the hold-off block was moved for timing; `run.sh` compiles `src/zaklad.v` at the
+start of each step, so steps 1-3 ran the pre-move text and the later steps the committed one. The two texts differ only
+in the position of one `always` block (Verilog block order has no semantic effect; iverilog compiled both), so the
+results hold for the committed source; C4's integration run repeats all 14 steps on the merged source anyway.
+
+**Build** (TD 4.6.8 SP1, synthesis check only, `~/c1/b3` = `src/` as committed): 5721 LUT (66.2 %) / 4682 reg / 6314 LE,
+all block RAM, 2 M18x18; `clk_200MHz` 0 errors 4.739 ns (worst path +0.261 ns: the EXT qualifier's `qual_ext/rem`),
+`sample_write_clock` 0 errors 9.576 ns, `clkc[1]` 2.568 ns and `i_mcu_clk` 22.152 ns 0 errors, `clkc[0]` 58 (SDC
+artefact); `FPGA.bin` sha256 `95465a5438c6c839836ab7c0f3bf428c126ddf32e4258dc10d818506da91730e`.
+0x153B for comparison: 4990 LUT, 4.583 ns. **The lottery is worse at this size**: the same logic rolled 5.218 ns
+(6 errors in the EXT qualifier's `gap` chain, fixed by `gap_r`), 5.186 ns (2 errors on 0x153B's own
+`sampling_triggered` half-cycle path into the write-clock `trigger_address` enable, 2 on the sequencer's `pp_i`
+enable), 5.078 ns (1 error, `sce_q` into `enc_nxt_n`) and 6.247 ns across four order-only rewrites (`c1_variants.py`
+pattern: move a block, rebuild in a copy of `fpga/al3` under `~/c1/v<N>`) before the fifth met timing. C4 should expect
+to roll again after merging C2 and C3 (about 6,200 LUT) and may need a real retiming of one of those three paths
+(`sampling_triggered` into the write clock domain is Atlan's; `pp_i` and `sce_q` are 0x1536 / 0x1538 paths).
+
+**For D2 (the pattern trigger engine, contract 7.5, a third `trig_qual` instance)**: C1 costs +731 LUT / +300 reg over
+0x153B in total; the hold-off block is about 70 LUT (a 33-bit decrement, the toggle sync and the mask) and the decoder /
+read-mux entries about 60, so the two qualifier instances with their configuration wires are about 600 LUT, about 300
+per instance (the EXT one on `clk_200MHz` is the timing-critical one: its `gap_r` is registered for that reason and its
+`rem` update is the design's worst `clk_200MHz` path at +0.26 ns). Reuse the module as is; give a third instance its own
+level compare and expect to roll the placement again.
+
+**For the firmware (C5)**: write 0x5E / 0x5F / 0x60 and 0x1B in the arm, any time before 0x01 = 0; 0x66 = 1 before the
+first arm of a session; N = 0 rejected for pulse width / timeout; caps bits 2 (HOLDOFF) and 20 (TRIG_TYPES); the
+positions are the edge type's (no new EXT correction); an auto capture inside the hold-off ends untriggered with the
+0x153B address.
+
+**Commands**: `wsl -d <distro> -- bash <script>` with the script doing `env REF_SRC_DIR=~/g11/refs SIM_WORK=~/c1/sim-<x>
+ONLY=trigtypes bash <repo>/fpga/al3/tb/run.sh <seed>` (the five reference files of `~/g11/refs` are the ones fpga-gen11
+exported); `DUT=<mutant>` for the mutation runs; full runs detached with `setsid nohup`, two seeds in parallel (about
+1 h); builds with `bash <repo>/fpga/al3/build.sh ~/c1/b<N>`. The worktree-isolation guard refuses heredocs and compound
+git commands: commit messages from a file (`git commit -F`), one git command per Bash call.
+## 0x153C C3 counter, fpga-c3 (2026-10-20)
+
+Brief (coordinator): item C3 of `docs/plans/fpga-0x153c.md` section 10: cherry-pick the gen8 counter (9de82ca `k_*` / `m_*`,
+0x61 / 0x62 / 0x35) onto 0x153B, add the min / max bytes, extend `tb_counter.v`, run.sh step 16, `FPGA commands.txt`,
+README "Changes" section 13 (counter). RTL and testbench only; no version byte change (C4), no dist. Branch `fpga-c3`
+from main 4b29d01; fpga-c1 (trigger types) and fpga-c2 (peak detect) worked in parallel on the same base.
+
+**What was done.** `src/zaklad.v` (+222 lines): the block "Hardware counter with min / max" after `seq_lat`, the 0x61 /
+0x62 write cases appended after 0x64, the 0x35 read case appended after 0x36, and two one-line terms in the `mcu_state`
+increment list (0x62 write, 0x35 read; each on its own line, commented "0x153C"). `tb/tb_counter.v` (new, step 16 of
+`tb/run.sh`, `ONLY=counter`). `src/FPGA commands.txt` (header bullet, read 0x35, writes 0x61 / 0x62). `README.md`
+section 13 (the register semantics, the design, the deviations, the tests, the build; section 12 is C1's after the merge of
+origin/main b9e6dcd into this branch). Version byte still 0x3B.
+
+**Register semantics as built** (README section 13 has the full map): 0x61 bits 1..0 gate (0 off, 1 / 2 / 3 = exactly
+2e6 / 2e7 / 2e8 clocks), bits 3..2 source (0 = the trigger source as 0x15 was written, 1 CH1, 2 CH2, 3 EXT); 0x62 level
+then hysteresis (high at code >= level, low at code < level - hysteresis). Read 0x35 = 16 bytes from one snapshot: { new,
+0, EXT, CH2, 0, 0, gate }, seq, E, T, W (u32 each, 28 bits used), min, max. Deviations from gen8, all inside the contract:
+the two source bits are exclusive (EXT wins); any 0x61 value change restarts the gate (a same-value write does not); level
+and hysteresis power on at 0 / 0 (TD ignores initial values); the snapshot is copied on the 200 MHz side 15 .. 20 ns after
+the 0x35 command strobe from a synchronised request (gen8 copied on the `i_mcu_clk` edge, racing the publish); min / max
+read 255 / 0 for the EXT source and before the first gate (the published min is stored inverted so the power-on flops
+give 255). Source 0 follows a private copy of 0x15 (`k_t15_*`), not `trigger_ext` / `trigger_channel`, so C1's trigger
+types cannot change what the counter follows. **Read cost of 0x35: 17 bus strobes** (command + 16 data), about 5 us.
+
+**Rate changes (firmware note).** A 0x0D / 0x53 write while the gate runs puts a few pairs of mixed age into the stream
+(the cores' pipelines re-align; the AD9288 has a 5.5-cycle pipeline too), which adds or drops one edge in the gate that
+spans the change (tb: -7.5e-5 / +7.3e-5 on a 1.29 MHz square when the gate was not restarted; 1 of 12858 edges; on a
+10-edge gate 10 %). The firmware should rewrite 0x61 after its settle wait on a time base or filter change (0 then the
+value: a value change restarts the gate), or skip the first result after one (`seq`). Not an RTL change: a restart pulse
+at the write would end before the transient at slow rates (up to 5 x 41 us at D 4095).
+
+**Tests.** `tb_counter.v`: thirteen 10 ms gates (about 68 min per seed: the 200 MHz design is the cost, not the
+stimulus), a reference model on `k_cs` for E / T / W and on the captured pair `adc*_w` for min / max. Results: seed 12345
+**115 checks, 0 failed, PASS** (4057 s); seed 4242 **115 checks, 0 failed, PASS** (4049 s); README section 13 "Tests" has
+the per-gate numbers. Full `tb/run.sh` (16 steps, `REF_SRC_DIR=~/g11/refs`) on the final source (16ef2b5 RTL): seed 12345 **ALL PASS**
+(9252 s: ext 39, decim 98 + cic_model 1876, fir 163 + cic_model 1612, long 8, seg 53 + seg_model 22 runs, trigpos 882,
+contract 12 = contract_0x153B.txt, encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, counter 115;
+every equivalence phase 0 mismatches); seed 4242 **ALL PASS** (9057 s: 39, 98 + 1873, 165 + 1638, 8, 53 + 22, 882, 12,
+encphase, 70 + 26, 2274, 38, 85, 115). On the merged source (7233bf9, C1 + C3, 16 steps with trigtypes): seed 12345
+**ALL PASS** (6510 s, trigtypes 1293, counter 115, everything else as above), seed 4242 **ALL PASS** (6292 s). The
+equivalence steps are untouched by the counter (0x61 = 0 in every reference step; the reference testbenches write
+command 0x35 as the CH2 offset, which also takes a snapshot, harmlessly).
+
+**Build** (TD 4.6.8 SP1, `build.sh` in `~/c3/b1`, this branch alone): 5337 LUT (61.8 %) / 4900 reg / 6095 LE against
+0x153B's 4990 / 4405 / 5658 rebuilt with the same flow (`~/c3/bref`, hash = `dist/al3-0x153B.bin`): **+347 LUT, +495 reg,
++437 LE**, block RAM and M18x18 unchanged. `clk_200MHz` 0 errors, min period 4.931 ns (+0.069: the sequencer's `q_untrig`
+saturating adder, zaklad.v 1478, not a counter path; the lottery of the 0x153A notes), `sample_write_clock` 9.594 ns,
+`i_mcu_clk` 20.37 ns, `clkc[1]` 2.376 ns, all 0 errors; `clkc[0]` 58 (SDC artefact). The contract's section 1.1 counted
+the counter inside gen8's +1115 LUT for three features plus about 50 for min / max; 347 of 1115 is the counter's share.
+**Merged C1 + C3 build** (`~/c3/b2`, this branch after the merge of origin/main b9e6dcd, version byte still 0x3B): 6079 LUT
+(70.4 %) / 5177 reg / 6822 LE, `sample_write_clock` 9.7 ns, `i_mcu_clk` 20.77 ns, `clkc[1]` 3.02 ns, all 0 errors, but
+**`clk_200MHz` 8 setup errors, min period 5.763 ns (-0.763 ns)**: the three failing endpoints are the sequencer's `q_pass`
+adder (zaklad.v 1754 of the merged file), 2-level paths whose fanout-1 nets route 2.4 + 1.8 ns: placement spread at 70 %
+LUT, not a logic depth problem and not a counter or trigger path (the pure-C3 build met timing at 4.931 ns, C1's own build
+after its rewrites). Expect the lottery that the contract's section 1.1 predicted above 70 %: C4 should re-roll with a
+neutral rewrite (the 0x153B b1 -> b2 recipe) or pipeline the q_pass add, and read the summary before pinning.
+
+**For C4 (integration).** Merge order is free: the counter block shares no always block with C1 / C2; conflicts, if any,
+are the `mcu_state` term lines, the run.sh header / usage line, the `FPGA commands.txt` lists and the README section numbers
+(this branch already carries the merge with C1: C1 = section 12, the counter = 13, step 14 and 16; C2 adds its own; the
+resolution pattern was "keep both, theirs first", scripted in the fpga-c3 scratch `resolve.py`). `tb_counter.v` accepts 0x06 = 0x153B or
+0x153C. Step 16 adds about 68 min to a full run; run it in parallel with the fir / seg steps as the 0x153B rule says.
+Bench check (contract 9.2 item 7): the post at 1 kHz and 1 MHz on CH1 and EXT, frequency within 1e-5 of phase_inc x
+50 MHz / 2^32, duty 50 %, min / max equal to the record's.
+
+**Commands.** `wsl -d <distro> -- bash <launcher>` with `setsid nohup env REF_SRC_DIR=$HOME/g11/refs SIM_WORK=... bash
+<repo>/fpga/al3/tb/run.sh <seed> > log 2>&1 &`; a `wsl ... bash script` started from the agent's PowerShell as a
+background task was killed after about 22 minutes (both seeds died at the same simulated time with no RESULT line), so
+detach every long job and watch the log from Windows through `//wsl$/<distro>/home/<user>/...`. `ONLY=counter` runs step 16
+alone; `stdbuf -oL vvp` makes the log fill per line. A reference build of another source: copy `build.sh`, `build.tcl`
+and `src/` to a WSL directory, replace `src/zaklad.v`, run that `build.sh <workdir>` (build.sh's `SRC_REV` needs WSL git
+on the repo, which a Windows worktree does not give).
 
 ## 0x153B 'spliced' on the unit: the records were flat, fpga-gen13 (2026-10-20)
 

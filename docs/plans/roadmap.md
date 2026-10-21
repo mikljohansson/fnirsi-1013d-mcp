@@ -23,6 +23,15 @@ Spectrum ladder follow-ups (0.2.85), the idle serial-port release and simulator 
 Still open: the hardware averaging decision, touch batch 3, the Measurements v2 remainder, the phosphor fast capture
 loop, the Bode follow-ups (harmonic and impedance modes), "1.17 on the unit", and the release steps of section 5.
 
+**Owner decisions 2026-10-20, 21:52 to 22:02** (after the status above): every firmware version supports one FPGA
+bitstream, the project's latest (0x153B for 0.3.0), and shows a loud banner on any other; the capability branches, the
+stock and Atlan paths and the per-bitstream feature tables go. ACQ Average becomes one behaviour (a true mean of N
+records on the MCU path as on the FPGA path). The "SD card alone" install path is dropped: the FPGA flash is a required
+install step, so the supported configuration is one firmware with one bitstream. For the work after the tag the owner
+chose the epics advanced triggers, peak detect, the streaming logger, the pulse pattern generator, hardware
+measurements and the software features on the new data (section 8, items 2 to 7); no deeper memory; testers with other
+variants later. The design of the next bitstream is in `docs/plans/fpga-0x153c.md` (being written).
+
 Status words: **done** (merged and benched), **built** (merged, host-tested, bench pending), **in flight** (an agent
 is working on it), **next** (designed or specified, not started), **maintainer** (needs the maintainer at the bench).
 

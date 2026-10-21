@@ -11,8 +11,6 @@ it.
 
 - Let the scope run for 5 minutes. A calibration taken earlier is marked "recalibrate after 5 minutes of warm-up".
 - Have both probes at hand. The gain steps need each probe on the calibration post, set to 1X.
-- The gain steps need an open bitstream (0x1532 or later), because they use its generator. On the stock bitstream
-  (0x1432) the wizard measures the zero level only.
 
 ## Start the wizard
 
@@ -37,7 +35,7 @@ measurement stops within about a second.
 ![Calibration wizard, zero level](screenshot:calibration-zero)
 
 **Screen 1** measures both channels on all six ranges. The progress line reads "CH1: measuring range 3 of 6", then
-"CH1: zero level done". The step takes about 8 seconds. On bitstream 0x153A each channel first trains its capture
+"CH1: zero level done". The step takes about 8 seconds. Each channel first trains its capture
 stages ("CH1: training capture stages..."), which adds about half a second. While a USB cable is connected, the screen
 says in amber "USB is connected: unplug it before Calibrate". **Continue** appears when both channels passed.
 
@@ -47,10 +45,6 @@ says in amber "USB is connected: unplug it before Calibrate". **Continue** appea
 **Screen 4** shows one line per channel, for example "CH1 calibrated: cores matched to 0.1 code, gain mismatch 1.3 %".
 "Cores matched" is how close the two cores' zero levels came. "Gain mismatch" is the gain difference between the cores
 that the correction now removes. Save calibration writes the result to the card and closes the wizard.
-
-On the stock bitstream screen 2 says "Gain calibration needs the open FPGA bitstream." and "Continue keeps the gains and
-saves the zero level." Continue then goes to Done, and the result line says "earlier gains kept" or "gains not
-measured".
 
 ## When a step fails
 
@@ -65,7 +59,6 @@ probe". **Calibrate** stays, so you can try again. There is no Skip.
 | No signal on CH1: tip on the post? | Put the probe tip on the calibration post |
 | the post signal clips: set the probe to 1X | Switch the probe to 1X |
 | the post signal moved: hold the tip still | Retry without moving the probe |
-| ADC readout fault near code 128: check the FPGA bitstream | The bitstream garbles one core; flash the recommended bitstream (0x153B) |
 
 A failed zero step also shows a small second line with the measurement point and the raw values. It is meant for a bug
 report.
@@ -95,7 +88,7 @@ Diagnostics > Status shows one calibration verdict with its reason:
 | OK | Calibrated, every value within its limit. | Nothing |
 | Check | FPGA changed since calibration (0x1535 to 0x153A): recalibrate. | Run Calibrate. The core order can differ between bitstreams |
 | Check | Calibrated 2 min after power-on: recalibrate after 5 minutes of warm-up. | Run Calibrate after warm-up |
-| Check | ADC capture flagged 3 times within a minute: run Calibrate. | Run Calibrate; it trains the capture stages again (0x153A) |
+| Check | ADC capture flagged 3 times within a minute: run Calibrate. | Run Calibrate; it trains the capture stages again |
 | Check | Gains not measured: run Calibrate with the probes on the post. | Run the wizard with the gain steps |
 | Check | Gains carried over from an earlier calibration: run Calibrate. | Run the wizard with the gain steps |
 | Check | A value is over its limit (below): move chargers and the USB cable away and calibrate again. If it stays, the input stage is noisy. | Run Calibrate with nothing on the inputs, chargers and the USB cable away. If the noise stays over its limit, the input stage is noisy |

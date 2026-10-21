@@ -36,8 +36,8 @@ Package layout in `mcp/`: `fnirsi/protocol.py` (frame codec, CRCs, structs), `fn
 
 | Tier | Name | What it changes | Examples | Default |
 |---|---|---|---|---|
-| 0 | READ_ONLY | nothing | `scope_info`, `scope_profile`, `scope_status`, `get_config`, `fetch_waveform` (LOCAL), `read_calibration`, `screenshot` | allowed |
-| 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_segments`, `capture_and_fft`, `decay_fit`, `measure` | allowed |
+| 0 | READ_ONLY | nothing | `scope_info`, `scope_profile`, `scope_status`, `get_config`, `fetch_waveform` (LOCAL), `read_calibration`, `screenshot`, `report`, `export_csv`, `decode` and `measure` on existing data | allowed |
+| 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_segments`, `capture_and_fft`, `decay_fit`, `measure` / `decode` with `capture=true`, `mask_test`, `dvm` | allowed |
 | 2 | FRONT_END | relays (range, AC/DC) and the offset PWM; audible clicks, relay wear, a small transient at the input when AC coupling switches | `set_channel` | allowed, rate-limited to 5 relay changes per second by the server |
 | 3 | OUTPUT | drives the calibration pin (3.3 V logic square wave). If that pin is wired into the detector (e.g. as a TX gate drive), this switches real coil current | `generator`, `self_test_loopback` | needs a confirmation token; off at server start |
 | 4 | RAW | arbitrary FPGA bus writes, rebooting into FEL | `raw_fpga`, `enter_fel` | disabled unless `FNIRSI_MCP_ENABLE_RAW=1`; needs a confirmation token |
@@ -346,6 +346,78 @@ divider is labelled with the UI time base's rate" (known firmware limit).
 `rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay(CH1->CH2)`. Computed on the
 host from raw data with calibration. Caveat on rise time: "rise times below ~12 ns (0.35 / 30 MHz) measure
 the scope, not the signal".
+
+### 4.3b Data tools: decode, mask test, CSV export, DVM (mcp-soft, 2026-10-20)
+
+Host-side work on captured data (roadmap: advanced capabilities are MCP features; the agent presents the data). No
+firmware or protocol change; every tool works on the simulator (`--signal uart:...`, `spi_clk:...`, `i2c_scl:...`,
+`dc:v=...` with `--noise`). Library: `fnirsi1013d.decode` (decoders), `fnirsi1013d.export` (CSV),
+`analysis.mask_envelope` / `mask_check` / `dvm_summary` / `dvm_resolution`.
+
+**`decode`** (`scope_decode`, tier 0 on existing data, tier 1 with `capture=true`). Serial decode of a capture.
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `protocol` | `uart`, `spi`, `i2c` | | |
+| `source` | path or `latest` | none | a saved capture (`.npz`); without it this server's last capture, else the scope's latest capture |
+| `capture`, `channels`, `timeout_s` | | | as `scope_capture`; `channels` are the lines: UART `[data]`, SPI `[clock, data]`, I2C `[SCL, SDA]` (defaults CH1 / CH1, CH2) |
+| `threshold` | float V | mid-level | logic threshold; 5 % of the swing is hysteresis on each side |
+| `baud`, `data_bits`, `parity`, `stop_bits`, `idle` | | auto, 8, none, 1, high | UART; `baud` auto = 1 / the shortest pulse, snapped to a standard rate; `idle='low'` for an inverted line |
+| `word_bits`, `cpol`, `cpha`, `msb_first`, `gap` | | 8, 0, 0, true, 2.5 periods | SPI; no chip select on two channels: words are counted from the first clock after a pause longer than `gap` |
+| `max_frames` | int | 200 | frames inline (all are in the file) |
+
+Returns `frames` with the time of each relative to the trigger (UART: value, hex, char, `errors` parity /
+framing; SPI: words per `transfer`, `incomplete`; I2C: START, `address`, `rw`, `ack`, `data` bytes with their ACK,
+`stop` / `repeated_start`, errors such as NACK on the address or stray bits), `n_frames`, `n_errors`, `preview`
+lines, `applied` (baud or clock, samples per bit, threshold, levels), `lines` (which channel is which) and a `.npz`
+(`t`, `<CH>_volts`, the frames in `meta_json`) that `scope_report` plots with the frames labelled. Caveats: the
+samples per bit (at least 4 per bit, 8 per I2C SCL period, for reliable timing; under 2 it refuses with the rate
+needed; measured on the simulator: UART decodes down to 2.5 samples per bit, SPI 3 per clock period, I2C 8 per SCL
+period), the 8-bit noise band, a record ending inside a frame, auto-trigger data. Maximum rate per sample rate:
+UART fs / 4 baud (200 MSa/s: 50 Mbaud, far above the 30 MHz front end; 2 MSa/s: 500 kbaud), SPI clock fs / 4, I2C
+SCL fs / 8.
+
+**`mask_test`** (`scope_mask_test`, tier 1: captures). Pass / fail against a mask.
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `channel` | channel | CH1 | |
+| `reference` | `capture`, a capture `.npz`, a mask `.npz` or a stored mask name | `capture` | the mask is built around the reference waveform, or reused as stored |
+| `tolerance_volts` / `tolerance_div` | V / divisions | 0.2 div of the live range | amplitude tolerance (ignored with a mask file) |
+| `tolerance_time` | s | 2 samples | time tolerance: running min / max over +-k samples |
+| `n`, `timeout_s`, `stop_on_fail` | | 10, 2.0, false | captures tested with the live settings |
+| `mask_name` | str | none | also store the mask as `<data dir>/masks/<name>.npz` |
+
+Returns per capture `passed`, `fail_samples`, `first_fail` (t, volts, the bound crossed and its limit), the worst
+excursion; `passed` / `failed` / `dropped`, `mask.file` (reusable; the dated `.npz` next to the captures, or the
+named one), and a result `.npz` (`t`, `upper`, `lower`, `reference`, the first failing capture or the last one as
+`<CH>_volts`, `fail_mask`) that `scope_report` plots as the band with the outside samples marked. The mask is bound to
+the sample rate and record length: a mismatch is refused with the settings to restore, and a settings change at the
+scope ends the run. Caveats: a tolerance under about 2 codes fails on noise alone, under 2 samples on trigger jitter
+alone; auto-trigger captures are not synchronised.
+
+**`export_csv`** (`scope_export_csv`, tier 0, touches no scope). `source` (`.npz` path or `latest`), `out` (default
+beside the file), `raw` (also the compensated codes and 16-bit filter outputs; the half-length per-core arrays stay in
+the `.npz`), `delimiter`, `caveats`. Columns: the time or frequency axis, then every array of that length (volts,
+clipped flags, mean / std, fit / residual, spectrum levels, complex values as `_re` / `_im`); segments in long format
+with a `segment` column and the per-segment timestamps repeated. The `#` header carries the tool and arguments, the
+sample rate, capture id, per-channel V/div, coupling, probe and offset, the trigger, decimation, the scaling note, the
+recorded caveats and the column units. The capture tools have no `format` option (there is no such convention in the
+server): capture first, export the file.
+
+**`dvm`** (`scope_dvm`, tier 1). Voltmeter readout per channel over `n` captures (1..256, default 8) or `duration_s`
+(<= 600 s), with the live settings. Per channel: `dc_mean` (and the spread between captures), `ac_rms`, `rms`, `min`,
+`max`, `vpp`, `frequency` (the dominant spectral component, 6x above the median bin, else null), the `range` in
+effect (V/div, volts per code, full scale, coupling, probe, `scaling`), `resolution` (`uncertainty_volts` = the larger
+of the sample noise over all samples, the spread of the per-capture means and the quantisation floor; `digits` =
+log10(full scale / uncertainty); `dither` false when the sample noise is under 0.5 code, then the mean cannot resolve
+below one code and the uncertainty is half a code) and a `statement` sentence that puts those together, e.g. "DC
+0.2500 V +- 27 uV (1 sigma) on the 100 mV/div range (8-bit, 3.62 mV per code, full scale 928 mV), 24000 samples in 6
+captures, sample noise 1.05 codes: 4.5 digits of full scale; absolute accuracy is that of the calibration
+(firmware), about one code". So "4-digit DVM" is a resolution claim the tool justifies from the measured noise and
+the sample count; the absolute accuracy stays the calibration's (`scope_calibration_info`). Wraps
+`scope_measure`'s statistics (`analysis.stats`); a settings change at the scope restarts the run. Saves the
+per-capture readings (`capture_t_s`, `<CH>_mean` / `_ac_rms` / `_rms` / `_min` / `_max` / `_frequency`).
 
 ### 4.4 Output (tier 3)
 
