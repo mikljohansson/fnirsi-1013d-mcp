@@ -266,7 +266,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fw-small done 11:2x, merged 11:3x as the merge of 85b9315: fpga_force_stop (0x0E = 0 then 0x1A = 0, test_force_deadline fails
+- fw-small done 11:1x, merged 11:1x as the merge of 85b9315: fpga_force_stop (0x0E = 0 then 0x1A = 0, test_force_deadline fails
   33 checks without it), Vmax / Vmin / Vpp from the peak bytes with Sample = Peak (pc_glue_peak_extremes, pb_extremes test),
   the readout-fault text no longer points at the bitstream (calibration.md row back). Host tests green, check_vectors OK, gcc10
   sha256 42288cb180dfcd3b3aaa386429791e992e0e7fdf19f2059e80a78b83229ff440 (unnumbered, 0.2.104 + D4 + D5 + fw-small). Open from
