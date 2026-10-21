@@ -266,7 +266,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fpga-d1 done 14:0x, pushed e1ee9dd (not merged yet: the 0x153C dist must come from fpga-c4's cruft-removed source, so D1
+- fpga-d1 done 13:4x, pushed e1ee9dd (not merged yet: the 0x153C dist must come from fpga-c4's cruft-removed source, so D1
   and D2 land after C4 and D3 integrates them on that source). Logger RTL: 0x69 bit 0 stream (no trigger accepted, two
   synchronised copies), bit 1 clears the lap; 0x6A u13 R = the next word the MCU reads, 0x01 = 1 resets R / unread / counter;
   read 0x38 8 B snapshot {stream, lap, 0, W[12:8]}, W[7:0], u32 words written, u16 unread 0..8192. Deviations from the contract
