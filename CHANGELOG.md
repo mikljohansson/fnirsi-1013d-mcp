@@ -32,7 +32,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.103 (provisional, branch fw-one) - 2026-10-20 (protocol 1.25, provisional; row 65)
+#### 0.2.103 - 2026-10-21 (protocol 1.25, row 65)
 
 - One supported FPGA bitstream (owner 2026-10-20 21:52): the firmware runs on `PC_FW_FPGA_VERSION` (0x153B) only; the
   capability word, the geometry and every feature decision come from that constant, the version word is read once at
