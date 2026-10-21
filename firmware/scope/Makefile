@@ -93,6 +93,8 @@ SRCS += slider_ov.c slider_ov_draw.c
 SRCS += spec_ladder.c
 # ui-type: the trigger menu's Type row as data (pure C, host_tests/test_trig_ui.c)
 SRCS += trig_ui.c
+# ui-sample: a peak-detect record as one bar per column (pure C, host_tests/test_peak_bars.c)
+SRCS += peak_bars.c
 # fw 0.2.59: Diagnostics pages and the first-run screen (ui_diag.c pure, host_tests/test_ui.c), their drawing and dialogs
 # (ui_dlg.c) and the display mode (ui_diag_view.c)
 SRCS += ui_diag.c ui_dlg.c ui_diag_view.c

@@ -73,6 +73,10 @@ uint32_t phos_add_record(phos_map *m, const uint8_t *codes, uint32_t n, const ui
 //chained segments). Points outside the map are clipped per pixel. Returns the cells touched.
 uint32_t phos_add_line(phos_map *m, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int skip_first, uint32_t inc);
 
+//ui-sample: add one vertical run, rows y1 .. y2 (either order) of column x in map coordinates, each cell once: a peak
+//record's bar (peak_bars.h). Rows outside the map are clipped, a column outside it is not written. Returns the cells.
+uint32_t phos_add_span(phos_map *m, int32_t x, int32_t y1, int32_t y2, uint32_t inc);
+
 //Paint the map, then decay it: dst points at the pixel of column 0, row 0; stride in pixels. Non-zero cells get
 //pal[count], zero cells are left alone. With k16 < 65536 every lit cell then decays, count = (count k16 + d) >> 16 with
 //d = (seed + 25033 x column) mod 65536 (dither: the expected count is exactly count x k16 / 65536 and every cell
