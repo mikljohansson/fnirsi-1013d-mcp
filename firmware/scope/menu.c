@@ -5468,8 +5468,14 @@ static void trig_row(uint32 ry, const char *label, const char *value, int keys, 
   display_fill_rounded_rect(rx + 4, ry + 4, 30, 36, 2);
   display_fill_rounded_rect(rx + rw - 34, ry + 4, 30, 36, 2);
   display_set_fg_color(fg);
-  trig_text_c(rx + 19, ty, "-");
-  trig_text_c(rx + rw - 19, ty, "+");
+
+  //fw-acqui (owner 2026-10-21): the key glyphs in the 24 px font, about twice the 16 px ones (+ 11 x 11 instead of 6 x 5,
+  //- 6 x 3 instead of 3 x 1), each bar on the key's middle row (ry + 22): font_5 has the + bar on its rows 10..12 and
+  //the - on rows 12..14
+  display_set_font(&font_5);
+  display_text(rx + 19 - ui_text_width(&font_5, "-") / 2, ry + 9, (int8 *)"-");
+  display_text(rx + rw - 19 - ui_text_width(&font_5, "+") / 2, ry + 11, (int8 *)"+");
+  display_set_font(&font_3);
   display_text(rx + 40, ty, (int8 *)label);
   display_set_fg_color(vc);
 
