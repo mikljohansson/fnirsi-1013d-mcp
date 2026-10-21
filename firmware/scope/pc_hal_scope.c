@@ -391,10 +391,10 @@ void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
     gp_square sq;
 
     (void)gp_split(p16, h16, &sq);
-    fpga_pat_square(&sq);
+    fpga_gen_square(&sq);
   }
 
-  fpga_pat_drive(enable);
+  fpga_gen_drive(enable);
 
   //UI copy, rounded to the UI's units (Hz, %), so the generator menu and the power-off save show the host's values
   {
@@ -416,7 +416,7 @@ void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
 
 uint8_t pc_hal_gen_status(void)
 {
-  return fpga_pat_status();
+  return fpga_gen_status();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

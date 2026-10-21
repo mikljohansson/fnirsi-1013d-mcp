@@ -424,8 +424,8 @@ static void cal_scratch_channel(uint32 ch)
 //wizard's 1 kHz afterwards is fpga_on_off_generator's square (cal_end), exact: n_h = n_l = 100,000 clocks
 static void cal_gen_level(uint32 high)
 {
-  fpga_pat_level((uint8)(high != 0));
-  fpga_pat_drive(1);
+  fpga_gen_level((uint8)(high != 0));
+  fpga_gen_drive(1);
 }
 
 //Per core means (1/16 code) of convs conversions at one post level, rate and PWM. 0 when a full-rate capture stayed

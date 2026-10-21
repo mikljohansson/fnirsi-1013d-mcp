@@ -56,7 +56,7 @@
 //     fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only), 0x6D mode 3 running
 //     (a mode-3 write starts an idle engine, ignored while it runs), any other mode stopping at once at the idle level
 //     (bit 2), 0x50 the pin driver, read 0x39 byte 0 = { running, 0, pending, 0 x 4, step }. Writes to the cut pattern
-//     registers (0x6E, 0x6F, 0x76..0x7D) are ignored. The pin's level changes are logged (fm.pat_edge) for the period
+//     registers (0x6E, 0x6F, 0x76..0x7D) are ignored. The pin's level changes are logged (fm.gen_edge) for the period
 //     and edge-placement checks.
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
@@ -69,7 +69,7 @@
 
 #define FM_RING_MAX   8192
 #define FM_TRACE_MAX  64
-#define FM_PAT_EDGES  4096                //the generator: pin level changes kept (a ring)
+#define FM_GEN_EDGES  4096                //the generator: pin level changes kept (a ring)
 
 typedef struct
 {
@@ -159,19 +159,19 @@ typedef struct
     uint8_t  flags;                 //0x6C byte 0 bits 7, 5: end, level
     uint32_t dur;
     uint16_t frac;
-  } pat_act[2], pat_sh[2], pat_q, pat_q2;   //active entries, their shadows, the two prefetched steps
-  uint8_t  pat_pending;             //0x39 byte 0 bit 5
-  uint8_t  pat_mode, pat_ctl;       //0x6D bits 1..0 and bit 2
-  uint8_t  pat_drive;               //0x50 bit 0
-  uint8_t  pat_run;                 //running
-  uint8_t  pat_step;                //the step running
-  uint8_t  pat_q_idx, pat_q2_idx;   //the prefetched steps' indices
-  uint8_t  pat_level;               //the square's level (the idle level when not running)
-  uint16_t pat_acc;                 //the fraction accumulator
-  uint64_t pat_end_clk;             //the running step ends at this clock
-  uint32_t pat_starts;
-  uint64_t pat_edge[FM_PAT_EDGES];  //clock << 1 | level of every pin level change while running
-  uint32_t pat_nedge;
+  } gen_act[2], gen_sh[2], gen_q, gen_q2;   //active entries, their shadows, the two prefetched steps
+  uint8_t  gen_pending;             //0x39 byte 0 bit 5
+  uint8_t  gen_mode, gen_ctl;       //0x6D bits 1..0 and bit 2
+  uint8_t  gen_drive;               //0x50 bit 0
+  uint8_t  gen_run;                 //running
+  uint8_t  gen_step;                //the step running
+  uint8_t  gen_q_idx, gen_q2_idx;   //the prefetched steps' indices
+  uint8_t  gen_level;               //the square's level (the idle level when not running)
+  uint16_t gen_acc;                 //the fraction accumulator
+  uint64_t gen_end_clk;             //the running step ends at this clock
+  uint32_t gen_starts;
+  uint64_t gen_edge[FM_GEN_EDGES];  //clock << 1 | level of every pin level change while running
+  uint32_t gen_nedge;
 
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;

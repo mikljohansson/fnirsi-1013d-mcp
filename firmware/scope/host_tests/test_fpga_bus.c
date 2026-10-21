@@ -1240,7 +1240,7 @@ static void test_counter(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator (fw-d5, 0x153D; the square only since fw-nopat)
 
-#define PAT_VER  0x153D
+#define GEN_VER  0x153D
 
 //The contract's formulas: P16 within half a unit of 2^16 x 2e11 / f, the back conversion, the split, at many points
 static void test_gen_formulas(void)
@@ -1341,7 +1341,7 @@ static void test_gen_formulas(void)
 }
 
 //Run the model for ns (in slices the u32 advance takes)
-static void pat_advance(uint64_t ns)
+static void gen_advance(uint64_t ns)
 {
   while(ns)
   {
@@ -1355,16 +1355,16 @@ static void pat_advance(uint64_t ns)
 //The edges logged since index from: every rising edge k at start + k P, every falling one H later, in 1/65536 clock;
 //the actual edge is the ideal one rounded up to the clock (Bresenham): -65536 < actual - ideal <= 0 after the shift.
 //Returns the worst |actual - ideal| in 1/65536 clock, -1 on a wrong level sequence; *periods the complete periods seen
-static int64_t pat_check_square(uint32_t from, uint64_t p16, uint64_t h16, uint32_t *periods, int64_t *mean_err16)
+static int64_t gen_check_square(uint32_t from, uint64_t p16, uint64_t h16, uint32_t *periods, int64_t *mean_err16)
 {
-  uint64_t start = fm.pat_edge[from % FM_PAT_EDGES] >> 1;
-  uint32_t i, n = fm.pat_nedge - from, rises = 0;
+  uint64_t start = fm.gen_edge[from % FM_GEN_EDGES] >> 1;
+  uint32_t i, n = fm.gen_nedge - from, rises = 0;
   int64_t  worst = 0;
   uint64_t last_rise = start;
 
   for(i = 0; i < n; i++)
   {
-    uint64_t e = fm.pat_edge[(from + i) % FM_PAT_EDGES];
+    uint64_t e = fm.gen_edge[(from + i) % FM_GEN_EDGES];
     uint8_t  level = (uint8_t)(e & 1);
     uint64_t k = i / 2;
     __int128 ideal = (__int128)((start << 16) + k * p16 + ((i & 1) ? h16 : 0));
@@ -1391,23 +1391,23 @@ static int64_t pat_check_square(uint32_t from, uint64_t p16, uint64_t h16, uint3
   return worst;
 }
 
-//The square on the model: the firmware's sequence (fpga_pat_square + 0x50), then about `periods` periods
-static void pat_square_case(uint64_t f_mhz, uint32_t bp, uint32_t periods, uint32_t seed)
+//The square on the model: the firmware's sequence (fpga_gen_square + 0x50), then about `periods` periods
+static void gen_square_case(uint64_t f_mhz, uint32_t bp, uint32_t periods, uint32_t seed)
 {
   uint64_t  p16 = gp_p16_from_mhz(f_mhz), h16 = gp_h16_from_bp(p16, bp);
   gp_square sq;
   uint32_t  from, seen = 0;
   int64_t   worst, mean = 0;
 
-  fm_reset(PAT_VER, 199999, seed);
+  fm_reset(GEN_VER, 199999, seed);
   T_EQ(gp_split(p16, h16, &sq), 0);
-  from = fm.pat_nedge;                                      //the start's rising edge is the next one logged
-  fpga_pat_square(&sq);
-  fpga_pat_drive(1);
-  T_EQ(fm.pat_run, 1); T_EQ(fm.pat_drive, 1);
-  pat_advance((uint64_t)periods * p16 * 5 / 65536 + 1000);
+  from = fm.gen_nedge;                                      //the start's rising edge is the next one logged
+  fpga_gen_square(&sq);
+  fpga_gen_drive(1);
+  T_EQ(fm.gen_run, 1); T_EQ(fm.gen_drive, 1);
+  gen_advance((uint64_t)periods * p16 * 5 / 65536 + 1000);
 
-  worst = pat_check_square(from, p16, h16, &seen, &mean);
+  worst = gen_check_square(from, p16, h16, &seen, &mean);
   T_TRUE(worst >= 0);
   T_TRUE(worst < 65536);                                    //every edge within one clock of its ideal time
   T_TRUE(seen + 2 >= periods);
@@ -1422,49 +1422,49 @@ static void test_gen_square(void)
 {
   uint32_t s0;
 
-  pat_square_case(1000000, 5000, 1000, 1);                  //1 kHz, the wizard's: no fraction
-  pat_square_case(999500, 5000, 1000, 2);                   //999.5 Hz: a fractional period
-  pat_square_case(10000000, 2500, 1000, 3);                 //10 kHz 25 %
-  pat_square_case(123456000, 2500, 1500, 4);                //123.456 kHz 25 %
-  pat_square_case(1000000000, 5000, 1500, 5);               //1 MHz
-  pat_square_case(3333333333ull, 3333, 1500, 6);            //3.33 MHz 33 %: fractions in both steps
-  pat_square_case(10000000000ull, 5000, 1500, 7);           //10 MHz
-  pat_square_case(47123, 7000, 200, 8);                     //47.123 Hz 70 %
+  gen_square_case(1000000, 5000, 1000, 1);                  //1 kHz, the wizard's: no fraction
+  gen_square_case(999500, 5000, 1000, 2);                   //999.5 Hz: a fractional period
+  gen_square_case(10000000, 2500, 1000, 3);                 //10 kHz 25 %
+  gen_square_case(123456000, 2500, 1500, 4);                //123.456 kHz 25 %
+  gen_square_case(1000000000, 5000, 1500, 5);               //1 MHz
+  gen_square_case(3333333333ull, 3333, 1500, 6);            //3.33 MHz 33 %: fractions in both steps
+  gen_square_case(10000000000ull, 5000, 1500, 7);           //10 MHz
+  gen_square_case(47123, 7000, 200, 8);                     //47.123 Hz 70 %
 
   //The firmware's first enable: 0x6D = 0, 0x6C x 2, 0x6D = 0x33 (continuous, start, commit); a running square changes
   //with 0x6C x 2 and 0x6D = 0x23: 18 strobes, 5.4 us at 0.3 us a strobe
-  fm_reset(PAT_VER, 199999, 9);
+  fm_reset(GEN_VER, 199999, 9);
   {
     gp_square a = { 100000, 100000, 0, 0 }, b = { 50000, 50000, 0, 0 };
 
-    fpga_pat_square(&a);
+    fpga_gen_square(&a);
     T_EQ(fm.ntrace, 4);
     T_EQ(fm.trace[0].cmd, 0x6D); T_EQ(fm.trace[0].value, 0);
     T_EQ(fm.trace[1].cmd, 0x6C); T_EQ(fm.trace[2].cmd, 0x6C);
     T_EQ(fm.trace[3].cmd, 0x6D); T_EQ(fm.trace[3].value, 0x33);
-    T_EQ(fm.pat_act[0].dur, 100000); T_EQ(fm.pat_act[0].flags, 0x20); T_EQ(fm.pat_act[1].flags, 0x80);
+    T_EQ(fm.gen_act[0].dur, 100000); T_EQ(fm.gen_act[0].flags, 0x20); T_EQ(fm.gen_act[1].flags, 0x80);
     s0 = fm.strobes;
-    fpga_pat_square(&b);
+    fpga_gen_square(&b);
     T_EQ(fm.strobes - s0, 18);
     T_EQ(fm.trace[6].cmd, 0x6D); T_EQ(fm.trace[6].value, 0x23);
-    T_EQ(fm.pat_starts, 1);                                 //no restart
+    T_EQ(fm.gen_starts, 1);                                 //no restart
   }
 
   //The static levels (the wizard's gain step, UI 0 / 100 %): mode 0 at the idle level, the pin driven
-  fpga_pat_level(1);
-  fpga_pat_drive(1);
-  T_EQ(fm.pat_run, 0); T_EQ(fm_pin(), 1);
-  fpga_pat_level(0);
+  fpga_gen_level(1);
+  fpga_gen_drive(1);
+  T_EQ(fm.gen_run, 0); T_EQ(fm_pin(), 1);
+  fpga_gen_level(0);
   T_EQ(fm_pin(), 0);
-  fpga_pat_drive(0);
+  fpga_gen_drive(0);
   T_EQ(fm_pin(), 2);
 
   //From a level back to the square: a fresh start (0x6D = 0 first)
   {
     gp_square a = { 10, 10, 0, 0 };
 
-    fpga_pat_square(&a);
-    T_EQ(fm.pat_run, 1); T_EQ(fm.pat_starts, 2);
+    fpga_gen_square(&a);
+    T_EQ(fm.gen_run, 1); T_EQ(fm.gen_starts, 2);
   }
 }
 
@@ -1482,22 +1482,22 @@ static void test_gen_change(void)
   (void)gp_split(pb, gp_h16_from_bp(pb, 2500), &b);
   (void)gp_split(pc, gp_h16_from_bp(pc, 5000), &c);
 
-  fm_reset(PAT_VER, 199999, 21);
-  fpga_pat_square(&a);
-  fpga_pat_drive(1);
-  pat_advance(10000000);                                    //10 ms: about 10 periods
-  from = fm.pat_nedge;
+  fm_reset(GEN_VER, 199999, 21);
+  fpga_gen_square(&a);
+  fpga_gen_drive(1);
+  gen_advance(10000000);                                    //10 ms: about 10 periods
+  from = fm.gen_nedge;
   t_commit = fm_clk();
-  fpga_pat_square(&b);
+  fpga_gen_square(&b);
 
-  T_EQ(fpga_pat_status() & 0xA0, 0xA0);                    //running, pending
-  pat_advance(20000000);
-  T_EQ(fpga_pat_status() & 0x20, 0);                        //taken
+  T_EQ(fpga_gen_status() & 0xA0, 0xA0);                    //running, pending
+  gen_advance(20000000);
+  T_EQ(fpga_gen_status() & 0x20, 0);                        //taken
 
-  for(i = from; i + 1 < fm.pat_nedge; i++)
+  for(i = from; i + 1 < fm.gen_nedge; i++)
   {
-    uint64_t d = (fm.pat_edge[(i + 1) % FM_PAT_EDGES] >> 1) - (fm.pat_edge[i % FM_PAT_EDGES] >> 1);
-    uint8_t  lvl = (uint8_t)(fm.pat_edge[i % FM_PAT_EDGES] & 1);
+    uint64_t d = (fm.gen_edge[(i + 1) % FM_GEN_EDGES] >> 1) - (fm.gen_edge[i % FM_GEN_EDGES] >> 1);
+    uint8_t  lvl = (uint8_t)(fm.gen_edge[i % FM_GEN_EDGES] & 1);
     uint32_t na = lvl ? a.n_h : a.n_l, nb = lvl ? b.n_h : b.n_l;
     int      is_a = (d == na) || (d == na + 1), is_b = (d == nb) || (d == nb + 1);
 
@@ -1520,31 +1520,31 @@ static void test_gen_change(void)
   //The step running at the commit and the two prefetched ones are old: the first new step is the third complete edge
   //interval after the commit (k + 1, k + 2 old, k + 3 new)
   T_EQ(first_new, 3);
-  T_TRUE((fm.pat_edge[from % FM_PAT_EDGES] >> 1) >= t_commit);
+  T_TRUE((fm.gen_edge[from % FM_GEN_EDGES] >> 1) >= t_commit);
 
   //A commit lost to a second commit before the take: B never runs
-  fm_reset(PAT_VER, 199999, 22);
+  fm_reset(GEN_VER, 199999, 22);
   {
     gp_square slow = { 200000000, 200000000, 0, 0 };       //1 s steps
 
-    fpga_pat_square(&slow);
-    fpga_pat_drive(1);
-    pat_advance(1000000);
-    fpga_pat_square(&b);                                    //pending
-    fpga_pat_square(&c);                                    //overwrites the shadow
-    T_EQ(fm.pat_sh[0].dur, c.n_h);
-    from = fm.pat_nedge;
-    pat_advance(4500000000ull);                             //the slow step, its prefetched one, then C
-    for(i = from; i + 1 < fm.pat_nedge; i++)
+    fpga_gen_square(&slow);
+    fpga_gen_drive(1);
+    gen_advance(1000000);
+    fpga_gen_square(&b);                                    //pending
+    fpga_gen_square(&c);                                    //overwrites the shadow
+    T_EQ(fm.gen_sh[0].dur, c.n_h);
+    from = fm.gen_nedge;
+    gen_advance(4500000000ull);                             //the slow step, its prefetched one, then C
+    for(i = from; i + 1 < fm.gen_nedge; i++)
     {
-      uint64_t d = (fm.pat_edge[(i + 1) % FM_PAT_EDGES] >> 1) - (fm.pat_edge[i % FM_PAT_EDGES] >> 1);
-      uint8_t  lvl = (uint8_t)(fm.pat_edge[i % FM_PAT_EDGES] & 1);
+      uint64_t d = (fm.gen_edge[(i + 1) % FM_GEN_EDGES] >> 1) - (fm.gen_edge[i % FM_GEN_EDGES] >> 1);
+      uint8_t  lvl = (uint8_t)(fm.gen_edge[i % FM_GEN_EDGES] & 1);
 
       if((d == (lvl ? b.n_h : b.n_l)) || (d == (lvl ? b.n_h : b.n_l) + 1))
         bad++;
     }
     T_EQ(bad, 0);
-    T_TRUE(fm.pat_nedge - from > 100);
+    T_TRUE(fm.gen_nedge - from > 100);
   }
 }
 
@@ -1556,27 +1556,27 @@ static void test_gen_status(void)
   uint32_t  s0;
   uint8_t   st;
 
-  fm_reset(PAT_VER, 199999, 23);
-  T_EQ(fpga_pat_status(), 0);
-  fpga_pat_square(&sq);
-  fpga_pat_drive(1);
+  fm_reset(GEN_VER, 199999, 23);
+  T_EQ(fpga_gen_status(), 0);
+  fpga_gen_square(&sq);
+  fpga_gen_drive(1);
   fm_advance_ns(1000);
   s0 = fm.strobes;
-  st = fpga_pat_status();
+  st = fpga_gen_status();
   T_EQ(fm.strobes - s0, 2);
   T_EQ(st, 0x80);                                           //running, entry 0 (high), the commit taken by the start
   T_EQ(fm_pin(), 1);
   fm_advance_ns(10000);
-  T_EQ(fpga_pat_status(), 0x81);                            //entry 1 (low)
+  T_EQ(fpga_gen_status(), 0x81);                            //entry 1 (low)
   T_EQ(fm_pin(), 0);
 
   //Index 2 and above, 0x6E, 0x6F and the engine's 0x76..0x7D: ignored
   {
-    fpga_pat_step s = { FPGA_PAT_S_LEVEL, 0, 77 };
+    fpga_gen_step s = { FPGA_GEN_S_LEVEL, 0, 77 };
     uint8_t c;
 
-    fpga_pat_step_write(2, &s);
-    fpga_pat_step_write(8, &s);
+    fpga_gen_step_write(2, &s);
+    fpga_gen_step_write(8, &s);
     for(c = 0x76; c <= 0x7D; c++)
     {
       fpga_write_cmd(c);
@@ -1586,13 +1586,13 @@ static void test_gen_status(void)
     fpga_write_byte(0xFF);
     fpga_write_cmd(0x6E);
     fpga_write_byte(0xFF);
-    T_EQ(fm.pat_act[0].dur, 1000); T_EQ(fm.pat_act[1].dur, 3000); T_EQ(fm.pat_sh[0].dur, 1000);
-    T_EQ(fm.pat_run, 1); T_EQ(fm.pat_starts, 1);
+    T_EQ(fm.gen_act[0].dur, 1000); T_EQ(fm.gen_act[1].dur, 3000); T_EQ(fm.gen_sh[0].dur, 1000);
+    T_EQ(fm.gen_run, 1); T_EQ(fm.gen_starts, 1);
   }
 
   //Off: mode 0 at the low idle level, the status reads 0 apart from the step
-  fpga_pat_level(0);
-  T_EQ(fpga_pat_status() & 0xA0, 0);
+  fpga_gen_level(0);
+  T_EQ(fpga_gen_status() & 0xA0, 0);
   T_EQ(fm_pin(), 0);
 }
 

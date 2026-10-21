@@ -275,65 +275,65 @@ int fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift)
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator (FPGA 0x153D, fw-d5; the square only since fw-nopat): fpga_bus.h
 
-fpga_pat_cfg fpga_pat;
+fpga_gen_cfg fpga_gen;
 
-void fpga_pat_step_write(uint8_t index, const fpga_pat_step *st)
+void fpga_gen_step_write(uint8_t index, const fpga_gen_step *st)
 {
   fpga_write_cmd(0x6C);
-  fpga_write_byte((uint8_t)(((st->flags & FPGA_PAT_S_END) ? 0x80 : 0) | ((st->flags & FPGA_PAT_S_LEVEL) ? 0x20 : 0) |
+  fpga_write_byte((uint8_t)(((st->flags & FPGA_GEN_S_END) ? 0x80 : 0) | ((st->flags & FPGA_GEN_S_LEVEL) ? 0x20 : 0) |
                             (index & 0x1F)));
   fpga_write_int(st->dur);
   fpga_write_short(st->frac);
 }
 
-void fpga_pat_ctl(uint8_t v)
+void fpga_gen_ctl(uint8_t v)
 {
   fpga_write_cmd(0x6D);
   fpga_write_byte(v);
 }
 
-void fpga_pat_drive(int on)
+void fpga_gen_drive(int on)
 {
   //0x50 as 1.00o5 writes it (4 bytes): 1 = the pin is driven with the square's level, 0 = hi-Z (the EXT input)
   fpga_write_cmd(0x50);
   fpga_write_int(on ? 1 : 0);
-  fpga_pat.drive = (uint8_t)(on != 0);
+  fpga_gen.drive = (uint8_t)(on != 0);
 }
 
-void fpga_pat_square(const gp_square *sq)
+void fpga_gen_square(const gp_square *sq)
 {
-  fpga_pat_step hi = { FPGA_PAT_S_LEVEL, sq->f_h, sq->n_h };
-  fpga_pat_step lo = { FPGA_PAT_S_END, sq->f_l, sq->n_l };
-  int running = (fpga_pat.mode == FPGA_PAT_CONT);
+  fpga_gen_step hi = { FPGA_GEN_S_LEVEL, sq->f_h, sq->n_h };
+  fpga_gen_step lo = { FPGA_GEN_S_END, sq->f_l, sq->n_l };
+  int running = (fpga_gen.mode == FPGA_GEN_CONT);
 
   if(!running)
   {
     //From a level or off: stop, then the two entries and commit + start in one control write
-    fpga_pat.mode = FPGA_PAT_OFF;
-    fpga_pat.ctl  = 0;
-    fpga_pat_ctl(0);
+    fpga_gen.mode = FPGA_GEN_OFF;
+    fpga_gen.ctl  = 0;
+    fpga_gen_ctl(0);
   }
 
   //Entries 0 and 1 go to the shadow; the commit makes them pending, taken at the next step boundary (or by the start):
   //18 strobes for a running square, glitch-free and phase-continuous
-  fpga_pat_step_write(0, &hi);
-  fpga_pat_step_write(1, &lo);
+  fpga_gen_step_write(0, &hi);
+  fpga_gen_step_write(1, &lo);
 
-  fpga_pat.step[0] = hi;
-  fpga_pat.step[1] = lo;
-  fpga_pat.mode    = FPGA_PAT_CONT;
-  fpga_pat_ctl((uint8_t)(FPGA_PAT_CONT | FPGA_PAT_CTL_COMMIT | (running ? 0 : FPGA_PAT_CTL_START)));
+  fpga_gen.step[0] = hi;
+  fpga_gen.step[1] = lo;
+  fpga_gen.mode    = FPGA_GEN_CONT;
+  fpga_gen_ctl((uint8_t)(FPGA_GEN_CONT | FPGA_GEN_CTL_COMMIT | (running ? 0 : FPGA_GEN_CTL_START)));
 }
 
-void fpga_pat_level(uint8_t level)
+void fpga_gen_level(uint8_t level)
 {
-  fpga_pat.mode = FPGA_PAT_OFF;
-  fpga_pat.ctl  = level ? FPGA_PAT_CTL_IDLE : 0;
-  fpga_pat_ctl(fpga_pat.ctl);
+  fpga_gen.mode = FPGA_GEN_OFF;
+  fpga_gen.ctl  = level ? FPGA_GEN_CTL_IDLE : 0;
+  fpga_gen_ctl(fpga_gen.ctl);
 }
 
-uint8_t fpga_pat_status(void)
+uint8_t fpga_gen_status(void)
 {
   fpga_write_cmd(0x39);
-  return (uint8_t)(fpga_read_byte() & FPGA_PAT_ST_MASK);
+  return (uint8_t)(fpga_read_byte() & FPGA_GEN_ST_MASK);
 }

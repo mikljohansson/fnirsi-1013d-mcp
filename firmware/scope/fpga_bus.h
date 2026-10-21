@@ -165,48 +165,48 @@ int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift);
 // pin is driven with the square's level, 0 = hi-Z (the EXT input). Read 0x39 byte 0 = { running, 0, pending, 0, 0, 0,
 // 0, step }.
 
-#define FPGA_PAT_OFF          0
-#define FPGA_PAT_CONT         3
+#define FPGA_GEN_OFF          0
+#define FPGA_GEN_CONT         3
 
-#define FPGA_PAT_CTL_IDLE     0x04     //0x6D bit 2: idle level
-#define FPGA_PAT_CTL_START    0x10     //0x6D bit 4 (self-clearing)
-#define FPGA_PAT_CTL_COMMIT   0x20     //0x6D bit 5 (self-clearing)
+#define FPGA_GEN_CTL_IDLE     0x04     //0x6D bit 2: idle level
+#define FPGA_GEN_CTL_START    0x10     //0x6D bit 4 (self-clearing)
+#define FPGA_GEN_CTL_COMMIT   0x20     //0x6D bit 5 (self-clearing)
 
-#define FPGA_PAT_S_LEVEL      0x01     //entry flags (the firmware's; 0x6C byte 0 bit 5)
-#define FPGA_PAT_S_END        0x04     //(bit 7)
+#define FPGA_GEN_S_LEVEL      0x01     //entry flags (the firmware's; 0x6C byte 0 bit 5)
+#define FPGA_GEN_S_END        0x04     //(bit 7)
 
-#define FPGA_PAT_ST_RUNNING   0x80     //0x39 byte 0 bit 7: the square runs
-#define FPGA_PAT_ST_PENDING   0x20     //0x39 byte 0 bit 5: a commit not yet taken
-#define FPGA_PAT_ST_STEP      0x01     //0x39 byte 0 bit 0: the entry running (0 high, 1 low)
-#define FPGA_PAT_ST_MASK      (FPGA_PAT_ST_RUNNING | FPGA_PAT_ST_PENDING | FPGA_PAT_ST_STEP)
+#define FPGA_GEN_ST_RUNNING   0x80     //0x39 byte 0 bit 7: the square runs
+#define FPGA_GEN_ST_PENDING   0x20     //0x39 byte 0 bit 5: a commit not yet taken
+#define FPGA_GEN_ST_STEP      0x01     //0x39 byte 0 bit 0: the entry running (0 high, 1 low)
+#define FPGA_GEN_ST_MASK      (FPGA_GEN_ST_RUNNING | FPGA_GEN_ST_PENDING | FPGA_GEN_ST_STEP)
 
 typedef struct
 {
-  uint8_t  flags;          //FPGA_PAT_S_*
+  uint8_t  flags;          //FPGA_GEN_S_*
   uint16_t frac;           //1/65536 clock
   uint32_t dur;            //clocks, >= 2
-} fpga_pat_step;
+} fpga_gen_step;
 
 typedef struct
 {
-  uint8_t  mode;           //0x6D bits 1..0: FPGA_PAT_OFF or FPGA_PAT_CONT
-  uint8_t  ctl;            //0x6D bit 2 (FPGA_PAT_CTL_IDLE)
+  uint8_t  mode;           //0x6D bits 1..0: FPGA_GEN_OFF or FPGA_GEN_CONT
+  uint8_t  ctl;            //0x6D bit 2 (FPGA_GEN_CTL_IDLE)
   uint8_t  drive;          //0x50 as last written
-  fpga_pat_step step[2];   //entries 0 (high) and 1 (low, end)
-} fpga_pat_cfg;
+  fpga_gen_step step[2];   //entries 0 (high) and 1 (low, end)
+} fpga_gen_cfg;
 
-extern fpga_pat_cfg fpga_pat;      //what the FPGA holds, the firmware's copy (power-on: all 0, off, hi-Z)
+extern fpga_gen_cfg fpga_gen;      //what the FPGA holds, the firmware's copy (power-on: all 0, off, hi-Z)
 
-void fpga_pat_step_write(uint8_t index, const fpga_pat_step *st);   //0x6C
-void fpga_pat_ctl(uint8_t v);                                       //0x6D
-void fpga_pat_drive(int on);                                        //0x50
+void fpga_gen_step_write(uint8_t index, const fpga_gen_step *st);   //0x6C
+void fpga_gen_ctl(uint8_t v);                                       //0x6D
+void fpga_gen_drive(int on);                                        //0x50
 //The square: entries 0 (high) and 1 (low, END) and 0x6D = continuous + commit, + start when the square was not running
 //already (then 0x6D = 0 first). A running square changes glitch-free at the next step boundary: 18 strobes
-void fpga_pat_square(const gp_square *sq);
+void fpga_gen_square(const gp_square *sq);
 //A static level: 0x6D = mode 0 with the idle level (the wizard's gain step, duty 0 / 100 %)
-void fpga_pat_level(uint8_t level);
-//0x39 byte 0 masked to FPGA_PAT_ST_MASK
-uint8_t fpga_pat_status(void);
+void fpga_gen_level(uint8_t level);
+//0x39 byte 0 masked to FPGA_GEN_ST_MASK
+uint8_t fpga_gen_status(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bus primitives: fpga_control.c / fpga_control.h on the scope, fpga_model.c in the host test

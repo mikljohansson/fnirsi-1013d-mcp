@@ -249,9 +249,10 @@ void fpga_enable_system(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//FPGA 0x153D (fw-d5): the generator is a fractional two-step square (gen_pat.h, fpga_bus.h "The generator"); the DDS (0x51 / 0x52) is gone. The UI's whole Hz and whole percent go through the contract's P16 / H16
-//formulas; a running square changes at the next step boundary (glitch-free), so the order of the frequency and the duty
-//writes no longer matters. Frequency 0 or duty 0 % holds the pin low, 100 % high (the DDS's behaviour at the extremes).
+//FPGA 0x153D (fw-d5): the generator is a fractional two-step square (gen_pat.h, fpga_bus.h "The generator"); the DDS
+//(0x51 / 0x52) is gone. The UI's whole Hz and whole percent go through the contract's P16 / H16 formulas; a running
+//square changes at the next step boundary (glitch-free), so the order of the frequency and the duty writes no longer
+//matters. Frequency 0 or duty 0 % holds the pin low, 100 % high (the DDS's behaviour at the extremes).
 static void fpga_gen_program(uint32 freq_hz, uint8 duty_pct)
 {
   uint64    p16, h16;
@@ -259,11 +260,11 @@ static void fpga_gen_program(uint32 freq_hz, uint8 duty_pct)
   gp_square sq;
 
   if(gp_ui_square(freq_hz, duty_pct, &p16, &h16, &level))
-    fpga_pat_level(level);
+    fpga_gen_level(level);
   else
   {
     (void)gp_split(p16, h16, &sq);
-    fpga_pat_square(&sq);
+    fpga_gen_square(&sq);
   }
 }
 
@@ -272,13 +273,13 @@ void fpga_on_off_generator(void)
   if (fpgasettings.gen_enable == 1)
   {
     fpga_gen_program(fpgasettings.gen_freq, fpgasettings.gen_duty);
-    fpga_pat_drive(1);
+    fpga_gen_drive(1);
   }
   else
   {
     //Off: the square stopped at the low idle level and the pin hi-Z (the EXT trigger input)
-    fpga_pat_drive(0);
-    fpga_pat_level(0);
+    fpga_gen_drive(0);
+    fpga_gen_level(0);
   }
 }
 

@@ -314,7 +314,7 @@ void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator's square (fw-d5, the RTL cut to the square by fpga-d3; fpga_model.h header)
 
-static int fm_pat_has(void)
+static int fm_gen_has(void)
 {
   return fm.version >= 0x153D;
 }
@@ -326,87 +326,87 @@ uint64_t fm_clk(void)
 
 int fm_pin(void)
 {
-  return fm.pat_drive ? fm.pat_level : 2;
+  return fm.gen_drive ? fm.gen_level : 2;
 }
 
-static void fm_pat_set_level(uint8_t level, uint64_t clk)
+static void fm_gen_set_level(uint8_t level, uint64_t clk)
 {
-  if(level != fm.pat_level)
+  if(level != fm.gen_level)
   {
-    fm.pat_edge[fm.pat_nedge % FM_PAT_EDGES] = (clk << 1) | level;
-    fm.pat_nedge++;
+    fm.gen_edge[fm.gen_nedge % FM_GEN_EDGES] = (clk << 1) | level;
+    fm.gen_nedge++;
   }
 
-  fm.pat_level = level;
+  fm.gen_level = level;
 }
 
-static uint8_t fm_pat_idle(void)
+static uint8_t fm_gen_idle(void)
 {
-  return (uint8_t)((fm.pat_ctl >> 2) & 1);
+  return (uint8_t)((fm.gen_ctl >> 2) & 1);
 }
 
 //The step after index k (whose entry is e): 0 after an end step (or entry 1)
-static uint8_t fm_pat_after(uint8_t k, uint8_t eflags)
+static uint8_t fm_gen_after(uint8_t k, uint8_t eflags)
 {
   return ((eflags & 0x80) || (k == 1)) ? 0 : (uint8_t)(k + 1);
 }
 
-static void fm_pat_take_pending(void)
+static void fm_gen_take_pending(void)
 {
-  if(fm.pat_pending)
+  if(fm.gen_pending)
   {
-    fm.pat_act[0]  = fm.pat_sh[0];
-    fm.pat_act[1]  = fm.pat_sh[1];
-    fm.pat_pending = 0;
+    fm.gen_act[0]  = fm.gen_sh[0];
+    fm.gen_act[1]  = fm.gen_sh[1];
+    fm.gen_pending = 0;
   }
 }
 
 //Begin the first queued step at clock clk; then take a pending commit and queue the step after the second one. The
 //engine prefetches two steps (fpga-d2, after the first 0x153D build): a commit during step k is taken at the boundary
 //into k + 1 (pending clears there), k + 1 and k + 2 run the old entries, k + 3 the new
-static void fm_pat_begin(uint64_t clk)
+static void fm_gen_begin(uint64_t clk)
 {
-  uint32_t sum = (uint32_t)fm.pat_acc + fm.pat_q.frac;
-  uint32_t dur = fm.pat_q.dur + (sum >> 16);
-  uint8_t  idx = fm.pat_q_idx;
+  uint32_t sum = (uint32_t)fm.gen_acc + fm.gen_q.frac;
+  uint32_t dur = fm.gen_q.dur + (sum >> 16);
+  uint8_t  idx = fm.gen_q_idx;
 
-  fm.pat_acc     = (uint16_t)sum;
-  fm.pat_step    = idx;
-  fm.pat_end_clk = clk + dur;
-  fm_pat_set_level((uint8_t)((fm.pat_q.flags >> 5) & 1), clk);
+  fm.gen_acc     = (uint16_t)sum;
+  fm.gen_step    = idx;
+  fm.gen_end_clk = clk + dur;
+  fm_gen_set_level((uint8_t)((fm.gen_q.flags >> 5) & 1), clk);
 
-  fm_pat_take_pending();
-  fm.pat_q      = fm.pat_q2;
-  fm.pat_q_idx  = fm.pat_q2_idx;
-  fm.pat_q2_idx = fm_pat_after(fm.pat_q_idx, fm.pat_q.flags);
-  fm.pat_q2     = fm.pat_act[fm.pat_q2_idx];
+  fm_gen_take_pending();
+  fm.gen_q      = fm.gen_q2;
+  fm.gen_q_idx  = fm.gen_q2_idx;
+  fm.gen_q2_idx = fm_gen_after(fm.gen_q_idx, fm.gen_q.flags);
+  fm.gen_q2     = fm.gen_act[fm.gen_q2_idx];
 }
 
 //A start: the pending shadows are taken first, so every step is new from step 0
-static void fm_pat_start(uint64_t clk)
+static void fm_gen_start(uint64_t clk)
 {
-  fm_pat_take_pending();
-  fm.pat_acc    = 0;
-  fm.pat_run    = 1;
-  fm.pat_starts++;
-  fm.pat_q_idx  = 0;
-  fm.pat_q      = fm.pat_act[0];
-  fm.pat_q2_idx = fm_pat_after(0, fm.pat_q.flags);
-  fm.pat_q2     = fm.pat_act[fm.pat_q2_idx];
-  fm_pat_begin(clk);
+  fm_gen_take_pending();
+  fm.gen_acc    = 0;
+  fm.gen_run    = 1;
+  fm.gen_starts++;
+  fm.gen_q_idx  = 0;
+  fm.gen_q      = fm.gen_act[0];
+  fm.gen_q2_idx = fm_gen_after(0, fm.gen_q.flags);
+  fm.gen_q2     = fm.gen_act[fm.gen_q2_idx];
+  fm_gen_begin(clk);
 }
 
-static void fm_pat_stop(uint64_t clk)
+static void fm_gen_stop(uint64_t clk)
 {
-  fm.pat_run = 0;
-  fm_pat_set_level(fm_pat_idle(), clk);
+  fm.gen_run = 0;
+  fm_gen_set_level(fm_gen_idle(), clk);
 }
 
 //Run the square up to clock clk (every boundary at or before it)
-static void fm_pat_run(uint64_t clk)
+static void fm_gen_run(uint64_t clk)
 {
-  while(fm.pat_run && (fm.pat_end_clk <= clk))
-    fm_pat_begin(fm.pat_end_clk);
+  while(fm.gen_run && (fm.gen_end_clk <= clk))
+    fm_gen_begin(fm.gen_end_clk);
 }
 
 static void fm_time(uint64_t ps)
@@ -418,24 +418,24 @@ static void fm_time(uint64_t ps)
   while(fm.next_edge_ps <= end)
   {
     fm.t_ps = fm.next_edge_ps;
-    fm_pat_run(fm.t_ps / 5000);
+    fm_gen_run(fm.t_ps / 5000);
     fm_edge();
     fm.next_edge_ps += fm_period_ps();
   }
 
   fm.t_ps = end;
-  fm_pat_run(fm.t_ps / 5000);
+  fm_gen_run(fm.t_ps / 5000);
 }
 
-static void fm_pat_write(uint8_t cmd)
+static void fm_gen_write(uint8_t cmd)
 {
   uint8_t *b = fm.buf;
   uint64_t now = fm_clk();
 
-  if(!fm_pat_has())
+  if(!fm_gen_has())
     return;
 
-  fm_pat_run(now);
+  fm_gen_run(now);
 
   switch(cmd)
   {
@@ -446,9 +446,9 @@ static void fm_pat_write(uint8_t cmd)
       //Entries 0 and 1 only (double-buffered); other indices are ignored
       if(idx < 2)
       {
-        fm.pat_sh[idx].flags = b[0] & 0xA0;
-        fm.pat_sh[idx].dur   = ((uint32_t)b[1] << 24) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 8) | b[4];
-        fm.pat_sh[idx].frac  = (uint16_t)((b[5] << 8) | b[6]);
+        fm.gen_sh[idx].flags = b[0] & 0xA0;
+        fm.gen_sh[idx].dur   = ((uint32_t)b[1] << 24) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 8) | b[4];
+        fm.gen_sh[idx].frac  = (uint16_t)((b[5] << 8) | b[6]);
       }
       break;
     }
@@ -458,25 +458,25 @@ static void fm_pat_write(uint8_t cmd)
       uint8_t v = b[0];
 
       //Mode 3 runs (a write while idle, or the start bit, starts it; ignored while running), any other mode is off
-      fm.pat_mode = v & 3;
-      fm.pat_ctl  = v & 0x04;
+      fm.gen_mode = v & 3;
+      fm.gen_ctl  = v & 0x04;
 
       if(v & 0x20)
-        fm.pat_pending = 1;
+        fm.gen_pending = 1;
 
-      if(fm.pat_mode != 3)
+      if(fm.gen_mode != 3)
       {
-        if(fm.pat_run)
-          fm_pat_stop(now + 1);
+        if(fm.gen_run)
+          fm_gen_stop(now + 1);
         else
-          fm_pat_set_level(fm_pat_idle(), now + 1);
+          fm_gen_set_level(fm_gen_idle(), now + 1);
       }
-      else if(!fm.pat_run)
-        fm_pat_start(now + 8);                                //step 0 40..45 ns after the strobe (fpga-d2, tb_pattern)
+      else if(!fm.gen_run)
+        fm_gen_start(now + 8);                                //step 0 40..45 ns after the strobe (fpga-d2, tb_pattern)
       break;
     }
 
-    case 0x50: fm.pat_drive = b[3] & 1; break;
+    case 0x50: fm.gen_drive = b[3] & 1; break;
   }
 }
 //The generator's square end
@@ -513,7 +513,7 @@ void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
   memset(&fpga_bus_wr, 0, sizeof(fpga_bus_wr));      //a fresh FPGA holds nothing the firmware wrote
   memset(&fpga_trig, 0, sizeof(fpga_trig));          //and the firmware's copy of the trigger extension is at power-on too
   memset(&fpga_cnt, 0, sizeof(fpga_cnt));            //C7 counter: the firmware's counter state too
-  memset(&fpga_pat, 0, sizeof(fpga_pat));            //the generator: the firmware's copy at power-on
+  memset(&fpga_gen, 0, sizeof(fpga_gen));            //the generator: the firmware's copy at power-on
   fm.pub_min = 255;                                  //C7: the published min reads 255 before the first gate
   fm.version = version;
   fm.divider = divider;
@@ -572,7 +572,7 @@ static void fm_apply(uint8_t cmd, uint32_t v)
   switch(cmd)
   {
     case 0x50: case 0x6C: case 0x6D:
-      fm_pat_write(cmd);
+      fm_gen_write(cmd);
       break;
   }
 
@@ -816,10 +816,10 @@ uint8_t fpga_io_strobe_read(void)
 
     //The generator: 0x39 = { running, 0, pending, 0, 0, 0, 0, step }; further strobes read 0
     case 0x39:
-      if(fm_pat_has() && (fm.nbytes++ == 0))
+      if(fm_gen_has() && (fm.nbytes++ == 0))
       {
-        fm_pat_run(fm_clk());
-        out = (uint8_t)((fm.pat_run ? 0x80 : 0) | (fm.pat_pending ? 0x20 : 0) | (fm.pat_step & 0x01));
+        fm_gen_run(fm_clk());
+        out = (uint8_t)((fm.gen_run ? 0x80 : 0) | (fm.gen_pending ? 0x20 : 0) | (fm.gen_step & 0x01));
       }
       break;
 

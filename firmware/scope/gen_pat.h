@@ -1,8 +1,9 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// gen_pat.h - the generator as a fractional two-step square (FPGA 0x153D, fw-d5, protocol 1.27; docs/plans/fpga-0x153c.md 7.2 and
-// 7.4): the integer maths from a frequency in mHz and a duty in basis points to the period P16 and the high part H16 in
-// 1/65536 of a 5 ns clock, the split into the two steps (n_h + f_h / 65536 high, n_l + f_l / 65536 low) and back. No FPU,
-// no globals, host-buildable (host_tests/test_fpga_bus.c test_gen_formulas, host_tests/test_session.c).
+// gen_pat.h - the generator as a fractional two-step square (FPGA 0x153D, fw-d5, protocol 1.27;
+// docs/plans/fpga-0x153c.md 7.2 and 7.4): the integer maths from a frequency in mHz and a duty in basis points to the
+// period P16 and the high part H16 in 1/65536 of a 5 ns clock, the split into the two steps (n_h + f_h / 65536 high,
+// n_l + f_l / 65536 low) and back. No FPU, no globals, host-buildable (host_tests/test_fpga_bus.c test_gen_formulas,
+// host_tests/test_session.c).
 //
 //   P16 = (2^16 x 2e11 + f / 2) / f          f in mHz; 2e11 = 200e6 clocks/s x 1000 mHz/Hz
 //   H16 = (P16 x d + 5000) / 10000           d in basis points
