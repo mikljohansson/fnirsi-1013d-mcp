@@ -15,9 +15,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   saved CIC2 / CIC3 values, the warnings that name the Filter, the user guide, the Peak greying unchanged). Not dispatched.
   Naming (owner 16:31: "sounds good with Hi-Res. Let's mimic what other scopes call it"): Off / Hi-Res / Anti-alias; "Average"
   stays the ACQ record mean only. Other scopes' names for reference: Tektronix Sample / Peak Detect / Hi Res / Average,
-  Keysight Normal / Peak Detect / High Resolution / Averaging, Rigol Normal / Peak / High Res / Average. The mockup round may
-  also show Hi-Res as a third Sample choice (Normal / Peak / Hi-Res, as those scopes group it) with the Filter row as
-  Off / Anti-alias, for the owner to compare.
+  Keysight Normal / Peak Detect / High Resolution / Averaging, Rigol Normal / Peak / High Res / Average. Hi-Res stays in the
+  Filter row, not as a third Sample choice: Hi-Res (boxcar) and Anti-alias (CIC3 + FIR) are two settings of the same FPGA
+  filter stage and exclude each other, so two rows would need a greying rule (owner asked 16:3x, coordinator recommendation).
 - **No 0x153E for 0.3.0** (owner decision 2026-10-21 16:15, after the walk-through of the 0x153E features): 0.3.0 ships on
   0x153D. Runt, window and the pulse-width range are dropped from the roadmap (owner: runt "rather special", window = check
   the dip or the spike separately, range "marginal"); both-core triggering stays the only later 0x153E candidate ("if we do
