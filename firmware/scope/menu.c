@@ -5295,8 +5295,6 @@ void scope_acquisition_ACQ_mode_select(void)
         else 
         {
         scopesettings.timeperdiv = 8;
-        //Send the time base command for the long time base
-        fpga_set_long_timebase(scopesettings.timeperdiv);
         display_set_fg_color(GREEN_COLOR);
         display_text(ACQ_MENU_XPOS + 43, ACQ_MENU_YPOS +  168, "ACQ");
         display_text(ACQ_MENU_XPOS + 20, ACQ_MENU_YPOS +  182, "Short mode");

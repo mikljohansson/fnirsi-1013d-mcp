@@ -73,8 +73,6 @@ void   fpga_set_channel_offset(PCHANNELSETTINGS settings);
 void   fpga_set_sample_rate(uint32 samplerate);
 void   fpga_set_time_base(uint32 timebase);     //void   fpga_set_short_timebase(void);
 
-void   fpga_set_long_timebase(uint32 timebase);            //For long time base
-
 void   fpga_set_trigger_channel(void);
 void   fpga_set_trigger_edge(void);
 void   fpga_swap_trigger_channel(void);

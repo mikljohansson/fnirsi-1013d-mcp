@@ -505,7 +505,6 @@ static void cal_begin(void)
 
   cal_backup_divider = fpga_divider;
   cal_backup_trigger = scopesettings.triggermode;
-  scopesettings.samplemode  = 0;
   scopesettings.triggermode = 0;
   fpga_set_trigger_mode();
   fpga_write_cmd(0x17);

@@ -503,10 +503,6 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   //Decimation filter mode, shift and 16-bit level, settled before the reset
   pc_dec_apply(dc);
 
-  //Trigger enable (dead on Atlan4 bitstreams)                                          BENCH: T6
-  fpga_write_cmd(0x0F);
-  fpga_write_byte(0x00);
-
   //Configured trigger mode again: FORCE leaves 0x1A in auto
   fpga_write_cmd(0x1A);
   fpga_write_byte(normal ? 0x01 : 0x00);
@@ -536,10 +532,6 @@ void pc_hal_acq_poll(int *done, int *triggered)
 
 uint16_t pc_hal_acq_finish(void)
 {
-  //As fpga_done_conversion in trigger mode: disable the trigger system once done
-  fpga_write_cmd(0x0F);
-  fpga_write_byte(0x01);
-
   return fpga_prepare_for_transfer();
 }
 

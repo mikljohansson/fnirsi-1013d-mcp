@@ -587,35 +587,6 @@ void fpga_set_time_base(uint32 timebase) //len pre rezim auto, urcuje max cas po
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void fpga_set_long_timebase(uint32 timebase)
-{
-  //Send the data, which is always 2000
-  //fpga_write_int(2000);//0x07d0 is 2000
-  
-  //Make sure setting is in range
-  if(timebase < (sizeof(timebase_settings) / sizeof(uint32)))
-  {
-    //Send the command for long time base to the FPGA
-    //fpga_write_cmd(0x0D);
-  
-    //Table settings ranges from setting 0 (200mS/div) to 23 (5nS/div)
-    //fpga_write_int(timebase_settings[timebase]);
-  }
- 
-  //The command 0x0D sets the rate with which the ADC is clocked. The 0x07D0 means 100KSa/s.
-  //With the command 0x28 the mode is selected. Needs to be set to 0x01 for the roll mode sampling. Not sure if it is needed for every read of the sampl
-  
-  //Disable trigger system???
-  fpga_write_cmd(0x0F);
-  fpga_write_byte(0x01);
-  
-  //Some mode select command for the FPGA (0x01 for long time base)
-  //fpga_write_cmd(0x28); //0X28 not support in FPGA???
-  //fpga_write_byte(0x01);
-}
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
 static void fpga_arm_idle(void)
 {
   //Same unbounded ready wait as 1.00o5 (UI behaviour unchanged), but keep the USB link answering if the FPGA hangs.
@@ -636,20 +607,6 @@ void fpga_do_conversion(void)
   //auto setup), written and settled before the sampling reset
   pc_glue_decim_conversion();
   
-  //Check if sampling with trigger system enabled
-  if(scopesettings.samplemode == 1)
-  {
-    //Enable trigger system???
-    fpga_write_cmd(0x0F);
-    fpga_write_byte(0x00);
-  }
-  else
-  {
-    //Disable the trigger circuit??
-    fpga_write_cmd(0x0F);
-    fpga_write_byte(0x01);
-  }
-
   //Set the FPGA for short time base mode
   //fpga_write_cmd(0x28);
   //fpga_write_byte(0x00);
@@ -680,22 +637,9 @@ uint8 fpga_done_conversion(void)
   //Send check on triggered or buffer full command to the FPGA
   fpga_write_cmd(0x0A);
   
-  //Check if sampling with trigger system enabled
-  if(scopesettings.samplemode == 1)
-  {
-    if (((fpga_read_byte() & 1) == 1))
-    {
-        //Disable trigger system???
-        fpga_write_cmd(0x0F);
-        fpga_write_byte(0x01);
-        scopesettings.conversion_done = 1;
-    }
-  }
-  else
-  {
-    //Check for the FPGA to signal triggered or buffer full
-    if (((fpga_read_byte() & 1) == 1)) scopesettings.conversion_done = 1;
-  }
+  //Check for the FPGA to signal triggered or buffer full
+  if(fpga_read_byte() & 1)
+    scopesettings.conversion_done = 1;
   
   //fw 0.2.62: a full-rate capture is checked before anyone reads it; a bad one is discarded and the conversion re-armed
   //(enc_heal.h, bounded), so every caller's wait loop simply keeps waiting

@@ -197,6 +197,7 @@ test: all
 	$(OUT)/test_diag
 	$(OUT)/test_bode_sweep
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --diag-checker $(OUT)/test_diag --seq-checker $(OUT)/seq_check --vectors $(VECTORS)
+	$(PYTHON) -I check_retired_regs.py $(SRC)
 	$(PYTHON) -I test_bode.py --cli $(OUT)/bode_cli
 	$(PYTHON) -I test_fft.py --cli $(OUT)/fft_cli --tables $(SRC)/fx_fft_tables.c --gen ../../tools/gen_fft_tables.py
 	@if command -v qemu-arm >/dev/null && command -v arm-none-eabi-gcc >/dev/null && [ -x $(ARM_CC10) ]; then \

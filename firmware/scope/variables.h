@@ -614,7 +614,6 @@ struct tagScopeSettings
   uint16 triggerlevel;                  //Actual trigger level set to the FPGA
 
   
-  uint8 samplemode;                     //New for mode select in the fpga_do_conversion function
    
   uint32    count;          //long time base, buffer count
   uint32    xpos;           //long time base

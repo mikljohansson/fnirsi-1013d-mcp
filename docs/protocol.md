@@ -890,8 +890,9 @@ other channel's cards, an EXT result, a result without edges and the reference t
 Firmware sequence, derived from `fpga_do_conversion` [V `S100 fpga_control.c:604-660`]:
 
 1. Wait out any pending relay settling time (8.3).
-2. Write 0x0F = 0 (trigger enable; dead on Atlan4 FPGAs, meaningful on stock [V zaklad.v 0x0F; Donwulff
-   inventory]).
+2. Write 0x1A = the configured trigger mode (FORCE leaves it in auto). Up to fw-cruft (1.27) the firmware first wrote
+   0x0F = 0 here and 0x0F = 1 at DONE (`sample_read_enable`: a mux whose both arms were the MCU clock on every Atlan4
+   bitstream, removed from the FPGA in 0x153C); it writes 0x0F no more.
 3. Write 0x01 = 1 (sample-system reset). Poll 0x05 bit0 until 1, at most 2,000,000 reads; on timeout answer
    `E_FPGA` (1.00o5 waits forever here [V `S100 fpga_control.c:636`]).
 4. With PROG_TRIGGER_POS: write 0x0B = pretrigger_words, 0x0C = total_words, 0x0E = auto_timeout.
@@ -1331,10 +1332,10 @@ differs from or fills a gap in sections 1-13. Hosts written against this documen
 - On USB bus reset or disconnect (and up to v0.2.43 suspend, row 50) the transport flushes the EP2 FIFOs itself (v0.1.2): the 1.00o5 reset
   handler issues its flushes with EPIND = 0, so EP2 kept a stale frame across host sessions.
 
-- ARM writes 0x0F = 0, then 0x1A = the configured mode (FORCE leaves it in auto), then the 0x01 reset with a
-  bounded 0x05 wait (2,000,000 reads), then 0x0B / 0x0C (programmable variants) and 0x0E (all variants) in reset,
-  then releases. At DONE the firmware writes 0x0F = 1, as `fpga_done_conversion` does in trigger mode, and
-  latches 0x14.
+- ARM writes 0x1A = the configured mode (FORCE leaves it in auto), then the 0x01 reset with a bounded 0x05 wait
+  (2,000,000 reads), then 0x0B / 0x0C (programmable variants) and 0x0E (all variants) in reset, then releases. At
+  DONE the firmware latches 0x14. (The 0x0F = 0 / 1 writes around a capture, no-ops on every Atlan4 bitstream, were
+  dropped with 0x153C: fw-cruft.)
 - READ_RAW never relies on the FPGA read pointer wrapping: a read that crosses the ring end is split, and each
   part writes 0x1F again (with `read_lag`) followed by one dummy strobe.
 - The UI's own acquisition is unchanged: the 1.00o5 `T + 7441` pointer shortcut and the unbounded 0x05 wait stay

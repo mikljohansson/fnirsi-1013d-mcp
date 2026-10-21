@@ -166,8 +166,6 @@ void scope_adjust_timebase_and_voltdiv (void)
     //Long time base
     if (scopesettings.timeperdiv < 11)  //9
     {   scopesettings.long_mode = 1;
-        //Send the time base command for the long time base
-        fpga_set_long_timebase(scopesettings.timeperdiv);
     }else 
     {   //Short time base
         scopesettings.long_mode = 0;
@@ -845,9 +843,6 @@ void scope_input_calibration(void)
       match_volt_per_div_settings(&scopesettings.channel1);
       match_volt_per_div_settings(&scopesettings.channel2);
       
-      //Disable the trigger circuit
-      scopesettings.samplemode = 0;
-
       //Switch back to AUTO trigger mode to avoid lockup in NORMAL or SINGLE mode
       scopesettings.triggermode = 0;
   
@@ -1084,9 +1079,6 @@ void scope_do_auto_setup_old(void)
   {
     return;
   }
-  
-  //Disable the trigger circuit
-  scopesettings.samplemode = 0;
   
   //Modification on 09-03-2022. Begin
   //Switch back to AUTO trigger mode to avoid lockup in NORMAL or SINGLE mode
@@ -1589,9 +1581,6 @@ void scope_do_auto_setup_new(void)
   {
     return;
   }
-  
-  //Disable the trigger circuit
-  scopesettings.samplemode = 0;
   
   //Modification on 09-03-2022. Begin
   //Switch back to AUTO trigger mode to avoid lockup in NORMAL or SINGLE mode

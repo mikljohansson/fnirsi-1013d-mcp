@@ -150,7 +150,6 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
   acal_cm_meas m;
   acal_corr    kg, kf;
   uint32       tm  = scopesettings.triggermode;
-  uint32       sm  = scopesettings.samplemode;
   uint32       sc  = scopesettings.samplecount;
   uint32       ns  = scopesettings.nofsamples;
   uint32       div = fpga_divider;
@@ -163,7 +162,6 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
   probe_ch.tracebuffer = probe_buf;
 
   //Trigger circuit off, FPGA auto mode (no lockup in NORMAL or SINGLE), the calibration's 500 samples per core
-  scopesettings.samplemode  = 0;
   scopesettings.triggermode = 0;
   fpga_set_trigger_mode();
   scopesettings.samplecount = 2 * ACAL_PROBE_SAMPLES;
@@ -176,7 +174,6 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
 
   scopesettings.samplecount = sc;
   scopesettings.nofsamples  = ns;
-  scopesettings.samplemode  = (uint8)sm;
   scopesettings.triggermode = (uint8)tm;
 
   //The UI's rate; a raw divider a host wrote (SET_TIMEBASE raw) is not in the rate table: written back as it was
