@@ -39,9 +39,9 @@ All on the same day (maintainer decision 2026-10-19: one announcement, no follow
 
 I have released {{VERSION}} of a set of changes to the FNIRSI 1013D tablet oscilloscope:
 
-- a scope firmware that runs from the SD card. The stock firmware in the MCU flash stays untouched. Remove the card and
-  the scope is stock again.
-- FPGA bitstreams for the Anlogic AL3A10 variant.
+- a scope firmware that runs from the SD card. The stock firmware in the MCU flash stays untouched. Write your FPGA
+  backup back and remove the card, and the scope is stock again.
+- an FPGA bitstream for the Anlogic AL3A10 variant, which the firmware needs.
 - a USB protocol and a Python MCP server. An AI agent (Claude Code, Codex, any MCP client) can configure the scope,
   capture and analyse while you keep using the touch screen.
 
@@ -65,10 +65,10 @@ The numbers are from my unit (AL3A10), not claims about every unit. Sources are 
   bitstream 0x153B, ten sweeps of an RC network (100 Hz to 1 MHz, 25 points) needed 25 captures each, no retakes, and
   flagged no point (bench 2026-10-20 20:40).
 - **Calibration per ADC core, with a wizard.** Each channel is two interleaved ADC cores with their own zero and gain,
-  and the difference changes with the clock mode. The wizard measures both per core and per clock class. On bitstream
-  0x153A and later it also trains the instant at which the FPGA captures each core's data. A self-check after every
-  200 MSa/s capture counts outliers. On my unit it flagged 0 of 18,865 captures on 0x153A (bench 2026-10-20). A
-  background tracker follows the full-rate drift.
+  and the difference changes with the clock mode. The wizard measures both per core and per clock class. It also
+  trains the instant at which the FPGA captures each core's data. A self-check after every 200 MSa/s capture counts
+  outliers. On my unit it flagged 0 of 18,865 captures on 0x153A (bench 2026-10-20). A background tracker follows the
+  full-rate drift.
 - **USB protocol and MCP server.** Binary, CRC-checked, over USB CDC; no driver on Windows or Linux. PING median 0.89 ms
   over 500 PINGs with no failures (firmware 0.2.48). A full 16,382-sample dual-channel capture including readout in
   110 ms (firmware 0.1.2). A 30-minute capture soak with 17,908 content-checked requests, no failures and no restarts
@@ -87,8 +87,8 @@ The numbers are from my unit (AL3A10), not claims about every unit. Sources are 
 - **Diagnostics screen**: identity, FPGA bitstream and features, calibration state, USB link, restarts, battery, an
   event log, and a report saved to the card.
 - **Digital phosphor view**, persistence 0.2 s to infinite, mono or heat palette.
-- **External trigger on the calibration pin** (bitstream 0x1533 and later). In a loopback through the scope's own
-  generator 10 of 10 captures triggered.
+- **External trigger on the calibration pin.** In a loopback through the scope's own generator 10 of 10 captures
+  triggered.
 - **Generator** (a 32-bit DDS square wave on the calibration pin) and a **Bode sweep** tool on the host that uses it.
 - **Hands-free development loop.** `fnirsi1013d-flash` reboots the scope into FEL, loads a build into RAM and can write
   it to the SD card over USB, with a backup first. The same commit gives the same image sha256 in any checkout and in CI.
@@ -113,8 +113,9 @@ measurements while you hold the probes.
   `docs/hardware-prep.md` helps you identify your board.
 - **The FPGA bitstream needs an SPI programmer.** The config flash is wired only to the FPGA, so the scope cannot flash
   it. You solder pins to the 2x3 header and use a 3.3 V programmer (I use an FT2232D board with a script in the
-  repository). Back up the flash twice and compare first. The firmware runs without a new bitstream; the FPGA features
-  need one. The bitstreams are attached to the release, with `BITSTREAMS.md` (hashes, wiring, rollback). Use 0x153B.
+  repository). Back up the flash twice and compare first. The bitstream is required: the firmware runs only with the
+  release's bitstream, 0x153B, and shows a banner on any other. It is attached to the release with `BITSTREAMS.md`
+  (hashes, wiring, rollback); the older images stay attached for the record, but no firmware supports them.
 - **The SD card's FAT32 partition must start at 8 MiB (sector 16384) or later.** The firmware sits in the raw sectors
   before it. Most cards start lower, so you recreate the partition. The card tool refuses a card that does not fit and
   says what it needs.
@@ -139,10 +140,11 @@ Short version; the full steps are on the documentation site (Install).
 
 1. Download from the release page ({{RELEASE_URL}}): `fnirsi_1013d-fw-{{VERSION}}.bin`,
    `fnirsi_1013d-sdtools-{{VERSION}}.zip`, the `fnirsi1013d` wheel and `SHA256SUMS`. Check the hashes.
-2. Back up your SD card and, if you will touch the FPGA, the config flash.
-3. Prepare a spare micro SD card with its FAT32 partition at 8 MiB. Build the SD parts with the tools zip
+2. Back up your SD card and the FPGA's config flash, twice.
+3. Flash bitstream 0x153B with your SPI programmer. It is required; with any other bitstream the firmware only shows a
+   banner, so the FPGA comes before the card.
+4. Prepare a spare micro SD card with its FAT32 partition at 8 MiB. Build the SD parts with the tools zip
    (`make_release_sd_package.py build ... --parts parts`) and write only those parts with `make_sd_image.py write`.
-4. Optional: flash bitstream 0x153B with your SPI programmer.
 5. Boot, and run the calibration wizard when the first-run screen asks.
 6. Install the MCP server from the wheel, point your agent at it (`fnirsi1013d-mcp --port auto`) and ask it to look at
    channel 1. Without a scope: `fnirsi1013d-mcp --sim`.
@@ -179,8 +181,8 @@ filter with the scope alone, a spectrum analyser (4096-point FFT in 2.7 ms), FPG
 at slow time bases, per-core ADC calibration with a wizard, a phosphor view, an external trigger and a USB protocol. A
 Python MCP server lets an AI agent (Claude Code, Codex) drive the scope while you keep using the touch screen.
 
-Verified on one unit only; the FPGA features need an SPI programmer. GPL-3.0. Release notes, install steps and the
-bench log: {{RELEASE_URL}}. Credit to Atlan4, pecostm32 and Donwulff, whose work this builds on.
+Verified on one unit only; the install needs an SPI programmer for the FPGA bitstream. GPL-3.0. Release notes, install
+steps and the bench log: {{RELEASE_URL}}. Credit to Atlan4, pecostm32 and Donwulff, whose work this builds on.
 
 For r/ClaudeAI, replace the second sentence of the first paragraph onwards with: the MCP server has 32 tools in safety
 tiers with confirmation tokens, a simulator you can try without the scope (`fnirsi1013d-mcp --sim`), a Claude Code skill
@@ -192,4 +194,4 @@ pulse-induction metal detector design. Most of the code was written by Claude ag
 > **Release {{VERSION}}.** Open firmware, FPGA bitstreams and an MCP server for the FNIRSI 1013D (Anlogic AL3A10
 > variant): frequency response and spectrum views on the scope, FPGA decimation filters, per-core calibration and a USB
 > protocol, so that an AI agent can use the scope next to you. It runs from the SD card and leaves the stock firmware
-> untouched; the FPGA features need an SPI programmer. See the release notes and "Install" below.
+> untouched; its FPGA bitstream needs an SPI programmer. See the release notes and "Install" below.

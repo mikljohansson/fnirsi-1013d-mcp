@@ -5,8 +5,9 @@ flash with a 2x3 header, JTAG IDCODE 0x18006C31). Each one starts with 32 bytes 
 `cc55aa33` and the device-id packet `f0000006 18006c31`. Do not write them to an EF2L45 or EP4CE6 board: those
 variants configure their FPGA differently (`docs/hardware-prep.md` section 3a).
 
-The firmware works without any of these. On the stock bitstream (0x1432) or Atlan4's 0x1532 it runs the legacy
-path; the features in the table below appear when the bitstream reports them. Flashing the FPGA needs a 3.3 V SPI
+Each firmware version supports one bitstream. The entry marked **recommended** here and in `manifest.json` is the one
+the current firmware needs; on any other it shows a banner that names the one needed. The "supported" and "withdrawn"
+entries are history. Flashing the FPGA is a step of the install (`docs/guide/install.md`); it needs a 3.3 V SPI
 programmer on the config-flash header and a verified backup first.
 
 ## Which one to use
@@ -30,9 +31,7 @@ change one core of a channel can deliver garbled 200 MSa/s data. Firmware 0.2.61
 capture after a rate change and retries, and Diagnostics shows the FPGA line of these versions in amber
 (`CHANGELOG.md` 0.2.61; `fpga/al3/README.md` "Changes" section 7).
 
-Every firmware from 0.2.9 on recognises 0x1533 to 0x153F as the AL3 family (`docs/protocol.md` section 5.1), so an
-older card firmware still boots on a newer bitstream; it just does not use the newer features. The firmware of this
-release supports every row of the table.
+The firmware of this release runs with the recommended row only.
 
 **After changing the bitstream, calibrate again.** The calibration stores per-core values, and the core order can
 differ between bitstreams. Diagnostics shows "FPGA changed since calibration" until you run the wizard
@@ -82,9 +81,10 @@ section "Changes".
 
 ## How to flash (Sipeed FT2232D and `spiflash_d2xx.py`)
 
-This is the route used on the maintainer's unit for every write above (`docs/hardware-status.md`). Any 3.3 V SPI
-programmer works; `docs/hardware-prep.md` section 2 covers the CH341A (needs a 3.3 V mod), flashrom and the pyftdi
-script. Run the tool from a checkout of the release tag: it writes its backups to `backups/` in that checkout.
+This is the FPGA step of the install (`docs/guide/install.md`). It is the route used on the maintainer's unit for
+every write above (`docs/hardware-status.md`). Any 3.3 V SPI programmer works; `docs/hardware-prep.md` section 2
+covers the CH341A (needs a 3.3 V mod), flashrom and the pyftdi script. Run the tool from a checkout of the release
+tag: it writes its backups to `backups/` in that checkout.
 
 ```
 git clone --branch vX.Y.Z https://github.com/mikljohansson/fnirsi-1013d-mcp
@@ -133,8 +133,8 @@ python firmware/tools/spiflash_d2xx.py write -i backups/fpga-flash-before.bin --
 python firmware/tools/spiflash_d2xx.py verify -i backups/fpga-flash-before.bin
 ```
 
-Any other image in the table is also a valid target, and the firmware runs on all of them. To go back to the stock
-firmware completely, **restore the stock bitstream first**, then boot the stock firmware (remove the card, or boot
-mode 1 in the boot menu). The stock firmware with a custom bitstream is not a valid combination
-(`docs/hardware-prep.md` section 5.4). The scope cannot restore its FPGA flash by itself: the config flash is wired
+Any other image in the table is also a valid target for the programmer, but the firmware shows its banner on all of
+them. To go back to the stock firmware completely, **restore the stock bitstream first**, then boot the stock firmware
+(remove the card, or boot mode 1 in the boot menu). The stock firmware with a custom bitstream is not a valid
+combination (`docs/hardware-prep.md` section 5.4). The scope cannot restore its FPGA flash by itself: the config flash is wired
 only to the FPGA (`docs/fpga-flash-from-mcu.md`).

@@ -972,6 +972,32 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
     return out
 
 
+def _capture_for_analysis(sess: Session, s: Scope, chans: list[str], capture: bool, timeout_s: float,
+                          notes: list[str], tool: str) -> Capture:
+    """The capture a host-side analysis tool (scope_measure, scope_decode) works on: a fresh host capture with
+    ``capture`` (tier 1), else this server's last capture when it has the channels, else the scope's latest capture
+    (collaborative firmware), the UI trace (legacy LOCAL) or the finished remote capture."""
+    if capture:
+        notes += sess.ensure_control()
+        cap = s.capture(chans, timeout_s)
+        if cap is None:
+            raise ToolError(f"{tool}: no trigger within {timeout_s} s")
+        sess.last_capture = cap
+        return cap
+    cap = sess.last_capture
+    if cap is None or any(c not in cap.channels for c in chans):
+        st = s.status()
+        if st.shared and st.capture_id:
+            cap = s.read_capture(chans)
+        elif st.control != P.Control.REMOTE and not st.shared:
+            cap = s.read_trace_capture(chans)
+        elif st.acq_state == P.AcqState.DONE:
+            cap = s.read_capture(chans, st=st)
+        else:
+            raise ToolError(f"{tool}: no capture available; call scope_capture or pass capture=true")
+    return cap
+
+
 def _capture_settings_summary(cap: Capture) -> dict[str, Any]:
     """The settings a capture was taken with (collaborative firmware), which may differ from the live ones."""
     ci = cap.capture_info
@@ -2673,25 +2699,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             s = sess.get_scope()
             notes: list[str] = []
             chans = _channels_arg(channels, ["CH1", "CH2"] if "delay" in sel else ["CH1"])
-            if capture:
-                notes += sess.ensure_control()
-                cap = s.capture(chans, timeout_s)
-                if cap is None:
-                    raise ToolError(f"scope_measure: no trigger within {timeout_s} s")
-                sess.last_capture = cap
-            else:
-                cap = sess.last_capture
-                if cap is None or any(c not in cap.channels for c in chans):
-                    st = s.status()
-                    if st.shared and st.capture_id:
-                        cap = s.read_capture(chans)
-                    elif st.control != P.Control.REMOTE and not st.shared:
-                        cap = s.read_trace_capture(chans)
-                    elif st.acq_state == P.AcqState.DONE:
-                        cap = s.read_capture(chans, st=st)
-                    else:
-                        raise ToolError("scope_measure: no capture available; call scope_capture or pass "
-                                        "capture=true")
+            cap = _capture_for_analysis(sess, s, chans, capture, timeout_s, notes, "scope_measure")
             res: dict[str, Any] = {}
             for c in chans:
                 v = cap.channels[c].volts
@@ -2725,6 +2733,535 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             out["caveats"] = notes + [SCALING_CAVEAT]
             return out
         return await run("scope_measure", 1 if capture else 0, args, go)
+
+    # ---- host-side data tools: decode, mask test, CSV export, DVM (docs/mcp-tools.md 4.3b) --------------------
+
+    def _resolve_source(source: str, tool: str) -> Path:
+        """A result file argument: 'latest' (the newest .npz under the data dir), an absolute path, or a path
+        relative to the data dir."""
+        from . import report as R
+
+        try:
+            if source == "latest":
+                return R.latest_result(cfg.data_dir)
+        except R.ReportError as e:
+            raise ToolError(f"{tool}: {e}") from None
+        src = Path(source).expanduser()
+        if not src.is_absolute() and not src.is_file():
+            src = Path(cfg.data_dir) / src
+        if not src.is_file():
+            raise ToolError(f"{tool}: {src}: no such file")
+        return src
+
+    def _load_waveforms(source: str, chans: list[str], tool: str
+                        ) -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, Any], Path]:
+        """Time axis and one volts array per channel from a saved capture (``*_volts``) or averaged capture
+        (``*_mean``)."""
+        from . import report as R
+
+        src = _resolve_source(source, tool)
+        try:
+            r = R.load_result(src)
+        except R.ReportError as e:
+            raise ToolError(f"{tool}: {e}") from None
+        a = r.arrays
+        if "t" not in a:
+            raise ToolError(f"{tool}: {src.name} is a {r.kind} result without a time axis; give a capture file")
+        suffix = "_volts" if any(k.endswith("_volts") and a[k].ndim == 1 for k in a) else "_mean"
+        volts = {}
+        for c in chans:
+            key = f"{c}{suffix}"
+            if key not in a or a[key].ndim != 1 or a[key].size != a["t"].size:
+                have = sorted(k for k in a if k.endswith(("_volts", "_mean")))
+                raise ToolError(f"{tool}: {src.name} has no {c} waveform (it holds {', '.join(have) or 'none'})")
+            volts[c] = np.asarray(a[key], np.float64)
+        return np.asarray(a["t"], np.float64), volts, r.meta, src
+
+    @register(0, title="Decode a serial bus")
+    async def scope_decode(
+        protocol: Annotated[Literal["uart", "spi", "i2c"], Field(description="the bus on the channels")],
+        source: Annotated[str | None, Field(description="a saved capture: the .npz path a tool returned or 'latest'; "
+                                                        "default: this server's last capture, else the scope's latest "
+                                                        "capture (what the screen shows)")] = None,
+        capture: Annotated[bool, Field(description="take a new host capture first (tier 1) with the live "
+                                                   "settings")] = False,
+        channels: Annotated[list[str] | None, Field(description="the lines: UART [data] (default ['CH1']); SPI "
+                                                                "[clock, data] and I2C [SCL, SDA] (default ['CH1', "
+                                                                "'CH2'])")] = None,
+        timeout_s: Annotated[float, Field(gt=0, le=60, description="for capture=true")] = 2.0,
+        threshold: Annotated[float | str | None, Field(description="logic threshold in volts at the probe tip; "
+                                                                   "default: mid-way between the line's levels")] = None,
+        baud: Annotated[float | str | None, Field(description="UART: bits per second, e.g. 115200 or '9600'; default: "
+                                                              "auto from the shortest pulse, snapped to a standard "
+                                                              "rate")] = None,
+        data_bits: Annotated[int, Field(ge=5, le=9, description="UART data bits")] = 8,
+        parity: Annotated[Literal["none", "even", "odd"], Field(description="UART parity")] = "none",
+        stop_bits: Annotated[float, Field(ge=1, le=2, description="UART stop bits (1, 1.5, 2)")] = 1,
+        idle: Annotated[Literal["high", "low"], Field(description="UART idle (mark) level; 'low' = inverted "
+                                                                  "line")] = "high",
+        word_bits: Annotated[int, Field(ge=1, le=32, description="SPI bits per word")] = 8,
+        cpol: Annotated[int, Field(ge=0, le=1, description="SPI clock polarity: 0 idle low, 1 idle high")] = 0,
+        cpha: Annotated[int, Field(ge=0, le=1, description="SPI clock phase: 0 sample on the leading edge, 1 on the "
+                                                           "trailing edge")] = 0,
+        msb_first: Annotated[bool, Field(description="SPI bit order")] = True,
+        gap: Annotated[float | str | None, Field(description="SPI: a clock pause longer than this starts a new "
+                                                             "transfer (default 2.5 clock periods); words are counted "
+                                                             "from the first clock after it, since there is no chip "
+                                                             "select on two channels")] = None,
+        max_frames: Annotated[int, Field(ge=1, le=5000, description="frames returned inline (all are in the "
+                                                                    "file)")] = 200,
+    ) -> dict[str, Any]:
+        """Decode UART, SPI or I2C from a capture: a saved .npz, this server's last capture, the scope's latest
+        capture, or a fresh one (capture=true, tier 1). Logic levels come from a mid-level threshold (or
+        `threshold` volts) with 5 % hysteresis; edges are placed between samples.
+
+        Returns the frames with their time relative to the trigger (UART: value, hex, char, parity / framing
+        errors; SPI: words per transfer, incomplete words flagged; I2C: START, address, R/W, ACK / NACK, data bytes
+        with their ACKs, STOP / repeated START), a text preview, `applied` (baud or clock, samples per bit,
+        threshold, levels) and a .npz with the waveforms and the frames. Caveats say when the sample rate is too
+        low: at least 4 samples per bit (8 per I2C SCL period) are needed for reliable timing, 2 to decode at all.
+        Tier 0 on existing data, tier 1 with capture=true."""
+        args = {"protocol": protocol, "source": source, "capture": capture, "channels": channels,
+                "threshold": threshold, "baud": baud, "data_bits": data_bits, "parity": parity,
+                "stop_bits": stop_bits, "idle": idle, "word_bits": word_bits, "cpol": cpol, "cpha": cpha,
+                "msb_first": msb_first, "gap": gap}
+        if capture:
+            need_tier(1, "scope_decode(capture=true)")
+        from . import decode as D
+
+        def go() -> dict[str, Any]:
+            notes: list[str] = []
+            want = 1 if protocol == "uart" else 2
+            chans = _channels_arg(channels, ["CH1"] if protocol == "uart" else ["CH1", "CH2"])
+            roles = {"uart": ["data"], "spi": ["clock", "data"], "i2c": ["scl", "sda"]}[protocol]
+            if len(chans) != want:
+                raise ToolError(f"scope_decode({protocol}) needs {want} channel(s): {' and '.join(roles)}; got "
+                                f"{chans}")
+            meta: dict[str, Any] = {}
+            arrays: dict[str, np.ndarray]
+            if source is not None:
+                if capture:
+                    raise ToolError("scope_decode: give either source (a saved file) or capture=true, not both")
+                t, volts, fmeta, src = _load_waveforms(source, chans, "scope_decode")
+                meta["source"] = str(src)
+                meta["capture_id"] = fmeta.get("capture_id")
+                for k in ("channels", "trigger", "divider", "pretrigger_samples", "total_samples", "triggered"):
+                    if k in fmeta:
+                        meta[k] = fmeta[k]
+                if fmeta.get("auto_timeout"):
+                    notes.append("the capture ended on the auto time-out: not synchronised to the signal")
+            else:
+                s = sess.get_scope()
+                cap = _capture_for_analysis(sess, s, chans, capture, timeout_s, notes, "scope_decode")
+                t = cap.t
+                volts = {c: cap.channels[c].volts for c in chans}
+                meta.update({"capture_id": cap.capture_id, "origin": cap.origin, "divider": cap.divider,
+                             "pretrigger_samples": cap.pretrigger_samples, "total_samples": cap.total_samples,
+                             "triggered": cap.triggered,
+                             "channels": {c: cap.channels[c].config.to_dict() for c in chans},
+                             "trigger": cap.trigger.to_dict()})
+                notes += _capture_caveats(cap, {})
+                if s.shared and capture:
+                    notes.append("the scope screen shows this capture and the scope is now in STOP; "
+                                 "scope_acquisition_control(action='run') resumes its own acquisition")
+            if t.size < 4:
+                raise ToolError("scope_decode: the capture has fewer than 4 samples")
+            dt = float(t[1] - t[0])
+            thr = _q(threshold, "V")
+            try:
+                if protocol == "uart":
+                    res = D.decode_uart(t, volts[chans[0]], baud=_q(baud), data_bits=data_bits, parity=parity,
+                                        stop_bits=stop_bits, idle=idle, threshold=thr)
+                elif protocol == "spi":
+                    res = D.decode_spi(t, volts[chans[0]], volts[chans[1]], word_bits=word_bits, cpol=cpol,
+                                       cpha=cpha, msb_first=msb_first, gap=_q(gap, "s"), threshold=thr)
+                else:
+                    res = D.decode_i2c(t, volts[chans[0]], volts[chans[1]], threshold=thr)
+            except D.DecodeError as e:
+                raise ToolError(f"scope_decode({protocol}): {e}") from None
+            lines = dict(zip(roles, chans))
+            cav = notes + res["caveats"] + D.STANDING + [SCALING_CAVEAT]
+            arrays = {"t": t, **{f"{c}_volts": volts[c].astype(np.float32) for c in chans}}
+            meta.update({"kind": "decode", "protocol": protocol, "args": args, "dt": dt, "lines": lines,
+                         "applied": res["applied"], "frames": res["frames"], "n_frames": res["n_frames"],
+                         "n_errors": res["n_errors"], "preview": res["preview"], "caveats": cav,
+                         "scaling": SCALING_CAVEAT})
+            path = sess.save_npz("decode", arrays, meta)
+            frames = res["frames"]
+            return {"ok": True, "protocol": protocol, "lines": lines, "n_frames": res["n_frames"],
+                    "n_errors": res["n_errors"], "frames": frames[:max_frames],
+                    "frames_truncated": len(frames) > max_frames, "preview": res["preview"],
+                    "applied": {k: (_r6(v) if isinstance(v, float) else v) for k, v in res["applied"].items()},
+                    "sample_rate": _r6(1 / dt), "n_samples": int(t.size), "file": path, "caveats": cav}
+        return await run("scope_decode", 1 if capture else 0, args, go)
+
+    @register(0, title="Export a result as CSV", read_only=True)
+    async def scope_export_csv(
+        source: Annotated[str, Field(description="'latest' (the newest result this server saved) or the .npz path a "
+                                                 "tool returned; a path relative to the data directory works too")] = "latest",
+        out: Annotated[str | None, Field(description="output path (default: beside the .npz with .csv)")] = None,
+        raw: Annotated[bool, Field(description="also write the raw codes (per-core codes, 16-bit filter "
+                                               "outputs)")] = False,
+        delimiter: Annotated[Literal[",", ";", "\t"], Field(description="column separator")] = ",",
+        caveats: Annotated[list[str] | None, Field(description="caveats to add to the header")] = None,
+    ) -> dict[str, Any]:
+        """Write a saved result (.npz) as CSV: the time (or frequency) axis and every array of that length as
+        columns (volts per channel, clipped flags, means and stds, fit and residual, spectrum levels; segments in
+        long format with a segment column), preceded by a '#' header with the tool and arguments, sample rate,
+        channel settings (V/div, coupling, probe), trigger, decimation, the scaling note and the recorded caveats.
+        Touches no scope."""
+        args = {"source": source, "out": out, "raw": raw, "delimiter": delimiter, "caveats": caveats}
+
+        def go() -> dict[str, Any]:
+            from . import export as X
+            from . import report as R
+
+            src = _resolve_source(source, "scope_export_csv")
+            try:
+                res = X.write_csv(src, out, raw=raw, delimiter=delimiter, caveats=caveats)
+            except (R.ReportError, ValueError, OSError) as e:
+                raise ToolError(f"scope_export_csv: {e}") from None
+            return {"ok": True, **{k: v for k, v in res.items() if k != "header"}, "header": res["header"][:16],
+                    "header_lines": len(res["header"])}
+        return await run("scope_export_csv", 0, args, go)
+
+    @register(1, title="Mask test")
+    async def scope_mask_test(
+        channel: Annotated[Literal["CH1", "CH2"], Field(description="channel under test")] = "CH1",
+        reference: Annotated[str, Field(description="'capture': take a reference capture now and build the mask "
+                                                    "around it; a saved capture .npz (path or relative to the data "
+                                                    "dir) to build it from; a mask .npz a previous run returned "
+                                                    "(mask_file), or the mask_name it was stored under")] = "capture",
+        tolerance_volts: Annotated[float | str | None, Field(description="amplitude tolerance, e.g. 0.05 or '50mV' "
+                                                                         "(default: tolerance_div)")] = None,
+        tolerance_div: Annotated[float | None, Field(ge=0, le=8, description="amplitude tolerance in divisions of "
+                                                                             "the live range (default 0.2)")] = None,
+        tolerance_time: Annotated[float | str | None, Field(description="time tolerance, e.g. '100ns' (default: 2 "
+                                                                        "samples, the trigger jitter)")] = None,
+        n: Annotated[int, Field(ge=1, le=1000, description="captures to test against the mask")] = 10,
+        timeout_s: Annotated[float, Field(gt=0, le=10, description="per capture")] = 2.0,
+        stop_on_fail: Annotated[bool, Field(description="stop at the first failing capture")] = False,
+        mask_name: Annotated[str | None, Field(description="also store the mask as <data dir>/masks/<name>.npz for "
+                                                           "later runs (reference=<name>)")] = None,
+    ) -> dict[str, Any]:
+        """Pass / fail testing against a mask: the mask is the reference waveform widened by a time tolerance
+        (running min / max over +-k samples) and an amplitude tolerance (volts, or divisions of the live range),
+        built from a reference capture taken now or from a saved capture, or reused from a mask file. Then `n`
+        captures are taken with the live settings and each is compared sample by sample.
+
+        Returns per capture pass / fail, the number of samples outside, the first failing sample (time, volts,
+        the bound it crossed) and the worst excursion; the mask file (reusable) and a result .npz with the mask, the
+        first failing capture (or the last one) and the outside-mask flags, which scope_report plots. The mask is
+        bound to the settings (sample rate, record length): a change at the scope ends the run. Tolerances below
+        about 2 codes or 2 samples fail on noise and trigger jitter alone; the caveats say so."""
+        args = {"channel": channel, "reference": reference, "tolerance_volts": tolerance_volts,
+                "tolerance_div": tolerance_div, "tolerance_time": tolerance_time, "n": n, "timeout_s": timeout_s,
+                "stop_on_fail": stop_on_fail, "mask_name": mask_name}
+
+        def safe(name: str) -> str:
+            s = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name.strip()).strip(".")
+            if not s:
+                raise ValueError(f"mask name {name!r} is empty")
+            return s
+
+        def go() -> dict[str, Any]:
+            from . import report as R
+
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            ch = channel_index(channel)
+            cctx = s.capture_context()
+            trig, tb = cctx.trigger, cctx.timebase
+            cfg_ch = cctx.channels[ch]
+            vdiv = _volts_per_div_at_probe(cfg_ch.range, cfg_ch.probe_factor)
+            vpl = s.scale(ch, cfg_ch).volts_per_lsb
+            dv_arg = _q(tolerance_volts, "V")
+            dtime_arg = _q(tolerance_time, "s")
+            mask_meta: dict[str, Any] | None = None
+            ref: np.ndarray | None = None
+            upper = lower = t = None
+            mask_file: str | None = None
+            built_from = ""
+            if reference == "capture":
+                cap = s.capture([channel], timeout_s, ctx=cctx)
+                if cap is None:
+                    raise ToolError(f"scope_mask_test: no trigger within {timeout_s} s for the reference capture")
+                notes += _capture_caveats(cap, {})
+                ref, t, dt = cap.channels[channel].volts.astype(np.float64), cap.t, cap.dt
+                built_from = f"reference capture {cap.capture_id}"
+            else:
+                p = Path(reference).expanduser()
+                cands = [p, Path(cfg.data_dir) / reference, Path(cfg.data_dir) / "masks" / reference,
+                         Path(cfg.data_dir) / "masks" / f"{reference}.npz"]
+                src = next((c for c in cands if c.is_file()), None)
+                if src is None:
+                    masks = sorted(q.stem for q in (Path(cfg.data_dir) / "masks").glob("*.npz")) \
+                        if (Path(cfg.data_dir) / "masks").is_dir() else []
+                    raise ToolError(f"scope_mask_test: no file or stored mask {reference!r}; stored masks: "
+                                    f"{', '.join(masks) or 'none'}")
+                try:
+                    r = R.load_result(src)
+                except R.ReportError as e:
+                    raise ToolError(f"scope_mask_test: {e}") from None
+                a = r.arrays
+                if r.kind in ("mask", "mask_test"):
+                    if "upper" not in a or "lower" not in a or "t" not in a:
+                        raise ToolError(f"scope_mask_test: {src.name} holds no mask arrays")
+                    upper, lower, t = (np.asarray(a[k], np.float64) for k in ("upper", "lower", "t"))
+                    ref = np.asarray(a["reference"], np.float64) if "reference" in a else None
+                    mask_meta = r.meta
+                    dt = float(r.meta.get("dt") or (t[1] - t[0]))
+                    mask_file = str(src)
+                    built_from = f"mask file {src.name}"
+                    if r.meta.get("channel") not in (None, channel):
+                        notes.append(f"the mask was built on {r.meta.get('channel')}, tested here on {channel}")
+                else:
+                    key = f"{channel}_volts"
+                    if "t" not in a or key not in a or a[key].ndim != 1:
+                        raise ToolError(f"scope_mask_test: {src.name} has no {channel} capture waveform")
+                    ref, t = np.asarray(a[key], np.float64), np.asarray(a["t"], np.float64)
+                    dt = float(r.meta.get("dt") or (t[1] - t[0]))
+                    built_from = f"saved capture {src.name}"
+            if mask_meta is not None:
+                tol = dict(mask_meta.get("tolerance") or {})
+                if dv_arg is not None or dtime_arg is not None or tolerance_div is not None:
+                    notes.append("tolerances given with a mask file are ignored: the file's mask is used as it is")
+            else:
+                assert ref is not None and t is not None
+                dv = dv_arg if dv_arg is not None else (0.2 if tolerance_div is None else tolerance_div) * vdiv
+                dtime = dtime_arg if dtime_arg is not None else 2 * dt
+                k = int(round(dtime / dt))
+                upper, lower = A.mask_envelope(ref, dv, k)
+                tol = {"volts": float(dv), "div": float(dv / vdiv) if vdiv else None, "time_s": float(k * dt),
+                       "samples": k}
+                mask_meta = {"kind": "mask", "channel": channel, "dt": dt, "n_samples": int(ref.size),
+                            "tolerance": tol, "built_from": built_from, "args": args,
+                            "settings": {"channel": cfg_ch.to_dict(), "trigger": trig.to_dict(),
+                                         "divider": tb.divider, "volts_per_div": vdiv, "volts_per_lsb": vpl},
+                            "scaling": SCALING_CAVEAT}
+                mask_file = sess.save_npz("mask", {"t": t, "upper": upper, "lower": lower, "reference": ref}, mask_meta)
+                if mask_name:
+                    d = Path(cfg.data_dir) / "masks"
+                    d.mkdir(parents=True, exist_ok=True)
+                    named = d / f"{safe(mask_name)}.npz"
+                    np.savez_compressed(named, meta_json=np.array(json.dumps(mask_meta, default=str)), t=t,
+                                        upper=upper, lower=lower, reference=ref)
+                    mask_file = str(named)
+            assert upper is not None and lower is not None and t is not None
+            n_mask = int(upper.size)
+            if n_mask != trig.total_samples or abs(tb.dt - dt) > 1e-6 * dt:
+                raise ToolError(f"scope_mask_test: the mask has {n_mask} samples at {fmt_si(1 / dt, 'Sa/s')}, the "
+                                f"scope is set to {trig.total_samples} samples at {fmt_si(1 / tb.dt, 'Sa/s')}: set the "
+                                "time base and total_samples back (scope_set_timebase, scope_set_trigger) or build "
+                                "a new reference")
+            rows: list[dict[str, Any]] = []
+            shown: np.ndarray | None = None
+            shown_fail: np.ndarray | None = None
+            shown_what = ""
+            dropped = 0
+            stopped = None
+            for i in range(n):
+                cap = s.capture([channel], timeout_s, ctx=cctx)
+                if cap is None:
+                    dropped += 1
+                    continue
+                if s.shared and cap.settings_seq != cctx.settings_seq:
+                    stopped = (f"settings were changed at the scope after {len(rows)} captures: the run stopped (the "
+                               "mask is bound to the settings it was built with)")
+                    break
+                v = cap.channels[channel].volts.astype(np.float64)
+                if v.size != n_mask:
+                    raise ToolError(f"scope_mask_test: capture {cap.capture_id} has {v.size} samples, the mask {n_mask}")
+                chk = A.mask_check(v, upper, lower)
+                row: dict[str, Any] = {"capture_id": cap.capture_id, "passed": chk["passed"],
+                                       "fail_samples": chk["fail_samples"],
+                                       "clipped_samples": int(cap.channels[channel].clipped.sum())}
+                if cap.auto_timeout:
+                    row["auto_timeout"] = True
+                if not chk["passed"]:
+                    ff = chk["first_fail"]
+                    row["first_fail"] = {"t": _r6(float(t[ff["index"]])), "index": ff["index"],
+                                         "volts": _r6(ff["volts"]), "bound": ff["bound"], "limit": _r6(ff["limit"])}
+                    row["worst_excursion_volts"] = _r6(chk["worst_excursion_volts"])
+                    row["worst_t"] = _r6(float(t[chk["worst_index"]]))
+                    if shown_fail is None or not np.any(shown_fail):
+                        shown, shown_fail, shown_what = v, chk["fail_mask"], f"first failing capture ({cap.capture_id})"
+                elif shown_fail is None or not np.any(shown_fail):
+                    shown, shown_fail, shown_what = v, chk["fail_mask"], f"last passing capture ({cap.capture_id})"
+                rows.append(row)
+                if stop_on_fail and not chk["passed"]:
+                    break
+            passed = sum(1 for r_ in rows if r_["passed"])
+            failed = len(rows) - passed
+            cav = list(notes)
+            if stopped:
+                cav.append(stopped)
+            if dropped:
+                cav.append(f"{dropped} capture(s) dropped: no trigger within {timeout_s} s")
+            if tol.get("volts") is not None and vpl and tol["volts"] < 2 * vpl:
+                cav.append(f"amplitude tolerance {fmt_si(tol['volts'], 'V')} is {tol['volts'] / vpl:.1f} codes: below "
+                           "about 2 codes the ADC noise alone fails captures")
+            if tol.get("samples", 2) < 2:
+                cav.append("time tolerance under 2 samples: trigger jitter (up to 2 / fs) alone can fail a capture; "
+                           "use scope_averaged_capture(align='edge') style references or widen it")
+            if any(r_.get("auto_timeout") for r_ in rows):
+                cav.append("some captures ended on the auto time-out: not synchronised, expect failures")
+            cav += STANDING_CAVEATS
+            arrays: dict[str, np.ndarray] = {"t": t, "upper": upper, "lower": lower}
+            if ref is not None:
+                arrays["reference"] = ref
+            if shown is not None and shown_fail is not None:
+                arrays[f"{channel}_volts"] = shown.astype(np.float32)
+                arrays["fail_mask"] = shown_fail
+            meta = {"kind": "mask_test", "args": args, "channel": channel, "dt": dt, "tolerance": tol,
+                    "results": rows, "passed": passed, "failed": failed, "n_tested": len(rows), "dropped": dropped,
+                    "mask_file": mask_file, "built_from": built_from, "shown": shown_what, "caveats": cav,
+                    "scaling": SCALING_CAVEAT}
+            path = sess.save_npz("masktest", arrays, meta)
+            first_fail = next((r_ for r_ in rows if not r_["passed"]), None)
+            return {"ok": True, "all_passed": failed == 0 and len(rows) > 0, "passed": passed, "failed": failed,
+                    "n_tested": len(rows), "dropped": dropped, "results": rows, "first_failure": first_fail,
+                    "tolerance": {k: (_r6(v) if isinstance(v, float) else v) for k, v in tol.items()},
+                    "mask": {"file": mask_file, "built_from": built_from, "samples": n_mask,
+                             "sample_rate": _r6(1 / dt)},
+                    "shown_in_file": shown_what, "file": path,
+                    "applied": {"n": len(rows), "mask_file": mask_file}, "caveats": cav}
+        return await run("scope_mask_test", 1, args, go)
+
+    @register(1, title="DVM readout")
+    async def scope_dvm(
+        channels: Annotated[list[str] | None, Field(description="channels to read, default ['CH1']")] = None,
+        n: Annotated[int, Field(ge=1, le=256, description="captures to average the readings over")] = 8,
+        duration_s: Annotated[float | str | None, Field(description="instead of n: keep capturing for this long "
+                                                                    "(at most 600 s, 1000 captures)")] = None,
+        timeout_s: Annotated[float, Field(gt=0, le=10, description="per capture")] = 2.0,
+    ) -> dict[str, Any]:
+        """Voltmeter readout per channel over several captures with the live settings: DC mean, AC RMS, true RMS,
+        min, max, peak-to-peak and the frequency of the dominant spectral component, each combined over the
+        captures, with a resolution statement: the range in effect (V/div, volts per 8-bit code, full scale), the
+        measured sample noise in codes, the 1-sigma uncertainty of the DC mean (sample noise over all samples, the
+        spread between captures, the quantisation floor; without dithering noise the mean cannot resolve below one
+        code) and the digits that uncertainty justifies on the full scale. Absolute accuracy is the calibration's
+        (see `scaling`), not a DVM's. Wraps scope_measure's statistics; saves the per-capture readings as .npz."""
+        args = {"channels": channels, "n": n, "duration_s": duration_s, "timeout_s": timeout_s}
+
+        def go() -> dict[str, Any]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            chans = _channels_arg(channels, ["CH1"])
+            dur = _q(duration_s, "s")
+            if dur is not None and not 0 < dur <= 600:
+                raise ToolError("scope_dvm: duration_s must be 0 .. 600 s")
+            limit = 1000 if dur is not None else n
+            cctx = s.capture_context()
+            restarts = 0
+
+            def fresh() -> dict[str, dict[str, list[Any]]]:
+                return {c: {"mean": [], "ac_rms": [], "rms": [], "min": [], "max": [], "frequency": [],
+                            "noise_codes": [], "clipped": [], "n": [], "t": []} for c in chans}
+
+            rd = fresh()
+            dropped = auto = 0
+            t0 = time.monotonic()
+            dt = 0.0
+            cap_last: Capture | None = None
+            count = 0
+            while count < limit and (dur is None or time.monotonic() - t0 < dur or count == 0):
+                cap = s.capture(chans, timeout_s, ctx=cctx)
+                if cap is None:
+                    dropped += 1
+                    if dropped >= 3 and count == 0:
+                        raise ToolError(f"scope_dvm: no trigger within {timeout_s} s three times; use trigger mode "
+                                        "'auto' (scope_set_trigger) for a voltmeter reading")
+                    continue
+                if s.shared and cap.settings_seq != cctx.settings_seq:
+                    restarts += 1
+                    if restarts > cfg.max_restarts:
+                        raise ToolError("scope_dvm: settings kept changing at the scope; retry when they are left alone")
+                    cctx = s.capture_context()
+                    rd, count, dropped, auto = fresh(), 0, 0, 0
+                    t0 = time.monotonic()
+                    continue
+                count += 1
+                auto += bool(cap.auto_timeout)
+                dt = cap.dt
+                cap_last = cap
+                now = time.monotonic() - t0
+                for c in chans:
+                    cd = cap.channels[c]
+                    st = A.stats(cd.volts)
+                    d = np.diff(np.asarray(cd.codes, np.float64))
+                    r = rd[c]
+                    r["mean"].append(st["mean"])
+                    r["ac_rms"].append(st["ac_rms"])
+                    r["rms"].append(st["rms"])
+                    r["min"].append(st["min"])
+                    r["max"].append(st["max"])
+                    r["frequency"].append(A.dominant_frequency(cd.volts, cap.dt))
+                    r["noise_codes"].append(float(np.median(np.abs(d - np.median(d))) * 1.4826 / math.sqrt(2)))
+                    r["clipped"].append(int(cd.clipped.sum()))
+                    r["n"].append(int(cd.volts.size))
+                    r["t"].append(now)
+            assert cap_last is not None
+            elapsed = time.monotonic() - t0
+            out_ch: dict[str, Any] = {}
+            cav = list(notes)
+            arrays: dict[str, np.ndarray] = {"capture_t_s": np.asarray(rd[chans[0]]["t"], np.float64)}
+            for c in chans:
+                r = rd[c]
+                summ = A.dvm_summary(r)
+                cd = cap_last.channels[c]
+                step = cd.volts_per_lsb
+                noise = float(np.median(r["noise_codes"]))
+                n_tot = int(sum(r["n"]))
+                res = A.dvm_resolution(step, 256 * step, noise, n_tot, summ["dc_std_between_captures"], count)
+                cfg_c = cd.config
+                vdiv = _volts_per_div_at_probe(cfg_c.range, cfg_c.probe_factor)
+                scaling = cd.scale.source if cd.scale is not None else "firmware"
+                clipped = int(sum(r["clipped"]))
+                statement = (f"{c}: DC {summ['dc_mean']:.{max(0, int(res['digits']))}f} V +- "
+                             f"{fmt_si(res['uncertainty_volts'], 'V', 2)} (1 sigma) on the {fmt_si(vdiv, 'V')}/div range "
+                             f"(8-bit, {fmt_si(step, 'V', 3)} per code, full scale {fmt_si(256 * step, 'V', 3)}), "
+                             f"{n_tot} samples in {count} captures, sample noise {noise:.2f} codes: "
+                             f"{res['digits']:.1f} digits of full scale; absolute accuracy is that of the calibration "
+                             f"({scaling}), about one code")
+                if not res["dither"]:
+                    cav.append(f"{c}: sample noise {noise:.2f} codes is below 0.5: no dither, the mean cannot resolve "
+                               "below one code (+-half a code is the stated uncertainty)")
+                if clipped:
+                    cav.append(f"{c}: {clipped} samples clipped: the readings are wrong; increase volts_per_div")
+                out_ch[c] = {**{k: _r6(v) if isinstance(v, float) else v for k, v in summ.items()},
+                             "range": {"volts_per_div": _r6(vdiv), "volts_per_lsb": _r6(step),
+                                       "full_scale_volts": _r6(256 * step), "coupling": "AC" if cfg_c.coupling else "DC",
+                                       "probe": cfg_c.probe_factor, "scaling": scaling},
+                             "resolution": {k: (_r6(v) if isinstance(v, float) else v) for k, v in res.items()},
+                             "statement": statement, "clipped_samples": clipped}
+                for k in ("mean", "ac_rms", "rms", "min", "max"):
+                    arrays[f"{c}_{k}"] = np.asarray(r[k], np.float64)
+                arrays[f"{c}_frequency"] = np.asarray([f if f is not None else np.nan for f in r["frequency"]],
+                                                      np.float64)
+            if auto:
+                cav.append(f"{auto} of {count} captures ended on the auto time-out: samples are not synchronised; "
+                           "the DC mean holds, AC RMS and Vpp of a periodic signal vary with the window")
+            if dt and cap_last.n:
+                cav.append(f"each capture is {cap_last.n} samples over {fmt_si(cap_last.n * dt, 's')}: the DC mean of an "
+                           "AC signal is exact only over whole periods; AC RMS needs several periods per record")
+            if restarts:
+                cav.append(f"settings were changed at the scope during the run: restarted {restarts} time(s); the "
+                           "readings use only captures with the final settings")
+            if dropped:
+                cav.append(f"{dropped} capture(s) dropped: no trigger within {timeout_s} s")
+            cav += STANDING_CAVEATS
+            meta = {"kind": "dvm", "args": args, "readings": {c: {k: v for k, v in out_ch[c].items() if k != "statement"}
+                                                              for c in chans},
+                    "n_captures": count, "n_samples_total": int(sum(rd[chans[0]]["n"])), "elapsed_s": elapsed,
+                    "dt": dt, "restarts": restarts, "dropped": dropped, "caveats": cav, "scaling": SCALING_CAVEAT}
+            path = sess.save_npz("dvm", arrays, meta)
+            return {"ok": True, "n_captures": count, "n_samples_total": meta["n_samples_total"],
+                    "elapsed_s": _r6(elapsed), "dropped": dropped, "restarts": restarts, "channels": out_ch,
+                    "statements": [out_ch[c]["statement"] for c in chans], "file": path,
+                    "applied": {"n_captures": count}, "caveats": cav}
+        return await run("scope_dvm", 1, args, go)
 
     @register(2, title="Calibrate volts with a known DC voltage")
     async def scope_calibrate_volts(

@@ -276,6 +276,108 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-spec measured update (done 23:27, merged 23:29 as bb2880b; 827 lines): TD-measured deltas on the 0x153B source: DDS -61
+  LUT, cruft (0x1B/0x3C/0x41/0x24-0x27 decoder entries, dec_neg, dec_swap, sample_read_enable, trigger_detect_enable, w_last
+  under SIM) -78, divider compare 32->20 bits -53; the two-step fractional pattern core +48 LUT / +231 reg (one 16-bit
+  accumulator per engine, cleared on burst start; the carry path is pipelined in the contract). Totals: 0x153C ~71 %, 0x153D
+  ~79 %, 0x153E ~85 % with ~1,300 LUT margin. Generator = two-step pattern (0x6C u32 + u16 fraction, double buffer 0x6D bit
+  5 / 0x39 bit 5), SET_GEN keeps its layout (P16 / H16 in 1/65536 clocks), Bode P = 4 M, 0x51/0x52 retired. Coordinator
+  plan change: the C0 cruft removal (contract: "first, on main") is folded into C4 integration (Fable) after C1-C3 merge,
+  so the three running RTL branches are not disturbed; fw-one told 23:29 to stop writing 0x53 bits 3/4 and to bound the
+  divider at 199,999.
+- ui-rows-review (Opus, dispatched 23:39, done before 23:48, read-only): adversarial review of the Type / Sample row mockups and note against
+  docs/ui-guidelines.md and the owner's taste; answers to the note's six open questions so the coordinator can decide
+  tonight and the owner veto in the morning.
+- ui-rows round 2 (done 23:55, merged 23:56 as e433ed2): all review items in the boards and the note (ACQ 478 px with five
+  chips and the real pass-time y, Pulse polarity row, pixel glyphs, viewer and Frequency response boards, "Bars", Idle
+  "Off", keypad for N, snap notices queued time/div first, marker 0xA000). Leftovers accepted by the coordinator: the
+  "not applied" note on four lines in the 66 px column; in Frequency response the parameter rows are not drawn (the sweep
+  does not use them) so the menu fits. The mockups are the acceptance reference for the C5/C6 UI items; owner veto pending.
+- Coordinator decisions on the ui-rows review (23:4x, as the owner's proxy, owner veto pending): ACQ menu widened to 478 px
+  with Sample as the fourth box (the mockup hid a collision with the five memory chips and drew the pass time at the
+  wrong y); no silent clamp: Width / Idle snap to the rate's range with the snap notice, +/- stop at the ends, Width
+  Shorter >= 2 words; no feature gating (one-bitstream rule); hints say only what the firmware knows; under Pulse the edge
+  row becomes Pulse polarity Positive / Negative; trace style "Peak" renamed "Bars"; Idle zero step "Off", values
+  capitalised; no Sample box in Spectrum, grey in roll; viewer and Frequency response boards; N by +/- and the generator
+  keypad on a tap, no held repeat; chip glyphs in firmware pixels; bars drawn with the integer step, overload from either
+  byte, phosphor accumulates, X-Y midpoints. ui-rows round 2 dispatched just before 23:48.
+- ui-rows (Opus, dispatched 23:15, done 23:37, merged 23:38 as 1742743): eight mockups under docs/mockups/ui-rows/ (a
+  headless-Chrome PNG renderer added to gen_ux), docs/plans/ui-rows.md. Type as the trigger menu's sixth row with Width
+  / shorter-longer or N / Idle parameter rows (+/- ladder), the chip shows the type as a glyph in the edge slot, Peak greys
+  Filter and Average with a note, "Scope only" in Spectrum; six open questions (ladder-only values, glyph vs word, N
+  held-repeat, Peak with phosphor/X-Y, Sample in Spectrum, Idle on EXT).
+ mockups and design note docs/plans/ui-rows.md for the two decided UI rows (Type in the
+  trigger menu: Edge / Pulse width / Nth edge with parameters; Sample in ACQ: Normal / Peak, and the Peak-vs-Filter
+  presentation), the trigger chip's text per type, a peak-detect trace mockup, the firmware checklist; adversarial review
+  follows, the owner sees the mockups with the morning batch.
+- mcp-soft (Opus, dispatched 22:06, done 22:45, merged 22:46 as 8eaf912; ruff clean, 496 tests): scope_decode (UART auto-baud,
+  SPI, I2C; limits: UART >= 4 samples per bit advised, refused under 2; SPI 3 per clock; I2C 8 per SCL period), scope_mask_test
+  (masks stored under the data dir, exact geometry only), scope_export_csv, scope_dvm (resolution statement); simulator
+  serial signals; report kinds. README and release notes say 34 tools; release notes need a line on the four tools
+  (release follow-up).
+- **Overnight autonomy** (owner 23:1x): continue the roadmap without the owner as far as 0x153E; the owner verifies
+  everything as one batch (or bisects by flashing 0x153C, 0x153D in turn if the batch fails). No hardware tonight: images
+  and bitstreams are built, simulated and pinned; every generation keeps its own dist entry and firmware image for the
+  bisect.
+- **0.3.0 scope** (owner 23:08): 0.3.0 ships when the chosen roadmap items are complete and benched, not the current
+  feature set; realistically 2026-10-21 or 10-22. Contents: fw-one (one bitstream, banner, one averaging), mcp-soft tools,
+  0x153C (triggers, hold-off, peak detect, counter) with its firmware and MCP 1.25 and the two UI rows, 0x153D (logger,
+  pattern generator with its trigger engine and fractional periods, no DDS, cruft removal) with firmware and MCP 1.26;
+  0x153E by the measured numbers. The release notes, announcement and checklist get one final refresh before the tag;
+  the version bump happens then. Reason (owner): see what is possible on commodity hardware, and have the detector
+  tooling ready in a couple of weeks.
+- Owner decision 23:0x: the pattern generator's durations get a fractional part (an accumulator per step, carry = one
+  extra 5 ns clock) so any average frequency is exact and the edges stay within one clock; a few dozen cells. In the
+  contract with the DDS removal.
+- Owner decisions 23:0x (LUT savings): (1) the pattern generator absorbs the square-wave generator (a two-step continuous
+  pattern with double-buffered durations; the DDS and its sweep logic go; firmware generator menu, wizard 1 kHz and the device
+  Bode sweep program the pattern); (2) chirps are MCU-stepped patterns (one period write per step); (3) an FPGA cruft audit
+  under the one-bitstream rule: register paths our firmware never writes are removed. fpga-spec measures the deltas by
+  synthesis and updates the contract and the D2 brief; 0x153E's question is answered by the measured numbers.
+- fpga-spec addendum (done 22:54, merged 22:55 as 4d35cb3): section 7.5 pattern trigger engine (registers 0x76-0x7D mirroring
+  the capture trigger's, status 0x42, burst start source in 0x6D bits 6..5, caps bit 27, SET_PATTERN_TRIGGER 0x021A), fallback
+  = the capture qualifier routed; 0x153D now ~7,350 LUT (85 %), 0x153E ~91 % and gated on 0x153D's measured count; logger
+  rates are the spec; trigger-out wire removed; DDS sweep kept, first to cut (owner 22:53).
+- Owner decisions from the evening Q&A (22:38-22:49): (1) logger contract rates 500 / 250 / 125 kS/s documented now, higher
+  after the bench; (2) no soldering to FPGA or other pins in this project, the prepared flash header is the only one
+  (the trigger-out wire option is closed); (3) the pattern generator gets its own trigger engine with the capture
+  trigger's vocabulary (two orthogonal engines, same register layout with a base offset; a burst starts from the MCU or
+  from its engine); the marker stays a capture trigger source for MCU-started patterns; no "pattern starts on the capture
+  trigger" link. fpga-spec is updating the contract (section 7.5, D2 brief, the 0x153D estimate).
+- docs-one (Opus, dispatched 22:04, done 22:22, merged 22:23 as 003924d): the card-only path gone from 15 files; README 175
+  lines, 34/34 links; placeholders {{BANNER_TEXT}} / {{BANNER_REACHABLE}} (first-run.md) and {{AVERAGE_TEXT}} (screens.md)
+  for fw-one's wording; README's manual steps reordered by the coordinator to download first (as install.md and the
+  runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
+  0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
+  code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fpga-c3 (done 03:3x, merged 03:34 as f629cec): C3 counter with min/max (0x61, 0x62, read 0x35 = 16 bytes, 17 strobes per
+  read); tb_counter 115 checks both seeds; full run.sh 16 steps ALL PASS on the merged C1+C3 source both seeds; TD +347 LUT
+  alone, merged C1+C3 6079 LUT (70 %) with 8 setup errors (-0.763 ns) on the sequencer's q_pass adder: placement spread, C4
+  re-rolls or pipelines it. Firmware note: a 0x0D/0x53 write mid-gate adds or drops one edge; rewrite 0x61 after the settle
+  wait or skip the first result after a rate change. Tool note: long WSL jobs need setsid nohup (a 22-min PowerShell
+  background task was killed).
+- fpga-c1 (done 2026-10-21 00:xx, merged 01:07 as da4dc6e): C1 trigger types + hold-off; tb_trigtypes 1293 checks on two
+  seeds, full run.sh ALL PASS on 12345 and 4242; TD 5721 LUT (+731 over 0x153B) / 4.739 ns met after four timing re-rolls;
+  deviations: 0x1B = 0 releases a running hold-off at once, the qualifier is held in reset until the first swc_adv edge after
+  a capture reset (type registers written in the 0x01 window apply at every rate). Notes for C4: keep the 0x1B decoder entry
+  when applying the C0 cruft list; expect to re-roll timing after merging C2/C3. Qualifier cost about 300 LUT per instance
+  (the pattern trigger engine's estimate in the contract rises from 175 to about 300).
+- fpga-c1 / fpga-c2 / fpga-c3 (Opus, dispatched 22:21-22:22, branches of the same names): 0x153C items C1 (trigger types
+  pulse width / Nth edge / timeout, 0x1B hold-off, 0x37, the fire gate; owns the capture and EXT blocks and the shared
+  decim_trig_sample lines), C2 (peak detect as a one-register switch, 0x56 bit 1, 0x29; owns decim_chan and the decimator
+  control; sends its two-line shared change via the coordinator), C3 (counter + min/max, 0x61/0x62/0x35 16 bytes; new block
+  after seq_lat). Each rebased from gen8-features-wip 9de82ca onto 0x153B, testbenches + run.sh steps 14-16, TD numbers; the
+  version byte, contract file and dist entry are C4's (integration, after the three merge). Coordinator decision on contract
+  question 1: 0x1B's meaning change accepted (one bitstream per firmware).
+- fpga-spec (Opus, dispatched 22:01, done 22:20, merged 22:21 as 4b29d01): docs/plans/fpga-0x153c.md, 608 lines. Generations
+  0x153C (triggers, hold-off, peak detect, counter; protocol 1.25), 0x153D (logger with the sample ring as the FIFO, pattern
+  generator with marker as trigger source, DDS sweep; 1.26), 0x153E (both-core trigger, runt, window, width range; 1.27).
+  Budget correction: 0x153B uses 4990 of 8640 LUTs and no block RAM is free (the roadmap's 7,000 / 200 kbit was stale);
+  0x153C ~72 %, 0x153D ~81 %, 0x153E ~87 %. Logger ceiling is the MCU + USB: 1 ch 8-bit 0.58-1.0 MS/s, 1 ch 16-bit or 2 ch
+  8-bit 290-510 kS/s, 2 ch 16-bit 145-260 kS/s; proposed contract 500 / 250 / 125 kS/s. Owner questions for the morning in
+  section 12 (logger contract rates now or after the bench; pattern marker as internal trigger vs a trigger-out wire mod;
+  DDS sweep in or out; build 0x153E at 87 % or stop at 0x153D; C9 timing).
+
 - fpga-spec (Opus, dispatched 22:01): docs/plans/fpga-0x153c.md, the design and register contract for the roadmap epics
   the owner chose at 22:00 (advanced triggers, peak detect, streaming logger, pulse pattern generator with trigger output,
   hardware measurements, software on new data; no deeper memory; testers later): generations, register map with ranges per

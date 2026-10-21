@@ -1,6 +1,6 @@
 ---
 name: fnirsi-install
-description: Guide a person through installing, hacking, upgrading or flashing their FNIRSI 1013D oscilloscope with this repository's open firmware, SD card and optional FPGA bitstream. Use when asked to install / hack / upgrade / flash my FNIRSI 1013D, put the firmware on the card, write the SD card, flash the FPGA or the bitstream, back up the scope, identify the FPGA variant, or recover a scope after a failed install.
+description: Guide a person through installing, hacking, upgrading or flashing their FNIRSI 1013D oscilloscope with this repository's open firmware, SD card and FPGA bitstream. Use when asked to install / hack / upgrade / flash my FNIRSI 1013D, put the firmware on the card, write the SD card, flash the FPGA or the bitstream, back up the scope, identify the FPGA variant, or recover a scope after a failed install.
 ---
 
 # Installing the open firmware on a FNIRSI 1013D
@@ -11,7 +11,8 @@ first boot, and the recovery paths.
 
 Rules that the runbook states and you never bend:
 
-1. Identify the variant first. Only the Anlogic AL3A10 board is verified; no bitstream exists for the others.
+1. Identify the variant first. Only the Anlogic AL3A10 board is verified; no bitstream exists for the others. The
+   bitstream is required: each firmware runs only with the one its release names and shows a banner on any other.
 2. Back up before writing: the card before the card tool runs, the FPGA flash twice (the two reads must agree) before
    any write to it.
 3. Verify `SHA256SUMS` before building or writing anything.

@@ -1,6 +1,6 @@
 ---
 name: fnirsi-scope
-description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, or use the scope's generator / calibration pin, or plot / present a scope result. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
+description: Run measurements on the FNIRSI 1013D oscilloscope through the fnirsi1013d MCP server (scope_* tools). Use when asked to measure on the scope, use the oscilloscope, capture CH1/CH2, look at a waveform, average captures, measure a metal detector / pulse-induction decay or time constant, take an FFT, measure a frequency response / Bode plot of a filter or tank, decode a serial bus (UART, SPI, I2C) from a capture, test waveforms against a mask (pass / fail), read voltages like a DVM (DC, AC RMS, true RMS), export a capture as CSV, or use the scope's generator / calibration pin, or plot / present a scope result. Covers session start, choosing range and timebase, averaging, the shared screen, generator safety, reading .npz results, reporting caveats and troubleshooting.
 ---
 
 # Measuring with the FNIRSI 1013D
@@ -43,7 +43,12 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
   variants on a 0x1535 bitstream; cic2 for decays) gives 16-bit, anti-aliased samples (guide section 3a); turn it
   off when done. `scope_spectrum` works while the screen shows the spectrum, waterfall or density view.
   Captures add a caveat while a spectrum or phosphor view is on: pass it on.
-- Quick numbers: `scope_measure`.
+- Quick numbers: `scope_measure`. Voltmeter-style readings over several captures: `scope_dvm` (quote its
+  `statement`: range, volts per code, noise, uncertainty and digits; absolute accuracy is the calibration's).
+- Serial bus: `scope_decode(protocol='uart'|'spi'|'i2c')` on the last / a saved / a fresh capture (guide section 3:
+  lines on CH1 (+CH2), >= 4 samples per bit, 8 per I2C SCL period; report frames, errors and the measured baud).
+- Pass / fail: `scope_mask_test` (band around a reference capture, `tolerance_div` 0.2 and 2 samples to start,
+  `mask_name` to reuse; keep the settings as when the mask was built). CSV of any result: `scope_export_csv`.
 - Frequency response of a passive DUT on the calibration post: `scope_bode_sweep` (guide section 3b). Wiring
   before anything: CH1 tip on the DUT input, CH2 on the output, DUT ground on the probe ground clips (wiring A;
   USB-shell ground only with `ch2_coupling='ac'`). Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
@@ -80,7 +85,8 @@ The probe ground (BNC shells) is VRF1, about +1.24 V above the scope's USB/digit
 
 `.npz` per waveform (`file` in the result): `numpy.load(path)`, metadata `json.loads(str(f["meta_json"]))`.
 capture/fetch: `t` (s, 0 = trigger), `CH1_volts`, `CH1_codes`, `CH1_clipped`; averaged: `CH1_mean`, `CH1_std`;
-segments: `CH1_volts` (segments x samples), `timestamps_s`, `triggered`;
+segments: `CH1_volts` (segments x samples), `timestamps_s`, `triggered`; decode: the lines plus the frames in `meta_json`;
+mask_test: `upper`, `lower`, `reference`, `fail_mask`; dvm: per-capture `CH1_mean` etc. over `capture_t_s`;
 decay_fit: `t` (after the edge), `data`, `fit`, `residual`; fft: `f`, `amplitude_vrms`.
 
 ## Presenting results

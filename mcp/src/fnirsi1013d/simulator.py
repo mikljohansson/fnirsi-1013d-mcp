@@ -136,10 +136,15 @@ VARIANTS = {
 # Signals
 
 
+#: serial-bus signal kinds (mcp-soft): a piecewise-constant timeline repeated every ``period`` (serial_timeline)
+SERIAL_KINDS = ("uart", "spi_clk", "spi_data", "i2c_scl", "i2c_sda")
+
+
 @dataclass
 class Signal:
     kind: str = "zero"
-    params: dict[str, float] = field(default_factory=dict)
+    #: numbers (SI units parsed), except ``text`` of the serial kinds, which stays a string
+    params: dict[str, Any] = field(default_factory=dict)
 
     def p(self, name: str, default: float) -> float:
         return float(self.params.get(name, default))
@@ -155,12 +160,19 @@ class Signal:
             return 1.65
         if self.kind in ("dut_in", "dut_out"):
             return self.p("offset", -1.24) + self.p("gain", 1.0) * 0.5 * self.p("high", 3.1)
+        if self.kind in SERIAL_KINDS:
+            times, levels, period = serial_timeline(self.kind, self.params)
+            return float(np.sum(np.diff(np.append(times, period)) * levels) / period)
         return self.p("offset", 0.0)
 
     def eval(self, t: np.ndarray, gen: "GenState") -> np.ndarray:
         k = self.kind
         if k == "zero":
             return np.zeros_like(t)
+        if k in SERIAL_KINDS:
+            times, levels, period = serial_timeline(k, self.params)
+            ph = np.mod(np.asarray(t, np.float64) - self.p("start", 0.0), period)
+            return levels[np.searchsorted(times, ph, side="right") - 1]
         if k == "dc":
             return np.full_like(t, self.p("v", 0.0))
         if k == "sine":
@@ -272,27 +284,156 @@ def dut_response(t: np.ndarray, f: float, duty: float, high: float, rs: float, r
     return xs @ C[node] + np.where(hi, D[node] * high, 0.0)
 
 
+#: default message of the serial kinds (``text=``): bytes with both MSB states and an odd and an even bit count
+SERIAL_DEFAULT_TEXT = "Hi!"
+
+_SERIAL_CACHE: dict[tuple, tuple[np.ndarray, np.ndarray, float]] = {}
+
+
+def serial_message(params: dict[str, Any]) -> bytes:
+    """The bytes a serial signal carries: ``text`` (latin-1; a CLI string, so no comma or colon) or the default."""
+    text = params.get("text", SERIAL_DEFAULT_TEXT)
+    return text.encode("latin-1", "replace") if isinstance(text, str) else bytes([int(text) & 0xFF])
+
+
+def serial_timeline(kind: str, params: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, float]:
+    """Piecewise-constant line levels of a serial-bus signal over one ``period`` (default 1 ms): ``(times, levels,
+    period)`` with level ``levels[i]`` from ``times[i]`` on; the message starts at time 0 and the line idles after it.
+
+    ``uart``: one frame per message byte, back to back: start bit, ``bits`` data bits LSB first (default 8),
+    ``parity`` 0 none / 1 even / 2 odd, ``stop`` stop bits (1), at ``baud`` (115200); levels ``high`` (3.3) /
+    ``low`` (0), ``idle`` 1 = idle high (mark = high), 0 = inverted; ``gap`` seconds between frames (0).
+    ``spi_clk`` / ``spi_data``: the message as ``bits``-bit words (8) MSB first (``msb`` 0 = LSB first) clocked at
+    ``freq`` (1 MHz) with ``cpol`` / ``cpha`` (0 / 0); data changes on the non-sampling edge; ``gap`` seconds of idle
+    clock between words (0; the data line rests low in a gap). No chip select (two channels).
+    ``i2c_scl`` / ``i2c_sda``: START, the 7-bit ``addr`` (0x50) with the R/W bit ``rw`` (0 write), the slave's ACK
+    (``nack`` 1 = no slave: NACK and STOP), the message bytes each ACKed (a read NACKs the last one), STOP, at ``freq``
+    (100 kHz); SDA changes while SCL is low, a quarter period after its falling edge."""
+    key = (kind, tuple(sorted((k, str(v)) for k, v in params.items())))
+    hit = _SERIAL_CACHE.get(key)
+    if hit is not None:
+        return hit
+    p = lambda name, default: float(params.get(name, default))  # noqa: E731
+    high, low, period = p("high", 3.3), p("low", 0.0), p("period", 1e-3)
+    msg = serial_message(params)
+    seg: list[tuple[float, float]] = []  # (duration, level)
+    if kind == "uart":
+        tb = 1.0 / p("baud", 115200)
+        nbits, parity, stop, gap = int(p("bits", 8)), int(p("parity", 0)), p("stop", 1), p("gap", 0.0)
+        mark, space = (high, low) if p("idle", 1) else (low, high)
+        for b in msg:
+            seg.append((tb, space))
+            ones = 0
+            for i in range(nbits):
+                bit = (b >> i) & 1
+                ones += bit
+                seg.append((tb, mark if bit else space))
+            if parity:
+                even = ones % 2 == 0
+                pbit = (0 if even else 1) if parity == 1 else (1 if even else 0)  # even parity makes the total even
+                seg.append((tb, mark if pbit else space))
+            seg.append((stop * tb, mark))
+            if gap > 0:
+                seg.append((gap, mark))
+        idle_level = mark
+    elif kind in ("spi_clk", "spi_data"):
+        half = 0.5 / p("freq", 1e6)
+        nbits, cpol, cpha, msb, gap = int(p("bits", 8)), int(p("cpol", 0)), int(p("cpha", 0)), p("msb", 1), p("gap", 0.0)
+        idle_clk, active_clk = (high, low) if cpol else (low, high)
+        words = _spi_words(msg, nbits)
+        clk: list[tuple[float, float]] = []
+        dat: list[tuple[float, float]] = []
+        if cpha:
+            dat.append((half, low))  # the first bit appears on the first (leading) edge
+        for w in words:
+            for i in range(nbits):
+                bit = (w >> (nbits - 1 - i)) & 1 if msb else (w >> i) & 1
+                clk += [(half, idle_clk), (half, active_clk)]
+                dat += [(half, high if bit else low), (half, high if bit else low)]
+            if gap > 0:
+                clk.append((gap, idle_clk))
+                dat.append((gap, low))
+        seg = clk if kind == "spi_clk" else dat
+        idle_level = idle_clk if kind == "spi_clk" else low
+    elif kind in ("i2c_scl", "i2c_sda"):
+        q = 0.25 / p("freq", 100e3)
+        addr, rw, nack = int(p("addr", 0x50)), int(p("rw", 0)), int(p("nack", 0))
+        scl: list[tuple[float, float]] = []
+        sda: list[tuple[float, float]] = []
+
+        def bit_slot(level: float) -> None:  # SCL low, SDA set a quarter in, SCL high for the second half
+            scl.extend([(2 * q, low), (2 * q, high)])
+            sda.extend([(q, sda[-1][1] if sda else high), (3 * q, level)])
+
+        # START: SDA falls while SCL is high, then SCL falls a quarter later
+        scl.append((q, high))
+        sda.append((q, low))
+        frames = [((addr << 1) | (rw & 1), low if not nack else high)]
+        if not nack:
+            frames += [(b, high if (rw and i == len(msg) - 1) else low) for i, b in enumerate(msg)]
+        for byte, ack_level in frames:
+            for i in range(8):
+                bit_slot(high if (byte >> (7 - i)) & 1 else low)
+            bit_slot(ack_level)
+        # STOP: SCL low, SDA low, SCL high, SDA rises a quarter later
+        scl.extend([(2 * q, low), (2 * q, high)])
+        sda.extend([(q, sda[-1][1]), (2 * q, low), (q, high)])
+        seg = scl if kind == "i2c_scl" else sda
+        idle_level = high
+    else:
+        raise ValueError(f"not a serial signal kind: {kind!r}")
+    dur = np.array([d for d, _ in seg], np.float64)
+    total = float(dur.sum())
+    if total >= period:
+        raise ValueError(f"{kind}: the message takes {total * 1e6:.1f} us, longer than period {period * 1e6:.1f} us; "
+                         "raise period or shorten text")
+    times = np.concatenate([[0.0], np.cumsum(dur)])
+    levels = np.array([lv for _, lv in seg] + [idle_level], np.float64)
+    out = (times, levels, period)
+    _SERIAL_CACHE[key] = out
+    return out
+
+
+def _spi_words(msg: bytes, nbits: int) -> list[int]:
+    """The message bytes repacked as ``nbits``-bit words (big endian, zero padded)."""
+    if nbits == 8:
+        return list(msg)
+    total = int.from_bytes(msg, "big")
+    nwords = max(1, -(-len(msg) * 8 // nbits))
+    total <<= nwords * nbits - len(msg) * 8
+    return [(total >> (nbits * (nwords - 1 - i))) & ((1 << nbits) - 1) for i in range(nwords)]
+
+
+SIGNAL_KINDS = ("zero", "dc", "sine", "square", "decay", "gate", "gen", "dut_in", "dut_out") + SERIAL_KINDS
+
+
 def parse_signal(spec: str) -> Signal:
-    """``kind:key=val,key=val``; values accept SI units (``80us``, ``10kHz``)."""
+    """``kind:key=val,key=val``; values accept SI units (``80us``, ``10kHz``); ``text=`` of the serial kinds is kept
+    as a string."""
     spec = spec.strip()
     kind, _, rest = spec.partition(":")
     kind = kind.strip().lower()
-    if kind not in ("zero", "dc", "sine", "square", "decay", "gate", "gen", "dut_in", "dut_out"):
-        raise ValueError(f"unknown signal kind {kind!r}; use sine, square, decay, gate, dc, gen, dut_in, dut_out "
-                         "or zero")
-    params: dict[str, float] = {}
+    if kind not in SIGNAL_KINDS:
+        raise ValueError(f"unknown signal kind {kind!r}; use {', '.join(SIGNAL_KINDS[1:])} or zero")
+    params: dict[str, Any] = {}
     for item in filter(None, (s.strip() for s in rest.split(","))):
         k, _, v = item.partition("=")
-        params[k.strip().lower()] = parse_quantity(v.strip())
+        k = k.strip().lower()
+        params[k] = v.strip() if k == "text" else parse_quantity(v.strip())
     return Signal(kind, params)
 
 
 def companion_signal(sig: Signal) -> Signal:
-    """Default CH2 for a CH1 signal: the TX gate for a decay, a sync square for periodic signals."""
+    """Default CH2 for a CH1 signal: the TX gate for a decay, a sync square for periodic signals, the data line of a
+    bus whose clock is on CH1."""
     if sig.kind == "decay":
         return Signal("gate", {"period": sig.p("period", 1e-3), "width": sig.p("width", 200e-6), "high": 3.3})
     if sig.kind in ("sine", "square"):
         return Signal("square", {"freq": sig.p("freq", 1e3), "amp": 1.5, "offset": 1.5, "duty": 0.5})
+    if sig.kind == "spi_clk":
+        return Signal("spi_data", dict(sig.params))
+    if sig.kind == "i2c_scl":
+        return Signal("i2c_sda", dict(sig.params))
     return Signal("zero")
 
 
