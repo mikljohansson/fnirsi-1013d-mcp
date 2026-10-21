@@ -706,7 +706,8 @@ int ui_fpga_mismatch_pass(void)
   uint32 i;
   int    id;
 
-  //Diagnostics took the pass (ui_diag_pass runs first); its Back put this page back on the screen
+  //Diagnostics took the pass (ui_diag_pass runs first); its Back put this page's picture back on the screen and
+  //fm_redraw (set when it opened) builds the page and its hit areas again
   if(!fm_open || ud_open)
     return 0;
 
@@ -740,8 +741,11 @@ int ui_fpga_mismatch_pass(void)
   switch(id)
   {
     case UD_ID_DIAG:
-      //Keeps this screen to return to (displaybuffer2), takes the passes until Back
+      //Keeps this screen to return to (displaybuffer2), takes the passes until Back. It builds its own pages into
+      //ud_pg: the notice is built again on the first pass after it, or every tap would be hit-tested against the
+      //Diagnostics page (fw 0.2.105: Back left the notice deaf to its three buttons)
       ui_diag_open();
+      fm_redraw = 1;
       break;
 
     case UD_ID_SETTINGS:

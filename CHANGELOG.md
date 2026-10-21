@@ -131,6 +131,15 @@ sections 74 to 79.
   Filter menu tests, SET_DECIM's peak detect capability, and the wizard's never-returned "no generator" result
   (4865cd1, 9c56216, 0c0bf4c, a3d861a, 4b0475d).
 
+**The mismatch notice after Diagnostics (fw-diag).**
+
+- **The FPGA mismatch notice answers its buttons after Diagnostics**: Diagnostics builds its pages into the hit areas the
+  notice uses, and Back put the notice's picture back without its page, so every later tap was tested against the
+  Diagnostics Status page, where the centres of Diagnostics, Settings and USB drive hit nothing: the screen looked hung
+  (owner, 0.2.104 on 0x153B, 2026-10-21). The notice is built again on the first pass after Diagnostics. The calibration
+  class probe no longer runs under the notice (it could arm conversions with an unbounded ready wait on the mismatched
+  bitstream). (f08b5b1)
+
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):
