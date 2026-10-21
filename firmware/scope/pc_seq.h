@@ -64,6 +64,8 @@
 #define PC_SEQ_FIT_PRE        6         //pre >= total
 #define PC_SEQ_FIT_N          7         //averaging: N 0 or > 65536, or > 257 with legacy (8-bit) records
 #define PC_SEQ_FIT_PROG       8         //bitstream without programmable geometry / sequencer
+#define PC_SEQ_FIT_PEAK       9         //C6: averaging of peak records (the sums would mix max and min bytes); SET_SEQ
+                                        //answers E_STATE detail 7 (docs/plans/fpga-0x153c.md section 4), GET_SEQ 16 = 9
 
 typedef struct
 {
@@ -94,6 +96,8 @@ typedef struct
 
 //Fit of a setting against the geometry of the next arm (words) and its record format; PC_SEQ_FIT_*
 uint8_t  pc_seq_fit(const pc_seq_cfg *c, uint32_t pre_words, uint32_t total_words, int wide);
+//The same with the record kind (C6): peak records (pc_decim_cfg.peak) refuse averaging (PC_SEQ_FIT_PEAK), segments fit
+uint8_t  pc_seq_fit_rec(const pc_seq_cfg *c, uint32_t pre_words, uint32_t total_words, int wide, int peak);
 //Largest count for the mode: 8192 >> m segments, or 2048 / total positions (0 when total is 0 or over the limit)
 uint32_t pc_seq_max_count(const pc_seq_cfg *c, uint32_t total_words);
 //Hold-off in 5 ns units, rounded up

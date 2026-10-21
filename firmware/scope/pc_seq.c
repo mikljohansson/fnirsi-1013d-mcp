@@ -55,6 +55,18 @@ uint8_t pc_seq_fit(const pc_seq_cfg *c, uint32_t pre_words, uint32_t total_words
   return PC_SEQ_FIT_OK;
 }
 
+//C6 peak detect: a peak word is { max, min } raw codes, so an averaging run's lane sums would mix the two; segments hold
+//whole words and are fine
+uint8_t pc_seq_fit_rec(const pc_seq_cfg *c, uint32_t pre_words, uint32_t total_words, int wide, int peak)
+{
+  uint8_t f = pc_seq_fit(c, pre_words, total_words, wide);
+
+  if((f == PC_SEQ_FIT_OK) && peak && (c->mode == PC_SEQ_AVERAGE))
+    return PC_SEQ_FIT_PEAK;
+
+  return f;
+}
+
 uint32_t pc_seq_holdoff_units(uint32_t ns)
 {
   return (uint32_t)(((uint64_t)ns + 4) / 5);
