@@ -141,11 +141,29 @@ Ideas that stay in the repository for later and are not part of the one-splash p
 
 - Deeper memory: use the AL3's spare block RAM for about 24,576 samples per channel, wider pretrigger and total
   registers, memory-depth table per FPGA version.
-- Advanced triggers (pulse width, runt, window, timeout, Nth edge), peak-detect acquisition, streaming data logger,
-  pulse pattern generator with trigger output, hardware measurements, serial decode, mask testing, PRBS output.
-- Trigger on both ADC cores, a 200 MHz DDS clock for a finer generator.
+- PRBS or noise output.
 - CSV export of the on-screen trace, a dot display mode, triggered sweeps slower than 10 ms/div.
 - Invite testers with EF2L45 and EP4CE6 units; those paths are inherited from Atlan4 and untested here.
+
+### A future FPGA 0x153E (owner, 2026-10-21)
+
+0.3.0 ships on 0x153D; 0x153E is not scheduled. The owner wants FPGA headroom kept ("not program the FPGA too full, who knows
+what we might want to do later"), so a 0x153E would combine one feature with the compaction below, measured block by block
+like `docs/plans/fpga-0x153c.md` section 13 on the 0x153D source.
+
+1. **Trigger on both ADC cores** (the only feature candidate; contract section 3.4): the edge found to 5 ns instead of 10 ns at
+   200 MS/s, so repeated captures line up twice as tightly (sharper averaged and phosphor traces at the fastest time bases).
+   About 200 LUT, on the half-cycle compare path, the design's main timing risk.
+2. **Compaction, small leftovers** (not measured yet, probably tens of LUT each): one trigger level register instead of the
+   8-bit 0x17 / 16-bit 0x55 pair, the sequencer's raw readout mode `seq_raw` (READ_SEQ S = 0xFF) if the host no longer needs
+   it, and the registers section 13 kept only because the firmware polls them.
+3. **Compaction, cycle-identical narrowings** (the design fills by registers, so these count most; each has a trade-off):
+   the counter's min / max (about 64 reg / 40 LUT; the measurement cards use them), the logger's u32 word counter (needs a
+   firmware change), the square generator's u32 step count (24 bits saves about 100 reg but raises the lowest square from
+   23 mHz to about 6 Hz).
+
+Dropped by the owner on 2026-10-21 and not candidates: the pulse pattern generator with its trigger engine and marker (cut from
+0x153D at 15:55, it did not fit; chirps stay host-stepped on the square), runt, window and the pulse-width range triggers.
 
 ## 7. Not pursued
 
