@@ -286,7 +286,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   4ec3bd0f267265270b775fa1183e65ef518de8ba8feaf6e3fa7abdece9c7933e. Found: the roll mode (100 ms/div to 50 s/div,
   test.c scope_get_long_timebase_data / scope_check_long_trigger via fpga_average_trace_data, averagecommand 0x24 / 0x26)
   reads the live ADC pins 0x153C removed; the roll trace is invalid on 0x153C (fw 0.2.104 + 0x153C is a bisect pair only).
-- fw-roll (Opus explicitly, dispatched 15:08, branch fw-roll): roll mode on the streaming logger per the owner's decision
+- fw-roll (Opus explicitly, dispatched 15:06, branch fw-roll): roll mode on the streaming logger per the owner's decision
   below: the long timebases take their points from the 0x153D stream (fpga_log / pc_logring on 0x69 / 0x6A / 0x38) instead
   of the 0x24 / 0x26 live-pin averages; averagecommand and fpga_average_trace_data(_long) go.
 - fpga-d3 (Fable, dispatched 14:03, branch fpga-d3): 0x153D integration per contract item D3: merge fpga-d1 (pushed) and
