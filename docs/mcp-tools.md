@@ -233,7 +233,13 @@ A peak-detect record (`peak` true in the result, kind `peak` in the `.npz`) adds
 mean and max width), the samples / preview as `<ch>_min` and `<ch>_max`, and the file `<ch>_min_volts`,
 `<ch>_max_volts`, `<ch>_min_codes`, `<ch>_max_codes`; `volts` / `codes` are the midpoint; the caveat says the
 envelope includes the noise extremes and that averaging is refused while peak detect is on (`scope_averaged_capture`
-refuses with a hint; SET_SEQ mode 2 answers E_STATE detail 7).
+refuses with a hint; SET_SEQ mode 2 answers E_STATE detail 7). Volts of a peak record (READ_RAW layout 3, READ_TRACE
+WIDE) use the **full clock class** of the calibration (the stored v3 zeros and gains of the full class, the v4 tracker
+included), as the firmware's midpoint does (fw-c6 `fpga_channel_correction_full`): under peak detect the ADCs run at
+200 MSa/s whatever the divider, while GET_CAL's `gain_a` .. `off_b` (bytes 92..107) and CAL_GATED describe the
+divider's gated class at a divider > 0, so those bytes are not what a peak record needs. At divider 0 and over 8190
+samples the record stays legacy (GET_DECIM why 2 / 3) and the firmware does not write peak detect at all (shift byte
+0x00).
 
 **`fetch_waveform`** (tier 0 in LOCAL, 1 in REMOTE). Reads the current capture without re-arming (the UI's
 last trace in LOCAL). Same returns as `capture`.

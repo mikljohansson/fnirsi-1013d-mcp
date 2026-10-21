@@ -2192,7 +2192,7 @@ class DecimConfig:
     cap: bool = False
     #: 1.26: peak detect active (k = 1, each word = { max, min } raw codes of the N-sample window, gain 1, shift 0)
     peak: bool = False
-    #: 1.26: 0x56 bit 1 as written (peak requested; active only with K >= 1, i.e. not at divider 0 / long records)
+    #: 1.26: 0x56 bit 1 as written (the firmware writes it only for a peak record: never at divider 0 / long records)
     peak_en: bool = False
 
     @property
@@ -2262,9 +2262,12 @@ class DecimConfig:
 
     @property
     def settle_us(self) -> int:
-        """Filter settling after a change: (K + 2) output periods, us, rounded up; with the FIR (K + 10) N 5 ns + 1 us."""
+        """Filter settling after a change: (K + 2) output periods, us, rounded up; with the FIR (K + 10) N 5 ns + 1 us;
+        peak detect 11 N 5 ns + 1 us (pc_decim_settle_us)."""
         if not self.k:
             return 0
+        if self.peak:  # 1.26 (fw-c6): after the 0x56 write as after a filter write, K counted as 1
+            return min((11 * self.n + 199) // 200 + 1, 0xFFFFFFFF)
         if self.fir:
             return min(((self.k + 10) * self.n + 199) // 200 + 1, 0xFFFFFFFF)
         return min(((self.k + 2) * self.n + 199) // 200, 0xFFFFFFFF)
@@ -2288,15 +2291,16 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: 
     1.26), ``flags`` (DECIM_FLAGS bits, plus DECIM_SET_FIR), the 0x0D divider, the capture length and the bitstream's
     level (DECIM_HAS_*, | DECIM_HAS_CAPSTAGES on 0x153A+). With the FIR active the CIC decimates by M = N / 2: gain
     M^K, S one higher, exactness on M. Peak detect runs the 16-bit path as K = 1 with the same legacy cases (divider 0,
-    records over 8190 samples) and no FIR, shift 0, gain 1."""
+    records over 8190 samples) and no FIR, shift 0, gain 1; the FIR request is dropped, and 0x56 bit 1 (``peak_en``,
+    shift byte bit 6) is written only when the record is a peak record (fw-c6: not at divider 0 / long records)."""
     peak = k_req == DECIM_PEAK
     k, n = (1 if peak else k_req & 3), decim_n(divider)
     cap = bool(has & DECIM_HAS_CAPSTAGES)
     has &= ~DECIM_HAS_CAPSTAGES
     if has == DECIM_HAS_NONE:
         return DecimConfig(why=6, cap=cap)
-    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR), cap=cap,
-                    peak_en=peak)
+    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR) and not peak,
+                    cap=cap)
     if cap:  # 0x153A: bits 3 / 4 select nothing (they read back in 0x29), kept 0
         c.flags &= ~(DECIM_NEG_A | DECIM_NEG_B)
     if k == 0:
@@ -2309,7 +2313,7 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: 
         c.why = 3
         return c
     if peak:
-        c.k, c.n, c.gain, c.shift, c.peak = 1, n, 1, 0, True
+        c.k, c.n, c.gain, c.shift, c.peak, c.peak_en = 1, n, 1, 0, True, True
         return c
     c.fir = c.fir_en and decim_fir_eligible(n)
     m = n // 2 if c.fir else n

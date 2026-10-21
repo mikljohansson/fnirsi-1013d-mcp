@@ -799,6 +799,17 @@ def signal_edges(sig: Signal, gen: "GenState", high: float, low: float
     return None
 
 
+def peak_mid_codes(mn: np.ndarray, mx: np.ndarray, gain_a: int, gain_b: int, off_a: int, off_b: int) -> np.ndarray:
+    """pc_peak_mid (fw-c6): the processed trace sample of a peak pair, through the mean of the two cores' Q16
+    correction of the full clock class (gain = round((gain_a + gain_b) / 2), off = (off_a + off_b) / 2 truncated):
+    clamp(((min + max) gain + 2 off + 2^16) >> 17)."""
+    gain = (int(gain_a) + int(gain_b) + 1) // 2
+    s = int(off_a) + int(off_b)
+    off = s // 2 if s >= 0 else -((-s) // 2)
+    v = ((np.asarray(mn, np.int64) + np.asarray(mx, np.int64)) * gain + 2 * off + 65536) >> 17
+    return np.clip(v, 0, 255).astype(np.uint8)
+
+
 def gate_count(period: float, rising: list[float], falling: list[float], t_start: float, gate: float
                ) -> tuple[int, int, int]:
     """The counter's E, T, W (5 ns clocks) for the rising edges of a periodic signal inside [t_start, t_start + gate]:
@@ -1198,6 +1209,16 @@ class Device:
                     out["gain"][k] = round(out["gain"][k] * f)
                     out["off"][k] = round(out["off"][k] * f - 65536 * (s * (dq - 128 * eq) / 2 + cmq))
         return out
+
+    def _peak_corr(self, ch: int, settings: Settings) -> tuple[int, int, int, int]:
+        """fpga_channel_correction_full (fw-c6): the 8-bit readout's per-core Q16 gain / offset of the full clock class
+        (the correction at divider 0, v4 tracker included) whatever the divider: the ADCs run at 200 MSa/s under peak
+        detect, while GET_CAL 92..107 report the divider's (gated) class."""
+        if not self.cfg.cal_v3:
+            c = self.cal[ch]
+            return 65536, 65536, c.adc_a_comp * 65536, c.adc_b_comp * 65536
+        v = self._v3_corr(ch, replace(settings, divider=0))
+        return v["gain"][0], v["gain"][1], v["off"][0], v["off"][1]
 
     def _corr16(self, ch: int, settings: Settings) -> tuple[int, int]:
         """16-bit path (gain16 Q16, corr16 in 1/16 code) the firmware applies: v3, else 1 and 8 x (comp_a + comp_b)."""
@@ -2340,11 +2361,9 @@ class Device:
         capture: the converted codes round(sample x 2^S / N^K + (adc_a_comp + adc_b_comp) / 2), 0..255."""
         Pw, Tw = self.capture_geometry
         dec = self.capture_decim
-        if dec.k and dec.peak:  # 1.26: the midpoint of { max, min } through the 8-bit mean-core correction
+        if dec.k and dec.peak:  # 1.26: the midpoint of { max, min } through the full class's mean-core correction
             w = self.build_trace16(ch).astype(np.int64)
-            mid = ((w & 0xFF) + (w >> 8)) / 2.0
-            cal = self.cal[ch]
-            tr = np.clip(np.rint(mid + (cal.adc_a_comp + cal.adc_b_comp) / 2.0), 0, 255).astype(np.uint8)
+            tr = peak_mid_codes(w & 0xFF, w >> 8, *self._peak_corr(ch, settings))
             return tr, (1 if settings.channels[ch].invert else 0)
         if dec.k:
             out = self.build_trace16(ch).astype(np.int64)
@@ -3391,7 +3410,7 @@ class Device:
         s = self.settings
         d = s.channels[ch].dcoffset
         cls = self._clock_class(s)
-        r.cal_flags = P.CAL_GATED if cls == P.CAL_CLASS_GATED else 0
+        r.cal_flags = P.CAL_GATED if s.divider else 0  # the 8-bit readout's class: by the divider (acal_correction)
         r.cal_shift = 128 - P.cal_target(d, c.dc_shift_value)
         if not self.cfg.cal_v3:
             r.cal_version, r.comp_a, r.comp_b = 1, c.adc_a_comp, c.adc_b_comp
