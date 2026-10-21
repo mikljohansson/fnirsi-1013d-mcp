@@ -2,13 +2,14 @@
 
 It models what the host can observe through docs/protocol.md:
 
-- One FPGA bitstream (section 5.1, protocol 1.25): the firmware is built for AL3 ``P.FW_FPGA_VERSION`` (0x153C
-  since protocol 1.26: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, DDS generator, EXT
+- One FPGA bitstream (section 5.1, protocol 1.25): the firmware is built for AL3 ``P.FW_FPGA_VERSION`` (0x153D
+  since protocol 1.27: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, the generator, EXT
   trigger, decimation filter with 16-bit samples, CIC compensation FIR, sequencer, the per-capture encode check
   (GET_HEALTH 88..103, event 21; hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``), the ADC capture
   stages (GET_HEALTH 104..123, GET_CAL 356..363, event 23; hooks ``Device.cap_counts_next``, ``cap_stored`` +
   ``cap_boot()``), and the 0x153C trigger types / hold-off (``TrigQual``, ``_search_trigger``, ``holdoff_left_s``),
-  peak detect (``_peak_samples``) and hardware counter (``counter_snapshot``) of protocol 1.26).
+  peak detect (``_peak_samples``) and hardware counter (``counter_snapshot``) of protocol 1.26, the streaming logger
+  and the fractional square generator of protocol 1.27).
   ``SimConfig.fpga_version`` (``--fpga-version 0x153B``) is the word the simulated FPGA reports: any other value is
   a mismatch, flagged in GET_INFO 78 / GET_HEALTH 126, and every command outside ``P.BASIC_CMDS`` answers
   E_UNSUPPORTED detail 1 with ``P.FPGA_MISMATCH_TEXT``.

@@ -46,10 +46,10 @@ PROTO_MAJOR = 1
 #: bitstream (FW_FPGA_VERSION, 0x153B then; GET_INFO 80 bytes with 76..79 fw_fpga_version / fpga_flags, GET_HEALTH 128 bytes
 #: layout 3 with 124..127 the same; a mismatch answers E_UNSUPPORTED detail 1 to every command outside BASIC_CMDS), one
 #: UI Average behaviour (GET_STATUS 46: 1 = the MCU's mean of N records, 2 = a sequencer run); 1.26 (FPGA 0x153C,
-#: docs/plans/fpga-0x153c.md, provisional numbering): trigger types (SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, caps
+#: docs/plans/fpga-0x153c.md, fw 0.2.104): trigger types (SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, caps
 #: TRIG_TYPES), the trigger hold-off (caps HOLDOFF: 0x1B in 5 ns units), peak detect (SET_DECIM filter 4, READ_RAW
 #: layout 3, GET_CAPTURE_INFO 79 bit 1, caps PEAK_DETECT) and the hardware counter (GET_COUNTER 0x0213, caps COUNTER);
-#: 1.27 (FPGA 0x153D, provisional numbering): the streaming logger (LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216,
+#: 1.27 (FPGA 0x153D, fw 0.2.105): the streaming logger (LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216,
 #: acq_state 5 LOGGING, caps LOGGER), the generator as a fractional two-step square (SET_GEN raw modes P16 / H16 on
 #: the 5 ns clock, GET_GEN 40 bytes; the DDS is gone, GET_INFO gen_clock_hz 200 MHz), READ_BODE rows carry the
 #: stimulus period P in 5 ns clocks. The pattern generator of the 1.27 drafts was cut (owner 2026-10-21, fw-nopat):
