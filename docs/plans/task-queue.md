@@ -276,7 +276,7 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- mcp-c8 (Opus, dispatched 04:32, done 06:1x, merged 06:2x as the commit after c432354): protocol 1.26 on the host; Trigger2
+- mcp-c8 (Opus, dispatched 04:32, done 05:3x, merged 05:38 as bcb269b): protocol 1.26 on the host; Trigger2
   byte-identical to fw-c5; peak detect and GET_COUNTER wire formats from the contract (sent to fw-c6 / fw-c7 to match:
   SET_DECIM filter 4, shift-byte bits 7/6, mode 0x81, READ_RAW layout 3 = minima then maxima per channel, GET_CAPTURE_INFO
   79 bits 1/0, E_STATE 7; GET_COUNTER 0x0213 request 8 B with what = configure, response 24 B with level / hysteresis /
