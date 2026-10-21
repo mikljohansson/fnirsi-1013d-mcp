@@ -2819,8 +2819,9 @@ void pc_glue_ui_service(void)
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host
-  //holds the UI off the ring (READ_RAW hold)
-  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) && !ui_diag_active() &&
+  //holds the UI off the ring (READ_RAW hold). Never on a mismatched bitstream (fw-diag): the notice screen runs instead
+  //of the scope and the probe's arms wait on the FPGA without a bound
+  acal_live_service((pc_hal_display_mode() < PHOSPHOR_DISPLAY_MODE) && !ui_diag_active() && !pc_glue_fpga_mismatch() &&
                     (!pc_ready || (!pc_sess.ui_hold && (pc_sess.acq_state != PC_ACQ_ARMED) &&
                                    (pc_sess.acq_state != PC_ACQ_TRIGGERED))));
 }
