@@ -276,6 +276,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- Coordinator 08:10: the account's Fable quota cut off fw-c6 and fw-c7 mid-edit; the owner reset it and both were resumed
+  in place. Record correction: every agent dispatched since 22:00 without an explicit model (labelled "Opus" above) ran
+  on the coordinator's model, Fable, because a general-purpose agent inherits it. From here firmware, MCP and docs
+  agents are dispatched with model opus explicitly; FPGA RTL stays on Fable per the owner.
 - ui-type (Opus, dispatched 05:13, done 05:4x, merged 05:48 as ae449b8): the trigger menu's Type row per ui-rows.md: trig_ui
   module (ladder, word period, ranges, snap, settings words 202/203 with 0xA000, glyphs), the Pulse polarity row, the
   keypad for N, a two-slot notice queue (time/div first), the shared No-trigger hint, the menu edits through fpga_trig_write
