@@ -285,6 +285,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   lines take the window max / min as the trigger byte; the reserved-bit writes in tb_decim / tb_fir / tb_seg keep bit 1
   clear; tb_peak 45; full run.sh 16 steps ALL PASS both seeds on the merged source; TD +136 LUT alone with a -0.504 ns
   miss on the sequencer's pp_i enable (lottery). WSL note: detached runs die when no wsl.exe stays attached.
+- fw-d5 re-push 2bd7042 merged 10:01 as 238ee86 (local only): host tests green except test_bode.py (PointPlan.period comes
+  with mcp-d6's bode.py), check_vectors OK; main is pushed together with mcp-d6 so CI stays green. fpga-d2's final rule: a
+  commit during step k applies from step k+3, step 0 starts about 35-40 ns after the start write (the model follows).
 - fw-d5 (Opus, dispatched 09:03, reported 09:4x, merge handed back 09:50): the generator as a fractional two-step pattern
   behind SET_GEN (P16 / H16 raw modes; GEN response 40 B with the 0x39 status), SET_PATTERN 0x0217 (12 + 8n B, start at
   offset 10, pin hi-Z flag), SET_PATTERN_TRIGGER 0x021A (28 B, response 32 B), trigger source 3 = the marker (button
