@@ -5,11 +5,11 @@
 // Integer only (no FPU on the F1C100s), no globals, no hardware: builds for the scope and on the host (host_tests).
 //
 // FPGA interface (fpga-gen3, fpga/al3/src/FPGA commands.txt):
-//   0x53 mode  bits 1:0 K (0 legacy 8-bit sample skipping, 1 boxcar = sum of N, 2 CIC2, 3 CIC3), bit 2 core-order swap,
-//              bit 3 / bit 4 capture the A / B cores on the falling write-clock edge (5 ns later; default rising)
+//   0x53 mode  bits 1:0 K (0 legacy 8-bit sample skipping, 1 boxcar = sum of N, 2 CIC2, 3 CIC3); bits 4..2 (the
+//              core-order swap and the falling-edge capture of older bitstreams) are ignored since 0x153C, written 0
 //   0x54 S     stored sample = min(65535, y >> S), y = filter output, gain N^K (y = 255 * N^K at full scale)
 //   0x55 L16   16-bit trigger level (K >= 1), compared with the stored 16-bit sample of the 0x15 channel
-//   0x29       read 2 bytes: {bit 7 16-bit layout active, bit 4 neg B, bit 3 neg A, bit 2 swap, bits 1:0 K}, S
+//   0x29       read 2 bytes: {bit 7 16-bit layout active, bits 4..2 0 (0x153C), bits 1:0 K}, S
 //   Latency: 12 write clocks (120 ns) from pin to memory for every K and N; a 16-bit sample is centred a further
 //   K * (N - 1) * 2.5 ns earlier. The ADC trigger is self-consistent; an EXT edge needs pc_decim_ext_shift.
 //   N = 2 * (floor(D / 2) + 1), D = the 0x0D divider; output rate 200 MSa/s / N (= 200 / (D + 1) for odd D)
@@ -35,10 +35,9 @@
 #define PC_DECIM_CIC2         2
 #define PC_DECIM_CIC3         3
 
-#define PC_DECIM_SWAP         0x04      //0x53 / 0x29 bit 2: core A is the earlier sample of each pair
-//0x53 bits 3 / 4 (the falling-edge capture of the A / B cores up to 0x1539) select nothing since 0x153A and are written 0
-//(fw-one; the 0x153C cruft audit removes them from the FPGA); SET_DECIM flags bits 1 / 2 are accepted and dropped
-#define PC_DECIM_FLAGS        PC_DECIM_SWAP
+//0x53 bits 4..2 (bit 2 the core-order swap, bits 3 / 4 the falling-edge capture up to 0x1539) select nothing on 0x153C,
+//which removed them (fpga/al3/README.md section 15): the firmware writes K alone. SET_DECIM flags bits 0..2 are accepted
+//and dropped (bits 1 / 2 since fw-one, bit 0 since fw-cruft); GET_DECIM reports them 0
 
 //The largest divider (0x0D) the firmware writes: the FPGA compares 20 bits (0x153C cruft audit, docs/plans/fpga-0x153c.md
 //section 13). The UI's table reaches 399,999 (500 Sa/s), a host raw divider above this is E_BAD_ARG
@@ -52,11 +51,11 @@
 #define PC_DECIM_PEAK_EN      0x40      //0x29 byte 1 bit 6: 0x56 bit 1 as written
 #define PC_DECIM_SHIFT_MASK   0x3F      //0x29 byte 1 bits 5..0: the shift S
 
-//Filter setting byte (pc_hal_decim_setting, SET_DECIM): bits 1:0 K, bits 2-4 PC_DECIM_FLAGS, bit 5 FIR requested, bit 6
+//Filter setting byte (pc_hal_decim_setting, SET_DECIM): bits 1:0 K, bits 4..2 0, bit 5 FIR requested, bit 6
 //peak detect requested (C6: SET_DECIM mode 4, the ACQ Sample row; the K and FIR bits are kept for the way back)
 #define PC_DECIM_SET_FIR      0x20
 #define PC_DECIM_SET_PEAK     0x40
-#define PC_DECIM_SET_MASK     0x7F
+#define PC_DECIM_SET_MASK     (3 | PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK)
 
 //Capability levels for pc_decim_config
 #define PC_DECIM_HAS_NONE     0         //bitstream without the filter (0x1533 and older)
@@ -96,7 +95,6 @@
 typedef struct
 {
   uint8_t  k;                 //effective order: 0 legacy, 1..3 (1 with peak detect: 0x53 = 1, the contract's K)
-  uint8_t  flags;             //0x53 bit 2: PC_DECIM_SWAP (written for every K); bits 3 / 4 always 0
   uint8_t  shift;             //S (0 when k = 0)
   uint8_t  why;               //PC_DECIM_WHY_*
   uint8_t  fir_en;            //0x56 bit 0 as written: FIR requested on a 0x1535+ bitstream (any K; 0 with peak detect)
@@ -130,7 +128,7 @@ uint8_t  pc_decim_shift(uint64_t gain);                                  //max(0
 uint16_t pc_decim_level16(uint8_t level8, uint64_t gain, uint8_t shift); //round(v * N^K / 2^S), at most 65535
 uint32_t pc_decim_scale_q24(uint64_t gain, uint8_t shift);               //round(2^(24 + S) / N^K)
 
-//The effective configuration for a request (k_req 0..3, flags PC_DECIM_FLAGS bits plus PC_DECIM_SET_FIR and
+//The effective configuration for a request (k_req 0..3, flags PC_DECIM_SET_FIR and
 //PC_DECIM_SET_PEAK), the 0x0D divider and the capture length in samples. has = PC_DECIM_HAS_*: NONE always gives k = 0
 //and no flags, CIC ignores PC_DECIM_SET_FIR. PC_DECIM_SET_PEAK (C6) wins over K: the record is peak words (c->peak, k 1,
 //n = the window, why 0) under the same divider / total rules as the filter; the request's K and FIR are not applied.

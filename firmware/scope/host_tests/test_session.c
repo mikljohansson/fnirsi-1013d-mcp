@@ -178,7 +178,8 @@ static void test_info(void)
   T_EQ(caps & fixed, fixed);
   T_EQ(caps & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);                //BENCH: T3 still open
   T_EQ(caps & PC_CAP_INTERLEAVE_UNVERIFIED, 0);                                       //the mock's boot 0x33: convention 1
-  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE | PC_CAP_LIVE_READ), 0);   //0x153E, never built
+  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE), 0);                  //0x153E, never built
+  T_EQ(caps & (1u << 9), 0);                                                         //reserved (LIVE_READ, retired)
   T_EQ(pc_get_u32(r.p + 24), 200000000); T_EQ(pc_get_u16(r.p + 28), 16382); T_EQ(pc_get_u16(r.p + 30), 80);
   T_EQ(r.p[32], 0); T_EQ(r.p[35], 0);
   T_STR((char *)r.p + 36, PC_FW_VERSION);
@@ -284,7 +285,7 @@ static void test_shared_basics(void)
   //Not built in this firmware: capability bits are 0 and the commands fail closed
   r = req(PC_CMD_ENTER_FEL, 0, 0);      T_EQ(r.h.status, PC_E_BAD_ARG);   //magic missing; FEL itself in test_fel_reset_stall
   r = req(PC_CMD_ACQUIRE_AVG, 0, 0);    T_EQ(r.h.status, PC_E_UNSUPPORTED);
-  r = req(PC_CMD_READ_LIVE, 0, 0);      T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = req(PC_CMD_RETIRED_0206, 0, 0);   T_EQ(r.h.status, PC_E_UNSUPPORTED);   //was READ_LIVE, retired in 1.27
 #if !PC_DEBUG
   r = req(PC_CMD_FORCE, 0, 0);          T_EQ(r.h.status, PC_E_UNSUPPORTED);
   r = req(PC_CMD_DEBUG_FPGA, 0, 0);     T_EQ(r.h.status, PC_E_UNSUPPORTED);
@@ -3108,8 +3109,8 @@ static void test_decim_math(void)
   //Spot values: 10 MSa/s (D 19, N 20): K1 S 0, K2 gain 400 S 1, K3 gain 8000 S 5; slow rates CIC3 -> CIC2
   pc_decim_config(1, 0, 19, 3000, 1, &c); T_EQ(c.shift, 0); T_EQ(pc_decim_level16(128, c.gain, c.shift), 2560);
   pc_decim_config(2, 0, 19, 3000, 1, &c); T_EQ(c.gain, 400); T_EQ(c.shift, 1); T_EQ(pc_decim_status(&c), 0x82);
-  pc_decim_config(3, 4, 19, 3000, 1, &c); T_EQ(c.gain, 8000); T_EQ(c.shift, 5); T_EQ(pc_decim_mode(&c), 0x07);
-  T_EQ(pc_decim_status(&c), 0x87); T_EQ(pc_decim_level16(255, c.gain, c.shift), 63750);
+  pc_decim_config(3, 0, 19, 3000, 1, &c); T_EQ(c.gain, 8000); T_EQ(c.shift, 5); T_EQ(pc_decim_mode(&c), 0x03);
+  T_EQ(pc_decim_status(&c), 0x83); T_EQ(pc_decim_level16(255, c.gain, c.shift), 63750);
   pc_decim_config(3, 0, 9999, 3000, 1, &c); T_EQ(c.k, 3); T_EQ(c.n, 10000);
   pc_decim_config(3, 0, 19999, 3000, 1, &c); T_EQ(c.k, 2); T_EQ(c.why, PC_DECIM_WHY_CIC3);
   pc_decim_config(3, 0, 399999, 3000, 1, &c); T_EQ(c.k, 2); T_EQ(c.shift, 30);
@@ -3126,10 +3127,10 @@ static void test_decim_math(void)
   T_EQ(pc_decim_ext_shift_at(&c, 19), 8); T_EQ(pc_decim_ext_shift_at(&c, 0), 4); T_EQ(pc_decim_ext_shift_at(&c, 399999), 8);
   pc_decim_config(2, 0, 19, 3000, 1, &c);     T_EQ(pc_decim_ext_shift_at(&c, 19), 2);
 
-  //The swap flag goes into 0x53 for every K, never without the filter; bits 3 / 4 (the falling-edge capture up to
-  //0x1539) are written 0 since fw-one
+  //0x53 carries K alone: bits 4..2 (the core-order swap, the falling-edge capture up to 0x1539) are ignored by 0x153C
+  //and written 0 (bits 3 / 4 since fw-one, bit 2 since fw-cruft)
   pc_decim_config(2, 0x18, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x02); T_EQ(pc_decim_status(&c), 0x82);
-  pc_decim_config(0, 0x1C, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x04); T_EQ(pc_decim_status(&c), 0x04);
+  pc_decim_config(0, 0x1C, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x00); T_EQ(pc_decim_status(&c), 0x00);
   pc_decim_config(2, 0x1C, 19, 3000, 0, &c);  T_EQ(pc_decim_mode(&c), 0);
   pc_decim_config(2, 0xA3, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x02);     //bit 6 is PC_DECIM_SET_PEAK since C6
 
@@ -3254,13 +3255,13 @@ static void test_decim_protocol(void)
   r = req(PC_CMD_READ_TRACE, p, 12);
   T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 16 + 6000); T_EQ(r.p[30], 0);
 
-  //SET_DECIM flags bits 1 / 2 (the falling-edge capture up to 0x1539) are accepted and dropped (fw-one): the read-back
-  //shows them 0 and 0x53 bits 3 / 4 are written 0; the swap bit as asked
+  //SET_DECIM flags bits 0..2 (the core-order swap and the falling-edge capture, gone in 0x153C) are accepted and
+  //dropped (bits 1 / 2 since fw-one, bit 0 since fw-cruft): the setting and the read-back show them 0
   memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, 19);
   r = req(PC_CMD_SET_TIMEBASE, p, 8);
-  memset(p, 0, 4); p[0] = 2; p[1] = 0x06;
+  memset(p, 0, 4); p[0] = 2; p[1] = 0x07;
   r = req(PC_CMD_SET_DECIM, p, 4);
-  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x1A); T_EQ(r.p[1], 0x00); T_EQ(r.p[2], 0x82);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x02); T_EQ(r.p[1], 0x00); T_EQ(r.p[2], 0x82);
 
   //EXT trigger with the filter: 3 samples fewer pretrigger words (N 20, CIC2, + 40 ns of the capture stages), edge back
   //at sample 3000
@@ -3378,9 +3379,9 @@ static void test_decim_fir_math(void)
   pc_decim_config(2, PC_DECIM_SET_FIR, 19, 3000, PC_DECIM_HAS_NONE, &c);
   T_EQ(c.fir_en, 0); T_EQ(pc_decim_status(&c), 0);
 
-  //PC_DECIM_SET_FIR never reaches 0x53; neither do bits 3 / 4 (fw-one: they select nothing since 0x153A)
-  pc_decim_config(2, PC_DECIM_SET_FIR | PC_DECIM_SWAP | 0x18, 19, 3000, PC_DECIM_HAS_FIR, &c);
-  T_EQ(pc_decim_mode(&c), 0x06);
+  //PC_DECIM_SET_FIR never reaches 0x53; neither do bits 4..2
+  pc_decim_config(2, PC_DECIM_SET_FIR | 0x1C, 19, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(pc_decim_mode(&c), 0x02);
 }
 
 static void test_decim_fir_protocol(void)
@@ -3436,10 +3437,17 @@ static void test_decim_fir_protocol(void)
   r = req(PC_CMD_GET_DECIM, 0, 0);
   T_EQ(r.p[1], 0x08); T_EQ(r.p[2], 0xC2); T_EQ(r.p[3], 0); T_EQ(pc_get_u64(r.p + 8), 100);
 
-  //Flags bit 4 and above refused; FIR off again
+  //Flags bit 4 and above refused; bits 0..2 (the retired core-order swap and falling-edge capture) accepted and dropped:
+  //the setting, GET_DECIM's flags and the 0x53 mode carry nothing of them; FIR off again
   memset(p, 0, 4); p[0] = 2; p[1] = 0x10;
   r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG);
-  p[1] = 0;
+  p[1] = 0x07;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x02); T_EQ(r.p[1], 0); T_EQ(r.p[2], 0x82);
+  memset(p, 0, 4); p[0] = 4; p[1] = 0x07;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x42); T_EQ(r.p[1], 0); T_EQ(r.p[2], 0x81);
+  p[0] = 2; p[1] = 0;
   r = req(PC_CMD_SET_DECIM, p, 4);
   T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0x02); T_EQ(r.p[2], 0x82);
 }
@@ -3753,13 +3761,13 @@ static void test_capture_stages(void)
   has = pc_decim_has();
   T_EQ(has, PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES);
   T_EQ(has, PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES);
-  pc_decim_config(0, 0x18 | PC_DECIM_SWAP, 19, 3000, has, &c);
-  T_EQ(c.cap, 1); T_EQ(c.flags, PC_DECIM_SWAP);                 //0x53 bits 3 / 4 select nothing: written 0
+  pc_decim_config(0, 0x1C, 19, 3000, has, &c);
+  T_EQ(c.cap, 1); T_EQ(pc_decim_mode(&c), 0);                   //0x53 bits 4..2 select nothing: written 0
   T_EQ(pc_decim_ext_shift_at(&c, 19), 14); T_EQ(pc_decim_ext_shift_at(&c, 0), 12); T_EQ(pc_decim_ext_shift_at(&c, 1999), 14);
   pc_decim_config(1, 0, 1, 3000, has, &c);   T_EQ(pc_decim_ext_shift(&c), 16);       //(240 + 5 + 80) / 20 = 16.25 (0x1539: 12)
   pc_decim_config(2, 0, 19, 3000, has, &c);  T_EQ(pc_decim_ext_shift(&c), 3);        //(240 + 95 + 80) / 200 = 2.08
   pc_decim_config(0, 0x08, 19, 3000, PC_DECIM_HAS_FIR, &c);
-  T_EQ(c.cap, 0); T_EQ(c.flags, 0); T_EQ(pc_decim_ext_shift_at(&c, 19), 8);
+  T_EQ(c.cap, 0); T_EQ(pc_decim_ext_shift_at(&c, 19), 8);
 }
 
 static void test_enc_check(void)
@@ -4098,8 +4106,8 @@ static void test_peak_math(void)
   T_EQ(c.peak, 1);
   pc_decim_config(2, PC_DECIM_SET_PEAK, 19, 3000, PC_DECIM_HAS_NONE, &c);
   T_EQ(c.peak, 0); T_EQ(c.why, PC_DECIM_WHY_NOCAP);
-  pc_decim_config(0, PC_DECIM_SET_PEAK | PC_DECIM_SWAP, 19, 3000, PC_DECIM_HAS_FIR, &c);
-  T_EQ(pc_decim_mode(&c), 0x05); T_EQ(pc_decim_status(&c), 0x85);
+  pc_decim_config(0, PC_DECIM_SET_PEAK | 0x04, 19, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(pc_decim_mode(&c), 0x01); T_EQ(pc_decim_status(&c), 0x81);
   //The FIR's own flag without peak is unchanged
   pc_decim_config(2, PC_DECIM_SET_FIR, 199, 3000, PC_DECIM_HAS_FIR, &c);
   T_EQ(c.peak, 0); T_EQ(c.fir, 1); T_EQ(pc_decim_cmd56(&c), 0x01); T_EQ(pc_decim_shift_byte(&c), c.shift);

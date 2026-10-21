@@ -119,7 +119,7 @@ void pc_variant_init(uint16_t version, pc_variant *v)
 }
 
 //Core order within a word (P-7.3, rows 58 and 62): the firmware's fixed convention (PC_INTERLEAVE_ORDER 0, core B the
-//earlier sample: READ_RAW / READ_TRACE interleave, acal_track's A - B model, the 0x53 swap bit clear) is verified by the
+//earlier sample: READ_RAW / READ_TRACE interleave, acal_track's A - B model) is verified by the
 //FPGA's own report: read 0x33 at boot with bits 3:2 = 01 (enc_heal_hw.c, before the session starts). A bitstream that
 //reports another convention keeps caps bit 12 INTERLEAVE_UNVERIFIED set, is flagged (GET_HEALTH 90 bit 1) and has its
 //full-rate captures judged by their data.
@@ -210,7 +210,7 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
   uint8_t set = pc_hal_decim_setting();
 
   (void)s;
-  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK), pc_hal_divider_now(), total,
+  pc_decim_config(set & 3, set & (PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK), pc_hal_divider_now(), total,
                   pc_decim_has(), c);
 }
 
@@ -2226,8 +2226,8 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   }
   else
     p[0] = set & 3;                                     //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
-  p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2 always 0 (fw-one),
-                                                        //falling-edge A / B, bit 3 FIR (1.11)
+  p[1] = (uint8_t)((set & PC_DECIM_SET_FIR) >> 2);      //flags: bit 3 FIR (1.11); bits 0..2 always 0 (the core-order
+                                                        //swap retired in 1.27, the falling-edge bits in 1.25)
   p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout; peak: 0x81)
   p[3] = pc_decim_shift_byte(&next);                    //S; C6: bits 7 / 6 peak active / written (0xC0 for a peak record)
   pc_put_u32(p + 4, next.n);
@@ -2252,9 +2252,9 @@ static int h_get_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   return PC_OK;
 }
 
-//SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3; C6: 4 peak detect), u8 flags (bit 0 core-order swap, bit 1 /
-//bit 2 capture the A / B cores on the falling write-clock edge, bit 3 CIC compensation FIR, 1.11, FPGA 0x1535+ only), u16
-//0. Sets the UI's Filter setting (shared control); the next arm (UI or host) writes it. Filter 4 (the ACQ Sample row,
+//SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3; C6: 4 peak detect), u8 flags (bit 3 CIC compensation FIR, 1.11;
+//bits 0..2, once the core-order swap and the falling-edge capture, are accepted and dropped: 0x153C ignores 0x53 bits
+//4..2), u16 0. Sets the UI's Filter setting (shared control); the next arm (UI or host) writes it. Filter 4 (the ACQ Sample row,
 //cap PEAK_DETECT) sets Sample Peak and keeps the Filter's K / FIR for the way back; the FIR flag is refused with it (the
 //FIR is off while peak detect runs); filter 0..3 sets Sample Normal with that filter.
 static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
@@ -2272,10 +2272,10 @@ static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   {
     if(!(s->var.caps & PC_CAP_PEAK_DETECT)) return pc_error(s, PC_E_UNSUPPORTED, 0, "peak detect");
     if(req[1] & 0x08)                       return pc_error(s, PC_E_BAD_ARG, 1, "FIR with peak detect");
-    set = (uint8_t)((pc_hal_decim_setting() & (PC_DECIM_SET_FIR | 3)) | ((req[1] & 0x07) << 2) | PC_DECIM_SET_PEAK);
+    set = (uint8_t)((pc_hal_decim_setting() & (PC_DECIM_SET_FIR | 3)) | PC_DECIM_SET_PEAK);
   }
   else
-    set = (uint8_t)(req[0] | ((req[1] & 0x0F) << 2));
+    set = (uint8_t)(req[0] | ((req[1] & 0x08) << 2));
 
   pc_hal_trigger_read(&t);
 
@@ -3608,7 +3608,7 @@ static int h_log_start(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
     return pc_error(s, PC_E_BAD_ARG, 4, "divider above 1048575");
 
   set = pc_hal_decim_setting();
-  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK), div, 2, pc_decim_has(), &dc);
+  pc_decim_config(set & 3, set & (PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK), div, 2, pc_decim_has(), &dc);
 
   if((fmt == FPGA_LOG_F_LEGACY) && pc_decim_wide(&dc))
     return pc_error(s, PC_E_BAD_ARG, 2, "format 0 needs SET_DECIM filter 0");
@@ -3760,7 +3760,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_WAIT,         0,                            0, h_wait },
   { PC_CMD_READ_RAW,     0,                            0, h_read_raw },
   { PC_CMD_READ_TRACE,   0,                            0, h_read_trace },
-  { PC_CMD_READ_LIVE,    0,                            PC_CAP_LIVE_READ, NULL },
+  { PC_CMD_RETIRED_0206, 0,                            0, NULL },     //was READ_LIVE: E_UNSUPPORTED as before
   { PC_CMD_ACQUIRE_AVG,  0,                            PC_CAP_DEVICE_AVERAGE, NULL },
   { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },

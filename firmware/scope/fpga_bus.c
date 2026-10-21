@@ -263,7 +263,7 @@ int fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift)
   int      settle = (div != fpga_decim_div);
 
   fpga_decim_div = div;
-  mode &= 0x1F;
+  mode &= 0x03;                         //K; 0x153C ignores bits 4..2 (pc_decim.h)
   cmd56 &= 0x03;                        //bit 0 FIR enable, bit 1 peak detect (0x153C, C6); bits 7..2 write 0
   shift &= 0x3F;
 

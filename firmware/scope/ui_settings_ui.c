@@ -303,9 +303,7 @@ static void apply_all(void)
 
   fpga_set_sample_rate(scopesettings.samplerate);
 
-  if(scopesettings.long_mode)
-    fpga_set_long_timebase(scopesettings.timeperdiv);
-  else
+  if(!scopesettings.long_mode)
     fpga_set_time_base(scopesettings.timeperdiv);
 
   fpga_set_trigger_channel();

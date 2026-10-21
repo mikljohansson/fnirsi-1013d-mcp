@@ -802,8 +802,8 @@ the old single default (CIC2+FIR) loads as the new defaults; any other saved cho
 - EXT trigger with K >= 1: the data lag the edge by 120 ns + K (N - 1) 2.5 ns, rounded to the nearest output
   sample (`pc_decim_ext_shift`); the UI (`pc_glue_decim_pre_words`) and host ARM write that many fewer pretrigger
   words, so the edge stays at sample `settriggerpoint`; GET_CAPTURE_INFO byte 70 reports the shift.
-- Hidden settings: falling-edge capture of the A / B cores (0x53 bits 3 / 4), only via SET_DECIM flags bits 1 / 2,
-  saved in bits 3 / 4 of settings word 207; the core-order swap (bit 2) is host only and not saved.
+- 0x53 bits 4..2 (the core-order swap and the falling-edge capture of the A / B cores) are gone in 0x153C: the firmware
+  writes K alone; SET_DECIM flags bits 0..2 are accepted and dropped (bits 1 / 2 since fw-one, bit 0 since fw-cruft).
 - UI: acquisition menu "Filter" box (off / boxcar / CIC2 / CIC3, a tap steps through them, green while on) in the
   slot of 1.00o5's Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); sectors without
   a valid word (new settings, written before 0.2.30) and the DEFAULT button give the defaults (pc_decim.h; CIC2

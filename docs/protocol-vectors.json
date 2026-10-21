@@ -37,7 +37,6 @@
   "WAIT": 515,
   "READ_RAW": 516,
   "READ_TRACE": 517,
-  "READ_LIVE": 518,
   "ACQUIRE_AVG": 519,
   "SET_ACQ_STATE": 520,
   "GET_CAPTURE_INFO": 521,
@@ -6504,32 +6503,6 @@
      "flags": 0,
      "len": 12,
      "payload": "030000000000000000000000",
-     "event": "frame"
-    }
-   ]
-  },
-  {
-   "name": "req_read_live",
-   "description": "CH1 A, 100 bytes",
-   "hex": "a513010006021c00000004000000516c00006400bf71d520",
-   "frames": [
-    {
-     "cmd": 518,
-     "seq": 28,
-     "status": 0,
-     "flags": 0,
-     "len": 4,
-     "payload": "00006400"
-    }
-   ],
-   "device_events": [
-    {
-     "cmd": 518,
-     "seq": 28,
-     "status": 0,
-     "flags": 0,
-     "len": 4,
-     "payload": "00006400",
      "event": "frame"
     }
    ]

@@ -607,7 +607,7 @@ Choices made only on the host or in the simulator, not covered by section 14:
    nothing but READ_RAW returning exactly `start_word .. start_word + count - 1`.
 
 To make the simulator report what the real firmware reports, use `--caps 0x1C03` for 0.1.1 or `--caps 0x1803`
-for 0.1.0 (AL3, no ACQUIRE_AVG, READ_SCREEN, READ_LIVE, FORCE or DEBUG_FPGA).
+for 0.1.0 (AL3, no ACQUIRE_AVG, READ_SCREEN, FORCE or DEBUG_FPGA).
 
 ## Link robustness
 

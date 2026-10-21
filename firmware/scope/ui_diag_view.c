@@ -296,7 +296,7 @@ typedef struct
   uint8  enable[2], invert[2], coupling[2], magnification[2], displayvpd[2], samplevpd[2];
   int16  dcoffset[2];
   int32  volts[2][7];
-  uint8  samplemode, triggermode, fail;
+  uint8  triggermode, fail;
   uint32 timeperdiv, samplerate;
 } ud_volts_backup;
 
@@ -317,7 +317,6 @@ static void ud_volts_backup_take(ud_volts_backup *b)
     memcpy(b->volts[ch], chs[ch]->input_calibration, sizeof(b->volts[ch]));
   }
 
-  b->samplemode  = scopesettings.samplemode;
   b->triggermode = scopesettings.triggermode;
   b->timeperdiv  = scopesettings.timeperdiv;
   b->samplerate  = scopesettings.samplerate;
@@ -350,15 +349,12 @@ static void ud_volts_restore(const ud_volts_backup *b, int volts)
     fpga_set_channel_offset(chs[ch]);
   }
 
-  scopesettings.samplemode  = b->samplemode;
   scopesettings.triggermode = b->triggermode;
   scopesettings.timeperdiv  = b->timeperdiv;
   scopesettings.samplerate  = b->samplerate;
   fpga_set_sample_rate(scopesettings.samplerate);
 
-  if(scopesettings.long_mode)
-    fpga_set_long_timebase(scopesettings.timeperdiv);
-  else
+  if(!scopesettings.long_mode)
     fpga_set_time_base(scopesettings.timeperdiv);
 
   fpga_set_trigger_mode();

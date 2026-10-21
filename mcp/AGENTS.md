@@ -26,7 +26,7 @@ should measure; skill `../.claude/skills/fnirsi-scope/`). Do not duplicate those
   and vector jobs. Keep it green; tests must not depend on timing margins (see the deferred-cancel fix 617ab34).
 - Write patch scripts with the Write tool and run them; bash heredocs in this harness mangle backslashes
   (`"\n"` becomes a newline), and a heredoc whose text holds triple quotes or apostrophes can fail as a whole ("unexpected
-  EOF"). Files are LF except `../docs/plans/task-queue.md` (CRLF: keep it, or the commit rewrites every line); on Windows write with `write_bytes(... .encode())`. Windows Python does not resolve
+  EOF"). Every file is LF (`.gitattributes`, since 2026-10-21, the task queue included); on Windows write with `write_bytes(... .encode())`. Windows Python does not resolve
   `/c/Users/...` paths: pass `C:/Users/...`. The session scratchpad is shared with other agents: prefix your files.
 - **Worktrees have no venv**: an agent worktree (`.claude/worktrees/...`) needs its own `uv venv mcp/.venv` and
   `uv pip install --python mcp/.venv -e "mcp[dev]"` (gitignored); the tracked `.mcp.json` is gone (maintainer's local file,
@@ -196,6 +196,12 @@ boot_splash_ms), 57 (0.2.19, restart record 49-56). Names match `bench_link.py`.
 then the counters (word 0 is not a counter). Since 0.2.21 n = 58 with 47 and 57 retired (always 0; the soak
 tool reports them only when they move, i.e. on older firmware). Since 0.2.44 counter 36 counts SUSPEND and 37 RESUME
 interrupts only, and 10 `link_resets` no longer counts suspends.
+
+fw-cruft (2026-10-21, protocol 1.27 row 67, no new minor): what FPGA 0x153C dropped is gone from the host too.
+READ_LIVE 0x0206 and caps bit 9 are retired (`P.RETIRED_CMDS` holds 0x0206: the simulator answers it E_UNSUPPORTED, as the
+firmware's NULL handler does, not E_UNKNOWN_CMD; test_transport). The 0x53 mode is K alone: `DecimConfig` has no
+`flags` field (positional order now k, shift, why, n, gain, ...), SET_DECIM flags bits 0..2 (swap, falling edge) are
+accepted and dropped by firmware and simulator, GET_DECIM reports them 0; only `SetDecimReq.FIR` remains.
 
 ## Volts model (`calibration.channel_scale`, `scope.Scope.scale`)
 
@@ -402,7 +408,7 @@ from there and moves items to "Dispatched". Add host items you discover there, n
    mode for averaging.
 5. Metal-detector tools (lock-in amplitude/phase, PI target comparison, ground balance, monitor); the Bode work
    covers the sweep.
-6. Adopt ACQUIRE_AVG / READ_SCREEN / READ_LIVE when the firmware ships them (simulator has them). READ_SCREEN built
+6. Adopt ACQUIRE_AVG / READ_SCREEN when the firmware ships them (simulator has them; READ_LIVE was retired in 1.27). READ_SCREEN built
    in firmware (fw 0.2.70, branch fw-screen, firmware/AGENTS.md section 46), bench pending (T9);
    `scope_screenshot` needs no change, tests/test_read_screen.py checks the wire format against the vectors.
 7. GET_BAD_FRAME (0x0008) decode and dump on E_BAD_CRC (the cmd id is in `Cmd`, no client method yet).

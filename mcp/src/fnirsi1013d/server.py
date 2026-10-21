@@ -841,9 +841,6 @@ def _decim_summary(st: P.DecimState) -> dict[str, Any]:
             out["ext_latency_shift_samples"] = st.ext_shift
         if d.fir_en and not d.fir:
             out["fir_note"] = "FIR requested but not active: it needs N >= 16 with N % 4 == 0 (10 MSa/s and slower)"
-    if st.flags & 0x07:
-        out["flags"] = [n for b, n in ((1, "core_order_swap"), (2, "falling_edge_A"), (4, "falling_edge_B"))
-                        if st.flags & b]
     return out
 
 

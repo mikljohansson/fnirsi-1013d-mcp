@@ -149,8 +149,7 @@ int main(void)
   
   fpga_set_sample_rate(scopesettings.samplerate);       //Short time base  
           //Setup the trigger system in the FPGA based on the loaded scope settings
-  if(scopesettings.long_mode)  fpga_set_long_timebase(scopesettings.timeperdiv);
-    else fpga_set_time_base(scopesettings.timeperdiv);  //Send the time base command for the longer settings
+  if(!scopesettings.long_mode) fpga_set_time_base(scopesettings.timeperdiv);  //The short time base's auto time-out (0x0E)
       //Set the sample rate that belongs to the selected time per div setting
     //scopesettings.samplerate = time_per_div_sample_rate[scopesettings.timeperdiv];  
 
@@ -336,8 +335,6 @@ int main(void)
     else
     {
         //Standard memory mode, trigger is the middle buffer (1.00o5's empty "long memory" branch is gone)
-        scopesettings.samplemode = 1;
-
         //Go through the trace data and display the trace data
         scope_acquire_trace_data();
     }
