@@ -276,6 +276,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-roll done 15:4x, merged 15:4x (head a83ea0d): roll.c (divider plan, column means, 3000-column record, trigger) + roll_view.c
+  on its own 32 KiB stream ring (both channels, legacy 8-bit, 200 S/s at 2 s/div and slower up to 4 kS/s at 100 ms/div);
+  averagecommand / fpga_average_trace_data(_long) / the old roll functions removed; check_retired_regs covers 0x24..0x27; ARM
+  and LOG_START in a long time base now stop the UI roll instead of E_STATE detail 2. test_roll 161 checks; host tests green,
+  check_vectors OK, ruff clean, 548 mcp tests, gcc10 8abd78c3fe60c2e6e97179e095359afc4fb502eab0af8ce99df00520a1d47e6f. At
+  numbering for 0x153D: the "Roll mode needs FPGA bitstream 0x153D" path (pc_hal_log_start -2) becomes dead under the
+  one-bitstream rule; remove it then. Open (section 78): saved roll waveforms unchecked, unmarked gaps after long menus.
 - fpga-d3 interim 15:2x: C4 + D1 build b0 6048 LUT / 5637 reg / 7072 LE (82 %), clk_200MHz -0.226 ns on q_pass; four hold-off
   re-rolls all worse (-0.53..-1.16 ns on other old paths). Projection with D2: about 7170 LUT / 6590 reg / 8310 LE = 96 % of
   the LEs, register-bound; D2's own no-engine variant at 88 % did not close. Cut order it will put to the owner once the
