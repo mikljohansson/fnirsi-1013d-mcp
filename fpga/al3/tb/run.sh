@@ -46,7 +46,14 @@
 #      E / T / W and min / max of every gate against a model of the input stream and of the captured pair, accuracy against
 #      the stimulus on EXT and CH1 (200 MSa/s, 10 MSa/s, K = 1), the source select (0x61 bits 3..2 and the 0x15 follow),
 #      the Schmitt thresholds at their boundaries, the hysteresis against noise, the "new" flag and the snapshot read.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|counter runs one testbench.
+#  18. tb_pattern.v (0x153D D2): the pulse pattern generator (0x6C-0x6F, read 0x39) and its trigger engine (0x76-0x7D, read
+#      0x42): the generator on 0x50 alone, the firmware's SET_GEN square waves (1 kHz, 999.5 Hz, 10 kHz 25 %, 1 MHz, 10 MHz,
+#      7.3 MHz, 3.5 + 2.25 clocks) with every edge within one clock of ideal and the mean period exact, the double buffer
+#      (glitch-free change, pending bit, accumulator kept, a commit overwritten), bursts / repeat with gap / continuous /
+#      stop / idle level / entry 7 as end, the accumulator cleared at a start, the marker triggering a capture (0x15 = 3)
+#      at the EXT position, every trigger type on CH1 (legacy, K = 2), CH2 and EXT against tb_trigtypes' model with the
+#      burst 2 clocks after the event clock, one shot / re-arm, the start sources, the capture and the engine at once.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|counter|pattern runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -161,6 +168,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_counter.vvp" +seed=$SEED | tee "$WORK/sim_counter.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = pattern ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_pattern.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_pattern.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_pattern.vvp" +seed=$SEED +logfile="$WORK/pattern.log" | tee "$WORK/sim_pattern.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_pattern.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
