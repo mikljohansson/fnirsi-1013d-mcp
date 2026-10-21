@@ -3760,7 +3760,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_WAIT,         0,                            0, h_wait },
   { PC_CMD_READ_RAW,     0,                            0, h_read_raw },
   { PC_CMD_READ_TRACE,   0,                            0, h_read_trace },
-  { PC_CMD_READ_LIVE,    0,                            PC_CAP_LIVE_READ, NULL },
+  { PC_CMD_RETIRED_0206, 0,                            0, NULL },     //was READ_LIVE: E_UNSUPPORTED as before
   { PC_CMD_ACQUIRE_AVG,  0,                            PC_CAP_DEVICE_AVERAGE, NULL },
   { PC_CMD_SET_ACQ_STATE, F_CONTROL,                   0, h_set_acq_state },
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },

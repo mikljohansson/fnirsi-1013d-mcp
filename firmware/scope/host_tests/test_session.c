@@ -178,7 +178,8 @@ static void test_info(void)
   T_EQ(caps & fixed, fixed);
   T_EQ(caps & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);                //BENCH: T3 still open
   T_EQ(caps & PC_CAP_INTERLEAVE_UNVERIFIED, 0);                                       //the mock's boot 0x33: convention 1
-  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE | PC_CAP_LIVE_READ), 0);   //0x153E, never built
+  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE), 0);                  //0x153E, never built
+  T_EQ(caps & (1u << 9), 0);                                                         //reserved (LIVE_READ, retired)
   T_EQ(pc_get_u32(r.p + 24), 200000000); T_EQ(pc_get_u16(r.p + 28), 16382); T_EQ(pc_get_u16(r.p + 30), 80);
   T_EQ(r.p[32], 0); T_EQ(r.p[35], 0);
   T_STR((char *)r.p + 36, PC_FW_VERSION);
@@ -284,7 +285,7 @@ static void test_shared_basics(void)
   //Not built in this firmware: capability bits are 0 and the commands fail closed
   r = req(PC_CMD_ENTER_FEL, 0, 0);      T_EQ(r.h.status, PC_E_BAD_ARG);   //magic missing; FEL itself in test_fel_reset_stall
   r = req(PC_CMD_ACQUIRE_AVG, 0, 0);    T_EQ(r.h.status, PC_E_UNSUPPORTED);
-  r = req(PC_CMD_READ_LIVE, 0, 0);      T_EQ(r.h.status, PC_E_UNSUPPORTED);
+  r = req(PC_CMD_RETIRED_0206, 0, 0);   T_EQ(r.h.status, PC_E_UNSUPPORTED);   //was READ_LIVE, retired in 1.27
 #if !PC_DEBUG
   r = req(PC_CMD_FORCE, 0, 0);          T_EQ(r.h.status, PC_E_UNSUPPORTED);
   r = req(PC_CMD_DEBUG_FPGA, 0, 0);     T_EQ(r.h.status, PC_E_UNSUPPORTED);

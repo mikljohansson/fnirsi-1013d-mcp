@@ -109,7 +109,7 @@
 #define PC_CMD_WAIT               0x0203
 #define PC_CMD_READ_RAW           0x0204
 #define PC_CMD_READ_TRACE         0x0205
-#define PC_CMD_READ_LIVE          0x0206
+#define PC_CMD_RETIRED_0206       0x0206     //was READ_LIVE (live ADC bytes, never built); retired in 1.27: E_UNSUPPORTED
 #define PC_CMD_ACQUIRE_AVG        0x0207
 #define PC_CMD_SET_ACQ_STATE      0x0208     //1.3: UI RUN / STOP
 #define PC_CMD_GET_CAPTURE_INFO   0x0209     //1.3: settings of the latest finished capture
@@ -174,7 +174,7 @@
 #define PC_CAP_SCREENSHOT             (1u << 6)
 #define PC_CAP_DEVICE_AVERAGE         (1u << 7)
 #define PC_CAP_DEBUG_RAW              (1u << 8)
-#define PC_CAP_LIVE_READ              (1u << 9)
+                                                   //bit 9 reserved (was LIVE_READ, never built; retired in 1.27)
 #define PC_CAP_ENTER_FEL              (1u << 10)
 #define PC_CAP_READ_LAG_UNVERIFIED    (1u << 11)
 #define PC_CAP_INTERLEAVE_UNVERIFIED  (1u << 12)

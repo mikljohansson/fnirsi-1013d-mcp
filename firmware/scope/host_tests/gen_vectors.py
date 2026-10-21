@@ -27,7 +27,7 @@ CMDS = {
     "GET_CHANNEL": 0x0100, "SET_CHANNEL": 0x0101, "GET_TIMEBASE": 0x0102, "SET_TIMEBASE": 0x0103,
     "GET_TRIGGER": 0x0104, "SET_TRIGGER": 0x0105,
     "ARM": 0x0200, "FORCE": 0x0201, "STOP": 0x0202, "WAIT": 0x0203, "READ_RAW": 0x0204,
-    "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
+    "READ_TRACE": 0x0205, "ACQUIRE_AVG": 0x0207,                       # 0x0206 retired (READ_LIVE, 1.27)
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
     "GET_COUNTER": 0x0213, "LOG_START": 0x0214, "LOG_READ": 0x0215, "LOG_STOP": 0x0216, "SET_TRIGGER2": 0x0219,
@@ -84,7 +84,7 @@ REQUESTS = [
     ("WAIT", struct.pack("<I", 1000), "timeout 1000 ms"),
     ("READ_RAW", struct.pack("<BBBBiII", 0x0F, 1, 0, 0, 0, 8192, 0), "all four cores, relative to capture start, per-core blocks, 8192 words"),
     ("READ_TRACE", struct.pack("<BBHII", 0x03, 0x00, 0, 0, 0), "both channels, everything"),
-    ("READ_LIVE", struct.pack("<BBH", 0, 0, 100), "CH1 A, 100 bytes"),
+    (None, None, "0x0206 READ_LIVE, retired in 1.27 (never built): the slot keeps the later sequence numbers"),
     ("ACQUIRE_AVG", struct.pack("<HBBIIII", 64, 0x01, 0x01, 100, 0, 2000, 0), "64 captures, CH1, require trigger"),
     ("SET_ACQ_STATE", struct.pack("<B3x", 1), "1.3: UI RUN (0 = STOP)"),
     ("GET_CAPTURE_INFO", b"", "1.3: settings of the latest finished capture"),
@@ -453,6 +453,9 @@ def build():
     # 1. one request per command
     seq = 10
     for name, payload, desc in REQUESTS:
+        if name is None:
+            seq += 1
+            continue
         cmd = CMDS[name]
         s = {"PING": 2, "GET_INFO": 1, "SET_TIMEBASE": 3}.get(name, seq)
         f = frame(cmd, s, payload)
