@@ -1510,3 +1510,9 @@ Newest entries at the bottom. Format: date, who, what, result.
     3004.965 / 2763.764 / 1141.368 Hz (e 99 / 299 / 275 / 113), 1 MHz e 0. The counter assumes full-rate samples; the
     K = 0 path at D > 0 slows the encodes. Owner decision pending (counter valid only at full rate vs an RTL change).
   - Not run yet: Nth edge (needs a gated burst), the Type / Sample rows on screen, the counter cards.
+- 2026-10-21 18:00-18:25: COM10 vanished at 18:00 during the next script (first "a device attached to the computer is not
+  working", then no port); the owner restarted the scope (what the screen showed was not noted). 18:24 FEL fw 0.2.104 again
+  (`#VER` fpga=0x153c). **Nth edge: pass** (1 kHz burst gated from the host after >= 0.3 s idle, h = 2000 words, divider 99,
+  normal mode, pretrigger 4000 samples): n = 1 triggers on the first rising edge after the idle low (pretrigger flat at
+  91..92 codes); n = 3 triggers on the third (rises at -3386, -1998 and +2 samples: the first at the generator's random start
+  phase, the next two one period apart).
