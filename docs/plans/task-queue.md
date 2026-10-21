@@ -276,6 +276,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-d4 / fw-d5 / mcp-d6 (Opus, dispatched 09:03-09:05, branches of the same names): 0x153D firmware and host from the
+  contract in parallel with the RTL: D4 LOG_START / LOG_READ / LOG_STOP with the DDR ring, acq_state 5, the contract
+  rates; D5 the generator as a two-step fractional pattern behind SET_GEN (P16 / H16), SET_PATTERN / SET_PATTERN_TRIGGER /
+  SET_SWEEP, Bode P = 4 M; D6 MCP 1.27 (scope_log, scope_pattern, scope_sweep, source "pattern", simulator). The firmware
+  writes its bytes into protocol.md row 67; D6 matches at the merge (as C5 / C8). PC_FW_FPGA_VERSION stays 0x153C until
+  the 0x153D integration (D3).
 - fpga-d1 / fpga-d2 (Fable, dispatched 09:0x, branches of the same names): 0x153D items D1 (logger RTL: 0x69 / 0x6A / 0x38,
   stream gating, word counter, lap; tb_stream step 17) and D2 (pat_gen: 8 steps u32 + u16 fraction, double buffer, bursts /
   repeat / gap / continuous, marker as trigger source 0x15 = 3, the DDS removed, the pattern trigger engine 0x76-0x7D /
