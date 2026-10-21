@@ -6,6 +6,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **No 0x153E for 0.3.0** (owner decision 2026-10-21 16:1x, after the walk-through of the 0x153E features): 0.3.0 ships on
+  0x153D. Runt, window and the pulse-width range are dropped from the roadmap (owner: runt "rather special", window = check
+  the dip or the spike separately, range "marginal"); both-core triggering stays the only later 0x153E candidate ("if we do
+  something perhaps it'd just be this one"). Keep headroom in the FPGA ("not program the FPGA too full, who knows what we
+  might want to do later"): about 19 % of the LEs stay free after 0x153D. E1-E3 and protocol 1.28 are not dispatched.
 - **Pattern feature cut** (owner decision 2026-10-21 15:55, "Yes, let's do the cut. I guess we'll need to compromise here"):
   0x153D was projected at about 96 % of the LEs, register-bound, not closing timing even without the engine. The pattern
   generator (8 double-buffered steps, repeat / gap, the marker and its capture source 0x15 = 3, the pattern trigger engine
