@@ -85,12 +85,9 @@ fnirsi1013d-sim --variant al3 --port 5555 --signal decay:tau=80us
 
 | Option | Meaning |
 |---|---|
-| `--variant stock\|al3\|ef2\|ep4` | FPGA version word 0x1432 / 0x1532 / 0x1632 / 0x1732 with its ring size, memory limit, fixed or programmable geometry, generator |
-| `--variant al3x`, `--ext SIGNAL` | AL3 with the external trigger (0x1533): trigger source EXT on the calibration pin, fed by `--ext` (default: CH2's signal), 3.3 V logic, 22 ns latency |
-| `--variant al3f` | AL3 0x1535: as al3d plus the CIC compensation FIR (protocol 1.11, caps FIR): CIC on N / 2, the 15 RTL taps, 250 ns latency |
-| `--variant al3d` | AL3 0x1534: EXT trigger plus the decimation filter (protocol 1.9, caps DECIM): boxcar / CIC2 / CIC3 model with 16-bit samples, the 120 ns pipeline latency and the EXT latency correction (no device averaging) |
-| `--variant al3e` | AL3 0x1538: al3s plus the per-capture encode self-check (protocol 1.19, caps ENC_CHECK, features bit 5): GET_HEALTH 88..103 count every full-rate capture; test hooks `Device.enc_bad_next` (garbled, re-taken clean, event 21) and `enc_unrecovered_next` (accepted garbled: GET_HEALTH 90 bit 2, last 0x33 = 0x77) |
-| `--variant al3s` | AL3 0x1536: al3f plus the sequencer (protocol 1.17, caps SEQ): segment runs (slots, table entries with 5 ns timestamps, circular runs, STOP, READ_RAW addr_mode 3) and averaging runs (positions, exact lane sums, 16-bit u32 sums) on one continuous signal timeline. A run is modelled record by record in a background thread (about 8 ms per legacy record of a 1 kHz signal at 200 MSa/s); averaging runs of more than 128 records (16 with 16-bit records) scale the sums of the first ones, so the simulated noise stops falling there |
+| `--variant al3` | the only value since fw 0.2.103 (protocol 1.25): an AL3A10 running the firmware's bitstream (`FPGA_VERSION`, 0x153C) with every feature the firmware has: EXT trigger, decimation filter and FIR (boxcar / CIC2 / CIC3 model with 16-bit samples, the 120 / 250 ns pipeline latency, the EXT latency correction), sequencer (segment runs with 5 ns timestamps, circular runs, averaging runs with exact lane sums; modelled record by record in a background thread), encode self-check and capture stages (GET_HEALTH counters; hooks `Device.enc_bad_next`, `cap_counts_next`), and since protocol 1.26 the trigger types (pulse width / Nth edge / timeout: `TrigQual`, a port of the FPGA testbench's reference model), the hold-off (across segments and re-arms), peak detect (every raw instant of a window, `PEAK_SUBSAMPLES`) and the hardware counter (analytic edges of the periodic signals, `signal_edges` / `gate_count`) |
+| `--fpga-version WORD` | the version word the simulated FPGA reports (default 0x153C); any other word, e.g. `0x153B`, models a scope whose bitstream was not flashed for this firmware: GET_INFO / GET_HEALTH flag the mismatch and every command outside the basic set answers E_UNSUPPORTED detail 1 |
+| `--ext SIGNAL` | the signal on the calibration pin for the EXT trigger and the counter's EXT source (default: CH2's), 3.3 V logic, 22 ns latency |
 | `--signal SPEC` | CH1 signal; CH2 defaults to the matching TX gate (decay) or a sync square (sine/square) |
 | `--ch1 SPEC`, `--ch2 SPEC` | per-channel signals |
 | `--noise L` | Gaussian noise per ADC core, LSB rms (default 1.0, about 2 LSB as on the real unit) |
@@ -227,16 +224,17 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 |---|---|---|
 | `scope_info` | 0 | firmware, protocol, FPGA variant, serial, capabilities, memory limits |
 | `scope_profile` | 0 | static capability profile, live values, unverified facts, standing caveats |
-| `scope_status` | 0 | mode, display_mode (scope / spectrum / waterfall / density / phosphor / bode), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics; from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / software / hardware, records per hardware run); features `enc_check` (1.19) and `bode` (1.20) |
+| `scope_status` | 0 | mode, display_mode (scope / spectrum / waterfall / density / phosphor / bode), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics; from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / mcu / hardware, `ui_averaging_records`); features `enc_check` (1.19), `bode` (1.20), `capture_stages` (1.24), `trig_types` / `peak` / `counter` (1.26); from 1.26 `trigger_status` (the qualifier's words) |
 | `scope_get_config` | 0 | channels, timebase, trigger and generator in physical units |
 | `scope_read_calibration` | 0 | offset centres, gains, A/B compensation, volts per code per range |
 | `scope_screenshot` | 0 | PNG of the 800x480 screen |
 | `scope_fetch_waveform` | 0 | the latest capture (what the screen shows) with the settings it was taken under, without capturing |
 | `scope_measure` | 0 / 1 with `capture=true` | vpp, vmin, vmax, mean, rms, ac_rms, frequency, period, duty, rise/fall time, CH1->CH2 delay |
 | `scope_set_timebase` | 1 | sample rate, window or raw divider |
-| `scope_set_decimation` | 1 | decimation filter off / boxcar / CIC2 / CIC3 (fw >= 0.2.30, FPGA 0x1534), with `+fir` the compensation FIR (fw >= 0.2.44, FPGA 0x1535): effective filter, N, shift, codes per count, effective bits; captures then read 16-bit samples |
-| `scope_set_trigger` | 1 | source, edge, level (volts or code), mode, pre-trigger, total samples, auto timeout |
-| `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview |
+| `scope_set_decimation` | 1 | decimation filter off / boxcar / CIC2 / CIC3, with `+fir` the compensation FIR: effective filter, N, shift, codes per count, effective bits; captures then read 16-bit samples; `peak` (protocol 1.26) = peak detect, every stored sample the min and max of its window (averaging refused while on) |
+| `scope_set_trigger` | 1 | source, edge, level (volts or code), mode, pre-trigger, total samples, auto timeout; protocol 1.26 (caps TRIG_TYPES): `type` edge / pulse_width / nth_edge / timeout with `polarity`, `width`, `longer`, `n`, `idle` in seconds (converted to trigger-stream samples, clamps named), `hold_off` (5 ns steps) |
+| `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview; `peak=true` (caps PEAK_DETECT) takes it with peak detect and returns min / max envelopes |
+| `scope_counter` | 0 / 1 when it configures | the hardware counter (protocol 1.26, caps COUNTER): frequency, period, positive width, duty, raw min / max (volts for CH1 / CH2) over a 10 ms / 100 ms / 1 s gate at 5 ns resolution; `gate`, `source`, `level`, `hysteresis` configure it (the scope's measurement cards follow), `readings` takes several gates |
 | `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
 | `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available; `hardware=true` sums the n records in the FPGA in one run (bitstream 0x1536, fw >= 0.2.58; records up to 2046 words, n <= 257 with 8-bit samples); restarts when a setting is changed at the scope |
 | `scope_capture_segments` | 1 | segmented capture (bitstream 0x1536, fw >= 0.2.58): the FPGA re-arms after every trigger and keeps `count` records with 5 ns trigger timestamps (or refills them until `timeout_s` with `circular`); per segment time, interval, triggered, min / max / mean / Vpp; `.npz` with every record |
@@ -309,8 +307,8 @@ different slope. Time is
 
 ## Bode sweep: `scope_bode_sweep` and `fnirsi1013d-bode`
 
-Host-driven frequency-response analyser (docs/plans/bode-design.md, steps H1-H3; `bode.py`). Needs an AL3 bitstream
-with the decimation filter (0x1534+, best 0x1535 with the FIR) and the generator.
+Host-driven frequency-response analyser (docs/plans/bode-design.md, steps H1-H3; `bode.py`). Needs the decimation
+filter with the FIR and the generator (every supported firmware has them).
 
 **Wiring.** Calibration post to the DUT input, CH1 tip on the DUT input, CH2 tip on the DUT output. **Wiring A
 (default): the DUT ground on the probe ground clips.** Wiring B, for a DUT that must not see the probe reference: the

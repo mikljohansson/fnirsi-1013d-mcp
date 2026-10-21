@@ -81,7 +81,7 @@ def test_wire_layouts():
 def test_get_set_decim_and_settings(sim_factory):
     srv = dsim(sim_factory)
     with Scope.connect(srv.url) as s:
-        assert s.info.caps & P.Caps.DECIM and s.info.fpga_version == 0x153B
+        assert s.info.caps & P.Caps.DECIM and s.info.fpga_version == P.FW_FPGA_VERSION
         st = s.get_decim()
         assert st.filter == 0 and st.next.k == 0 and st.last_mode == 0xFF and st.why == 1
         seq = s.status().settings_seq
@@ -93,7 +93,7 @@ def test_get_set_decim_and_settings(sim_factory):
         assert tb.divider == 198 and tb.dt == pytest.approx(1e-6) and tb.sample_rate_hz == 1_000_000
         tr = s.get_trigger(cached=False)
         assert tr.total_samples == 3000 and tr.total_words == 3000 and tr.pretrigger_words == 1500
-        for req, detail in ((bytes([4, 0, 0, 0]), 0), (bytes([1, 16, 0, 0]), 1)):  # filter 4; flags bits 4-7
+        for req, detail in ((bytes([5, 0, 0, 0]), 0), (bytes([1, 16, 0, 0]), 1)):  # filter 5 (4 = peak, 1.26); flags bits 4-7
             with pytest.raises(DeviceError) as e:
                 s.t.request(P.Cmd.SET_DECIM, req)
             assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, detail)

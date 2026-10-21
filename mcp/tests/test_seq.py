@@ -97,7 +97,7 @@ def test_wire_layouts_match_the_firmware_frames():
     status = P.StatusResp.unpack(frame_payload("resp_get_status_1_17"))
     assert (status.features, status.ui_average, status.ui_average_log2n) == (0x1F, 2, 6)
     assert P.feature_names(status.features) == ["ext_trigger", "decim", "fir", "segments", "hw_average"]
-    assert len(status.pack()) == 48 and status.pack() == frame_payload("resp_get_status_1_17")
+    assert len(status.pack()) == 52 and status.pack()[:48] == frame_payload("resp_get_status_1_17")  # 52 since 1.26
     assert P.StatusResp.unpack(status.pack()[:44]).features == 0  # 1.16 firmware: the tail reads 0
 
 
@@ -123,14 +123,14 @@ def test_status_features_and_ui_average(sim_factory):
     s = Scope.connect(srv.url)
     try:
         st = s.status()
-        assert st.features == 0xFF and st.ui_average == 0 and s.info.proto_minor >= 17  # 1.20 BODE, 1.24 CAPTURE_STAGES
+        assert st.features == 0x7FF and st.ui_average == 0 and s.info.proto_minor >= 17  # ..1.24 CAPTURE_STAGES, 1.26 bits 8-10
         assert s.info.caps & P.Caps.SEQ
         s.set_timebase(divider=0)
         s.set_trigger(pretrigger_samples=1500, total_samples=3000)
         srv.device.ui_average = True
         st = s.status()
         assert (st.ui_average, st.ui_average_log2n) == (2, 6)  # 1500 words at 200 MSa/s: 64 records in 40 ms
-        assert s.get_decim().features == 0xFF and s.get_decim().ui_average == 2
+        assert s.get_decim().features == 0x7FF and s.get_decim().ui_average == 2
         s.set_timebase(divider=19)
         s.set_decim("cic2")  # 16-bit records never fit the accumulator: the MCU sums them (fw 0.2.102)
         assert (s.status().ui_average, s.status().ui_average_log2n) == (1, 3)  # 3000 words, 3.6 ms readout: 8
@@ -291,7 +291,7 @@ def test_segment_and_hardware_averaging_tools(sim_factory, tmp_path):
         async with client_for(srv, tmp_path) as c:
             st = await c.call("scope_status")
             assert st["features"] == ["ext_trigger", "decim", "fir", "segments", "hw_average", "enc_check", "bode",
-                                      "capture_stages"]
+                                      "capture_stages", "trig_types", "peak", "counter"]
             assert st["ui_averaging"] == "off" and st["hardware_averaging"] is False
             await c.call("scope_set_timebase", sample_rate="200MS/s")
             await c.call("scope_set_trigger", source="CH1", edge="rising", level=0.0, mode="normal",

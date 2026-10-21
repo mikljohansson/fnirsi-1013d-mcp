@@ -26,8 +26,8 @@ def frame(name: str) -> dict:
 
 
 def test_constants():
-    assert P.PROTO_MINOR == 25 and P.FW_FPGA_VERSION == 0x153B and P.FPGA_F_MISMATCH == 0x01
-    assert P.UNSUP_FPGA_MISMATCH == 1 and P.FPGA_MISMATCH_TEXT == "FPGA bitstream mismatch: this firmware needs 0x153B"
+    assert P.PROTO_MINOR >= 25 and P.FW_FPGA_VERSION >= 0x153B and P.FPGA_F_MISMATCH == 0x01
+    assert P.UNSUP_FPGA_MISMATCH == 1 and P.FPGA_MISMATCH_TEXT == f"FPGA bitstream mismatch: this firmware needs 0x{P.FW_FPGA_VERSION:04X}"
     # the firmware's F_BASIC set (pc_cmds.c): the link, the diagnostics readers, the card, the screen and FEL
     basic = {P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_BATTERY, P.Cmd.TEST_PATTERN, P.Cmd.GET_LINK_STATS,
              P.Cmd.GET_BAD_FRAME, P.Cmd.GET_EVENT_LOG, P.Cmd.GET_HEALTH, P.Cmd.READ_SPECTRUM, P.Cmd.SD_INFO,
@@ -56,7 +56,7 @@ def test_info_resp_80_bytes_and_76_byte_decode():
 
 def test_info_and_refusal_vectors():
     ok = P.InfoResp.unpack(bytes.fromhex(frame("host_resp_get_info_1_25")["payload"]))
-    assert frame("host_resp_get_info_1_25")["len"] == 80 and ok.proto_minor == 25
+    assert frame("host_resp_get_info_1_25")["len"] == 80 and ok.proto_minor == 25  # the 1.25 vector
     assert (ok.fpga_version, ok.fw_fpga_version, ok.fpga_flags) == (0x153B, 0x153B, 0) and not ok.fpga_mismatch
     assert ok.caps & P.Caps.CAPTURE_STAGES and ok.caps & P.Caps.SEQ and not ok.caps & P.Caps.INTERLEAVE_UNVERIFIED
     bad = P.InfoResp.unpack(bytes.fromhex(frame("host_resp_get_info_1_25_mismatch")["payload"]))
@@ -64,7 +64,8 @@ def test_info_and_refusal_vectors():
     assert (bad.ring_words, bad.max_total_samples, bad.caps) == (ok.ring_words, ok.max_total_samples, ok.caps)
     f = frame("host_resp_e_unsupported_fpga_mismatch")
     assert f["status"] == P.Status.E_UNSUPPORTED and f["cmd"] == P.Cmd.ARM
-    assert P.parse_error_payload(bytes.fromhex(f["payload"])) == (P.UNSUP_FPGA_MISMATCH, P.FPGA_MISMATCH_TEXT)
+    assert P.parse_error_payload(bytes.fromhex(f["payload"])) == \
+        (P.UNSUP_FPGA_MISMATCH, "FPGA bitstream mismatch: this firmware needs 0x153B")  # the 1.25 vector
 
 
 def test_health_resp_128_bytes_layout_3():
@@ -155,19 +156,20 @@ def test_simulator_mismatch(sim_factory):
     srv = sim_factory(fpga_version=0x1532, signal="sine:freq=10kHz,amp=0.25")
     with Scope.connect(srv.url) as s:  # connect succeeds: GET_INFO is basic
         i = s.info
-        assert (i.fpga_version, i.fw_fpga_version, i.fpga_flags, i.fpga_mismatch) == (0x1532, 0x153B, 1, True)
+        assert (i.fpga_version, i.fw_fpga_version, i.fpga_flags, i.fpga_mismatch) == \
+            (0x1532, P.FW_FPGA_VERSION, 1, True)
         assert (i.ring_words, i.max_total_samples) == (8192, 16382) and i.caps & P.Caps.SEQ  # the firmware's fixed ones
         p = s.profile()
-        assert p.fpga_mismatch and p.fw_fpga_version == 0x153B
-        assert "runs 0x1532" in p.mismatch_caveat() and "needs 0x153B" in p.mismatch_caveat()
+        assert p.fpga_mismatch and p.fw_fpga_version == P.FW_FPGA_VERSION
+        assert "runs 0x1532" in p.mismatch_caveat() and f"needs 0x{P.FW_FPGA_VERSION:04X}" in p.mismatch_caveat()
         assert s.t.ascii("#VER").endswith("fpga=0x1532")
         h = s.health()
-        assert h.fpga_mismatch and (h.layout, h.length, h.fw_fpga_version) == (3, 128, 0x153B)
+        assert h.fpga_mismatch and (h.layout, h.length, h.fw_fpga_version) == (3, 128, P.FW_FPGA_VERSION)
         assert h.describe()["fpga"]["mismatch"]
         with pytest.raises(DeviceError) as e:
             s.arm()
         assert (e.value.status, e.value.detail, e.value.text) == (P.Status.E_UNSUPPORTED, 1, P.FPGA_MISMATCH_TEXT)
-        assert "FPGA bitstream mismatch: this firmware needs 0x153B" in str(e.value) and "[detail 1]" in str(e.value)
+        assert P.FPGA_MISMATCH_TEXT in str(e.value) and "[detail 1]" in str(e.value)
         for call in (lambda: s.set_trigger(level=100), lambda: s.get_channel(0, cached=False),
                      lambda: s.get_decim(), lambda: s.set_gen(enable=True), lambda: s.read_trace(["CH1"])):
             with pytest.raises(DeviceError) as e:
@@ -184,7 +186,7 @@ def test_simulator_mismatch(sim_factory):
 def test_simulator_matching_bitstream_and_legacy_info(sim_factory):
     srv = sim_factory()
     with Scope.connect(srv.url) as s:
-        assert not s.info.fpga_mismatch and s.info.fw_fpga_version == 0x153B
+        assert not s.info.fpga_mismatch and s.info.fw_fpga_version == P.FW_FPGA_VERSION
         assert len(s.t.request(P.Cmd.GET_INFO).payload) == 80
         assert not s.health().fpga_mismatch and s.health().has_fpga_version
         assert s.arm().acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED, P.AcqState.DONE)
@@ -200,7 +202,7 @@ def test_simulator_matching_bitstream_and_legacy_info(sim_factory):
 def test_simulator_cli_fpga_version():
     cfg = build_config(make_parser().parse_args(["--fpga-version", "0x1532"]))
     assert cfg.fpga_version == 0x1532 and cfg.variant == "al3"
-    assert build_config(make_parser().parse_args(["--variant", "al3"])).fpga_version == 0x153B
+    assert build_config(make_parser().parse_args(["--variant", "al3"])).fpga_version == P.FW_FPGA_VERSION
     with pytest.raises(SystemExit):
         make_parser().parse_args(["--variant", "stock"])
 

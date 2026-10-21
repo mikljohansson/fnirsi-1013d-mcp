@@ -79,6 +79,16 @@ class ChannelData:
     #: 1.9 decimated capture: the stored 16-bit filter outputs (``codes`` = samples16 x 2^S / N^K + the mean core
     #: compensation, i.e. compensated ADC codes with fractional resolution)
     samples16: np.ndarray | None = None
+    #: 1.26 peak-detect record: the window's minimum and maximum in volts (through the 8-bit model with the mean of both
+    #: cores' zero and gain) and as raw codes; ``volts`` / ``codes`` are then the midpoint of the two
+    min_volts: np.ndarray | None = None
+    max_volts: np.ndarray | None = None
+    min_codes: np.ndarray | None = None
+    max_codes: np.ndarray | None = None
+
+    @property
+    def peak(self) -> bool:
+        return self.min_volts is not None
 
     @property
     def volts_per_lsb(self) -> float:
@@ -131,6 +141,11 @@ class Capture:
         the capture was read without GET_CAPTURE_INFO, or from older firmware, which never sets the bit)."""
         ci = self.capture_info
         return ci is not None and bool(ci.header.flags & ci.header.F_MAYBE_SPLICED)
+
+    @property
+    def peak(self) -> bool:
+        """1.26: a peak-detect record (every channel carries ``min_volts`` / ``max_volts``)."""
+        return self.decim is not None and self.decim.peak
 
 
 @dataclass
@@ -239,6 +254,9 @@ class CaptureContext:
                              "pretrigger_samples": tr.pretrigger_samples, "total_samples": tr.total_samples}
         if self.decim is not None:
             d["decim"] = f"{self.decim.filter_name} N {self.decim.n} S {self.decim.shift}" if self.decim.k else "off"
+        if tr.trigger2 is not None:  # 1.26: the same text as CaptureInfo.settings_key
+            t2 = tr.trigger2
+            d["trig2"] = f"type {t2.type} flags {t2.flags} N {t2.n} H {t2.h} holdoff {t2.holdoff}"
         for i, c in sorted(self.channels.items()):
             for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
                 d[f"CH{i + 1}.{k}"] = getattr(c, k)
@@ -634,6 +652,82 @@ class Scope:
         self._trig = P.Trigger.unpack(self._req(P.Cmd.SET_TRIGGER, r.pack()))
         return self._trig
 
+    def set_trigger2(self, *, type: int | str | None = None, polarity: int | str | None = None,
+                     longer: bool | None = None, source: int | None = None, n: int | None = None, h: int | None = None,
+                     level: int | None = None, holdoff: int | None = None, holdoff_s: float | None = None,
+                     level2: int | None = None, both_cores: bool | None = None, range_: bool | None = None
+                     ) -> P.Trigger:
+        """SET_TRIGGER2 (protocol 1.26, FPGA 0x153C, caps TRIG_TYPES, row 66): the trigger type and its parameters in
+        the wire's units. Starts from GET_TRIGGER's current block and changes what is given: ``type`` (P.TRIG_* or
+        'edge' / 'pulse_width' / 'nth_edge' / 'timeout'), ``polarity`` (0 / 1 or the type's name,
+        P.TRIG_POLARITY_NAMES), ``longer`` (pulse width: longer than ``n`` instead of shorter), ``n`` (pulse width /
+        timeout: samples of the trigger stream; Nth edge: the count), ``h`` (Nth edge: idle samples, 0 = from the
+        arm), ``level`` (raw 8-bit code), ``holdoff`` (5 ns units) or ``holdoff_s`` (seconds, rounded), and the 0x153E
+        fields ``level2`` / ``both_cores`` / ``range_`` (refused by 1.26 firmware). A type change zeroes the fields the
+        new type does not use (the firmware refuses them otherwise) and gives N 1 where it must be at least 1. The
+        firmware writes 0x66 with every SET_TRIGGER2: the next ARM clears a hold-off still running."""
+        cur = self.get_trigger(cached=False)
+        if cur.trigger2 is None:
+            raise ScopeError("set_trigger2 needs firmware with protocol 1.26 (GET_TRIGGER 52 bytes)")
+        t2 = P.Trigger2(**cur.trigger2.__dict__)
+        if type is not None:
+            new_type = P.TRIG_TYPE_NAMES.index(type) if isinstance(type, str) else int(type)
+            if new_type != t2.type:
+                t2.type = new_type
+                if new_type == P.TRIG_EDGE:
+                    t2.n, t2.h, t2.flags = 0, 0, t2.flags & ~P.TRIG2_F_LONGER
+                elif new_type == P.TRIG_NTH_EDGE:
+                    t2.n, t2.flags = max(1, min(P.TRIG2_MAX_NTH, t2.n)), t2.flags & ~P.TRIG2_F_LONGER
+                else:
+                    t2.n, t2.h = max(1, t2.n), 0
+                    if new_type != P.TRIG_PULSE_WIDTH:
+                        t2.flags &= ~P.TRIG2_F_LONGER
+        if polarity is not None:
+            if isinstance(polarity, str):
+                names = P.TRIG_POLARITY_NAMES.get(t2.type, ("0", "1"))
+                if polarity not in names:
+                    raise ValueError(f"polarity {polarity!r} is not one of {names} for the {P.TRIG_TYPE_NAMES[t2.type]} "
+                                     "type")
+                polarity = names.index(polarity)
+            t2.polarity = int(polarity)
+        for flag, bit in ((longer, P.TRIG2_F_LONGER), (range_, P.TRIG2_F_RANGE), (both_cores, P.TRIG2_F_BOTH_CORES)):
+            if flag is not None:
+                t2.flags = (t2.flags & ~bit) | (bit if flag else 0)
+        if source is not None:
+            t2.source = int(source)
+        if n is not None:
+            t2.n = int(n)
+        if h is not None:
+            t2.h = int(h)
+        if level is not None:
+            t2.level = int(level)
+        if level2 is not None:
+            t2.level2 = int(level2)
+        if holdoff is not None and holdoff_s is not None:
+            raise ValueError("give holdoff (5 ns units) or holdoff_s, not both")
+        if holdoff is not None:
+            t2.holdoff = int(holdoff)
+        if holdoff_s is not None:
+            t2.holdoff = P.holdoff_units(holdoff_s)
+        t2.reserved = 0
+        self._trig = P.Trigger.unpack(self._req(P.Cmd.SET_TRIGGER2, t2.pack()))
+        return self._trig
+
+    def read_counter(self, *, gate: int | None = None, source: int | str | None = None, level: int | None = None,
+                     hysteresis: int | None = None) -> P.CounterResp:
+        """GET_COUNTER (protocol 1.26, caps COUNTER): the hardware counter's latest gate (E, T, W, min, max). With
+        any of ``gate`` (P.COUNTER_GATES index), ``source`` (P.COUNTER_SOURCES index or name), ``level``,
+        ``hysteresis`` given the configuration is written first (the other fields keep their values)."""
+        if gate is None and source is None and level is None and hysteresis is None:
+            return P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, P.CounterReq().pack()))
+        cur = P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, P.CounterReq().pack()))
+        if isinstance(source, str):
+            source = P.COUNTER_SOURCES.index(source)
+        req = P.CounterReq(P.CounterReq.CONFIG, cur.gate if gate is None else int(gate),
+                           cur.source if source is None else int(source), cur.level if level is None else int(level),
+                           cur.hysteresis if hysteresis is None else int(hysteresis))
+        return P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, req.pack()))
+
     # --- SD card (fw >= 0.2.2, cap SD_SECTORS) -------------------------------------------------------------
 
     def get_decim(self) -> P.DecimState:
@@ -653,6 +747,8 @@ class Scope:
             f, fir = int(filter_), None
         if fir and not self.info.caps & P.Caps.FIR:
             raise ValueError(f"set_decim({filter_!r}): no FIR on this bitstream (caps FIR: FPGA 0x1535+)")
+        if f == P.DECIM_PEAK and not self.info.caps & P.Caps.PEAK_DETECT:
+            raise ValueError("set_decim('peak'): no peak detect on this firmware (caps PEAK_DETECT, protocol 1.26)")
         if flags is None:
             flags = self.get_decim().flags
             if fir is not None:
@@ -826,14 +922,16 @@ class Scope:
             else:
                 chans = [ch for ch in (0, 1) if core_mask & (3 << (2 * ch))]
                 for i, ch in enumerate(chans):
-                    out[ch] = body[i * 2 * hdr.count:(i + 1) * 2 * hdr.count]
+                    blk = body[i * 2 * hdr.count:(i + 1) * 2 * hdr.count]
+                    # layout 3 (1.26 peak records): count minima then count maxima -> rows 0 / 1
+                    out[ch] = blk.reshape(2, hdr.count) if layout == P.ReadRawReq.LAYOUT_PEAK else blk
             parts.append(out)
             done += n
         assert first is not None
         if len(parts) == 1:
             return first, parts[0]
         first.count = count
-        return first, {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+        return first, {k: np.concatenate([p[k] for p in parts], axis=-1) for k in parts[0]}
 
     def read_trace(self, channels: Iterable[int | str] = ("CH1",), start: int = 0, count: int = 0,
                    reread: bool = False, no_invert: bool = False, wide: bool = False
@@ -1072,6 +1170,8 @@ class Scope:
             count = total - start_sample
         if start_sample < 0 or count <= 0 or start_sample + count > total:
             raise ValueError(f"sample window {start_sample}+{count} outside 0..{total}")
+        if dec is not None and dec.k and dec.peak:
+            return self._read_capture_peak(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg)
         if dec is not None and dec.k:
             return self._read_capture16(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg)
         w0 = start_sample // 2
@@ -1145,6 +1245,44 @@ class Scope:
                        bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
                        st.capture_settings_seq, ci, decim=dec)
 
+    def _channel_peak(self, c: int, cfg: P.ChannelConfig, mn: np.ndarray, mx: np.ndarray) -> ChannelData:
+        """A channel of a 1.26 peak-detect record: raw minima and maxima of each window (both cores at full rate),
+        converted with the 8-bit model's mean of both cores (the firmware's (gain_a + gain_b) / 2 and off); ``volts``
+        and ``codes`` are the midpoint, ``clipped`` where a window touched a rail."""
+        sc = self.scale(c, cfg, P.CAL_CLASS_FULL)
+        mn = np.asarray(mn, np.uint8)
+        mx = np.asarray(mx, np.uint8)
+        lo = sc.volts_mean_raw(mn.astype(np.float64))
+        hi = sc.volts_mean_raw(mx.astype(np.float64))
+        codes = sc.codes_mean_raw((mn.astype(np.float64) + mx) / 2)
+        if cfg.invert:
+            lo, hi = -hi, -lo
+        clipped = (mn == 0) | (mx == 255)
+        return ChannelData(CHANNEL_NAMES[c], codes, (lo + hi) / 2, clipped, cfg, scale=sc, min_volts=lo,
+                           max_volts=hi, min_codes=mn.copy(), max_codes=mx.copy())
+
+    def _read_capture_peak(self, chans: list[int], start_sample: int, count: int, st: P.StatusResp | None,
+                           trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig],
+                           ci: P.CaptureInfo | None, expect_id: int | None, dec: P.DecimConfig,
+                           seg: int | None = None) -> Capture:
+        """1.26: a peak-detect record through READ_RAW layout 3 (per channel ``count`` minima then maxima)."""
+        mask = 0
+        for c in chans:
+            mask |= 3 << (2 * c)
+        mode, base = (P.ReadRawReq.ADDR_CAPTURE, 0) if seg is None else (P.ReadRawReq.ADDR_SEGMENT, seg << 16)
+        hdr, data = self.read_raw(mask, addr_mode=mode, address=base | start_sample, count=count,
+                                  layout=P.ReadRawReq.LAYOUT_PEAK)
+        if expect_id is not None and hdr.capture_id != expect_id:
+            raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
+        if st is None:
+            st = self.status()
+        out = {CHANNEL_NAMES[c]: self._channel_peak(c, cfgs[c], data[c][0], data[c][1]) for c in chans}
+        origin = ORIGIN_NAMES.get(st.capture_origin, "host")
+        return Capture(hdr.capture_id, tb.dt, tb.divider, start_sample, trig.pretrigger_samples, trig.total_samples,
+                       bool(st.flags & P.StatusFlags.FPGA_TRIGGERED) and not (st.flags & P.StatusFlags.AUTO_TIMEOUT),
+                       bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
+                       st.capture_settings_seq, ci, decim=dec)
+
     def read_trace_capture(self, channels: Iterable[int | str] = ("CH1",)) -> Capture:
         """Read the firmware's processed trace (READ_TRACE). Works in LOCAL (the UI's last trace). Collaborative
         firmware: the latest capture with the settings it was taken under (GET_CAPTURE_INFO)."""
@@ -1169,7 +1307,10 @@ class Scope:
         for c, (meta, arr) in data.items():
             cfg = cfgs[c]
             if dec is not None and arr.dtype == np.uint16:
-                out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, arr, dec)
+                if dec.peak:  # 1.26: the stored word is { max, min }
+                    out[CHANNEL_NAMES[c]] = self._channel_peak(c, cfg, arr & 0xFF, arr >> 8)
+                else:
+                    out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, arr, dec)
                 continue
             codes = arr.astype(np.float64)
             clipped = (arr == 0) | (arr == 255)
