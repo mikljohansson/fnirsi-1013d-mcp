@@ -30,7 +30,7 @@ CMDS = {
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
-    "SET_TRIGGER2": 0x0219,
+    "GET_COUNTER": 0x0213, "SET_TRIGGER2": 0x0219,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401, "CAL_PROBE": 0x0402,
@@ -118,6 +118,9 @@ REQUESTS = [
     ("SET_TRIGGER2", struct.pack("<BBBBIIHHII", 1, 1, 0, 1, 1500, 0, 140, 0, 200000, 0),
      "1.26: pulse width shorter than 1500 samples (flags 0), negative pulse (polarity 1), CH2, level 140, hold-off "
      "200000 x 5 ns = 1 ms"),
+    # appended (fw-c7, protocol 1.26, FPGA 0x153C counter)
+    ("GET_COUNTER", struct.pack("<BBBBB3x", 0, 0, 0, 0, 0),
+     "1.26 (fw-c7): read the hardware counter's latest result (what 0; the other fields are ignored)"),
 ]
 
 
@@ -683,7 +686,7 @@ def build():
         "14 level2)",
         [decoded(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)])
 
-    # 5g. Protocol 1.26, C6 peak detect (fw-c6, section 14 row 66): the firmware's refusals. The host-side request /
+    # 5h. Protocol 1.26, C6 peak detect (fw-c6, section 14 row 66): the firmware's refusals. The host-side request /
     # response vectors (host_req_set_decim_peak, host_resp_get_decim_peak, host_req_read_raw_peak, host_resp_read_raw_peak,
     # host_resp_get_capture_info_1_26_peak) are mcp-c8's (mcp/src/fnirsi1013d/vectors.py --merge) and are kept by main()
     ep = struct.pack("<H", 1) + b"FIR with peak detect"
@@ -704,6 +707,45 @@ def build():
         "1.26 READ_RAW layout 2 of a peak-detect record: E_BAD_ARG detail 2 (layout 3 reads it); layout 3 of any other "
         "record is detail 2 'layout 3 needs a peak-detect record'",
         [decoded(CMDS["READ_RAW"], 82, ep, status=4, flags=FLAG_RESPONSE)])
+    # 5g. Protocol 1.26 (fw-c7, section 14 row 66): the FPGA 0x153C hardware counter. GET_COUNTER 0x0213 request 8
+    # bytes: 0 u8 what (0 read, 1 configure then read), 1 u8 gate (0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s), 2 u8 source
+    # (0 the trigger source, 1 CH1, 2 CH2, 3 EXT), 3 u8 level (0 = follow the UI trigger level), 4 u8 hysteresis, 3 x 0.
+    # Response 24 bytes: 0 flags (bit 0 NEW, 1 VALID, 2 EXT, 3 CH2), 1 seq, 2 gate, 3 source (configured), 4 u32 E, 8 u32
+    # T, 12 u32 W, 16 min, 17 max, 18 level, 19 hysteresis (in effect), 20 u32 freq_mHz (round half up, saturating, 0
+    # when not VALID). The mcp's own host_ vectors (host_req_get_counter_read / _config, host_resp_get_counter) are kept
+    # beside these
+    p = struct.pack("<BBBBB3x", 1, 2, 0, 0, 6)
+    f = frame(CMDS["GET_COUNTER"], 80, p)
+    add("req_get_counter_follow_trigger", f, [ev_frame(CMDS["GET_COUNTER"], 80, p)],
+        "1.26 (fw-c7): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 = follow the "
+        "UI trigger level, hysteresis 6; the configuration is written by the next main-loop pass",
+        [decoded(CMDS["GET_COUNTER"], 80, p)])
+    p = struct.pack("<BBBBB3x", 1, 1, 3, 128, 0)
+    f = frame(CMDS["GET_COUNTER"], 81, p)
+    add("req_get_counter_ext_10ms", f, [ev_frame(CMDS["GET_COUNTER"], 81, p)],
+        "1.26 (fw-c7): 10 ms gate on EXT (the level and hysteresis do not apply to EXT: pinned at 128 / 0)",
+        [decoded(CMDS["GET_COUNTER"], 81, p)])
+    cb = struct.pack("<BBBBIIIBBBBI", 0x0A, 5, 1, 0, 10000, 2000000, 1000000, 60, 200, 150, 6, 1000000000)
+    assert len(cb) == 24
+    f = frame(CMDS["GET_COUNTER"], 82, cb, flags=FLAG_RESPONSE)
+    add("resp_get_counter_1_26_ch2", f, [],
+        "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous "
+        "GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 "
+        "clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (the trigger level followed), "
+        "hysteresis 6, freq_mHz 1000000000",
+        [decoded(CMDS["GET_COUNTER"], 82, cb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<BBBBIIIBBBBI", 0x01, 9, 2, 0, 0, 0, 0, 60, 70, 128, 6, 0)
+    f = frame(CMDS["GET_COUNTER"], 83, cb, flags=FLAG_RESPONSE)
+    add("resp_get_counter_1_26_no_edges", f, [],
+        "1.26 (fw-c7) GET_COUNTER response: a new gate with fewer than two edges (the signal under the Schmitt thresholds "
+        "60..70 against 128 / 6): NEW set, VALID clear, E = T = W = 0, freq_mHz 0; the cards keep the record's values",
+        [decoded(CMDS["GET_COUNTER"], 83, cb, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 4) + b"hysteresis > level"
+    f = frame(CMDS["GET_COUNTER"], 84, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_get_counter_e_bad_arg_hyst", f, [],
+        "1.26 (fw-c7) GET_COUNTER E_BAD_ARG: detail = the byte offset of the field (0 what, 1 gate, 2 source, 4 "
+        "hysteresis > a non-zero level), then the text; nothing is configured then",
+        [decoded(CMDS["GET_COUNTER"], 84, ep, status=4, flags=FLAG_RESPONSE)])
 
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")

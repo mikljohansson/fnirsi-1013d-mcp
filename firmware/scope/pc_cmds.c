@@ -129,6 +129,7 @@ void pc_variant_init(uint16_t version, pc_variant *v)
                   PC_CAP_SEQ | PC_CAP_ENC_CHECK | PC_CAP_CAPTURE_STAGES |
                   PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES |                                                 //1.26: 0x153C
                   PC_CAP_PEAK_DETECT |                                                                 //C6 peak detect
+                  PC_CAP_COUNTER |                                                                     //C7 counter
                   PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
 
 #if PC_DEBUG
@@ -441,7 +442,8 @@ static uint16_t pc_features(const pc_session *s)
   (void)s;
   return PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR | PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE |
          PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE | PC_FEAT_W_TRIG_TYPES |
-         PC_FEAT_W_PEAK;                                                                  //C6 peak detect
+         PC_FEAT_W_PEAK |                                                                 //C6 peak detect
+         PC_FEAT_W_COUNTER;                                                               //C7 counter
 }
 
 //1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
@@ -1388,6 +1390,79 @@ static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8
   pc_hal_trig_ext_write(&x);
 
   *rl = pc_trigger_body(s, resp);
+  return PC_OK;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//C7 counter (fw-c7, FPGA 0x153C, protocol 1.26 row 66, cap COUNTER). GET_COUNTER 0x0213: request u8 what (0 read, 1
+//configure then read), u8 gate, u8 source, u8 level (0 = follow the UI trigger level), u8 hysteresis, 3 x 0. The answer
+//is the result the main loop's pass holds (no FPGA access here, so it is answered inside menus too: F_MODAL); a
+//configuration is noted and written by the next main-loop pass. Response 24 bytes: 0 flags (bit 0 NEW: the sequence
+//number differs from the previous GET_COUNTER's, bit 1 VALID: E >= 1 and the result current, bit 2 EXT, bit 3 CH2: the
+//result's source), 1 seq, 2 gate and 3 source as configured, 4 u32 E, 8 u32 T, 12 u32 W, 16 min, 17 max, 18 level and
+//19 hysteresis in effect, 20 u32 freq_mHz = round(E x 2e11 / T) saturating, 0 when not VALID.
+
+//E x 2e8 / T in mHz, round half up, saturating (E x 2e11 would overflow for the largest E, so two stages)
+static uint32_t pc_counter_freq_mhz(uint32_t e, uint32_t t)
+{
+  uint64_t num = (uint64_t)e * 200000000ull, q = num / t, r = num % t, mhz;
+
+  mhz = q * 1000ull + (r * 1000ull + t / 2) / t;
+  return (mhz > 0xFFFFFFFFull) ? 0xFFFFFFFFu : (uint32_t)mhz;
+}
+
+static int h_get_counter(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  pc_hw_counter c;
+  uint8_t what = len ? req[0] : 0, flags = 0, valid;
+
+  if(what > 1)
+    return pc_error(s, PC_E_BAD_ARG, 0, "what 0..1");
+
+  if(what == 1)
+  {
+    if(len < 5)
+      return pc_error(s, PC_E_BAD_ARG, 0, "configuration needs 8 bytes");
+
+    if(req[1] > 3)
+      return pc_error(s, PC_E_BAD_ARG, 1, "gate 0..3");
+
+    if(req[2] > 3)
+      return pc_error(s, PC_E_BAD_ARG, 2, "source 0..3");
+
+    if(req[3] && (req[4] > req[3]))
+      return pc_error(s, PC_E_BAD_ARG, 4, "hysteresis > level");
+
+    pc_hal_counter_config(req[1], req[2], req[3], req[4]);
+  }
+
+  pc_hal_counter_read(&c);
+  valid = (uint8_t)(c.held && c.current && c.has_period && (c.t != 0));
+
+  if(c.held && (!s->cnt_seen || (s->cnt_seen_seq != c.seq)))
+    flags |= 0x01;
+
+  if(valid)                    flags |= 0x02;
+  if(c.res_src == 2)           flags |= 0x04;
+  if(c.res_src == 1)           flags |= 0x08;
+
+  s->cnt_seen     = c.held;
+  s->cnt_seen_seq = c.seq;
+
+  memset(resp, 0, PC_COUNTER_LEN);
+  resp[0] = flags;
+  resp[1] = c.seq;
+  resp[2] = c.gate;
+  resp[3] = c.source;
+  pc_put_u32(resp + 4,  c.e);
+  pc_put_u32(resp + 8,  c.t);
+  pc_put_u32(resp + 12, c.w);
+  resp[16] = c.min;
+  resp[17] = c.max;
+  resp[18] = c.level;
+  resp[19] = c.hyst;
+  pc_put_u32(resp + 20, valid ? pc_counter_freq_mhz(c.e, c.t) : 0);
+  *rl = PC_COUNTER_LEN;
   return PC_OK;
 }
 
@@ -3170,6 +3245,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_TRIGGER,  F_MODAL,                      0, h_get_trigger },
   { PC_CMD_SET_TRIGGER,  0,                            0, h_set_trigger },
   { PC_CMD_SET_TRIGGER2, 0,                            PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
+  { PC_CMD_GET_COUNTER,  F_MODAL,                      PC_CAP_COUNTER, h_get_counter },       //C7 counter (memory only)
   { PC_CMD_ARM,          0,                            0, h_arm },
   { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
   { PC_CMD_STOP,         F_CONTROL,                    0, h_stop },

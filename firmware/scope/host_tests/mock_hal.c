@@ -102,6 +102,12 @@ void mock_reset(uint16_t fpga_version)
   mock.tb.divider    = sr_div[tpd_sr[24]];
   mock.fpga_divider  = mock.tb.divider;
 
+  //C7 counter: the boot configuration, no result yet
+  mock.cnt.gate   = 2;
+  mock.cnt.level  = 128;
+  mock.cnt.hyst   = 6;
+  mock.cnt.min    = 255;
+
   mock.trg.source     = 0;
   mock.trg.edge       = 0;
   mock.trg.level      = 128;
@@ -346,6 +352,21 @@ void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
   mock.trig_ext_writes++;
 }
 void pc_hal_trig_status(uint8_t out[4]) { mock.fpga_ops++; mock.trig_status_reads++; memcpy(out, mock.trig_st, 4); }
+
+//C7 counter (fw-c7): memory only on the scope too (the main loop's pass does the bus work); a configuration is echoed
+//into the answer as the firmware's pass would write it (level 0 = the trigger level is followed: the level in effect
+//stays what it was)
+void pc_hal_counter_read(pc_hw_counter *c) { *c = mock.cnt; }
+void pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst)
+{
+  mock.cnt_cfg[0] = gate; mock.cnt_cfg[1] = source; mock.cnt_cfg[2] = level; mock.cnt_cfg[3] = hyst;
+  mock.cnt_configs++;
+  mock.cnt.gate   = gate;
+  mock.cnt.source = source;
+  mock.cnt.hyst   = hyst;
+  if(level)
+    mock.cnt.level = level;
+}
 void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
 
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)

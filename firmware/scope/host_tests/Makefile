@@ -119,8 +119,8 @@ $(OUT)/test_bode_sweep: test_bode_sweep.c test_util.h $(BODE_SRCS) $(SRC)/bode_s
 
 # fw 0.2.72: the MCU-FPGA bus sequences (fpga_bus.c: readout start, sampling reset order) against a bus-level model of
 # zaklad.v's MCU interface (fpga_model.c)
-$(OUT)/test_fpga_bus: test_fpga_bus.c test_util.h fpga_model.c fpga_model.h $(SRC)/fpga_bus.c $(SRC)/fpga_bus.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h | $(OUT)
-	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_fpga_bus.c fpga_model.c $(SRC)/fpga_bus.c $(SRC)/pc_decim.c
+$(OUT)/test_fpga_bus: test_fpga_bus.c test_util.h fpga_model.c fpga_model.h $(SRC)/fpga_bus.c $(SRC)/fpga_bus.h $(SRC)/fpga_counter.c $(SRC)/fpga_counter.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h | $(OUT)
+	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_fpga_bus.c fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/pc_decim.c
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c

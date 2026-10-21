@@ -889,7 +889,83 @@ static void test_meas_spectrum_maths(void)
 }
 
 //Card sources: none by default; a registered one is returned for its item only
-static void test_src_fn(int ch, char *text) { strcpy(text, ch ? "2" : "1"); }
+static int test_src_fn(int ch, char *text) { strcpy(text, ch ? "2" : "1"); return 1; }
+
+//C7 counter: the card rule (ui_meas.h): the six timing cards of the result's channel take the counter's values when
+//the result is current and has a period, formatted as the record's; everything else answers 0 (the record's value)
+static void test_counter_cards(void)
+{
+  ui_ms_counter c;
+  char t[UI_MS_TEXT_MAX];
+  int i, ch;
+
+  //ui_fmt_ps: four significant digits at the prefix that fits
+  ui_fmt_ps(t, 1000000);          T_STR(t, "1.000us");
+  ui_fmt_ps(t, 500000);           T_STR(t, "500.0ns");
+  ui_fmt_ps(t, 5000);             T_STR(t, "5.00ns");
+  ui_fmt_ps(t, 33333);            T_STR(t, "33.33ns");
+  ui_fmt_ps(t, 999999995000ull);  T_STR(t, "1.000s");
+  ui_fmt_ps(t, 1000000000ull);    T_STR(t, "1.000ms");
+  ui_fmt_ps(t, 0);                T_STR(t, "0s");
+
+  //No copy yet: nothing for any card
+  memset(&c, 0, sizeof(c));
+  ui_ms_counter_set(&c);
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    for(ch = 0; ch < 2; ch++)
+      T_EQ(ui_ms_counter_text(i, ch, t), 0);
+
+  //1 MHz 50 % on CH1: the six timing cards of CH1, the record for CH2's and for every voltage card
+  c.valid = 1; c.ch = 0; c.freq_mhz = 1000000000ull; c.period_ps = 1000000; c.width_ps = 500000; c.low_ps = 500000;
+  c.duty_ppm = 500000;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 0, t), 1);   T_STR(t, "1.000MHz");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PERIOD, 0, t), 1); T_STR(t, "1.000us");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PWIDTH, 0, t), 1); T_STR(t, "500.0ns");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NWIDTH, 0, t), 1); T_STR(t, "500.0ns");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PDUTY, 0, t), 1);  T_STR(t, "50.00%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NDUTY, 0, t), 1);  T_STR(t, "50.00%");
+  for(i = 0; i < UI_MEAS_FREQ; i++)
+    T_EQ(ui_ms_counter_text(i, 0, t), 0);
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    T_EQ(ui_ms_counter_text(i, 1, t), 0);
+
+  //1 kHz 20 % on CH2, as the record would print it
+  c.ch = 1; c.freq_mhz = 1000000; c.period_ps = 1000000000ull; c.width_ps = 200000000ull; c.low_ps = 800000000ull;
+  c.duty_ppm = 200000;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 1, t), 1);   T_STR(t, "1.000kHz");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PERIOD, 1, t), 1); T_STR(t, "1.000ms");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PWIDTH, 1, t), 1); T_STR(t, "200.0us");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NWIDTH, 1, t), 1); T_STR(t, "800.0us");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PDUTY, 1, t), 1);  T_STR(t, "20.00%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NDUTY, 1, t), 1);  T_STR(t, "80.00%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 0, t), 0);
+
+  //Duty rounding: 333333 ppm -> 33.33 %, 666667 -> 66.67 %; a 12.345678 MHz value keeps four digits
+  c.duty_ppm = 333333; c.freq_mhz = 12345678000ull;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_PDUTY, 1, t), 1); T_STR(t, "33.33%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NDUTY, 1, t), 1); T_STR(t, "66.67%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 1, t), 1);  T_STR(t, "12.35MHz");
+
+  //Not valid (no current result, no period, or EXT): the record everywhere
+  c.valid = 0;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 1, t), 0);
+
+  //The registered sources: the six timing items and nothing else; they answer through the same rule
+  ui_ms_counter_register();
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    T_EQ(ui_ms_get_source(i) != 0, (i >= UI_MEAS_FREQ) && (i <= UI_MEAS_NDUTY));
+  c.valid = 1;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_get_source(UI_MEAS_FREQ)(1, t), 1);   T_STR(t, "12.35MHz");
+  T_EQ(ui_ms_get_source(UI_MEAS_FREQ)(0, t), 0);
+  T_EQ(ui_ms_get_source(UI_MEAS_NDUTY)(1, t), 1);  T_STR(t, "66.67%");
+  for(i = UI_MEAS_FREQ; i <= UI_MEAS_NDUTY; i++)
+    ui_ms_set_source(i, 0);
+}
 
 static void test_meas_sources(void)
 {
@@ -2210,6 +2286,7 @@ int main(void)
   test_meas_fit();
   test_meas_spectrum_maths();
   test_meas_sources();
+  test_counter_cards();
   test_meas_menu();
   test_bode_scales();
   test_bode_readout();

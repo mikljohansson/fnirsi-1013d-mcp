@@ -166,6 +166,21 @@ char *ui_fmt_record_time(char *p, uint32 samples, uint64 fs_mhz)
   return ui_sig4(p, (int32)v, scale, "s", 0);
 }
 
+//C7 counter: hundredths of a nanosecond at the n prefix, coarser while over int32 (as ui_fmt_record_time)
+char *ui_fmt_ps(char *p, uint64 ps)
+{
+  uint64 v = (ps + 5) / 10;
+  uint32 scale = 1;
+
+  while(v > 0x7FFFFFFFull)
+  {
+    v = (v + 500) / 1000;
+    scale++;
+  }
+
+  return ui_sig4(p, (int32)v, scale, "s", 0);
+}
+
 char *ui_fmt_mhz(char *p, uint64 mhz)
 {
   if((mhz + 5) / 10 <= 0x7FFFFFFFull)

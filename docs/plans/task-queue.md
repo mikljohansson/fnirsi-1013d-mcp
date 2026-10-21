@@ -276,6 +276,17 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-c7 (dispatched 05:13, cut off and resumed, done 08:1x, merged 08:19 as 4639122): the counter in the firmware:
+  fpga_counter.c (boot 0x62 128/6 and 0x61 gate 100 ms source 0; one 0x35 read per pass, 17 strobes; 64-bit integer
+  derivation), the rate-change rule = rewrite 0x61 (0 then value) and drop that pass's result, the level follows the
+  trigger level unless a host pins it (level 0 = follow); GET_COUNTER byte-exact with the host; the Freq / Period / +-Width
+  / +-Duty cards of the trigger source's channel take the counter while a current result holds (Vmin/Vmax/Vpp stay
+  record-based: deviation from contract section 5); caps bit 22, features bit 10; 137 vectors; gcc10 3faa7a98 (provisional).
+  MCP follow-up: the simulator refuses hysteresis > level for level 0; accept it as the firmware does (level 0 = follow).
+- Coordinator 08:10: the account's Fable quota cut off fw-c6 and fw-c7 mid-edit; the owner reset it and both were resumed
+  in place. Record correction: every agent dispatched since 22:00 without an explicit model (labelled "Opus" above) ran
+  on the coordinator's model, Fable, because a general-purpose agent inherits it. From here firmware, MCP and docs
+  agents are dispatched with model opus explicitly; FPGA RTL stays on Fable per the owner.
 - ui-type (Opus, dispatched 05:13, done 05:4x, merged 05:48 as ae449b8): the trigger menu's Type row per ui-rows.md: trig_ui
   module (ladder, word period, ranges, snap, settings words 202/203 with 0xA000, glyphs), the Pulse polarity row, the
   keypad for N, a two-slot notice queue (time/div first), the shared No-trigger hint, the menu edits through fpga_trig_write

@@ -477,6 +477,58 @@ contract's section 10) drives it as follows.
   reads the same code in Normal and Peak (the midpoint); the generator's 1 kHz square at 10 kSa/s in Peak shows min / max
   pairs spanning the square (READ_RAW layout 3) where Normal aliases; a short glitch (the Bode output stepped by the host)
   at 500 kSa/s caught in Peak and missed in Normal; the trigger level on the rising max; Average greyed / GET_STATUS 46 = 0.
+### Hardware counter (FPGA 0x153C, fw-c7, protocol 1.26 row 66)
+
+Bitstream 0x153C (fpga-c3, `fpga/al3/AGENTS.md` "0x153C C3 counter"; contract `docs/plans/fpga-0x153c.md` section 5) counts
+the trigger stream reciprocally at 200 MHz: 0x61 bits 1..0 gate (0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s, exactly 2e6 / 2e7 /
+2e8 clocks), bits 3..2 source (0 the trigger source as 0x15 was written, 1 CH1, 2 CH2, 3 EXT); 0x62 level (the Schmitt
+trigger is high at code >= level) and hysteresis (low below level - hysteresis); read 0x35 = 16 bytes from one snapshot
+taken at the command byte: { new, 0, EXT, CH2, 0, 0, gate }, seq, E, T, W (u32 each, 28 bits used), min, max. From the
+first rising edge of the gate to the last: E periods, T clocks, W high clocks; E = 0 = fewer than two edges; a gate or
+source change restarts the gate, a same-value write and a level change do not. The counter never touches the capture.
+
+- **What the cards show and when** (`ui_meas.c`, "the card rule"): the counter follows the trigger source, one channel
+  at a time. The **Freq, Period, +Width, -Width, +Duty and -Duty** cards of that channel show the counter's values
+  (frequency E / (T x 5 ns), period T x 5 ns / E, high and low time, duty W / T; four significant digits in the record's
+  formats, so the text never changes shape) while the counter holds a **current result with a period**: the gate on, the
+  result younger than three gates + 100 ms, E >= 1. Everything else shows the record's measurement as before: the other
+  channel's timing cards, every voltage card (Vmax .. Vp), the reference traces, an EXT-source result, and a result
+  without edges (the signal under the Schmitt thresholds, or slower than two edges per gate: at 100 ms that is below
+  about 20 Hz, where the record at a slow time base measures it). The cards show a result from the pass after the one
+  that read it (at most one pass, 15..40 ms, after the gate ended); at the 100 ms gate they update ten times a second.
+- **Level**: the counter's level follows the UI's trigger level (the marker the user placed inside the signal, so what
+  triggers is what is counted) with hysteresis 6 codes (about three times the 2 LSB noise); boot writes 128 / 6 and the
+  first pass follows the marker. A host configuration with a non-zero level pins it (GET_COUNTER `what` = 1); level 0
+  returns to following.
+- **One reader, one copy** (`fpga_counter.c`, host-buildable; `fpga_cnt`): boot (`pc_glue_init`, built-for word only)
+  writes 0x62 = 128 / 6 then 0x61 = gate 100 ms, source 0 (5 strobes). The main loop reads 0x35 once per pass after the
+  capture readout (`PC_COUNTER_PASS` in fnirsi_1013d_scope.c, `pc_glue_counter_pass`): the command byte plus 16 data
+  strobes, **17 x 0.3 us = about 5 us** against a 15..40 ms pass; a snapshot with "new" set is taken, derived and
+  time-stamped (64-bit integer arithmetic: frequency in uHz through a two-stage division, times in ps, duty in ppm,
+  rounded to nearest; no floating point). The copy for the cards (`ui_ms_counter_set`) and GET_COUNTER's answer are
+  memory reads.
+- **Rate changes** (fpga-c3's note: a 0x0D / 0x53 write while a gate runs puts a few pairs of mixed age into the stream
+  and adds or drops one edge in the gate that spans it): the pass that sees such a write (`fpga_bus_wr.wclk`, counted
+  by `fpga_bus_note_write`) writes **0x61 = 0 before its read** (the running gate is aborted, nothing can be published
+  after this), reads 0x35 and **drops the result it carries** (the gate that spanned the write, or one read late), then
+  writes **0x61 = the value** again: the next result is one clean full gate. 4 strobes on such passes only; the pass runs
+  milliseconds after the write, long past the transient (at most 5 x 41 us at D 4095). The alternative, skipping the
+  first result by `seq`, was not taken: a clean result published just before the write and read after it would be
+  skipped while the contaminated gate's result became the second. A level change writes 0x62 (3 strobes) and restarts
+  the gate the same way, so no result mixes two levels; a trigger source change (0x15) restarts the FPGA's gate by
+  itself and the result carries its source. During a Frequency response sweep the 0x0D writes restart the gate every
+  pass and no result is published (the cards are not shown there).
+- **Host** (`pc_cmds.c`, `docs/protocol.md` GET_COUNTER): **GET_COUNTER 0x0213** (cap COUNTER bit 22, features bit 10;
+  the bytes fixed with the mcp: `what` 0 read / 1 configure, gate, source, level, hysteresis; 24-byte response flags
+  NEW / VALID / EXT / CH2, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz round half up saturating).
+  It is answered from the firmware's copy (F_MODAL: inside menus too); a configuration is written by the next pass.
+- **Host tests**: `test_fpga_bus.c` `test_counter` / `test_counter_derive` (the boot writes, the 17-strobe pass, the
+  derived values against `fpga_model.c`'s synthetic square waves at every gate and source, the rate-change rule's write
+  order and the dropped result, the level follow, a host configuration, the 0x15 restart, the current / stale rule, the
+  arithmetic's corners: 100 MHz, 1 Hz over 1 s, the 28-bit maxima), `test_session.c` `test_counter` (caps, features,
+  the body byte-exact with the mcp's `host_resp_get_counter`, the NEW bit, the refusals, the answer inside a modal
+  screen, the mismatch refusal), `test_ui.c` `test_counter_cards` (the card rule and the texts), the 1.26 counter
+  vectors in `docs/protocol-vectors.json`.
 
 ### Build options
 

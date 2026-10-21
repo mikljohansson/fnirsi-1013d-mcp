@@ -29,6 +29,16 @@
 //     older bitstreams read the shift alone). With peak on and `capture` set, every word written is { max, min } per
 //     channel of the N synthetic raw samples of its window (fm_raw_sample: a sawtooth with 255 spikes every 1000 and 0
 //     dips every 1777 samples; fm_peak_word is the reference), lanes 0x20 / 0x22 = min, 0x21 / 0x23 = max.
+//   - fw-c7 (0x153C, C7 counter): 0x61 (gate, source), 0x62 (level, hysteresis), the trigger source copy 0x15, read 0x35
+//     (16 bytes from a snapshot taken at the command byte, fpga/al3/AGENTS.md "0x153C C3 counter"). The stream is a
+//     synthetic square wave per source (cnt_sig: period, high time and phase in ps, all multiples of the 5 ns clock, and
+//     the low / high codes; period 0 = a constant low level): a gate of exactly 2e6 / 2e7 / 2e8 clocks publishes E, T, W
+//     (the edges inside the gate: E = their count - 1, T = E x period, W = E x high time in clocks), min / max (the
+//     codes for CH1 / CH2 when the Schmitt thresholds are crossed, 255 / 0 for EXT and before the first gate) and a
+//     sequence number, and restarts; any change of the effective source or gate (0x61, or 0x15 with source 0)
+//     restarts the gate without publishing, a same-value write does not. CH1 / CH2 see edges only when the low code is
+//     below level - hysteresis and the high code at or above the level. The mixed-age transient of a 0x0D / 0x53 write
+//     is not modelled (the firmware's rule is what the tests check).
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -96,6 +106,23 @@ typedef struct
   uint64_t ho_until_ps;             //the hold-off of the last trigger ends here (0 = none)
   uint32_t ho_blocked;              //triggers not taken because the hold-off ran
 
+  //fw-c7 (0x153C): the counter (fpga_model.h header)
+  uint8_t  reg_15;                  //trigger source as written (0 CH1, 1 CH2, 2 EXT)
+  uint8_t  reg_61;                  //gate bits 1..0, source bits 3..2
+  uint8_t  reg_62_lvl, reg_62_hys;
+  struct
+  {
+    uint64_t period_ps, high_ps, phase_ps;
+    uint8_t  lo, hi;
+  } cnt_sig[3];                     //CH1, CH2, EXT
+  uint8_t  cnt_cfg;                 //{ 0, 0, 0, 0, ext, ch2, gate[1:0] } the gate runs with (0 = off)
+  uint64_t cnt_start_ps, cnt_end_ps;//the running gate
+  uint32_t cnt_publishes, cnt_restarts;
+  uint32_t pub_e, pub_t, pub_w;     //published
+  uint8_t  pub_min, pub_max, pub_seq, pub_cfg;
+  uint8_t  snap[16];                //the 0x35 snapshot
+  uint8_t  snap_seq;                //m_seq: the sequence number of the previous snapshot
+
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;
   uint32_t seed;
@@ -114,5 +141,8 @@ void    fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx); //{ max
 void fm_fill(uint32_t salt);                //distinct bytes per word and lane
 void fm_advance_ns(uint32_t ns);            //idle time (e.g. the capture after the release)
 int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the first matching write at or after from, -1
+//fw-c7: the counter's stream on source src (0 CH1, 1 CH2, 2 EXT): a square wave of period_ns / high_ns (multiples of
+//5 ns) starting at phase_ns, codes lo / hi; period 0 = a constant low level
+void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase_ns, uint8_t lo, uint8_t hi);
 
 #endif /* FPGA_MODEL_H */

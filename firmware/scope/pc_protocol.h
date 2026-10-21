@@ -115,8 +115,9 @@
 #define PC_CMD_READ_SEQ           0x0210     //1.17: segment table or averaged record of the latest sequencer run
 #define PC_CMD_BODE_CTRL          0x0211     //1.20: on-device Bode sweep: settings, run / stop, thru calibration
 #define PC_CMD_READ_BODE          0x0212     //1.20: the Bode table of the latest sweep
-#define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0213..0x0218
-                                             //      are the contract's GET_COUNTER, LOG_*, SET_PATTERN, docs/plans/fpga-0x153c.md)
+#define PC_CMD_GET_COUNTER        0x0213     //1.26 (fw-c7): the 0x153C hardware counter's result, or its configuration (what = 1)
+#define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0214..0x0218
+                                             //      are the contract's LOG_*, SET_PATTERN, docs/plans/fpga-0x153c.md)
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
@@ -176,6 +177,7 @@
 #define PC_CAP_TRIG_TYPES             (1u << 20)   //1.26: trigger types 0x5E / 0x5F / 0x60, read 0x34 / 0x37; SET_TRIGGER2 (0x153C+)
 #define PC_CAP_PEAK_DETECT            (1u << 21)   //1.26 (C6): peak detect 0x56 bit 1; SET_DECIM filter 4, READ_RAW layout 3 (0x153C+)
                                                    //      (bit 2 HOLDOFF: 0x1B is the trigger hold-off in 5 ns units, 0x153C+)
+#define PC_CAP_COUNTER                (1u << 22)   //1.26 (fw-c7): the hardware counter 0x61 / 0x62, read 0x35; GET_COUNTER (0x153C+)
 
 //GET_STATUS bytes 44-45 / GET_DECIM bytes 32-33 (1.17): what the running bitstream has
 #define PC_FEAT_W_EXT_TRIGGER         0x0001       //0x1533+
@@ -188,6 +190,7 @@
 #define PC_FEAT_W_CAPTURE             0x0080       //1.24: ADC capture stages and outlier counters (0x153A+)
 #define PC_FEAT_W_TRIG_TYPES          0x0100       //1.26: trigger types and hold-off (0x153C+; the contract's bit 5 was taken)
 #define PC_FEAT_W_PEAK                0x0200       //1.26 (C6): peak detect (0x153C+); C7's COUNTER takes 0x0400
+#define PC_FEAT_W_COUNTER             0x0400       //1.26 (fw-c7): the hardware counter (0x153C+; bit 9 is C6's PEAK)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header
