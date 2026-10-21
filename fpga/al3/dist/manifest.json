@@ -156,6 +156,26 @@
    ],
    "status": "recommended",
    "bench": "built 2026-10-20 13:50 (fpga-gen11, build b2: clk_200MHz 0 errors, min period 4.583 ns; sample_write_clock 9.231 ns; capture margins >= 1.10 ns at the power-on stages at TT, train the stages after flashing as for 0x153A); tb: tb_timeout 75 checks 0 errors at 2048 words (the 0x153A source fails 30 of them: the bench splice), ext / decim / trigpos / firstrec / contract pass, the full 13-step run ALL PASS on seeds 12345 and 4242 (fpga-gen12, 2026-10-20: the two steps fpga-gen11 left not green were testbench artefacts, fpga/al3/AGENTS.md '0x153B flash-ready'); source unchanged since the build; flashed 2026-10-20 19:31 (verified 1391978c..; pre-write backup = the 0x153A padded image, rollback = write it back); the bench of 19:52 (docs/hardware-status.md) read every record as spliced, but the saved records hold no signal at all (code 128 +- 1 on both channels, 1 kHz fundamental under 0.1 code where the square gives about 113; the probes were off the post after the wizard's open-input run; README section 11 'Bench 2026-10-20 19:31-20:03', fpga-gen13), so nothing about the record geometry was measured; tb_timeout case B (fpga-gen13) models that host capture byte for byte and passes; benched 2026-10-20 20:40 on fw 0.2.102 with the probes on (check 0: 181 / 168 codes pk-pk): check 1 the seam test 0 of 100 untriggered captures spliced (50 at 1 MSa/s, 50 at 200 MSa/s), check 2 bode_cells auto records leak -58..-62 dB worst, check 4 ten sweeps 100 Hz..1 MHz / 25 with 25 captures, 0 time-outs, 0 retakes, 0 flagged, check 5 eleven flat 0.5 Hz records at 10 MSa/s none flagged triggered; check 3 (20:49) 50 of the UI's own auto-mode traces in RUN with the level at 255 (READ_TRACE, 50 distinct captures) contiguous, worst seam ratio 0.01, a stopped frame clean on screen; check 6 segments in auto mode (4 x 1024 samples, 10 kHz) untriggered and triggered all contiguous; the 20:40 observation of 3 of 50 untriggered captures reading triggered=1 did not reproduce in 160 captures at levels 255 and 240 with the generator on and off; recommended since 2026-10-20 20:42, 0x153A supported"
+  },
+  {
+   "version": "0x153C",
+   "file": "al3-0x153C.bin",
+   "size": 282898,
+   "sha256": "2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2",
+   "flash_image_sha256": "07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77",
+   "source_commit": "1f1ded4b9efc92008635f82add1b27c01b6c821b",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.104",
+   "features": [
+    "as 0x153B",
+    "trigger types pulse width / Nth edge / timeout on CH1, CH2 and EXT (0x5E, 0x5F, 0x60, reads 0x34 / 0x37) and the trigger hold-off on 0x1B (0x66 clears it at the next arm)",
+    "peak detect: { max, min } words of the window's raw samples on the 16-bit path, the one-register switch 0x56 bit 1 (0x29 byte 1)",
+    "hardware counter with min / max: 0x61 gate / source, 0x62 level / hysteresis, read 0x35 (16 bytes from one snapshot)",
+    "cruft of the stock design removed (one-bitstream rule): write 0x3C / read 0x41, reads 0x24..0x27, write 0x0F, 0x53 bits 4..2 (0x29 bits 4..2 read 0); the sample-rate divider is taken on 20 bits (0x0D bits 31..20 ignored)",
+    "capability bits the firmware derives from the version word: 2 HOLDOFF, 20 TRIG_TYPES, 21 PEAK_DETECT, 22 COUNTER"
+   ],
+   "status": "unbenched",
+   "bench": "built 2026-10-21 10:45 (fpga-c4, build h4 = the committed source: clk_200MHz 0 errors, min period 4.772 ns; sample_write_clock 9.053 ns, i_mcu_clk 19.538 ns, clkc[1] 2.197 ns, 0 errors; 6126 LUT / 5451 reg / 7103 LE, all block RAM, 2 M18x18; capture margins >= 1.31 ns at the power-on stages at TT: retrain the stages after flashing as for 0x153B); tb/run.sh 16 steps: RUN_RESULT_TEXT; not flashed: the owner flashes from dist per fpga/al3/AGENTS.md '0x153C built, fpga-c4' and benches docs/plans/fpga-0x153c.md section 9.2 items 1-7 before this entry becomes recommended"
   }
  ]
 }
