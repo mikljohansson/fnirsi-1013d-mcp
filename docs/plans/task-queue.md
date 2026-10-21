@@ -350,6 +350,20 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
   0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
   code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fw-one (Opus, dispatched 22:02, done 04:23, merged 04:24 as 1f13767, numbered fw 0.2.103 / protocol 1.25 at 868f8c9):
+  PC_FW_FPGA_VERSION 0x153B with fixed caps, the version word read once at boot sets only the mismatch flag; the notice
+  screen (Diagnostics / Settings / USB drive reachable, acquisition and the generator off, basic USB commands answered,
+  the rest E_UNSUPPORTED detail 1); stock / Atlan / 0x1532..0x1537 / EF2 / EP4 code removed (enc_heal workarounds,
+  legacy geometry, 0x0E = W-2, spliced bit, variant arms); Average = mean of N records on both paths (planner shared,
+  GET_STATUS 46/47); 0x53 bits 3/4 written 0, divider bound 0xFFFFF (UI max 399,999); mcp protocol 1.25, simulator one
+  bitstream with --fpga-version. Coordinator: gcc10 image 772,096 B sha256 7f87eb635eaacc0091bae7d604c84abf70c7a820
+  18e0c5fcfbdc7baf0dc9faba pinned as backups/fw-0.2.103_7f87eb63.bin (not loaded: scope off); host tests green,
+  check_vectors OK, mcp ruff clean and 501 tests; guide placeholders filled; contract protocol minors renumbered
+  1.26..1.28. Bench tomorrow: the notice against a real mismatch (0x153A rollback image or the stock word), the Average
+  passes, the soak repeat. Open for C8: scope_info / capture caveats from Profile.mismatch_caveat(), scope_status
+  ui_averaging_records for the MCU state, mcp/README --variant table, "on 0x1534 / 0x1536" mentions in mcp-tools.md and
+  the measurement guide. Open small: "ADC readout fault near code 128" message still in the firmware (calibration.md row
+  removed); the 0x0E = 0 force (two lines in pc_hal_force).
 - Coordinator 03:36-04:1x: the account's usage limit cut off fw-one and fpga-c2 (both terminated by the API, work saved in
   their worktrees); resumed after the 04:10 reset with the remaining steps (fw-one: screenshots.py kwarg, merge main, tests,
   gcc10 hash, push; fpga-c2: merge main with C1 and C3, the shared two-line change, re-simulate, push).
