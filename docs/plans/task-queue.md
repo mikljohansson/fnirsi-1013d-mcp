@@ -276,6 +276,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d1 / fpga-d2 (Fable, dispatched 09:0x, branches of the same names): 0x153D items D1 (logger RTL: 0x69 / 0x6A / 0x38,
+  stream gating, word counter, lap; tb_stream step 17) and D2 (pat_gen: 8 steps u32 + u16 fraction, double buffer, bursts /
+  repeat / gap / continuous, marker as trigger source 0x15 = 3, the DDS removed, the pattern trigger engine 0x76-0x7D /
+  0x42 as a third trig_qual instance with the routed fallback if timing fails; tb_pattern step 18). Both start from main
+  with C1 + C3 (C2 and C4 land in parallel); C4 owns the version byte, the contract file, dist and the C0 cruft removal.
+- mcp-c8b (Opus, dispatched 09:0x, branch mcp-c8b): host follow-ups to fw 0.2.104: simulator counter level 0 = follow, the
+  full-class peak correction and the "not written" legacy case, the tool count in README / release notes, mcp/AGENTS.md.
 - fw 0.2.104 numbered 08:5x (built for 0x153C: fw-c5, fw-c6, fw-c7, ui-type, ui-sample merged; ui-sample done 08:5x, merged
   08:57 as 2d4861f): host tests green on merged main, check_vectors OK (140); gcc10 sha256 7c640ab5fe1f9b1c75dc321c96038e7dc3fe8fb88fd9e105e81cf344351d2cbc pinned as
   backups/fw-0.2.104_7c640ab5.bin. Needs the 0x153C bitstream on the unit (C4 pending on fpga-c2); on 0x153B it shows the
