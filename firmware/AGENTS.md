@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (version provisional), protocol 1.26 (row 66 addition, provisional): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
 **Branch fw-c5 (2026-10-21): fw 0.2.103 + C5 (version provisional, the coordinator numbers it), protocol 1.26 (row 66, provisional): built for FPGA 0x153C (`PC_FW_FPGA_VERSION`; a scope on 0x153B shows the mismatch notice until C4's bitstream is flashed), caps bits 2 HOLDOFF / 20 TRIG_TYPES, SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112, the trigger extension registers 0x5E / 0x5F / 0x60 / 0x1B / 0x66 in fpga_bus.c with the arm-window writes; section 69.**
 **Branch fw-one (2026-10-20): fw 0.2.103, protocol 1.25 (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
 **Branch fw-diag (2026-10-20): fw 0.2.100, protocol 1.24 unchanged: Diagnostics Restarts tile counts crashes only (type 0 = deliberate), the noise rows use the zero step's limits (gated 1.0, full 3.0 codes, one pair of constants in adc_cal.h; the wizard's gated limit tightened from 3.0); section 66.**
@@ -5251,3 +5252,125 @@ written per arm), E_UNSUPPORTED detail 6 on SET_TRIGGER's hold-off.
   converting time to samples from the capture's word period, the simulator's qualifier model, `host_` vectors.
 - Nothing reads 0x34 / 0x37 during a UI capture (the main loop's own conversions): the status bytes describe host
   captures only.
+
+## 71. fw-c7: counter (fw 0.2.103 + C7, version provisional, protocol 1.26 row 66 addition, provisional)
+
+Branch `fw-c7` (worktree) from main c432354 (fw-c5 merged), origin/main 1635a1a (mcp-c8, ui-type) merged in. Brief: item
+**C7** of `docs/plans/fpga-0x153c.md` section 10 against fpga-c3's merged RTL (`fpga/al3/AGENTS.md` "0x153C C3 counter");
+the wire format fixed by the coordinator at 06:2x to the mcp's (mcp-c8) bytes. Commits: the counter module with the bus
+model and its test; GET_COUNTER, the cards and the host tests; the docs. **Nothing benched, nothing flashed**: the unit
+runs 0x153B; the coordinator numbers the version (`PC_FW_VERSION` is still 0.2.103 on the branch).
+
+**What was built**
+- **fpga_counter.c / .h** (new, host-buildable against fpga_bus.h; built into the scope by `SRCS += fpga_counter.c`):
+  `fpga_cnt` is the one copy. `fpga_counter_boot` writes 0x62 = 128 / 6 then 0x61 = gate 100 ms (2), source 0 (5
+  strobes; `pc_glue_init` after `fpga_trig_write`, built-for word only, with `ui_ms_counter_register`).
+  `fpga_counter_pass(now_ms, trig_level)` runs once per main-loop pass after the capture readout (`PC_COUNTER_PASS()` in
+  fnirsi_1013d_scope.c right after the `scope_acquire_trace_data` branch, `pc_glue_counter_pass` in pc_hal_scope.c): the
+  0x35 read (command + 16 strobes = **17 strobes, about 5 us**), a snapshot with "new" taken into the state (seq, source
+  from the EXT / CH2 bits, gate, E, T, W, min, max, the pass clock) and derived by `fpga_counter_derive` (64-bit integer
+  arithmetic: frequency in uHz by a two-stage division since E x 2e14 overflows, period / high / low time in ps, duty in
+  ppm, all rounded to nearest; E = 0 = no period). `fpga_counter_current(now)`: a result is current while the gate is on
+  and it is younger than three configured gates + 100 ms. `fpga_counter_config` only notes a host configuration; the
+  pass writes it.
+- **The rate-change rule** (fpga-c3's note): `fpga_bus_wr.wclk` counts the 0x0D and 0x53 writes (`fpga_bus_note_write`;
+  0x54 / 0x55 / 0x56 do not move the write clock). A pass that sees it moved writes **0x61 = 0 before its read** (the
+  running gate is aborted: nothing can be published after this), reads 0x35 and **drops the result it carries**, then
+  writes **0x61 = the value** (a value change restarts the gate): the next result is one clean full gate; 4 strobes on
+  such passes only, and the pass is milliseconds past the write (the transient lasts at most 5 x 41 us). Chosen over
+  "skip the first result by seq" because a clean result published just before the write and read after it would be the
+  one skipped while the contaminated gate's became the second (a 15..40 % chance per change with 100 ms gates and
+  15..40 ms passes). The settle wait of the brief is implicit: the pass is after the readout.
+- **Level**: follows the UI trigger level (`scopesettings.triggerlevel` clamped 0..255) with hysteresis 6; a change
+  writes 0x62 (3 strobes) and restarts the gate the same way (0x61 = 0 / value), so no result mixes two levels. A host
+  `what = 1` with level != 0 pins the thresholds; level 0 returns to following (`cfg_level` 0). The trigger source needs
+  nothing: the FPGA's source 0 follows 0x15 and restarts its gate by itself; the result carries its source bits.
+- **GET_COUNTER 0x0213** (pc_cmds.c, block "C7 counter"; `F_MODAL`, cap `PC_CAP_COUNTER` bit 22; features
+  `PC_FEAT_W_COUNTER` 0x0400): request u8 what (0 read, 1 configure then read), u8 gate, u8 source, u8 level, u8
+  hysteresis, 3 x 0 (an empty request reads; `what` = 1 with fewer than 5 bytes is E_BAD_ARG detail 0); E_BAD_ARG detail
+  0 what > 1, 1 gate > 3, 2 source > 3, 4 hysteresis > a non-zero level; nothing handed to the HAL then. Response 24 bytes:
+  0 flags (bit 0 NEW: the result's seq differs from the previous GET_COUNTER's, `s->cnt_seen` / `cnt_seen_seq`; bit 1
+  VALID: held, current, E >= 1; bit 2 EXT, bit 3 CH2: the result's source), 1 seq, 2 gate and 3 source as configured, 4 E,
+  8 T, 12 W, 16 min, 17 max, 18 level and 19 hysteresis in effect, 20 freq_mHz = round(E x 2e11 / T) saturating, 0 when
+  not VALID (`pc_counter_freq_mhz`, two-stage). The handler never touches the FPGA (pc_hal.h `pc_hw_counter`,
+  `pc_hal_counter_read` / `pc_hal_counter_config`, both memory only), so it is answered inside menus; a configuration
+  from a menu applies when the menu closes (the next pass). Byte-exact with the mcp's `host_resp_get_counter`
+  (test_session asserts the 24 bytes).
+- **The cards** (ui_meas.c "C7 counter"; the rule in ui_meas.h and firmware/README.md "Hardware counter"): `ui_ms_source`
+  now returns int (1 = text written, 0 = use the record; scope_functions.c falls back). `ui_ms_counter_set` takes the
+  pass's copy (valid = current and has a period and not EXT, the channel, mHz / ps / ppm); the six timing items Freq,
+  Period, +Width, -Width, +Duty, -Duty are registered as sources (`ui_ms_counter_register`) and answer through
+  `ui_ms_counter_text`: the counter's value for the result's channel, 0 for everything else. Formats: `ui_fmt_mhz`,
+  the new `ui_fmt_ps` (ui_fmt.c), `ui_fmt_sig4_fixed` for the duty in hundredths of a percent: the record's four
+  significant digits, so the card text keeps its shape. `UI_MEAS_PERIOD .. UI_MEAS_NDUTY` (7..11) joined ui_fmt.h.
+- **fpga_model.c**: 0x61 / 0x62 / 0x15 latches (fm_len 0x62 = 2), the gate on a synthetic square wave per source
+  (`fm_cnt_signal`: period, high time, phase as multiples of 5 ns, low / high codes; edges only when the Schmitt thresholds
+  are crossed), publish at every gate end (E = edges - 1, T = E x period, W = E x high time in clocks, min / max, seq++),
+  the restart on a changed effective configuration (0x61 value or 0x15 with source 0; a same-value write does not), the
+  snapshot at the 0x35 command byte with "new" = seq changed since the previous snapshot, 255 / 0 before the first gate
+  and on EXT. The mixed-age transient is not modelled (the firmware's rule is what the test checks). `fm_reset` zeroes
+  `fpga_cnt`. Versions below 0x153C ignore the registers and read zeros.
+- **Host tests**: test_fpga_bus `test_counter_derive` (0 edges, 100 MHz = two clocks, 30 MHz over 1 s, thirds rounded,
+  1.000000005 Hz, the 28-bit maxima, W > T clamped) and `test_counter` (the boot trace and 5 strobes, the 17-strobe pass
+  with no write, 1 MHz 50 % on CH1 at the 100 ms gate exact, the same gate not re-taken, the latest of several gates, the
+  0x0D case: 0x61 = 0 at trace index 0 and 0x61 = 2 at 1 around the dropped read, the gate restarted and the next result
+  clean, 0x53 counts and 0x54 / 0x56 do not, the level follow's 0x62 / 0x61 / 0x61 trace, E = 0 under the thresholds, a
+  host configuration 1 s / CH2 / 100 / 10 applied by the next pass with 1 kHz 20 % exact, EXT 10 MHz at 10 ms with 255
+  / 0, source 0 following 0x15 = 1 with no firmware write, a same-value 0x61 not restarting, gate off and on, the current
+  bounds, the 0x153B model); test_session `test_counter` (above); test_ui `test_counter_cards` (`ui_fmt_ps`, the rule for
+  both channels and every item, the duty rounding, the registered sources). test_session's features word is 0x5FF now
+  (bit 10; C6 adds bit 9). test_ui_diag's mismatch texts were literal "0x153b" since fw-c5 moved the constant (a
+  pre-existing failure of `make test`): they follow `PC_FW_FPGA_VERSION` now (the "newer" case uses the constant + 1).
+  `make -s test` green (test_fpga_bus 8834 checks, test_session 72435, test_ui 1434375, test_ui_diag 12996; check_vectors
+  OK against 137 vectors, the mcp's 40 `host_` ones kept by gen_vectors). GCC 10 build: no warnings in the files touched.
+- **Vectors** (gen_vectors.py: GET_COUNTER in CMDS, the one-per-command `req_get_counter`, section 5g):
+  `req_get_counter_follow_trigger`, `req_get_counter_ext_10ms`, `resp_get_counter_1_26_ch2`,
+  `resp_get_counter_1_26_no_edges`, `resp_get_counter_e_bad_arg_hyst`; 137 vectors.
+
+**Decided and why**
+- The host's level 0 means "follow the UI trigger level" (a Schmitt level of 0 is meaningless: everything is high), and
+  the hysteresis > level refusal applies to a non-zero level only. The mcp's simulator refuses hysteresis > level for
+  level 0 too (`_cmd_get_counter`): C8 should accept level 0 with any hysteresis as the firmware does.
+- The level follows the trigger marker rather than staying at 128 (contract section 5): an off-centre logic signal
+  would otherwise never cross the thresholds and the cards would never use the counter; the marker is where the scope
+  triggers, so what triggers is what is counted.
+- VALID folds "current" in (gate on, younger than three gates + 100 ms): a stale result after a gate-off or a menu that
+  held the main loop for seconds must not read as live. The mcp's `valid` property is a subset check (E >= 1, T > 0) and
+  stays compatible.
+- -Width and -Duty come from the same result as +Width and +Duty (low time = (T - W) x 5 ns / E, duty' = 1 - duty): a
+  card pair from two sources would disagree in the last digit.
+- Vmin / Vmax / Vpp stay record-based (the brief's card list; converting the counter's codes needs the channel's
+  calibration in scope_functions.c, not host-buildable). min / max are in GET_COUNTER for the host. Deviation from the
+  contract's section 5, stated in protocol.md row 66.
+- GET_COUNTER is F_MODAL and memory only, with the configuration applied by the next pass, rather than a bus write in
+  the handler: a pure read must not close the user's menu (fw-eng6's rule), and one writer (the pass) keeps the restart
+  logic in one place.
+- The cards' copy is made by the pass; the cards draw it from the next pass (the readout, which draws the cards, runs
+  before the pass hook): at most one pass of lag against a 100 ms gate.
+
+**Bench (coordinator; FEL load after C4's 0x153C is flashed, never without the backup; contract 9.2 item 7)**
+1. `#VER` proto=1.26; GET_INFO caps bit 22; GET_STATUS 44 bit 10. GET_COUNTER (empty request) right after boot: 24 bytes,
+   flags 0 or 2 / 3 once the first 100 ms gate ended, gate 2, source 0, level = the trigger level (18), 6 (19).
+2. The post at 1 kHz on CH1, the trigger marker inside the signal: GET_COUNTER flags 3 then 2, E about 100, T = E x
+   200000 +- 1, W about T / 2, freq_mHz 1000000 +- 1 (within 1e-5 of phase_inc x 50 MHz / 2^32), min / max equal to the
+   record's; the Freq card reads "1.000kHz", Period "1.000ms", +Duty "50.00%", and the CH2 cards keep "no period".
+   At 1 MHz the same with freq_mHz 1000000000 +- 10; the cards "1.000MHz" / "1.000us".
+3. Move the trigger marker: 18 follows within a pass; move it above the signal: E = 0, VALID clear, the cards fall back to
+   the record's values (same numbers, from the record). Trigger source CH2 in the menu: flags bit 3 after the next gate.
+4. Time base change (0x0D): no result with E off by one: read GET_COUNTER every 100 ms across a change; every VALID
+   freq_mHz stays within 1e-5 (the first result after the change may come up to 200 ms later).
+5. `what` = 1 gate 3 source 3 (EXT, the generator on): 1 s results, freq within 1e-5, min 255 max 0; gate 0: VALID clear
+   after 100 ms, cards on the record. `what` = 1 level 0 hysteresis 6 gate 2 source 0 restores the boot behaviour.
+6. GET_COUNTER inside the trigger menu: answered, the menu stays open; `pass_ms` with the counter on within 1 ms of fw-c5's.
+Regression signs: `pass_ms` up by more than 1 ms (a read per pass costs 5 us), a card flickering between two values at a
+steady signal (the rule's channel test failing), E off by one after time base changes (the restart order broken),
+GET_COUNTER closing a menu (F_MODAL lost in a merge).
+
+**Open**
+- C6 (peak detect) shares pc_cmds.c's dispatch table (`//C7 counter` entry after SET_TRIGGER2), the caps / features
+  lines and fpga_model.c's `fm_apply` / `fm_len` / read switch: append; the features word in test_session is 0x5FF with
+  bit 9 still clear.
+- mcp (C8): level 0 semantics (above); `scope_counter` could surface VALID's "current" meaning in a caveat.
+- The counter's min / max could feed Vmin / Vmax / Vpp through a source in scope_functions.c (the contract's list) once
+  the 8-bit per-core conversion is wanted there.
+- The pass hook runs in the long (roll) time base too (harmless reads); the cards are not shown there.
