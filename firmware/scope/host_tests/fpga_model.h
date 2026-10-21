@@ -44,7 +44,7 @@
 //     capture model, or the peak pairs), bit 1 clears the lap flag; 0x6A the reader position (the next word to read);
 //     fpga-d1's detector: occ = (W - 0x6A) mod 8192 at a 0x6A write, +1 per word up to 8192, a word written at 8192 sets
 //     the lap flag; 0x01 = 1 zeroes 0x6A and occ, not the flag; read 0x38 = the 8-byte snapshot at the command byte
-//     ({ streaming, lap, 0, 0, 0, W[12:8] }, W[7:0], u32 words since the release, u16 occ). With 0x69 = 0 the capture
+//     ({ streaming, lap, 0, W[12:8] }, W[7:0], u32 words since the release, u16 occ). With 0x69 = 0 the capture
 //     returns to the normal rules (auto with 0x0E = 0: the writes stop at the next edge). Older versions read 0. strobe_ns != 0
 //     makes every strobe take exactly that long (the drain cost test runs at the measured 0.30 / 0.35 us per byte).
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write

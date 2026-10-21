@@ -6,7 +6,7 @@
 // Registers (contract 2.1 / 2.2): 0x69 bit 0 stream on (the capture never stops and never triggers; the arm is the normal
 // 0x01 = 1 / 0 with 0x0B = 0x0C = 0; decimator, filter, peak and the readout as in any capture), bit 1 clear the lap flag
 // (self-clearing); 0x6A u13 reader position; read 0x38 = 8 bytes from one snapshot at the command byte: { streaming, lap,
-// 0, 0, 0, W[12:8] }, W[7:0] (the next word to be written), u32 words written since 0x01 = 0, u16 words since the reader
+// 0, W[12:8] }, W[7:0] (the next word to be written), u32 words written since 0x01 = 0, u16 words since the reader
 // position.
 //
 // How the firmware drives them (fpga-d1's RTL as built and checked by tb_stream.v, 2026-10-21):
