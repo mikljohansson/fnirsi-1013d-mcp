@@ -816,7 +816,9 @@ min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of th
 
 Filter per mode (fw 0.2.64, maintainer): the Scope view defaults to a filter without the FIR (the FIR's 6-9 % step
 overshoot pulses on a square wave), the Spectrum view to one with it: CIC2 and CIC2+FIR until fw 0.2.105, Hi-Res
-(boxcar) and Anti-alias (CIC3+FIR) since fw-acqui, so a fresh box shows one of its three modes. Each mode keeps its own setting (`pc_dec_set_mode[2]`,
+(boxcar) and Anti-alias (CIC3+FIR) since fw-acqui, so a fresh box shows one of its three modes; a saved word holding
+the old default of its mode (Scope CIC2, Spectrum CIC2+FIR) loads as the new default (`ui_filter_migrate`, owner
+2026-10-21), any other saved mode as it is. Each mode keeps its own setting (`pc_dec_set_mode[2]`,
 `PC_DECIM_DEFAULT_SCOPE` / `_SPEC` in pc_decim.h): settings word 207 the Scope's, word 212 (0xD500 marker) the
 Spectrum's. The Filter box, the arm and SET_DECIM / GET_DECIM act on the mode on screen. A 0.2.30..0.2.63 sector with
 the old single default (CIC2+FIR) loads as the new defaults; any other saved choice is kept for both modes.

@@ -2397,6 +2397,20 @@ static void test_acq_filter(void)
   //The defaults are among the three (a fresh scope's box never shows a host mode)
   T_EQ(PC_DECIM_DEFAULT_SCOPE, UI_FILTER_HIRES);
   T_EQ(PC_DECIM_DEFAULT_SPEC, UI_FILTER_ANTIALIAS);
+
+  //Saved words: the old per-mode defaults move to the new ones; every other mode (and the old default of the other
+  //mode) loads as it is
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2, 0), UI_FILTER_HIRES);
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2 | PC_DECIM_SET_FIR, 1), UI_FILTER_ANTIALIAS);
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2 | PC_DECIM_SET_FIR, 0), PC_DECIM_CIC2 | PC_DECIM_SET_FIR);
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2, 1), PC_DECIM_CIC2);
+  for(i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+  {
+    if(t[i].set != PC_DECIM_CIC2)
+      T_EQ(ui_filter_migrate(t[i].set, 0), t[i].set);
+    if(t[i].set != (PC_DECIM_CIC2 | PC_DECIM_SET_FIR))
+      T_EQ(ui_filter_migrate(t[i].set, 1), t[i].set);
+  }
 }
 
 static void test_acq_row(void)

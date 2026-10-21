@@ -217,6 +217,17 @@ uint8 ui_filter_next(uint8 filter_set)
   return UI_FILTER_OFF;
 }
 
+uint8 ui_filter_migrate(uint8 filter_set, int spectrum)
+{
+  if(!spectrum && (filter_set == PC_DECIM_CIC2))
+    return PC_DECIM_DEFAULT_SCOPE;
+
+  if(spectrum && (filter_set == (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)))
+    return PC_DECIM_DEFAULT_SPEC;
+
+  return filter_set;
+}
+
 int ui_acq_box_at(uint32 x, uint32 y)
 {
   uint32 i;

@@ -214,6 +214,11 @@ const char *ui_filter_name(uint8 filter_set);
 //leaves a mode the box cannot offer for the one every scope has, and the next presses step as always)
 uint8 ui_filter_next(uint8 filter_set);
 
+//A saved per-mode Filter word on load (owner 2026-10-21): the defaults of fw 0.2.64..0.2.105 (Scope CIC2, Spectrum
+//CIC2+FIR) become the new ones (Hi-Res, Anti-alias), so an existing unit's box shows one of its three modes too; any
+//other saved mode loads as it is (and shows by name). spectrum: the Spectrum's word 212, else the Scope's word 207
+uint8 ui_filter_migrate(uint8 filter_set, int spectrum);
+
 //The box under a touch at menu coordinates x, y: UI_ACQ_ROLL .. UI_ACQ_SAMPLE, or -1 (the drawn box, down to the rule)
 int  ui_acq_box_at(uint32 x, uint32 y);
 

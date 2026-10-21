@@ -2280,13 +2280,15 @@ static void pc_ui_fix_settings(void)
 
     if((settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & 0xFFDC) == 0xD500)
     {
-      pc_dec_set_mode[0] = old;
-      pc_dec_set_mode[1] = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & (PC_DECIM_SET_FIR | 3));
+      //fw-acqui (owner 2026-10-21): the 0.2.64..0.2.105 defaults (Scope CIC2, Spectrum CIC2+FIR) become the new ones
+      //(Hi-Res, Anti-alias); any other saved mode loads as it is (ui_ctrl.h ui_filter_migrate)
+      pc_dec_set_mode[0] = ui_filter_migrate(old, 0);
+      pc_dec_set_mode[1] = ui_filter_migrate((uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & (PC_DECIM_SET_FIR | 3)), 1);
     }
     else if(old != PC_DECIM_DEFAULT_OLD)
     {
-      pc_dec_set_mode[0] = old;
-      pc_dec_set_mode[1] = old;
+      pc_dec_set_mode[0] = ui_filter_migrate(old, 0);
+      pc_dec_set_mode[1] = ui_filter_migrate(old, 1);
     }
   }
 

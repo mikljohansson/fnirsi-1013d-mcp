@@ -23,7 +23,8 @@ program on the PC has the scope's serial port open or has sent it a request in t
   mean of the samples in each interval: less noise, more resolution, no overshoot on edges, and it rejects signals far
   above the rate. **Anti-alias** keeps the passband flat to a quarter of the rate and rejects everything above half of
   it the most (the Spectrum's default), at the cost of up to about 7 % overshoot on a square wave's edges. The Scope
-  defaults to Hi-Res, the Spectrum analyser to Anti-alias; each keeps its own choice. A program on the PC can set other
+  defaults to Hi-Res, the Spectrum analyser to Anti-alias; each keeps its own choice (settings saved by an older
+  firmware with its defaults, CIC2 and CIC2+FIR, load as these). A program on the PC can set other
   filter modes (CIC2, CIC3, boxcar+FIR, CIC2+FIR): the box then shows that name, and a tap goes to Off. With a filter
   on, memory depths above 6000 are not offered.
 - **Sample** (the fourth box of the row under the sample rates, Scope only): **Normal** stores the samples as before;

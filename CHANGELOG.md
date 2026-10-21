@@ -151,8 +151,10 @@ sections 74 to 79.
   Anti-alias (CIC3 + FIR) -> Off. A mode the host set over SET_DECIM (CIC2, CIC3, boxcar+FIR, CIC2+FIR), or a saved
   setting from an older firmware, shows by its own name; a tap goes to Off. SET_DECIM and the MCP filter names are
   unchanged. The Spectrum's warning reads "Aliasing possible: set Acquisition > Filter Anti-alias". (e5ad32d)
-- **Filter defaults**: Scope Hi-Res (was CIC2), Spectrum Anti-alias (was CIC2+FIR), for new settings and the DEFAULT
-  button; saved settings keep what they hold. (178af30)
+- **Filter defaults** (owner, 2026-10-21): Scope Hi-Res (was CIC2), Spectrum Anti-alias (was CIC2+FIR), for new settings
+  and the DEFAULT button. (178af30) Saved settings that still hold the old defaults (Scope word 207 CIC2, Spectrum word
+  212 CIC2+FIR) move to the new defaults on load, so an existing unit's box shows one of the three modes too; any other
+  saved mode loads as it is and shows by name (`ui_filter_migrate`).
 
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
