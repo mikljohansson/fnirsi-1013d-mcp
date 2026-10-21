@@ -1492,3 +1492,21 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-21 17:38: power-cycled after the flash: `#VER` fw=0.2.102 proto=1.24 fpga=0x153c (the card's firmware boots on the
   new bitstream). FEL-load of fw 0.2.104 (7c640ab5..): `#VER` fw=0.2.104 proto=1.26 fpga=0x153c, GET_INFO fpga_flags 0, no
   notice; the Scope view runs (CH1 the 1 kHz square through the RC ladder, 500 kSa/s, 200 us/div, Auto, CH1 rising).
+- 2026-10-21 17:39-18:0x: **0x153C checks** (fw 0.2.104; wizard rerun by the owner with the inputs open after the flash,
+  17:4x; CH1 first on the RC ladder node, then on the generator post from 17:50, CH2 on the ladder). Scratchpad scripts
+  c_checks*.py over COM10 (host control, restored to 500 kSa/s / Auto / 1 kHz afterwards).
+  - Pulse width (10 kHz 20 % = 20 us high, divider 99, normal mode, CH1 post): longer than 15 us triggers, longer than 25 us
+    does not, shorter than 25 us triggers, shorter than 15 us does not. **Pass.** (On the ladder node none triggered: the
+    RC rounds the 20 us pulse.)
+  - Timeout (1 kHz 50 %, 500 us high): 400 us triggers, 600 us does not. **Pass.**
+  - Hold-off (1 kHz, edge, 8-segment run, 200-sample records): spacing 1.000 ms without, 3.000 ms with hold-off 2.5 ms
+    (every third edge). **Pass.**
+  - Peak detect (10 kHz 1 % = 1 us spikes, divider 1999): Normal max 165 (spikes partly caught), Peak max 181 with a spike
+    in all 600 expected columns. **Pass.**
+  - **Counter: exact with the ADCs at full rate, wrong with Filter Off at divided rates.** Filter boxcar or divider 0:
+    1 kHz 999.996 Hz (the generator's 999.996, e 99 / T 99.0 ms), 10 kHz 9999.995, 100 kHz 100000.005, 1 MHz 1000000.000,
+    duty 50 %, min / max 89 / 184; a change settles after one 100 ms gate. Filter Off at divider 399 (the default 500 kSa/s,
+    the ADC encodes run at 200 / (D + 1) MSa/s in Atlan's sample-skipping path): 1 kHz gates alternate 1000.000 /
+    3004.965 / 2763.764 / 1141.368 Hz (e 99 / 299 / 275 / 113), 1 MHz e 0. The counter assumes full-rate samples; the
+    K = 0 path at D > 0 slows the encodes. Owner decision pending (counter valid only at full rate vs an RTL change).
+  - Not run yet: Nth edge (needs a gated burst), the Type / Sample rows on screen, the counter cards.
