@@ -2956,7 +2956,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         source: Annotated[Literal["trigger", "CH1", "CH2", "EXT"] | None, Field(description="what to count: "
                           "'trigger' follows the trigger source (the boot setting), or a channel / EXT")] = None,
         level: Annotated[float | str | None, Field(description="comparator level in volts at the probe tip (CH1 / "
-                         "CH2; converted to a raw code); default: as set (128 = mid-screen at boot)")] = None,
+                         "CH2; converted to a raw code and pinned), or 'trigger' to follow the trigger level (the "
+                         "boot setting); default: as set")] = None,
         hysteresis: Annotated[int | None, Field(ge=0, le=255, description="codes below the level that read low "
                                                                             "(boot: 6, about 3 x the noise)")] = None,
         readings: Annotated[int, Field(ge=1, le=50, description="snapshots to take, one per new gate (the tool waits "
@@ -2967,8 +2968,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         raw min / max over the gate (as volts and Vpp for CH1 / CH2). Resolution one 5 ns clock over the gate (5e-7 at
         10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy on top; range about 1 Hz (two edges in a 1 s gate) to the
         30 MHz front end. Tier 0 when it only reads; configuring the gate, source or thresholds is a tier 1 change
-        the measurement cards on the scope follow. Needs no capture; `readings` > 1 returns every snapshot and the
-        spread, and saves them as a .npz for scope_report."""
+        the measurement cards on the scope follow. The comparator level follows the trigger level (the boot setting,
+        what triggers is what is counted) until a level in volts pins it; level='trigger' follows again. Needs no
+        capture; `readings` > 1 returns every snapshot and the spread, and saves them as a .npz for scope_report."""
         args = {k: v for k, v in dict(gate=gate, source=source, level=level, hysteresis=hysteresis,
                                       readings=readings).items() if v is not None}
         configuring = any(v is not None for v in (gate, source, level, hysteresis))
@@ -2990,14 +2992,16 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             eff_src = P.COUNTER_SOURCES[kw.get("source", cur.source)]
             if eff_src == "trigger":
                 eff_src = ("CH1", "CH2", "EXT")[min(s.get_trigger(cached=False).source, 2)]
-            if level is not None:
+            if isinstance(level, str) and level.strip().lower() == "trigger":
+                kw["level"] = P.COUNTER_LEVEL_FOLLOW
+            elif level is not None:
                 if eff_src == "EXT":
                     notes.append("level is ignored for EXT (3.3 V logic input)")
                 else:
                     ch = channel_index(eff_src)
                     v = parse_quantity(level, "V")
                     raw = round(s.scale(ch, s.get_channel(ch, cached=False)).raw_a_for_volts(v))
-                    kw["level"] = int(min(255, max(0, raw)))
+                    kw["level"] = int(min(255, max(1, raw)))  # code 0 would mean "follow the trigger level"
                     if raw != kw["level"]:
                         notes.append(f"level {v:g} V is outside the channel's range; clamped to code {kw['level']}")
             if hysteresis is not None:
@@ -3036,6 +3040,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             last = snaps[-1]
             freqs = [r.frequency_hz for r in snaps if r.frequency_hz is not None]
             out: dict[str, Any] = {"ok": True, "source": src_name, "gate_s": gate_s, "level_code": last.level,
+                                   "level_follows_trigger": s.counter_level_cfg == P.COUNTER_LEVEL_FOLLOW,
                                    "hysteresis_codes": last.hysteresis, "valid": last.valid,
                                    "frequency_hz": _r6(last.frequency_hz), "period_s": _r6(last.period_s),
                                    "width_s": _r6(last.width_s), "duty": _r6(last.duty), "edges": last.e,
