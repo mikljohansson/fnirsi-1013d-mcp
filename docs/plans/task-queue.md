@@ -288,6 +288,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   lines take the window max / min as the trigger byte; the reserved-bit writes in tb_decim / tb_fir / tb_seg keep bit 1
   clear; tb_peak 45; full run.sh 16 steps ALL PASS both seeds on the merged source; TD +136 LUT alone with a -0.504 ns
   miss on the sequencer's pp_i enable (lottery). WSL note: detached runs die when no wsl.exe stays attached.
+- mcp-d6 (Opus, dispatched 09:05, done 10:2x, merged 10:23 as fc71df7): protocol 1.27 on the host, byte-matched to fw-d4 and
+  fw-d5 (test_d27 holds their vector payloads; bode-plan-vectors.json v2 byte-identical): scope_log / scope_log_status /
+  scope_log_stop (raw sample files + log.json, pumped in the background under the session lock), scope_pattern (tier 3,
+  capture=true arms first), scope_sweep (host-stepped, ~2,000 steps/s), source "pattern", GEN exact frequency, report
+  kinds log / pattern; 549 tests; README 40 tools. Note: the self-test's fast square is 200 MHz / 201 now (an even period
+  puts every edge on the same core, so the T4 interleave check lost its information: bench item). Main with fw-d5 +
+  mcp-d6: host tests green, check_vectors OK, gcc10 builds (817,152 B), ruff clean; pushed when pytest finishes.
 - fw-d5 re-push 2bd7042 merged 10:01 as 238ee86 (local only): host tests green except test_bode.py (PointPlan.period comes
   with mcp-d6's bode.py), check_vectors OK; main is pushed together with mcp-d6 so CI stays green. fpga-d2's final rule: a
   commit during step k applies from step k+3, step 0 starts about 35-40 ns after the start write (the model follows).
