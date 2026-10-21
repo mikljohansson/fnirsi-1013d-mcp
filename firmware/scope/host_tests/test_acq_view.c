@@ -317,6 +317,62 @@ static void test_stopped(void)
       }
 }
 
+//ui-type: two notice slots, the time/div's first, each for its ACQ_NOTICE_MS; nothing lost, a new change replaces the queue
+static void test_notice_queue(void)
+{
+  state(3000, 7, 27, 1);
+
+  //One change, two notices: the time/div's shows first, the Width's after its time
+  acq_view_notice_queue(0, "Time/div set to ", "1us", " for this rate");
+  acq_view_notice_queue(1, "Width set to ", "5us", " for this rate");
+  T_STR(acq_view_notice(), "Time/div set to 1us for this rate");
+  timer0ticks += ACQ_NOTICE_MS - 1;
+  T_STR(acq_view_notice(), "Time/div set to 1us for this rate");
+  timer0ticks += 1;
+  T_STR(acq_view_notice(), "Width set to 5us for this rate");
+  timer0ticks += ACQ_NOTICE_MS - 1;
+  T_STR(acq_view_notice(), "Width set to 5us for this rate");
+  timer0ticks += 1;
+  T_TRUE(acq_view_notice() == 0);
+
+  //A trigger notice alone shows at once; a second one replaces it
+  acq_view_notice_queue(1, "Idle set to ", "5us", " for this rate");
+  T_STR(acq_view_notice(), "Idle set to 5us for this rate");
+  acq_view_notice_queue(1, "Idle set to ", "10us", " for this rate");
+  T_STR(acq_view_notice(), "Idle set to 10us for this rate");
+  timer0ticks += ACQ_NOTICE_MS;
+  T_TRUE(acq_view_notice() == 0);
+
+  //A new time/div notice drops a pending trigger notice (a new change replaces the queue) and replaces a showing one,
+  //which then has its own full time
+  acq_view_notice_queue(0, "Time/div set to ", "1us", " for this rate");
+  acq_view_notice_queue(1, "Width set to ", "5us", " for this rate");
+  acq_view_notice_queue(0, "Time/div set to ", "2us", " for this rate");
+  T_STR(acq_view_notice(), "Time/div set to 2us for this rate");
+  timer0ticks += ACQ_NOTICE_MS;
+  T_TRUE(acq_view_notice() == 0);
+  acq_view_notice_queue(0, "Time/div set to ", "1us", " for this rate");
+  T_STR(acq_view_notice(), "Time/div set to 1us for this rate");
+  timer0ticks += 1000;
+  acq_view_notice_queue(0, "Time/div set to ", "5us", " for this rate");
+  T_STR(acq_view_notice(), "Time/div set to 5us for this rate");
+  timer0ticks += ACQ_NOTICE_MS - 1;
+  T_STR(acq_view_notice(), "Time/div set to 5us for this rate");
+  timer0ticks += 1;
+  T_TRUE(acq_view_notice() == 0);
+
+  //A trigger notice queued while the time/div's shows waits for it
+  acq_view_notice_queue(0, "Time/div set to ", "1us", " for this rate");
+  T_STR(acq_view_notice(), "Time/div set to 1us for this rate");
+  timer0ticks += 2000;
+  acq_view_notice_queue(1, "Width set to ", "5us", " for this rate");
+  T_STR(acq_view_notice(), "Time/div set to 1us for this rate");
+  timer0ticks += 2000;
+  T_STR(acq_view_notice(), "Width set to 5us for this rate");
+  timer0ticks += ACQ_NOTICE_MS;
+  T_TRUE(acq_view_notice() == 0);
+}
+
 //The snap notice keeps its words
 static void test_snap_notice(void)
 {
@@ -485,6 +541,7 @@ int main(void)
   test_hand_rate_and_boxes();
   test_stopped();
   test_snap_notice();
+  test_notice_queue();
   test_owner_tap();
   test_spectrum_tap();
   test_tb_for_rate();

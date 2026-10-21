@@ -151,8 +151,13 @@ typedef struct
   uint8 untrig;               //the latest record ended on the auto time-out
   uint8 running;
   uint8 xy;                   //X-Y view
+  uint8 trig_type;            //ui-type: the trigger type armed (fpga_bus.h FPGA_TRIG_*: 0 edge, 1 pulse width, 2 Nth edge)
+  uint8 trig_idle;            //Nth edge with an idle time (H != 0)
 } ui_warn_in;
 
 const char *ui_scope_warning(const ui_warn_in *w);
+
+//The "No trigger" hint per trigger type (ui-type): the settings to check
+const char *ui_no_trigger_hint(uint8 trig_type, uint8 idle_on);
 
 #endif

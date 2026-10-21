@@ -536,6 +536,27 @@ static void test_warnings(void)
   T_STR(ui_scope_warning(&w), "");                 //stopped: the frozen record is not a live problem
   w.running = 1;
 
+  //ui-type (docs/plans/ui-rows.md 2.6): the hint names the settings of the trigger type to check; every one fits the
+  //420 px warning box in the 13 px font it is drawn with (and in the 16 px font the note measured)
+  w.trig_type = 1;
+  T_STR(ui_scope_warning(&w), "No trigger: check the level and Width");
+  w.trig_type = 2;
+  T_STR(ui_scope_warning(&w), "No trigger: check the level and N");
+  w.trig_idle = 1;
+  T_STR(ui_scope_warning(&w), "No trigger: check the level, N and Idle");
+  w.trig_type = 3;                                 //the host's timeout: the plain hint
+  T_STR(ui_scope_warning(&w), "No trigger: check the trigger level");
+  T_STR(ui_no_trigger_hint(0, 1), "No trigger: check the trigger level");
+  T_STR(ui_no_trigger_hint(1, 1), "No trigger: check the level and Width");
+  T_STR(ui_no_trigger_hint(2, 0), "No trigger: check the level and N");
+  T_STR(ui_no_trigger_hint(2, 1), "No trigger: check the level, N and Idle");
+  T_TRUE(ui_text_width(&font_3, ui_no_trigger_hint(2, 1)) <= 420);
+  T_TRUE(ui_text_width(&font_2, ui_no_trigger_hint(2, 1)) <= 420);
+  printf("hint \"%s\": %u px in font_3, %u px in font_2\n", ui_no_trigger_hint(2, 1),
+         ui_text_width(&font_3, ui_no_trigger_hint(2, 1)), ui_text_width(&font_2, ui_no_trigger_hint(2, 1)));
+  w.trig_type = 0;
+  w.trig_idle = 0;
+
   w.over[1] = 1;                                   //CH2 off: its flag means nothing
   T_STR(ui_scope_warning(&w), "No trigger: check the trigger level");
   w.en[1] = 1;

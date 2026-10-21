@@ -68,8 +68,13 @@ int32 acq_view_slider_pos(int32 start, int32 dx);
 //(slider_ov.h sov_jump; the position unchanged inside the window, above the row, or with no to-scale window)
 int32 acq_view_slider_jump(int32 pos, int32 x, int32 y);
 
-//The snap notice to draw now, or 0; the first call after a snap starts its ACQ_NOTICE_MS
+//The snap notice to draw now, or 0; the first call after a snap starts its ACQ_NOTICE_MS. Two slots (ui-type): the
+//time/div's notice (slot 0) shows before the trigger's (slot 1, "Width set to 5us for this rate"), each for its time
 const char *acq_view_notice(void);
+
+//Queue a notice (head, mid and tail joined) in a slot: a new notice replaces its slot's, a time/div notice also drops a
+//pending trigger notice
+void acq_view_notice_queue(int slot, const char *head, const char *mid, const char *tail);
 
 //fw 0.2.84: the ACQ menu's memory depth chips that can be chosen, bit i for (i + 1) x 3000 samples (i 0 .. 4): those
 //within the record the bitstream holds (`max_total`) and, with the decimation Filter on, within the 16-bit layout's
