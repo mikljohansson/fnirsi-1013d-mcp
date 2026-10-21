@@ -1598,6 +1598,12 @@ static int h_force(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *res
   if(s->acq_state != PC_ACQ_ARMED)
     return pc_error(s, PC_E_STATE, 0, "not armed");
 
+  //fw-left: a sequencer run is ended by STOP (pc_hal_seq_stop: no restarts, then 0x1A = 0 with the arm's 0x0E). The
+  //force's 0x0E = 0 would stay for every later segment (each cap_rst restarts time_base_cnt), ending them after about
+  //two words
+  if(s->cap_next.seq_mode)
+    return pc_error(s, PC_E_STATE, 0, "sequencer run: STOP ends it");
+
   pc_hal_force();                                                                    //BENCH: T7
 
   *rl = pc_status_body(s, resp);
