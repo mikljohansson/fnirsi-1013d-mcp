@@ -581,7 +581,7 @@
             8'h76: //Source, 1 byte: bits 1..0 = 0 CH1, 1 CH2, 2 / 3 EXT (as 0x15; 3 is EXT here, not the marker)
             8'h77: //Polarity per type, 1 byte: bit 0 (as 0x16)
             8'h78: //Level, 1 byte, raw ADC code (as 0x17; the legacy stream)
-            8'h79: //Level, 2 bytes high byte first, 16-bit (as 0x55; K >= 1)
+            8'h79: //Level, 2 bytes high byte first, 16-bit (as 0x55; K >= 1; with peak detect level << 8, as 0x55)
             8'h7A: //Type, 1 byte: bits 2..0 = 0 edge, 1 pulse width, 2 Nth edge, 3 timeout (4 .. 7 act as edge); bit 3
                    //pulse width longer than N (as 0x5E)
             8'h7B: //N, 3 bytes high byte first (as 0x5F)

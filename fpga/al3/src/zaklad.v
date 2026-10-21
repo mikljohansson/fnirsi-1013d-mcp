@@ -1938,8 +1938,11 @@ assign sampling_enable = ~(
   wire        pq_h_z   = (pt_h == 24'd0);
 
   //write clock side: the newest stream sample against the engine's own level, on the pre-detect side (as q_a_adc)
+  //(peak detect, 0x153C: the window max for a rising detection, the min for a falling one, as the high byte, as the
+  //capture's dec_trig_sample does; the firmware writes 0x79 = level << 8 then)
   wire [7:0]  pq_raw8  = pt_src[0] ? adc2A_w : adc1A_w;
-  wire [15:0] pq_raw16 = pt_src[0] ? dec_out2 : dec_out1;
+  wire [15:0] pq_word  = pt_src[0] ? dec_out2 : dec_out1;
+  wire [15:0] pq_raw16 = peak_act ? { (pq_edge ? pq_word[7:0] : pq_word[15:8]), 8'h00 } : pq_word;
   reg         pq_s = 0;
   always @(posedge sample_write_clock)
     if(swc_adv)
