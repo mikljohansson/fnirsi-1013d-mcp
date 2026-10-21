@@ -276,6 +276,38 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-d4 (Opus, dispatched 09:03, done 09:3x, merged 09:40 as a304273): the streaming logger: LOG_START 16 B / LOG 48 B /
+  LOG_READ (16 B header + whole words, oldest first, never across a gap) / LOG_STOP, 8 MiB NOLOAD .logring in DDR, acq_state
+  5, the contract tiers at 500 kB/s with 52-82 % CPU duty in the host model, gap and lap flags, the Scope view's "Logging
+  to the host" notice with no UI pass while logging, auto-stop 10 s without a LOG_READ; register semantics agreed with
+  fpga-d1 (0x6A = next word to read, full detector, 0x38 byte 0 = { stream, lap, 0, W[12:8] }), bytes agreed with mcp-d6;
+  test_log 344, 151 vectors; gcc10 488d2827 (provisional). Deviations: LOG_READ returns at once, header 4..7 = the FPGA
+  word counter, features bit 11, LOG_START needs the Scope view and a format matching the Filter.
+- Coordinator 09:42: the fw-d4 merge brought 30 files in with CRLF on every line (and Atlan's vendor files had been CRLF
+  since the start); the coordinator's CR check with the shell escape never worked. Fixed 0f177ca: every text file LF,
+  .gitattributes text=auto eol=lf (al_ip sources excluded), merge.renormalize on; host tests, vectors and the gcc10
+  build re-verified after the normalisation.
+- mcp-c8b (Opus, dispatched 09:00, done 09:1x, merged 09:17 as 2c29614): counter level 0 = follow (simulator), the host bug where
+  read_counter re-sent the level it read and pinned it on any gate change (fixed: the client remembers the level it set;
+  scope_counter level='trigger'), peak detect aligned with all 41 decim_peak device vectors (legacy cases write nothing,
+  FIR dropped / refused with peak, settle 11 N x 5 ns + 1 us), the simulator's GET_CAL gated flag follows the divider,
+  README 35 tools / release notes 37 and 35; 524 tests. Remaining host-vs-firmware differences are timing-of-application
+  only (the firmware applies a counter configuration on the next pass; the simulator at once).
+- Coordinator 09:03: the fw-d5 and mcp-d6 briefs wrongly named a SET_SWEEP 0x0218; the contract has none (the chirp is the
+  host stepping SET_GEN through the double buffer). fw-d5 caught it; both agents told to follow the contract.
+- fw-d4 / fw-d5 / mcp-d6 (Opus, dispatched 09:03-09:05, branches of the same names): 0x153D firmware and host from the
+  contract in parallel with the RTL: D4 LOG_START / LOG_READ / LOG_STOP with the DDR ring, acq_state 5, the contract
+  rates; D5 the generator as a two-step fractional pattern behind SET_GEN (P16 / H16), SET_PATTERN / SET_PATTERN_TRIGGER /
+  SET_SWEEP, Bode P = 4 M; D6 MCP 1.27 (scope_log, scope_pattern, scope_sweep, source "pattern", simulator). The firmware
+  writes its bytes into protocol.md row 67; D6 matches at the merge (as C5 / C8). PC_FW_FPGA_VERSION stays 0x153C until
+  the 0x153D integration (D3).
+- fpga-d1 / fpga-d2 (Fable, dispatched 09:0x, branches of the same names): 0x153D items D1 (logger RTL: 0x69 / 0x6A / 0x38,
+  stream gating, word counter, lap; tb_stream step 17) and D2 (pat_gen: 8 steps u32 + u16 fraction, double buffer, bursts /
+  repeat / gap / continuous, marker as trigger source 0x15 = 3, the DDS removed, the pattern trigger engine 0x76-0x7D /
+  0x42 as a third trig_qual instance with the routed fallback if timing fails; tb_pattern step 18). Both start from main
+  with C1 + C3 (C2 and C4 land in parallel); C4 owns the version byte, the contract file, dist and the C0 cruft removal.
+- mcp-c8b (Opus, dispatched 09:0x, branch mcp-c8b): host follow-ups to fw 0.2.104: simulator counter level 0 = follow, the
+  full-class peak correction and the "not written" legacy case, the tool count in README / release notes, mcp/AGENTS.md.
 - fw 0.2.104 numbered 08:5x (built for 0x153C: fw-c5, fw-c6, fw-c7, ui-type, ui-sample merged; ui-sample done 08:5x, merged
   08:57 as 2d4861f): host tests green on merged main, check_vectors OK (140); gcc10 sha256 7c640ab5fe1f9b1c75dc321c96038e7dc3fe8fb88fd9e105e81cf344351d2cbc pinned as
   backups/fw-0.2.104_7c640ab5.bin. Needs the 0x153C bitstream on the unit (C4 pending on fpga-c2); on 0x153B it shows the

@@ -39,6 +39,14 @@
 //     restarts the gate without publishing, a same-value write does not. CH1 / CH2 see edges only when the low code is
 //     below level - hysteresis and the high code at or above the level. The mixed-age transient of a 0x0D / 0x53 write
 //     is not modelled (the firmware's rule is what the tests check).
+//   - D4 logger (0x153D, fw-d4; docs/plans/fpga-0x153c.md sections 2.1, 2.2, 6.1): 0x69 bit 0 stream (the capture after
+//     the release writes one word per write clock edge for ever, no trigger, no stop; words carry their index as in the
+//     capture model, or the peak pairs), bit 1 clears the lap flag; 0x6A the reader position (the next word to read);
+//     fpga-d1's detector: occ = (W - 0x6A) mod 8192 at a 0x6A write, +1 per word up to 8192, a word written at 8192 sets
+//     the lap flag; 0x01 = 1 zeroes 0x6A and occ, not the flag; read 0x38 = the 8-byte snapshot at the command byte
+//     ({ streaming, lap, 0, W[12:8] }, W[7:0], u32 words since the release, u16 occ). With 0x69 = 0 the capture
+//     returns to the normal rules (auto with 0x0E = 0: the writes stop at the next edge). Older versions read 0. strobe_ns != 0
+//     makes every strobe take exactly that long (the drain cost test runs at the measured 0.30 / 0.35 us per byte).
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -123,6 +131,16 @@ typedef struct
   uint8_t  snap[16];                //the 0x35 snapshot
   uint8_t  snap_seq;                //m_seq: the sequence number of the previous snapshot
 
+  //D4 logger (0x153D)
+  uint8_t  reg_69;                  //bit 0 stream
+  uint16_t reg_6a;                  //reader position
+  uint8_t  lap;
+  uint32_t occ;                     //unread words 0..8192 (fpga-d1's detector)
+  uint32_t laps_seen;               //lap flag set events
+  uint8_t  log_snap[8];             //the 0x38 snapshot
+  uint32_t strobe_ns;               //0: random 41..298 ns per strobe
+  //D4 logger end
+
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;
   uint32_t seed;
@@ -140,6 +158,7 @@ uint8_t fm_raw_sample(uint32_t ch, uint64_t j);                        //synthet
 void    fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx); //{ max, min } of word w's window
 void fm_fill(uint32_t salt);                //distinct bytes per word and lane
 void fm_advance_ns(uint32_t ns);            //idle time (e.g. the capture after the release)
+void fm_advance_ps(uint64_t ps);            //D4 logger: the same in ps
 int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the first matching write at or after from, -1
 //fw-c7: the counter's stream on source src (0 CH1, 1 CH2, 2 EXT): a square wave of period_ns / high_ns (multiples of
 //5 ns) starting at phase_ns, codes lo / hi; period 0 = a constant low level

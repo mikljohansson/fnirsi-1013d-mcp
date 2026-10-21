@@ -956,6 +956,17 @@ def signal_edges(sig: Signal, gen: "GenState", high: float, low: float
     return None
 
 
+def peak_mid_codes(mn: np.ndarray, mx: np.ndarray, gain_a: int, gain_b: int, off_a: int, off_b: int) -> np.ndarray:
+    """pc_peak_mid (fw-c6): the processed trace sample of a peak pair, through the mean of the two cores' Q16
+    correction of the full clock class (gain = round((gain_a + gain_b) / 2), off = (off_a + off_b) / 2 truncated):
+    clamp(((min + max) gain + 2 off + 2^16) >> 17)."""
+    gain = (int(gain_a) + int(gain_b) + 1) // 2
+    s = int(off_a) + int(off_b)
+    off = s // 2 if s >= 0 else -((-s) // 2)
+    v = ((np.asarray(mn, np.int64) + np.asarray(mx, np.int64)) * gain + 2 * off + 65536) >> 17
+    return np.clip(v, 0, 255).astype(np.uint8)
+
+
 def gate_count(period: float, rising: list[float], falling: list[float], t_start: float, gate: float
                ) -> tuple[int, int, int]:
     """The counter's E, T, W (5 ns clocks) for the rising edges of a periodic signal inside [t_start, t_start + gate]:
@@ -1151,7 +1162,8 @@ class Device:
         self.cap_counts_next: list[tuple[int, int, int, int]] = []
         #: protocol 1.26: the trigger hold-off (0x1B) still to run at the next arm, from the latest capture's trigger
         #: (across MCU re-arms, as the FPGA's counter; cleared by 0x66 + ARM) and the counter's configuration (the
-        #: firmware's boot values: gate 100 ms, the trigger source, level 128 / hysteresis 6) and last read sequence
+        #: firmware's boot values: gate 100 ms, the trigger source, level 0 = follow the trigger level, hysteresis 6)
+        #: and last read sequence
         self.holdoff_left_s = 0.0
         #: 0x66 = 1 written (boot, SET_TRIGGER hold-off, SET_TRIGGER2): the next 0x01 = 1 clears a running hold-off
         self.holdoff_clear_pending = True
@@ -1159,7 +1171,7 @@ class Device:
         self.trig_status: tuple[int, int, int] = (0, 0, 0)
         self.counter_gate = 2
         self.counter_source = 0
-        self.counter_level = P.COUNTER_DEFAULT_LEVEL
+        self.counter_level = P.COUNTER_LEVEL_FOLLOW  # as configured; counter_level_now() is the one in effect
         self.counter_hyst = P.COUNTER_DEFAULT_HYST
         self.counter_seq_read: int | None = None
         #: protocol 1.27 (FPGA 0x153D): the pattern's MCU start (device time; None = not started), the commit not yet
@@ -1377,6 +1389,16 @@ class Device:
                     out["gain"][k] = round(out["gain"][k] * f)
                     out["off"][k] = round(out["off"][k] * f - 65536 * (s * (dq - 128 * eq) / 2 + cmq))
         return out
+
+    def _peak_corr(self, ch: int, settings: Settings) -> tuple[int, int, int, int]:
+        """fpga_channel_correction_full (fw-c6): the 8-bit readout's per-core Q16 gain / offset of the full clock class
+        (the correction at divider 0, v4 tracker included) whatever the divider: the ADCs run at 200 MSa/s under peak
+        detect, while GET_CAL 92..107 report the divider's (gated) class."""
+        if not self.cfg.cal_v3:
+            c = self.cal[ch]
+            return 65536, 65536, c.adc_a_comp * 65536, c.adc_b_comp * 65536
+        v = self._v3_corr(ch, replace(settings, divider=0))
+        return v["gain"][0], v["gain"][1], v["off"][0], v["off"][1]
 
     def _corr16(self, ch: int, settings: Settings) -> tuple[int, int]:
         """16-bit path (gain16 Q16, corr16 in 1/16 code) the firmware applies: v3, else 1 and 8 x (comp_a + comp_b)."""
@@ -2641,11 +2663,9 @@ class Device:
         capture: the converted codes round(sample x 2^S / N^K + (adc_a_comp + adc_b_comp) / 2), 0..255."""
         Pw, Tw = self.capture_geometry
         dec = self.capture_decim
-        if dec.k and dec.peak:  # 1.26: the midpoint of { max, min } through the 8-bit mean-core correction
+        if dec.k and dec.peak:  # 1.26: the midpoint of { max, min } through the full class's mean-core correction
             w = self.build_trace16(ch).astype(np.int64)
-            mid = ((w & 0xFF) + (w >> 8)) / 2.0
-            cal = self.cal[ch]
-            tr = np.clip(np.rint(mid + (cal.adc_a_comp + cal.adc_b_comp) / 2.0), 0, 255).astype(np.uint8)
+            tr = peak_mid_codes(w & 0xFF, w >> 8, *self._peak_corr(ch, settings))
             return tr, (1 if settings.channels[ch].invert else 0)
         if dec.k:
             out = self.build_trace16(ch).astype(np.int64)
@@ -2934,7 +2954,8 @@ class Device:
         last = self.decim_written
         filt = P.DECIM_PEAK if s.peak and self.trig26_on else s.decim & 3
         sb = (lambda d: d.shift_byte) if self.trig26_on else (lambda d: d.shift)  # 1.26: the peak bits in the shift byte
-        return P.DecimState(filt, (s.decim & (P.DECIM_FLAGS | P.DECIM_SET_FIR)) >> 2, nxt.status, sb(nxt), nxt.n, nxt.gain,
+        flags = s.decim & (P.DECIM_FLAGS | (0 if filt == P.DECIM_PEAK else P.DECIM_SET_FIR))  # the kept FIR masked
+        return P.DecimState(filt, flags >> 2, nxt.status, sb(nxt), nxt.n, nxt.gain,
                             s.divider, nxt.rate(s.divider), last.status if last else 0xFF, sb(last) if last else 0,
                             last.status if last else 0, sb(last) if last else 0, P.DECIM_MAX_TOTAL, nxt.why,
                             self.ext_shift_for(nxt, s.divider, s.trigger.source, s.trigger.pretrigger_samples),
@@ -2947,16 +2968,18 @@ class Device:
     def _cmd_set_decim(self, req: P.Frame) -> P.Frame:
         r = P.SetDecimReq.unpack(req.payload)
         if r.filter > P.DECIM_PEAK:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..4")
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "filter 0..3, 4 peak")
         if r.filter == P.DECIM_PEAK and not (self.caps & P.Caps.PEAK_DETECT):
             raise _DevErr(P.Status.E_UNSUPPORTED, 0, "peak detect needs caps PEAK_DETECT (protocol 1.26)")
         if r.flags & ~0x0F:  # bits 0-2 the swap and NEG bits, bit 3 the FIR (1.11)
             raise _DevErr(P.Status.E_BAD_ARG, 1, "flags")
+        if r.filter == P.DECIM_PEAK and r.flags & P.SetDecimReq.FIR:
+            raise _DevErr(P.Status.E_BAD_ARG, 1, "FIR with peak detect")
         if r.filter and self.settings.trigger.total_samples > P.DECIM_MAX_TOTAL:
             raise _DevErr(P.Status.E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first")
-        if r.filter == P.DECIM_PEAK:  # 1.26: the Sample row; the Filter word keeps its K for the way back
+        if r.filter == P.DECIM_PEAK:  # 1.26: the Sample row; the Filter word keeps its K and FIR for the way back
             self.settings.peak = 1
-            self.settings.decim = (self.settings.decim & 3) | ((r.flags & 0x0F) << 2)
+            self.settings.decim = (self.settings.decim & (3 | P.DECIM_SET_FIR)) | ((r.flags & 0x07) << 2)
         else:
             self.settings.peak = 0
             self.settings.decim = r.filter | ((r.flags & 0x0F) << 2)
@@ -3276,6 +3299,13 @@ class Device:
         self.holdoff_clear_pending = True  # 0x66 = 1: a new definition is a new session
         return self._ok(req, self.trigger().pack())
 
+    def counter_level_now(self) -> int:
+        """The counter's Schmitt level in effect: the configured code, or with level 0 the trigger level (fw-c7
+        pc_glue_counter_pass: scopesettings.triggerlevel clamped to 0..255, taken every main-loop pass)."""
+        if self.counter_level != P.COUNTER_LEVEL_FOLLOW:
+            return self.counter_level
+        return min(255, max(0, int(self.settings.trigger.level)))
+
     def counter_snapshot(self) -> P.CounterResp:
         """The 0x35 snapshot (protocol 1.26): the latest complete gate of the counter on its source, from the signal's
         periodic edges through the Schmitt thresholds (``signal_edges`` / ``gate_count``), min / max from the noise-free
@@ -3286,7 +3316,8 @@ class Device:
         if src == 0:
             src = (1, 2, 3)[min(self.settings.trigger.source, 2)]
         flags = (P.COUNTER_F_EXT if src == 3 else 0) | (P.COUNTER_F_CH2 if src == 2 else 0)
-        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, self.counter_level,
+        level = self.counter_level_now()
+        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, level,
                              self.counter_hyst, 0)
         if gate_s <= 0:
             return resp
@@ -3306,8 +3337,8 @@ class Device:
             ch = src - 1
             sig = self.cfg.signals[ch]
             cs = self.settings.channels[ch]
-            high = self._code_to_volts(ch, self.counter_level, self.settings)
-            low = self._code_to_volts(ch, self.counter_level - self.counter_hyst, self.settings)
+            high = self._code_to_volts(ch, level, self.settings)
+            low = self._code_to_volts(ch, level - self.counter_hyst, self.settings)
             dc = sig.dc if cs.coupling == 1 else 0.0
             edges = signal_edges(sig, gen, high + dc, low + dc)
             # min / max of the raw codes over the gate: the noise-free extremes of one period (or the level) plus the
@@ -3349,7 +3380,7 @@ class Device:
                 raise _DevErr(P.Status.E_BAD_ARG, 1, f"gate {r.gate}")
             if r.source >= len(P.COUNTER_SOURCES):
                 raise _DevErr(P.Status.E_BAD_ARG, 2, f"source {r.source}")
-            if r.hysteresis > r.level:
+            if r.level != P.COUNTER_LEVEL_FOLLOW and r.hysteresis > r.level:  # level 0 follows the trigger level
                 raise _DevErr(P.Status.E_BAD_ARG, 4, "hysteresis > level")
             self.counter_gate, self.counter_source = r.gate, r.source
             self.counter_level, self.counter_hyst = r.level, r.hysteresis
@@ -4007,7 +4038,7 @@ class Device:
         s = self.settings
         d = s.channels[ch].dcoffset
         cls = self._clock_class(s)
-        r.cal_flags = P.CAL_GATED if cls == P.CAL_CLASS_GATED else 0
+        r.cal_flags = P.CAL_GATED if s.divider else 0  # the 8-bit readout's class: by the divider (acal_correction)
         r.cal_shift = 128 - P.cal_target(d, c.dc_shift_value)
         if not self.cfg.cal_v3:
             r.cal_version, r.comp_a, r.comp_b = 1, c.adc_a_comp, c.adc_b_comp

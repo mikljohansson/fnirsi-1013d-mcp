@@ -74,6 +74,8 @@ SRCS += fpga_bus.c
 # fw-c7: the FPGA 0x153C hardware counter: boot configuration, the once-per-pass 0x35 reader, the derived values
 # (host_tests/test_fpga_bus.c test_counter)
 SRCS += fpga_counter.c
+# D4 logger (fw-d4): the 0x153D streaming logger's drain and its DDR ring
+SRCS += fpga_log.c pc_logring.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)

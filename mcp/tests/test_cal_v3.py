@@ -73,7 +73,7 @@ def test_v3_volts_on_both_cores_and_classes(sim_factory, divider, filt):
             s.set_decim(filt)
             cal = s.get_cal(0)
             assert cal.cal_version == (3 if v3 else 1)
-            assert bool(cal.cal_flags & P.CAL_GATED) == (divider > 0 and filt == "off")
+            assert bool(cal.cal_flags & P.CAL_GATED) == (divider > 0)  # the 8-bit readout's class, filter or not
             cap = s.capture(["CH1"])
             c = cap.channels["CH1"]
             lsb = c.volts_per_lsb
