@@ -276,6 +276,17 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-d4 (Opus, dispatched 09:03, done 09:3x, merged 09:40 as a304273): the streaming logger: LOG_START 16 B / LOG 48 B /
+  LOG_READ (16 B header + whole words, oldest first, never across a gap) / LOG_STOP, 8 MiB NOLOAD .logring in DDR, acq_state
+  5, the contract tiers at 500 kB/s with 52-82 % CPU duty in the host model, gap and lap flags, the Scope view's "Logging
+  to the host" notice with no UI pass while logging, auto-stop 10 s without a LOG_READ; register semantics agreed with
+  fpga-d1 (0x6A = next word to read, full detector, 0x38 byte 0 = { stream, lap, 0, W[12:8] }), bytes agreed with mcp-d6;
+  test_log 344, 151 vectors; gcc10 488d2827 (provisional). Deviations: LOG_READ returns at once, header 4..7 = the FPGA
+  word counter, features bit 11, LOG_START needs the Scope view and a format matching the Filter.
+- Coordinator 09:42: the fw-d4 merge brought 30 files in with CRLF on every line (and Atlan's vendor files had been CRLF
+  since the start); the coordinator's CR check with the shell escape never worked. Fixed 0f177ca: every text file LF,
+  .gitattributes text=auto eol=lf (al_ip sources excluded), merge.renormalize on; host tests, vectors and the gcc10
+  build re-verified after the normalisation.
 - mcp-c8b (Opus, dispatched 09:00, done 09:1x, merged 09:17 as 2c29614): counter level 0 = follow (simulator), the host bug where
   read_counter re-sent the level it read and pinned it on any gate change (fixed: the client remembers the level it set;
   scope_counter level='trigger'), peak detect aligned with all 41 decim_peak device vectors (legacy cases write nothing,
