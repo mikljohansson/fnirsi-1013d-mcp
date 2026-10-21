@@ -276,6 +276,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- Coordinator 10:2x: fpga-d2 reported its detached WSL runs dying with empty logs (a broad `pkill -f` from another agent on
+  the shared WSL instance); rule sent to fpga-c4 and fpga-d1 and to be written into fpga/al3/AGENTS.md "Build" by C4: kill
+  only by PID or by a pattern with your own work directory, never by vvp / run.sh / td / build.sh / tb_.
 - fpga-c4 (Fable, dispatched 09:54, branch fpga-c4): 0x153C integration: the C0 cruft removal (section 13 list, 0x1B kept,
   div20), version byte 0x3C, the timing re-roll on the merged source (known misses on q_pass / pp_i), contract_0x153C.txt,
   run.sh 16 steps on two seeds, dist entry as a candidate (min_firmware 0.2.104), BITSTREAMS.md row, AGENTS.md status
