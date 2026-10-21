@@ -2,14 +2,16 @@
 
 It models what the host can observe through docs/protocol.md:
 
-- One FPGA bitstream (section 5.1, fw 0.2.102 / protocol 1.25): the firmware is built for AL3 0x153B
-  (``FPGA_VERSION``: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, DDS generator, EXT
+- One FPGA bitstream (section 5.1, protocol 1.25): the firmware is built for AL3 ``P.FW_FPGA_VERSION`` (0x153C
+  since protocol 1.26: 8192-word ring, 16382 samples per channel, programmable pre-trigger/total, DDS generator, EXT
   trigger, decimation filter with 16-bit samples, CIC compensation FIR, sequencer, the per-capture encode check
-  (GET_HEALTH 88..103, event 21; hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``) and the ADC capture
+  (GET_HEALTH 88..103, event 21; hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``), the ADC capture
   stages (GET_HEALTH 104..123, GET_CAL 356..363, event 23; hooks ``Device.cap_counts_next``, ``cap_stored`` +
-  ``cap_boot()``)). ``SimConfig.fpga_version`` (``--fpga-version 0x1532``) is the word the simulated FPGA reports:
-  any other value is a mismatch, flagged in GET_INFO 78 / GET_HEALTH 126, and every command outside
-  ``P.BASIC_CMDS`` answers E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153B".
+  ``cap_boot()``), and the 0x153C trigger types / hold-off (``TrigQual``, ``_search_trigger``, ``holdoff_left_s``),
+  peak detect (``_peak_samples``) and hardware counter (``counter_snapshot``) of protocol 1.26).
+  ``SimConfig.fpga_version`` (``--fpga-version 0x153B``) is the word the simulated FPGA reports: any other value is
+  a mismatch, flagged in GET_INFO 78 / GET_HEALTH 126, and every command outside ``P.BASIC_CMDS`` answers
+  E_UNSUPPORTED detail 1 with ``P.FPGA_MISMATCH_TEXT``.
 - The on-device Bode plot (protocol 1.20, BODE_CTRL / READ_BODE, display mode 5) on every bitstream with the filter
   and the generator: ``SimBode`` runs the host tool's ``bode.BodeRunner`` against this device through an in-process
   link (the firmware's bode_sweep.c is a port of it), so device and host sweeps of a ``dut_in`` / ``dut_out`` DUT
@@ -69,7 +71,7 @@ log = logging.getLogger("fnirsi1013d.sim")
 # The bitstream (fw 0.2.102, protocol 1.25: the firmware supports FW_FPGA_VERSION only; the simulated scope is an
 # AL3A10 running it unless SimConfig.fpga_version says otherwise, which models the mismatch)
 
-#: the version word the simulated firmware is built for and the geometry that goes with it (AL3 0x153B)
+#: the version word the simulated firmware is built for and the geometry that goes with it (AL3, P.FW_FPGA_VERSION)
 FPGA_VERSION = P.FW_FPGA_VERSION
 RING_WORDS = 8192
 MAX_TOTAL_SAMPLES = 16382
@@ -423,23 +425,25 @@ class TriggerState:
     #: FPGA 0x1B in 5 ns units: the trigger hold-off since 0x153C (caps HOLDOFF)
     holdoff: int = 0
     auto_timeout: int = 0  # 0 = firmware default
-    #: 1.26 (0x5E / 0x5F / 0x60 / 0x66): type P.TRIG_*, pulse width "longer", N, H / N2, the 0x153E fields, the one-shot
-    #: hold-off clear
+    #: 1.26 (0x5E / 0x5F / 0x60): type P.TRIG_*, pulse width "longer", N, H (the 0x153E fields stay 0 on 1.26)
     ttype: int = P.TRIG_EDGE
     longer: int = 0
-    n: int = 1
+    n: int = 0
     h: int = 0
     level2: int = 0
     range_: int = 0
     both_cores: int = 0
-    clear_holdoff: int = 0
 
     def trigger2(self) -> P.Trigger2:
         """The GET_TRIGGER 28..51 block."""
         flags = (P.TRIG2_F_LONGER if self.longer else 0) | (P.TRIG2_F_RANGE if self.range_ else 0) | \
-            (P.TRIG2_F_BOTH_CORES if self.both_cores else 0) | (P.TRIG2_F_CLEAR_HOLDOFF if self.clear_holdoff else 0)
+            (P.TRIG2_F_BOTH_CORES if self.both_cores else 0)
         return P.Trigger2(self.ttype, self.edge, flags, self.source, self.n, self.h, self.level, self.level2,
-                          self.holdoff * P.TRIG2_HOLDOFF_UNIT_NS, 0)
+                          self.holdoff, 0)
+
+    def capture_trig2(self) -> P.CaptureTrig2:
+        """The GET_CAPTURE_INFO 96..111 block."""
+        return P.CaptureTrig2(self.ttype, self.trigger2().flags, self.n, self.h, self.holdoff)
 
 
 @dataclass
@@ -992,6 +996,10 @@ class Device:
         #: (across MCU re-arms, as the FPGA's counter; cleared by 0x66 + ARM) and the counter's configuration (the
         #: firmware's boot values: gate 100 ms, the trigger source, level 128 / hysteresis 6) and last read sequence
         self.holdoff_left_s = 0.0
+        #: 0x66 = 1 written (boot, SET_TRIGGER hold-off, SET_TRIGGER2): the next 0x01 = 1 clears a running hold-off
+        self.holdoff_clear_pending = True
+        #: GET_STATUS 48..51 (0x37, 0x34 byte 0, edges still to count): zeroed at ARM, read while a capture is in flight
+        self.trig_status: tuple[int, int, int] = (0, 0, 0)
         self.counter_gate = 2
         self.counter_source = 0
         self.counter_level = P.COUNTER_DEFAULT_LEVEL
@@ -1968,8 +1976,7 @@ class Device:
         ch = tuple((c.enable, c.range, c.coupling, c.dcoffset, c.invert, c.probe_index) for c in s.channels)
         tr = s.trigger
         return ch, s.divider, (tr.source, tr.edge, tr.level, tr.mode, tr.pretrigger_samples, tr.total_samples,
-                               tr.holdoff, tr.auto_timeout, tr.ttype, tr.longer, tr.n, tr.h, tr.level2, tr.range_,
-                               tr.both_cores), s.decim, s.peak
+                               tr.holdoff, tr.auto_timeout, tr.ttype, tr.longer, tr.n, tr.h), s.decim, s.peak
 
     def _bump_if_changed(self, before: tuple) -> None:
         if self.settings_key() != before:
@@ -2049,9 +2056,14 @@ class Device:
         self.fpga_done = False
         self.auto_timeout_flag = False
         self.run_held = False
-        if self.settings.trigger.clear_holdoff:  # 1.26: 0x66 bit 0, one shot: this 0x01 = 1 clears the hold-off timer
+        if self.holdoff_clear_pending:  # 1.26: 0x66 = 1 written by SET_TRIGGER / SET_TRIGGER2: this 0x01 = 1 clears the timer
             self.holdoff_left_s = 0.0
-            self.settings.trigger.clear_holdoff = 0
+            self.holdoff_clear_pending = False
+        tr0 = self.settings.trigger  # the qualifier status words (GET_STATUS 48..51) at the arm (fpga_model's reset state)
+        self.trig_status = (0, (tr0.ttype & 3) | (P.STATUS34_LONGER if tr0.longer else 0) |
+                            (P.STATUS34_EXT if tr0.source == 2 else 0) |
+                            (P.STATUS34_COUNTING if tr0.ttype != P.TRIG_EDGE and tr0.h == 0 else 0),
+                            max(0, (tr0.n & 0xFFFF) - 1) if tr0.ttype == P.TRIG_NTH_EDGE else 0)
         if self.seq_setting.mode != P.SEQ_OFF:
             self._start_run(self.settings.copy(), self.seq_setting)
         else:
@@ -2177,7 +2189,9 @@ class Device:
             capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
             run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0,
             ext_flags=self._ext_flags(now), display_mode=int(self.display_mode), features=int(self.features),
-            ui_average=self.ui_average_state()[0], ui_average_log2n=self.ui_average_state()[1])
+            ui_average=self.ui_average_state()[0], ui_average_log2n=self.ui_average_state()[1],
+            fpga_37=self.trig_status[0] | (P.STATUS37_HOLDOFF_RUNNING if self.holdoff_left_s > 0 else 0),
+            fpga_34=self.trig_status[1], edges_left=self.trig_status[2])
 
     def _ext_flags(self, now: float) -> int:
         if not self.caps & P.Caps.EXT_TRIGGER:
@@ -2188,9 +2202,12 @@ class Device:
             | (int(P.ExtFlags.EDGE_SEEN) if getattr(self, "capture_ext_edge", False) and self.ring_valid else 0)
 
     def status_bytes(self) -> bytes:
-        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 48 in 1.17."""
+        """GET_STATUS body as this firmware sends it: 32 bytes in the legacy (protocol 1.2) model, 48 in 1.17..1.25, 52
+        since 1.26."""
         b = self.status().pack()
-        return b if self.shared else b[:32]
+        if not self.shared:
+            return b[:32]
+        return b if self.trig26_on else b[:48]
 
     @property
     def cap_on(self) -> bool:
@@ -2240,7 +2257,7 @@ class Device:
         d = self.capture_decim
         return P.CaptureInfo(h, chans, d.status, d.shift_byte if self.trig26_on else d.shift,
                              self.ext_shift_for(d, self.capture_divider, tr.source, pre), d.n, has_decim=True,
-                             run=self.run_info())
+                             run=self.run_info(), trig2=tr.capture_trig2() if self.trig26_on else None)
 
     def run_info(self) -> P.SeqRunInfo:
         """GET_CAPTURE_INFO 76..95 (protocol 1.17) of the latest capture; since 1.26 byte 79 also says 16-bit / peak for
@@ -2920,6 +2937,7 @@ class Device:
             if r.holdoff and not (self.caps & P.Caps.HOLDOFF):
                 raise _DevErr(P.Status.E_UNSUPPORTED, 6, "hold-off not implemented by this FPGA")
             new.holdoff = r.holdoff
+            self.holdoff_clear_pending = True  # 1.26: written to 0x1B with the clear request (0x66 = 1)
         if r.mask & M.M_AUTO_TIMEOUT:
             new.auto_timeout = r.auto_timeout
         if r.mask & (M.M_PRETRIGGER | M.M_TOTAL):
@@ -2937,51 +2955,47 @@ class Device:
         return self._ok(req, self.trigger().pack())
 
     def _cmd_set_trigger2(self, req: P.Frame) -> P.Frame:
-        """SET_TRIGGER2 (protocol 1.26): the type block; every field applies (E_BAD_ARG / E_UNSUPPORTED detail =
-        P.TRIG2_FIELDS index)."""
+        """SET_TRIGGER2 (protocol 1.26, row 66; pc_cmds.c h_set_trigger2): every field written, validated in byte-offset
+        order with E_BAD_ARG detail = the offset; nothing written when a field is refused."""
         r = P.Trigger2.unpack(req.payload)
         tr = self.settings.trigger
         new = replace(tr)
-        if r.type > P.TRIG_WINDOW:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, f"type {r.type}")
-        if r.type in (P.TRIG_RUNT, P.TRIG_WINDOW) and not (self.caps & P.Caps.TRIG_RUNT_WINDOW):
-            raise _DevErr(P.Status.E_UNSUPPORTED, 0, "runt / window triggers need FPGA 0x153E (caps TRIG_RUNT_WINDOW)")
+        E = P.Status.E_BAD_ARG
+        if r.type in (P.TRIG_RUNT, P.TRIG_WINDOW):
+            raise _DevErr(E, P.TRIG2_D_TYPE, "runt / window: FPGA 0x153E")
+        if r.type > P.TRIG_TIMEOUT:
+            raise _DevErr(E, P.TRIG2_D_TYPE, "type 0..3")
         if r.polarity > 1:
-            raise _DevErr(P.Status.E_BAD_ARG, 1, f"polarity {r.polarity}")
-        if r.flags & ~P.TRIG2_FLAGS:
-            raise _DevErr(P.Status.E_BAD_ARG, 2, "flags")
-        if r.flags & (P.TRIG2_F_RANGE | P.TRIG2_F_BOTH_CORES) and not (self.caps & P.Caps.TRIG_RUNT_WINDOW):
-            raise _DevErr(P.Status.E_UNSUPPORTED, 2, "the pulse-width range and both-core flags need FPGA 0x153E")
+            raise _DevErr(E, P.TRIG2_D_POLARITY, f"polarity {r.polarity}")
+        if r.flags & (P.TRIG2_F_RANGE | P.TRIG2_F_BOTH_CORES):
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "range / both cores: FPGA 0x153E")
+        if r.flags & ~P.TRIG2_F_LONGER:
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "flags")
+        if r.flags & P.TRIG2_F_LONGER and r.type != P.TRIG_PULSE_WIDTH:
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "LONGER is for the pulse width type")
         if r.source > 2:
-            raise _DevErr(P.Status.E_BAD_ARG, 3, f"source {r.source}")
-        if r.source == 2 and not (self.caps & P.Caps.EXT_TRIGGER):
-            raise _DevErr(P.Status.E_UNSUPPORTED, 3, "EXT trigger needs caps EXT_TRIGGER")
+            raise _DevErr(E, P.TRIG2_D_SOURCE, f"source {r.source}")
         if r.type in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT) and not 1 <= r.n <= P.TRIG2_MAX_N:
-            raise _DevErr(P.Status.E_BAD_ARG, 4, f"n {r.n} not in 1..{P.TRIG2_MAX_N}")
+            raise _DevErr(E, P.TRIG2_D_N, f"N {r.n} not in 1..{P.TRIG2_MAX_N}")
         if r.type == P.TRIG_NTH_EDGE and not 1 <= r.n <= P.TRIG2_MAX_NTH:
-            raise _DevErr(P.Status.E_BAD_ARG, 4, f"Nth edge count {r.n} not in 1..{P.TRIG2_MAX_NTH}")
-        if r.n2_or_h > P.TRIG2_MAX_N:
-            raise _DevErr(P.Status.E_BAD_ARG, 5, f"h / n2 {r.n2_or_h} > {P.TRIG2_MAX_N}")
-        if r.flags & P.TRIG2_F_RANGE and r.n2_or_h < r.n:
-            raise _DevErr(P.Status.E_BAD_ARG, 5, "range: N2 must be >= N")
+            raise _DevErr(E, P.TRIG2_D_N, f"Nth edge count {r.n} not in 1..{P.TRIG2_MAX_NTH}")
+        if r.type == P.TRIG_EDGE and r.n:
+            raise _DevErr(E, P.TRIG2_D_N, "edge: N must be 0")
+        if r.type == P.TRIG_NTH_EDGE and r.h > P.TRIG2_MAX_N:
+            raise _DevErr(E, P.TRIG2_D_H, f"H {r.h} > {P.TRIG2_MAX_N}")
+        if r.type != P.TRIG_NTH_EDGE and r.h:
+            raise _DevErr(E, P.TRIG2_D_H, "H is for the Nth edge type")
         if r.level > 255:
-            raise _DevErr(P.Status.E_BAD_ARG, 6, f"level {r.level} > 255")
-        if r.level2 > 255 or (r.level2 and not (self.caps & P.Caps.TRIG_RUNT_WINDOW)):
-            raise _DevErr(P.Status.E_UNSUPPORTED if r.level2 <= 255 else P.Status.E_BAD_ARG, 7, "level2")
-        if r.holdoff_ns and not (self.caps & P.Caps.HOLDOFF):
-            raise _DevErr(P.Status.E_UNSUPPORTED, 8, "hold-off not implemented by this FPGA")
-        if r.reserved:
-            raise _DevErr(P.Status.E_BAD_ARG, 9, "reserved")
+            raise _DevErr(E, P.TRIG2_D_LEVEL, f"level {r.level} > 255")
+        if r.level2:
+            raise _DevErr(E, P.TRIG2_D_LEVEL2, "level2: FPGA 0x153E")
         if r.source == 2 and tr.source != 2:
             self.settings.gen.enable = 0  # as SET_TRIGGER: selecting EXT switches the generator off
-        new.ttype, new.edge, new.source, new.level, new.level2 = r.type, r.polarity, r.source, r.level, r.level2
+        new.ttype, new.edge, new.source, new.level = r.type, r.polarity, r.source, r.level
         new.longer = int(bool(r.flags & P.TRIG2_F_LONGER))
-        new.range_ = int(bool(r.flags & P.TRIG2_F_RANGE))
-        new.both_cores = int(bool(r.flags & P.TRIG2_F_BOTH_CORES))
-        new.clear_holdoff = int(bool(r.flags & P.TRIG2_F_CLEAR_HOLDOFF))
-        new.n, new.h = r.n, r.n2_or_h
-        new.holdoff = P.trig2_holdoff_units(r.holdoff_ns)
+        new.n, new.h, new.holdoff = r.n, r.h, r.holdoff
         self.settings.trigger = new
+        self.holdoff_clear_pending = True  # 0x66 = 1: a new definition is a new session
         return self._ok(req, self.trigger().pack())
 
     def counter_snapshot(self) -> P.CounterResp:
@@ -3001,7 +3015,7 @@ class Device:
         up = self.now() - self.t_boot
         seq = int(up / gate_s)
         resp.seq = seq & 0xFF
-        if seq >= 1 and self.counter_seq_read != seq:
+        if self.counter_seq_read != seq:  # the model always has a complete gate behind it
             resp.flags |= P.COUNTER_F_NEW
         self.counter_seq_read = seq
         t_start = max(0.0, (seq - 1) * gate_s)
