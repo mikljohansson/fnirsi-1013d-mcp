@@ -365,6 +365,9 @@ class Scope:
         self._chan: dict[int, P.ChannelConfig] = {}
         self._cal: dict[int, P.CalResp] = {}
         self._cal_t: dict[int, float] = {}
+        #: GET_COUNTER level this client configured (P.COUNTER_LEVEL_FOLLOW = following the trigger level, the
+        #: firmware's boot state): GET_COUNTER reports the level in effect, not whether it follows
+        self.counter_level_cfg = P.COUNTER_LEVEL_FOLLOW
         self._tb: P.Timebase | None = None
         self._trig: P.Trigger | None = None
         #: legacy (no SHARED_MODE) only: REMOTE held by this client
@@ -716,17 +719,22 @@ class Scope:
     def read_counter(self, *, gate: int | None = None, source: int | str | None = None, level: int | None = None,
                      hysteresis: int | None = None) -> P.CounterResp:
         """GET_COUNTER (protocol 1.26, caps COUNTER): the hardware counter's latest gate (E, T, W, min, max). With
-        any of ``gate`` (P.COUNTER_GATES index), ``source`` (P.COUNTER_SOURCES index or name), ``level``,
-        ``hysteresis`` given the configuration is written first (the other fields keep their values)."""
+        any of ``gate`` (P.COUNTER_GATES index), ``source`` (P.COUNTER_SOURCES index or name), ``level`` (raw code;
+        0 = follow the trigger level), ``hysteresis`` given the configuration is written first (the other fields keep
+        their values; the level is the one this client configured, following the trigger level unless it pinned one:
+        the response's level is the one in effect and cannot say whether it follows)."""
         if gate is None and source is None and level is None and hysteresis is None:
             return P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, P.CounterReq().pack()))
         cur = P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, P.CounterReq().pack()))
         if isinstance(source, str):
             source = P.COUNTER_SOURCES.index(source)
         req = P.CounterReq(P.CounterReq.CONFIG, cur.gate if gate is None else int(gate),
-                           cur.source if source is None else int(source), cur.level if level is None else int(level),
+                           cur.source if source is None else int(source),
+                           self.counter_level_cfg if level is None else int(level),
                            cur.hysteresis if hysteresis is None else int(hysteresis))
-        return P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, req.pack()))
+        resp = P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, req.pack()))
+        self.counter_level_cfg = req.level
+        return resp
 
     # --- SD card (fw >= 0.2.2, cap SD_SECTORS) -------------------------------------------------------------
 
@@ -753,6 +761,8 @@ class Scope:
             flags = self.get_decim().flags
             if fir is not None:
                 flags = (flags & ~P.SetDecimReq.FIR) | (P.SetDecimReq.FIR if fir else 0)
+            if f == P.DECIM_PEAK:  # fw-c6: E_BAD_ARG 1 for the FIR bit with peak (the Filter keeps its FIR)
+                flags &= ~P.SetDecimReq.FIR
         st = P.DecimState.unpack(self._req(P.Cmd.SET_DECIM, P.SetDecimReq(f, flags).pack()))
         self._trig = self._tb = None  # words and the sample period follow the filter
         return st

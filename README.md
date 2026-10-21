@@ -45,7 +45,7 @@ back first, so keep that backup.
 - A first-run screen, **Diagnostics** (status tiles, a calibration page, an event log, a report saved to the card),
   viewers for saved pictures and waveforms, Settings, USB drive mode.
 
-**From your AI agent over USB** (34 tools in the default profile; raw FPGA access is off unless you enable it; no
+**From your AI agent over USB** (35 tools in the default profile; raw FPGA access is off unless you enable it; no
 remote lock-out: you and the agent change the same live settings, and the screen follows)
 - **Read**: identity, capabilities, status, settings, calibration and voltage scaling, event log, the scope's own
   spectrum, card info, health, a screenshot; a report with a plot and an HTML page of any result.
@@ -54,7 +54,8 @@ remote lock-out: you and the agent change the same live settings, and the screen
 - **Capture**: one capture, or a time window of it, with the raw ADC codes per core; the trace on the screen;
   arm, wait, force and stop; averaged captures aligned on an edge, or summed in the FPGA; a burst of
   triggers captured back to back (built and simulator-tested, not yet benched); capture and FFT; a
-  pulse-induction decay fit; measurements; calibrate volts against a known DC voltage.
+  pulse-induction decay fit; measurements; the hardware counter (frequency, period, width and duty at 5 ns
+  resolution, FPGA 0x153C); calibrate volts against a known DC voltage.
 - **Analyse**: decode UART, SPI or I2C from a capture; test captures against a mask built from a reference; a DVM
   readout (DC, AC RMS, true RMS, min, max, frequency) with a statement of its real resolution; export any result as CSV.
 - **Drive**, each with a confirmation token: the generator, a loopback self-test, a Bode sweep. Every
