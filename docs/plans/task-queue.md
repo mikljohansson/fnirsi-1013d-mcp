@@ -266,6 +266,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d1 done 14:0x, pushed e1ee9dd (not merged yet: the 0x153C dist must come from fpga-c4's cruft-removed source, so D1
+  and D2 land after C4 and D3 integrates them on that source). Logger RTL: 0x69 bit 0 stream (no trigger accepted, two
+  synchronised copies), bit 1 clears the lap; 0x6A u13 R = the next word the MCU reads, 0x01 = 1 resets R / unread / counter;
+  read 0x38 8 B snapshot {stream, lap, 0, W[12:8]}, W[7:0], u32 words written, u16 unread 0..8192. Deviations from the contract
+  (adopted by fw-d4): the lap is a full detector (unread count = 8192 while streaming), byte 0 has one reserved bit (W is 13
+  bits), 0x01 = 1 zeroes R too, W = address after the last word written. tb_stream 757 checks both seeds; full run.sh 17 steps
+  ALL PASS both seeds on the pre-merge source, stream + ext steps on the merged (C2) source; rates T1 500 kS/s, T2 250 kS/s,
+  T3 125 kS/s at the 300 ns strobe (FPGA not the limit). TD: 6208 LUT (71.9 %), +129 LUT over C1 + C3; 4 setup errors at
+  -0.383 ns on C3's c_mx > k_mx compare (not a logger path; D3 re-rolls). Handoff in fpga/al3/AGENTS.md, README section 15.
 - mcp-ci done 11:4x, merged 11:4x: the Bode tests compare the generator's configuration (the live 0x39 bits masked; the
   sweep's last SET_GEN leaves PENDING for up to two steps), and the simulator's log lap hook fires only once a word is unread
   (the IndexError was lap[0], the lap had skipped 0 words when the first read shared the start's clock tick; Python 3.12 on
