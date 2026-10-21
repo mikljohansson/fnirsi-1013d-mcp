@@ -196,7 +196,7 @@ static void test_info(void)
   //in GET_INFO and GET_HEALTH, every acquisition and configuration command refused with one clear status, and the link,
   //the diagnostics readers, the card, the screen and FEL still answering (the notice screen on the scope says what to do)
   {
-    static const uint16_t other[] = { 0x1432, 0x1532, 0x153A, 0x153B, 0x153D, 0x1632, 0x9999 };
+    static const uint16_t other[] = { 0x1432, 0x1532, 0x153A, 0x153B, 0x153C, 0x153E, 0x1632, 0x9999 };
     uint32_t i;
 
     for(i=0;i<sizeof(other) / sizeof(other[0]);i++)
@@ -300,7 +300,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.27,fpga=0x153c");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.27,fpga=0x153d");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -4346,11 +4346,9 @@ static void test_logger(void)
   }
   T_EQ(mock_log.starts, 0);
 
-  //The FPGA: no ready, no stream (a 0x153C bitstream)
+  //The FPGA never became ready
   mock_log.start_rc = -1;
   r = log_start(1, 0, 399, 0); T_EQ(r.h.status, PC_E_FPGA); T_EQ(pc_get_u16(r.p), 0);
-  mock_log.start_rc = -2;
-  r = log_start(1, 0, 399, 0); T_EQ(r.h.status, PC_E_FPGA); T_EQ(pc_get_u16(r.p), 1);
   T_EQ(status().p[1], PC_ACQ_IDLE);
   mock_log.start_rc = 0;
 
@@ -4386,7 +4384,7 @@ static void test_logger(void)
   r = req(PC_CMD_GET_CHANNEL, 0, 0);     T_EQ(r.h.status, 0);
   r = req(PC_CMD_GET_LINK_STATS, 0, 0);  T_EQ(r.h.status, 0);
   r = req(PC_CMD_PING, 0, 0);            T_EQ(r.h.status, 0);
-  T_EQ(mock_log.starts, 3);                                    //the two FPGA refusals and this one
+  T_EQ(mock_log.starts, 2);                                    //the FPGA refusal and this one
 
   //LOG_READ: max_bytes 1..65536
   r = log_read(0);      T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);

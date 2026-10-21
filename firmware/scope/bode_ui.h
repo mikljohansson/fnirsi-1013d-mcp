@@ -226,16 +226,15 @@ int bu_card_text(int item, const bu_card_in *in, char *t);
 #define BU_W_NO_CORNER        13      //note
 #define BU_W_AUTO_CANCEL      14      //note
 #define BU_W_NOTHING_SAVED    15
-#define BU_W_NEEDS_FPGA       16
-#define BU_W_NOT_IN_VIEWER    17
-#define BU_W_SAVE_FAILED      18
-#define BU_W_READOUT          19      //fw 0.2.71: BODE_ERR_READOUT
-#define BU_W_AUTO_INCONSISTENT 20     //fw 0.2.84: AUTO SET failures (owner 2026-10-20 11:23), STOP, settings kept
-#define BU_W_AUTO_CH1         21
-#define BU_W_AUTO_PEAK        22
-#define BU_W_CH1_LOW_HF       23      //fw 0.2.84: CH1 low above 2 MHz, the x1 probe's roll-off
-#define BU_W_CH2_SMALL        24      //fw 0.2.94: ch2_small on Constant: the CH2 menu's V/div (owner 14:16)
-#define BU_W_COUNT            25
+#define BU_W_NOT_IN_VIEWER    16
+#define BU_W_SAVE_FAILED      17
+#define BU_W_READOUT          18      //fw 0.2.71: BODE_ERR_READOUT
+#define BU_W_AUTO_INCONSISTENT 19     //fw 0.2.84: AUTO SET failures (owner 2026-10-20 11:23), STOP, settings kept
+#define BU_W_AUTO_CH1         20
+#define BU_W_AUTO_PEAK        21
+#define BU_W_CH1_LOW_HF       22      //fw 0.2.84: CH1 low above 2 MHz, the x1 probe's roll-off
+#define BU_W_CH2_SMALL        23      //fw 0.2.94: ch2_small on Constant: the CH2 menu's V/div (owner 14:16)
+#define BU_W_COUNT            24
 
 extern const char *const bu_warn[BU_W_COUNT];
 extern const char *const bu_instruction[2];

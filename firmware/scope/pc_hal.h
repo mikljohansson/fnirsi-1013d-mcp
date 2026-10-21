@@ -501,8 +501,8 @@ typedef struct
 } pc_hw_log;
 
 //[FPGA][UI] 0x0D = divider, the decimation registers of dc (settled), the UI's conversions stopped, the stream armed
-//(fpga_log_start) for limit words (0 = until stopped). 0 running, -1 the FPGA never became ready, -2 the bitstream does not
-//stream (0x38). The main loop enters the log loop after this MAIN poll
+//(fpga_log_start) for limit words (0 = until stopped). 0 running, -1 the FPGA never became ready. The main loop enters the
+//log loop after this MAIN poll
 int      pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit);
 void     pc_hal_log_stop(uint8_t state);                     //[FPGA] FPGA_LOG_STOPPED (the tail is read) or _ERROR
 void     pc_hal_log_info(pc_hw_log *l);                      //memory, any context

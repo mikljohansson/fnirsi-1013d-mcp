@@ -27,7 +27,6 @@
 #define CW_GAIN            2      //screens 2-3 (channel ch): Calibrate, or Continue after it passed
 #define CW_GAIN_LEVEL_RUN  3      //action GAIN_LEVEL issued: waiting for cw_level_result
 #define CW_GAIN_MEAS_RUN   4      //action GAIN_MEASURE issued: waiting for cw_gain_result
-#define CW_GAIN_NA         5      //screen 2 without the generator (stock bitstream): Continue to Done
 #define CW_DONE            6      //screen 4: Save calibration
 #define CW_END             7      //left (COMMIT or DISCARD issued)
 
@@ -70,7 +69,6 @@ typedef struct
 {
   uint8_t  state;
   uint8_t  ch;                    //screens 2-3: channel in focus
-  uint8_t  al3;                   //bitstream with the generator (0x50 and the square, 0x153D) (else screen 2 is CW_GAIN_NA)
   uint8_t  action;                //CW_ACT_*, taken by cw_take
   uint8_t  action_ch;
   uint8_t  zero_st[2];            //CW_Z_*
@@ -90,7 +88,7 @@ typedef struct
   uint16_t cap_v[2];              //the 0x63 value after the channel's training
 } cal_wiz;
 
-void cw_init(cal_wiz *w, int al3);
+void cw_init(cal_wiz *w);
 
 //Button events: 1 when taken, 0 when the button is not offered in this state (stray touches)
 int  cw_event(cal_wiz *w, int ev);

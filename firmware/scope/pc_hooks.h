@@ -69,7 +69,7 @@ void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)draw
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
 //fw-roll: the roll mode's stream on the 0x153D logger (pc_hal_scope.c; roll.h, roll_view.c)
-int   pc_glue_roll_start(uint8 tpd, uint32_t *wpc); //stream for roll time base tpd: 0 running, -1 no ready, -2 no stream
+int   pc_glue_roll_start(uint8 tpd, uint32_t *wpc); //stream for roll time base tpd: 0 running, -1 no ready, -3 no plan
 int   pc_glue_roll_running(uint8 tpd);            //1 while the stream runs for tpd
 void  pc_glue_roll_release(void);                 //0x69 = 0 and the UI's 0x0D back (every arm calls it; no-op when off)
 int32 pc_glue_roll_read(uint8 *dst, uint32 max, int *gap); //whole words drained and read, -1 the stream stopped

@@ -21,7 +21,7 @@
 #define BODE_DISPLAY_MODE     5     //GET_STATUS byte 43
 
 int    bode_view_active(void);
-int    bode_view_available(void);   //the bitstream has the decimation filter and the DDS, no viewer is open
+int    bode_view_available(void);   //no viewer is open
 void   bode_view_open(void);
 void   bode_view_close(void);
 

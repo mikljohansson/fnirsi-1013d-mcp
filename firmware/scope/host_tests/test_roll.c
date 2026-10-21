@@ -343,11 +343,6 @@ static void test_stream(void)
   fm.ntrace = 0;
   fpga_log_stop(&l, FPGA_LOG_ENDED);
   T_EQ(fm.reg_69, 0); T_EQ(fm.trace[0].cmd, 0x69); T_EQ(fm.ntrace, 1);
-
-  //0x153C has no stream: refused (the roll stops with the 0x153D notice)
-  fm_reset(0x153C, div, 78);
-  fm.capture = 1;
-  T_EQ(fpga_log_start(&l, 3, FPGA_LOG_F_LEGACY, 0, ring_mem, sizeof(ring_mem), 100000), -2);
 }
 
 int main(void)

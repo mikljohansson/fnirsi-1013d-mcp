@@ -88,12 +88,14 @@ void pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // The bitstream this firmware is built for (P-5.1, PC_FW_FPGA_VERSION). One geometry, one capability word, derived from
-// the constant: AL3A10 0x153B has the programmable geometry and the DDS generator (0x1532), the EXT trigger (0x1533), the
+// the constant: AL3A10 0x153D has the programmable geometry and the generator (0x1532), the EXT trigger (0x1533), the
 // decimation filter with 16-bit samples (0x1534, cmds 0x53-0x55, read 0x29), the CIC compensation FIR (0x1535, 0x56),
 // the sequencer (0x1536, cmds 0x57-0x5D, reads 0x2A-0x32), the encode self-check with the guaranteed core order (0x1538,
-// read 0x33), the per-core capture stages (0x153A, 0x63 / 0x36) and the trigger types with the hold-off (0x153C, cmds
-// 0x5E-0x60, 0x66, 0x1B, reads 0x34 / 0x37). The version word read at boot decides only the
-// mismatch flag; a mismatched scope answers the F_BASIC commands and refuses the rest (pc_dispatch).
+// read 0x33), the per-core capture stages (0x153A, 0x63 / 0x36), the trigger types with the hold-off (0x153C, cmds
+// 0x5E-0x60, 0x66, 0x1B, reads 0x34 / 0x37), peak detect and the counter (0x153C, 0x56 bit 1, 0x61 / 0x62, read 0x35),
+// the streaming logger and the generator as a fractional square (0x153D, 0x69 / 0x6A, read 0x38; 0x6C / 0x6D, read
+// 0x39). No feature is tested against the version word: the word read at boot decides only the mismatch flag; a
+// mismatched scope answers the F_BASIC commands and refuses the rest (pc_dispatch).
 
 void pc_variant_init(uint16_t version, pc_variant *v)
 {
@@ -3399,11 +3401,8 @@ static int h_log_start(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 
   r = pc_hal_log_start(ch, fmt, div, &dc, limit);
 
-  if(r == -1)
-    return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
-
   if(r)
-    return pc_error(s, PC_E_FPGA, 1, "0x38: the FPGA does not stream (needs 0x153D)");
+    return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
 
   s->acq_state = PC_ACQ_LOGGING;
   *rl = pc_log_body(s, resp);

@@ -346,7 +346,7 @@ notes" section of `docs/protocol.md`.
 
 Every firmware version runs on exactly one FPGA bitstream, the project's latest (owner decision 2026-10-20: "every
 firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner"). The constant is
-`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153B, `fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
+`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153D since fw 0.2.105, `fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
 geometry (8192 words, 16382 samples) and every feature decision derive from it, never from the version word the FPGA
 reports. That word is read once at boot (`pc_glue_init`) and compared:
 
@@ -354,13 +354,13 @@ reports. That word is read once at boot (`pc_glue_init`) and compared:
   capture, enc_heal.c) and the capture stages (0x63 / 0x36, cap_stage.c) stay: 0x153B needs them.
 - **Mismatch** (older or newer word): the scope boots into a full-screen notice instead of the scope
   (`ui_diag.c ud_build_fpga_mismatch`, `ui_diag_view.c ui_fpga_mismatch_pass`): "This firmware needs FPGA bitstream
-  0x153B." / "This scope has 0x1532." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
+  0x153D." / "This scope has 0x1532." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
   stock firmware.", with three buttons: Diagnostics (the version word, Save report, the log, Enter FEL; Back returns to
   the notice; no Calibrate, DC shift trim or Volts calibration there), Settings and USB drive (the modal screens of the
   main menu; the notice is redrawn after). The acquisition, the Scope, Spectrum and Frequency response views and the
   generator never run; nothing is written to the FPGA's feature registers at boot. Over USB: GET_INFO 76 carries the
   built-for word and 78 bit 0 the mismatch (GET_HEALTH 124 / 126 the same), every command outside the basic set answers
-  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153B", and PING, GET_INFO, GET_STATUS,
+  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153D", and PING, GET_INFO, GET_STATUS,
   GET_HEALTH, GET_LINK_STATS, GET_EVENT_LOG, GET_CAL, the SD commands, SAVE_REPORT, READ_SCREEN and ENTER_FEL keep
   working (`F_BASIC` in pc_cmds.c), so a host can read the version word, save the report and load another image.
 
@@ -372,6 +372,9 @@ per-bitstream bus contract (`fpga_bus_contract_for`; `FPGA_READ_DUMMY` is the on
 the version word or on a capability bit that cannot be false on 0x153B (62 sites in 11 files). A new bitstream means a new
 firmware: change `PC_FW_FPGA_VERSION`, the bus contract constant if the readout changed, and the notice's text follows.
 fw-c5 did exactly that for 0x153C: the constant, `PC_FW_FPGA_VERSION_TEXT` (the mismatch error's text) and the caps.
+fw-105 (fw 0.2.105) for 0x153D: the constant and its text, and the checks for a bitstream without the new features
+deleted (the logger's "does not stream" refusal, roll mode's "needs 0x153D" stop; also the wizard's screen and the
+Frequency response's warning for a bitstream without the generator).
 
 ### Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26)
 
@@ -567,7 +570,8 @@ bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread
   reset or DTR drop, or no LOG_READ for 10 s: state 4).
 - **Start** (`fpga_log_start`): 0x0D = divider, the filter / peak registers through `pc_dec_apply` (settled), the
   sequencer off (`pc_seq_hw_pre_reset` and 0x57 = 0), 0x69 = 1, 0x1A = 0, the sampling reset with 0x0B = 0x0C = 0x0E = 0,
-  a 0x38 snapshot (bit 7 clear: no stream, E_FPGA detail 1; base = (W - count) mod 8192), 0x6A = base, 0x69 = 3.
+  a 0x38 snapshot (base = (W - count) mod 8192), 0x6A = base, 0x69 = 3. Every drain step checks the stream bit (0x38
+  bit 7): clear ends the log with state 4.
 - **Drain step**: up to 2048 words from the next unread one, one pass per lane as READ_RAW (0x1F, the read command, the
   dummy strobe; `fpga_read_lane`) straight into the DDR ring at the word's byte offset, then a second 0x38: the chunk is
   kept when the lap flag is clear and the counter is at most 8176 words ahead of the chunk's first word, else it is a gap;
@@ -595,8 +599,8 @@ bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread
   overheads). Twice the 1 ch 8-bit tier (1 MS/s) with a 256 KiB ring falls behind and logs gaps with the DDR flag,
   every delivered byte right.
 - **Host tests**: `test_log` (above, plus every format and channel mask byte for byte, the DDR wrap, a 40 ms stall's gap,
-  a lap flag with nothing lost, the DDR-full gap, the duration limit, the start's write order, a leftover lap flag, the
-  0x153C refusal, the bounded ready wait, the tail after a stop), `test_session` `test_logger` (caps, features, every
+  a lap flag with nothing lost, the DDR-full gap, the duration limit, the start's write order, a leftover lap flag, a
+  stream bit that is clear (the first drain step ends the log), the bounded ready wait, the tail after a stop), `test_session` `test_logger` (caps, features, every
   refusal and tier boundary, the 48-byte LOG and a gap chunk byte for byte, the E_STATE 9 gate and what still answers,
   ENDED, the host watchdog and DTR drop), the 1.27 vectors.
 
@@ -640,8 +644,7 @@ drawing), `pc_hal_scope.c` `pc_glue_roll_*` (the stream).
 - **Screen** (`roll_view_draw`): only when columns came in: the trace area cleared, the grid, both enabled channels with
   the newest column at x 726 and one column per pixel to the left, the pointers and cursors, copied to the screen. No busy
   wait (1.00o5 waited in a timer loop per point): at 100 ms/div a pass adds about 20 columns, at 50 s/div one per second.
-- **Failures** say why and stop (STOP shown): "Roll mode needs FPGA bitstream 0x153D" (0x38 bit 7 clear), "FPGA not ready:
-  roll mode stopped" (the bounded 0x05 wait), "FPGA stream stopped: tap RUN to restart" (the FPGA left stream mode).
+- **Failures** say why and stop (STOP shown): "FPGA not ready: roll mode stopped" (the bounded 0x05 wait), "FPGA stream stopped: tap RUN to restart" (the FPGA left stream mode).
 - **Host**: ARM and LOG_START in a long time base stop the UI and run (before: E_STATE detail 2); READ_RAW of the latest
   capture answers E_STATE detail 2 only while the UI rolls.
 
@@ -650,9 +653,7 @@ drawing), `pc_hal_scope.c` `pc_glue_roll_*` (the stream).
 Bitstream 0x153D (fpga-d3's RTL; contract `docs/plans/fpga-0x153c.md` sections 7.2-7.4) removes Atlan4's DDS (0x51 /
 0x52): the calibration pin is driven by a **fractional two-step square** on the 200 MHz clock. The pattern generator
 of the contract (8 steps, bursts, gap, the marker as a capture trigger source, its own trigger engine) was cut by the
-owner on 2026-10-21 (0x153D did not fit the FPGA; fw-nopat). The firmware on this branch is still built for 0x153C
-(`PC_FW_FPGA_VERSION`): the generator only works once 0x153D is flashed and the version word moves with the
-integration.
+owner on 2026-10-21 (0x153D did not fit the FPGA; fw-nopat). Built for 0x153D since fw 0.2.105.
 
 - **The registers** (`fpga_bus.c` / `fpga_bus.h` block "The generator", `fpga_gen`): 0x6C entry 0 (high) and 1 (low)
   ({ -, -, level, index }, u32 duration in 5 ns clocks >= 2, u16 fraction in 1/65536 clock), 0x6D control (mode 0 off
@@ -1792,8 +1793,7 @@ steps up by itself (flag ch2_overload), Hold stops with a warning.
 
 **Entering and leaving.** The main menu's third row, "Frequency" over "response" (fw 0.2.69; "Bode plot" in 0.2.68, the
 generator menu's fourth row in 0.2.66-0.2.67), with a low-pass response icon. The Scope or Spectrum analyser row leaves
-it. The row is grey on bitstreams without the filter and DDS ("Frequency response needs FPGA 0x1534 or later" at the top
-of the plot when tapped) and in the waveform viewer ("Leave the waveform viewer first"). On entry the view takes the
+it. The row is grey in the waveform viewer ("Leave the waveform viewer first"). On entry the view takes the
 generator, both channels (enabled, DC coupled, ranges and offsets of the sweep), the time base (raw dividers) and
 RUN / STOP; an EXT trigger is set to CH1 (the pin is the generator's) with a note; from roll mode, roll goes off with
 "Roll off for the frequency response". Leaving gives every one of them back as it was. Nothing is driven until a sweep
@@ -2420,8 +2420,7 @@ While a measurement runs the action reads "Measuring..." greyed; Cancel stays li
 points, about once a second; the measurement stops at the next one). A failure keeps Calibrate (retry); there is no Skip.
 Screen 1 shows "USB is connected: unplug it before Calibrate" in amber while a host is attached (the MUSB frame number
 moves; checked twice a second; Calibrate is not refused). Both channels are always measured in the zero step; nothing
-is used unless both pass. On a bitstream without the generator (stock 0x1432) screen 2 says "Gain calibration needs the
-open FPGA bitstream." / "Continue keeps the gains and saves the zero level." and Continue leads to Done. "Cores matched"
+is used unless both pass. "Cores matched"
 is the zero step's worst |drift A - drift B| over ranges and classes (one decimal, at least 0.1), "gain mismatch" the
 full-class |G_A / G_B - 1| the correction now removes; without a gain step the line says "earlier gains kept" (carried
 with flag KEPT, GET_CAL flags bit 4) or "gains not measured".

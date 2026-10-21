@@ -301,9 +301,12 @@ static void test_start(void)
   T_EQ(l.state, FPGA_LOG_STOPPED); T_EQ(fm.ntrace, 0);
   T_EQ(fpga_log_drain(&l), 0);
 
-  //0x153C does not stream: 0x38 reads 0, refused, 0x69 = 0 written
+  //An FPGA that does not stream (0x38 bit 7 clear; the 0x153C model): the start has no version check (the mismatch gate
+  //refuses LOG_START on another bitstream), the first drain step sees the bit clear, ends the log with an error and
+  //writes 0x69 = 0
   fm_reset(0x153C, 399, 2);
-  T_EQ(fpga_log_start(&l, 1, 0, 0, ring_mem, 1u << 16, 100000), -2);
+  T_EQ(fpga_log_start(&l, 1, 0, 0, ring_mem, 1u << 16, 100000), 0);
+  T_EQ(fpga_log_drain(&l), 0);
   T_EQ(l.state, FPGA_LOG_ERROR);
   T_EQ(fm.trace[fm.ntrace - 1].cmd, 0x69); T_EQ(fm.trace[fm.ntrace - 1].value, 0);
 

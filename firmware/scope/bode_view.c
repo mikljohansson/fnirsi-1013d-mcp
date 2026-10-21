@@ -45,9 +45,6 @@
 
 extern DISPLAYDATA displaydata;
 
-//pc_hal_scope.c (fw 0.2.66): the capabilities of the running bitstream
-uint32 pc_glue_caps(void);
-
 
 #define PHASE_COLOR       0x00FF80FF
 #define FLAG_COLOR        0x00707070
@@ -205,13 +202,12 @@ int bode_view_active(void)
 
 int bode_view_available(void)
 {
-  return ((pc_glue_caps() & (PC_CAP_DECIM | PC_CAP_GENERATOR)) == (PC_CAP_DECIM | PC_CAP_GENERATOR)) &&
-         !scopesettings.waveviewmode;
+  return !scopesettings.waveviewmode;
 }
 
 const char *bode_view_unavailable_text(void)
 {
-  return scopesettings.waveviewmode ? bu_warn[BU_W_NOT_IN_VIEWER] : bu_warn[BU_W_NEEDS_FPGA];
+  return bu_warn[BU_W_NOT_IN_VIEWER];
 }
 
 void bode_view_note_roll(void)

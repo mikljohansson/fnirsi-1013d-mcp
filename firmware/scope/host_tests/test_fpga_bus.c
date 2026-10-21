@@ -36,8 +36,8 @@
 #include "pc_decim.h"
 #include <string.h>
 
-//The model's bitstreams the firmware's sequences are run against: the built-for 0x153C and its predecessors with the
-//same bus (the firmware runs on 0x153C only; the older models show the faults the order and the dummy strobe answer)
+//The model's bitstreams the firmware's sequences are run against: the built-for 0x153D and its predecessors with the
+//same bus (the firmware runs on 0x153D only; the older models show the faults the order and the dummy strobe answer)
 static const uint16_t versions[] = { 0x1535, 0x1537, 0x1539, 0x153A, 0x153B, 0x153C, 0x153D };
 #define NVER (sizeof(versions) / sizeof(versions[0]))
 
@@ -118,7 +118,7 @@ static void test_readout(void)
 
   //The model has the lag: without the dummy strobe (the 1.00o5 readouts up to fw 0.2.69) the first byte repeats and
   //everything after it is one word late
-  fm_reset(0x153B, 0, 5);
+  fm_reset(0x153D, 0, 5);
   fm_fill(3);
   fpga_write_cmd(0x1F);
   fpga_write_short(40);
@@ -260,7 +260,7 @@ static void test_ready_bound(void)
   fpga_arm_cfg c;
   uint32_t idles = 0;
 
-  fm_reset(0x153B, 0, 9);
+  fm_reset(0x153D, 0, 9);
   fm.ready_never = 1;
   fm.ntrace = 0;
 
@@ -341,7 +341,7 @@ static void test_decim_write(void)
   pc_decim_cfg c, ref;
   int i;
 
-  fm_reset(0x153B, 199, 21);
+  fm_reset(0x153D, 199, 21);
   T_EQ(fpga_bus_wr.held, 0);
 
   //The bench case: the host's raw 4095, then a UI time/div snap (no 0x0D: nothing reaches the bus), then CIC2 + FIR.
@@ -878,7 +878,7 @@ static void test_peak(void)
   uint32_t i, n, spikes = 0, dips = 0;
   int ok;
 
-  fm_reset(0x153C, 19, 61);
+  fm_reset(0x153D, 19, 61);
   fm.capture = 1;
   fm.trig_at = -1;
   fm_fill(5);
@@ -1047,7 +1047,7 @@ static void test_counter(void)
   uint64_t t0;
 
   //Divider 199 (2 us write clock) keeps the model fast; the counter's stream is at 5 ns whatever the divider
-  fm_reset(0x153C, 199, 900);
+  fm_reset(0x153D, 199, 900);
   fm.ntrace = 0;
 
   //Boot: 0x62 = 128 / 6, then 0x61 = gate 100 ms, source 0 (5 strobes); the gate runs on CH1 (0x15 = 0)

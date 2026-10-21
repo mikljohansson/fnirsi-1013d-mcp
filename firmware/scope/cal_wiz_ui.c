@@ -620,17 +620,13 @@ static void wiz_build(void)
 
   wiz_dlg.title    = cw_title(&wiz);
 
-  //fw 0.2.68 (owner): "Step M of N" at the right end of the title line, as the volts calibration. Four screens with the
-  //generator (zero, CH1 gain, CH2 gain, save); without it (CW_GAIN_NA) three, the save screen being step 3
+  //fw 0.2.68 (owner): "Step M of 4" at the right end of the title line, as the volts calibration: zero, CH1 gain, CH2
+  //gain, save
   {
     static char st[] = "Step 1 of 4";
-    int         m = cw_screen(&wiz), n = wiz.al3 ? 4 : 3;
-
-    if(m > n)
-      m = n;
+    int         m = cw_screen(&wiz);
 
     st[5]  = (char)('0' + m);
-    st[10] = (char)('0' + n);
     wiz_dlg.step = m ? st : 0;
   }
   wiz_dlg.line[0]  = cw_instruction(&wiz, 0);
@@ -922,7 +918,7 @@ uint32 cal_wizard_run(void)
   uint32 written = 0, tick;
   int    hit, ev;
 
-  cw_init(&wiz, 1);
+  cw_init(&wiz);
   wiz_abort = 0;
   wiz_usb   = wiz_usb_host();
   wiz_cap_start = fpga_capture_value();
@@ -1046,7 +1042,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     cal_last_r[0] = cal_last_r[1] = 0;
     cal_last_garbled[0] = cal_last_garbled[1] = 0;
 
-    cw_init(&wiz, 1);
+    cw_init(&wiz);
     wiz_abort = 0;
     wiz_usb   = 0;
     ui_dlg_bg_begin();
@@ -1063,7 +1059,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     wiz_show();
     timer0_delay(500);
     ui_dlg_bg_end();
-    cw_init(&wiz, 1);
+    cw_init(&wiz);
 
     memcpy(pt, cal_last_pt[ch], sizeof(pt));
     fail   = cal_last_fail[ch];
