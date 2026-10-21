@@ -350,6 +350,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
   0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
   code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- Coordinator 03:36-04:1x: the account's usage limit cut off fw-one and fpga-c2 (both terminated by the API, work saved in
+  their worktrees); resumed after the 04:10 reset with the remaining steps (fw-one: screenshots.py kwarg, merge main, tests,
+  gcc10 hash, push; fpga-c2: merge main with C1 and C3, the shared two-line change, re-simulate, push).
 - fpga-c3 (done 03:3x, merged 03:34 as f629cec): C3 counter with min/max (0x61, 0x62, read 0x35 = 16 bytes, 17 strobes per
   read); tb_counter 115 checks both seeds; full run.sh 16 steps ALL PASS on the merged C1+C3 source both seeds; TD +347 LUT
   alone, merged C1+C3 6079 LUT (70 %) with 8 setup errors (-0.763 ns) on the sequencer's q_pass adder: placement spread, C4
