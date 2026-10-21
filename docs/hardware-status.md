@@ -1482,3 +1482,10 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-21 17:33 (owner): on the mismatch notice (fw 0.2.104 on 0x153B), Diagnostics and then back hangs the UI (the screen
   stops responding); the owner restarted the scope, which boots fw 0.2.102 from the card again (the FEL load was RAM only).
   Bug handed to fw-diag; the notice itself looks good (owner).
+- 2026-10-21 17:35-17:38: **FPGA flash 0x153B -> 0x153C** (owner present, Sipeed FT2232D on J2, scope on battery, USB
+  unplugged). First probe read ff ff ff (the GND wire had come off; reconnected by the owner), then JEDEC ef 40 14 (W25Q80DV).
+  Pre-write double read backups/fpga-flash_pre-0x153C_20261021-1736.bin = 1391978c33379271.. (the pinned 0x153B padded
+  image, as required). write -i backups/dist-0x153C/fnirsi_1013d-fpga-al3-0x153c-flash1m.bin --yes --confirm-id ef4014: the
+  tool's own backup backups/20261021-173709-pre-write.bin = 1391978c.., 69 sectors erased, 1104 pages programmed, verified
+  read-back 07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77 (the 0x153C padded image). Rollback = the 0x153B
+  padded image written the same way. Next: power-cycle, FEL 0.2.104, the 0x153C checks.
