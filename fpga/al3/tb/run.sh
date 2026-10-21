@@ -46,7 +46,13 @@
 #      E / T / W and min / max of every gate against a model of the input stream and of the captured pair, accuracy against
 #      the stimulus on EXT and CH1 (200 MSa/s, 10 MSa/s, K = 1), the source select (0x61 bits 3..2 and the 0x15 follow),
 #      the Schmitt thresholds at their boundaries, the hysteresis against noise, the "new" flag and the snapshot read.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|counter runs one testbench.
+#  17. tb_stream.v (0x153D D1): the streaming logger (0x69, 0x6A, read 0x38): the write never stops and never triggers
+#      while streaming at legacy and filtered rates (0x0A / 0x18 read 0 with the time-out elapsed or the level crossed),
+#      the 0x38 snapshot against a mirror of the write port (counter, W, unread), chunks read with the firmware's
+#      sequences at the contract's rate tiers contiguous across the ring end, the lap flag exactly at the write that
+#      overwrites the oldest unread word, the resync, the empty ring, stop and restart, normal captures before and after
+#      (0x69 = 0 = 0x153C). STREAM_CHUNKS chunks per keep-up tier (default 2).
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|counter|stream runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -161,6 +167,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_counter.vvp" +seed=$SEED | tee "$WORK/sim_counter.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = stream ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_stream.vvp" +seed=$SEED +chunks=${STREAM_CHUNKS:-2} | tee "$WORK/sim_stream.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_stream.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"
