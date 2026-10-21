@@ -182,8 +182,9 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   disturb one. Resolution is one 5 ns clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s); the 50 MHz crystal
   (about 1e-5, uncalibrated) is the accuracy: quote the `resolution` statement with the number. Reading is tier 0;
   `gate`, `source`, `level` (volts) and `hysteresis` configure it (tier 1) and the scope's measurement cards follow
-  (level 128 / 6 codes at boot, the trigger channel). A signal that does not cross the level by more than the
-  hysteresis gives no count: set `level` mid-swing. `vmin` / `vmax` are raw extremes over the whole gate, noise
+  (at boot the level follows the trigger level, 6 codes hysteresis, the trigger channel; a `level` in volts pins it,
+  `level='trigger'` follows again). A signal that does not cross the level by more than the hysteresis gives no
+  count: put the trigger level (or `level`) mid-swing. `vmin` / `vmax` are raw extremes over the whole gate, noise
   peaks included; a capture's min / max are a few codes narrower.
 - **Peak detect at slow time bases** (`scope_capture(peak=true)` for one capture, `scope_set_decimation(filter='peak')`
   to leave it on): below 200 MSa/s every stored sample is the min and max of its window of raw 200 MSa/s samples, so
@@ -192,6 +193,43 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   `volts` is the midpoint. The envelope is a few codes wider than the signal (noise extremes over N samples): do not
   read noise from it. Averaging is refused while peak detect is on (the words hold min / max pairs); records are at
   most 8190 samples as with the filters. `scope_report` draws the envelope as a band.
+
+## 3d. The logger, pulse patterns and chirps (protocol 1.27, FPGA 0x153D)
+
+`scope_info` caps `LOGGER`, `PATTERN_GEN`, `PATTERN_TRIGGER` (`scope_status` features `logger`, `pattern`,
+`pattern_trigger`). Simulator only when this was written: say so with numbers from them.
+
+- **Log for a long time** (`scope_log`, `scope_log_status`, `scope_log_stop`): when a record of 16,382 samples is not
+  enough (RX drift over minutes, a slow decay train, an intermittent event), stream CH1 / CH2 to a file. Pick the
+  rate within the tiers: 500 kS/s for one 8-bit channel, 250 kS/s for one 16-bit or two 8-bit, 125 kS/s for two
+  16-bit (the tool refuses more and says why). The default `filter='auto'` logs the CIC3 + FIR output (no aliasing);
+  `bits=8` keeps the filtered word's high byte (0.4 % of full scale per code), `bits=16` the full word,
+  `filter='off'` raw samples of both ADC cores (aliases above fs / 2). Set the channels, ranges and the generator or
+  pattern first: while the log runs the scope's screen is frozen and every acquisition tool answers "logging:
+  LOG_STOP first". Give `duration` or end it with `scope_log_stop`; watch `scope_log_status` (samples, USB rate,
+  gaps). The result is a directory of raw sample files plus `log.json`, read back with
+  `fnirsi1013d.logfile.load_log(dir)`, and a summary `.npz` for `scope_report` (min .. max per bin, gaps marked). Report
+  every gap (`gaps`, `lost_samples`, the cause: a lap = the scope fell behind, an overflow = the host did): the
+  samples around a gap are exact, the time axis jumps.
+- **Drive a pulse pattern and capture at its marker** (`scope_pattern`, `scope_set_trigger(source='pattern')`): the
+  calibration post outputs up to 8 steps of logic level and duration (a TX gate, a double pulse, a burst train),
+  every edge on the 5 ns grid. Mark the step that starts the TX pulse (`"mark": true`), set the capture trigger to
+  `source='pattern'` (edge type, `mode='normal'`) with the pretrigger where the RX decay should start in the record,
+  and call `scope_pattern(..., capture=true)`: it arms first, then starts the pattern, and returns the capture with
+  the pulse at the trigger point. For many records use `mode='repeat'` (R bursts, `gap` between them) with
+  `scope_capture_segments`, or `mode='continuous'`. To start bursts from an external event without the host in the
+  loop give `start='trigger'` and `trigger={...}` (the `scope_set_trigger` vocabulary on CH1 / CH2 / EXT; with EXT the
+  pattern runs with `drive_pin=false`, since EXT and the post are one wire). The pin is 3.3 V logic, not a driver: a
+  token is needed, the duty ceiling applies, and if it is wired into the detector it switches coil current.
+  `scope_report` draws the pattern's timing diagram from `timing_file`.
+- **Chirp a filter on the spectrum view** (`scope_sweep`): put the post on the filter's input and CH1 on its output,
+  switch the scope to its Spectrum view (or use `scope_capture_and_fft`), then `scope_sweep(start='1kHz',
+  stop='100kHz', steps=200, time_s=1)`: the square steps through the frequencies, each step glitch-free and
+  phase-continuous, and the spectrum's peak hold traces the response. The host sends one command per step, so about
+  2,000 steps per second is the limit (the result's `stats` say what was achieved); for a measured magnitude and
+  phase use `scope_bode_sweep` instead. The generator is restored afterwards.
+- **The generator** (`scope_generator`) is the same pattern underneath: its frequency is exact to 2^-16 of the period
+  (`frequency_exact_hz`), edges on the 5 ns grid; 200 MHz / an integer (1 kHz, 1 MHz) has no dither at all.
 
 ## 3b. Frequency response (Bode)
 
@@ -239,7 +277,8 @@ calibration, about +-1 dB near -55 dB. The ground-return error is not removed by
 On collaborative firmware the person at the scope can change any setting at any time; the last change wins. Every
 capture carries the `settings_seq` it was taken under. Long runs (averaging, decay fit, FFT) restart when a
 setting changes mid-run and say so in `restarts` / caveats: report it, and if it keeps happening, ask the person
-to leave the knobs alone (the tool gives up after 5 restarts). A menu open on the scope is closed by your next request on
+to leave the knobs alone (the tool gives up after 5 restarts). A streaming log (`scope_log`) does not restart: the
+scope's screen is frozen while it runs, and a log ended at the scope keeps what it has with a caveat. A menu open on the scope is closed by your next request on
 firmware 0.2.78+ (protocol 1.23; the caveat says so, the scope shows no note): tell the person
 if they were using it. Older firmware fails with "modal screen" (E_BUSY): ask them to close it. Leave the scope as you found it where reasonable (RUN, the
 user's range) and say what you changed.

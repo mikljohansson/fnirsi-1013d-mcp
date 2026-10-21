@@ -30,7 +30,8 @@ CMDS = {
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
-    "GET_COUNTER": 0x0213, "SET_TRIGGER2": 0x0219,
+    "GET_COUNTER": 0x0213, "LOG_START": 0x0214, "LOG_READ": 0x0215, "LOG_STOP": 0x0216, "SET_TRIGGER2": 0x0219,
+    "SET_PATTERN": 0x0217, "SET_PATTERN_TRIGGER": 0x021A,                        # D5 pattern (1.27)
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401, "CAL_PROBE": 0x0402,
@@ -121,6 +122,13 @@ REQUESTS = [
     # appended (fw-c7, protocol 1.26, FPGA 0x153C counter)
     ("GET_COUNTER", struct.pack("<BBBBB3x", 0, 0, 0, 0, 0),
      "1.26 (fw-c7): read the hardware counter's latest result (what 0; the other fields are ignored)"),
+    # appended (fw-d4, protocol 1.27, FPGA 0x153D streaming logger)
+    ("LOG_START", struct.pack("<BBHIII", 1, 0, 0, 399, 0, 0),
+     "1.27 (fw-d4): log CH1, format 0 (legacy 8-bit), divider 399 (500 kS/s: the 1 ch 8-bit tier), until LOG_STOP"),
+    ("LOG_READ", struct.pack("<II", 65536, 0),
+     "1.27 (fw-d4): the next chunk of the log, at most 65536 bytes (whole words); returns at once"),
+    ("LOG_STOP", b"",
+     "1.27 (fw-d4): stop the log (the FPGA's tail is read into the DDR ring); the LOG summary"),
 ]
 
 
@@ -746,6 +754,131 @@ def build():
         "1.26 (fw-c7) GET_COUNTER E_BAD_ARG: detail = the byte offset of the field (0 what, 1 gate, 2 source, 4 "
         "hysteresis > a non-zero level), then the text; nothing is configured then",
         [decoded(CMDS["GET_COUNTER"], 84, ep, status=4, flags=FLAG_RESPONSE)])
+
+    # 5h. Protocol 1.27 (fw-d4, section 14 row 67): the FPGA 0x153D streaming logger, byte-exact with test_session.c
+    # test_logger and the mcp's layouts (mcp-d6). LOG_START 16 bytes: u8 channels, u8 format, u16 0, u32 divider, u32
+    # duration_ms, u32 0. LOG (LOG_START / LOG_STOP response) 48 bytes: u8 state, u8 channels, u8 format, u8 flags, u32
+    # divider, u32 duration_ms, u32 sample clocks, u64 bytes produced, u64 bytes sent, u32 gaps, u32 DDR ring bytes, u32 ms,
+    # u32 0. LOG_READ chunk: u32 seq, u32 FPGA word counter of the first word, u32 bytes, u8 flags (bit 0 running, 1 gap,
+    # 2 ended, 3 the gap includes words the full DDR ring refused), u8 format, u16 0, then the bytes
+    p = struct.pack("<BBHIII", 3, 2, 0, 1599, 10000, 0)
+    f = frame(CMDS["LOG_START"], 90, p)
+    add("req_log_start_2ch_16bit_10s", f, [ev_frame(CMDS["LOG_START"], 90, p)],
+        "1.27 (fw-d4): CH1 + CH2, format 2 (filtered u16, SET_DECIM filter 1..3 first), divider 1599 (N 1600: 125 kS/s, "
+        "the 2 ch 16-bit tier), 10 s",
+        [decoded(CMDS["LOG_START"], 90, p)])
+    p = struct.pack("<BBHIII", 1, 3, 0, 799, 0, 0)
+    f = frame(CMDS["LOG_START"], 91, p)
+    add("req_log_start_peak", f, [ev_frame(CMDS["LOG_START"], 91, p)],
+        "1.27 (fw-d4): CH1, format 3 (peak min / max pairs, SET_DECIM filter 4 first), divider 799 (window 800: 250 kS/s)",
+        [decoded(CMDS["LOG_START"], 91, p)])
+    lb = struct.pack("<BBBBIIIQQIIII", 1, 1, 0, 0, 399, 100, 400, 0, 0, 0, 8 << 20, 0, 0)
+    assert len(lb) == 48
+    f = frame(CMDS["LOG_START"], 92, lb, flags=FLAG_RESPONSE)
+    add("resp_log_start_1_27", f, [],
+        "1.27 (fw-d4) LOG_START response (LOG, 48 bytes): state 1 running, CH1, format 0, flags 0, divider 399, 100 ms, "
+        "400 clocks per sample (D + 1), 0 bytes produced / sent, 0 gaps, DDR ring 8 MiB, 0 ms",
+        [decoded(CMDS["LOG_START"], 92, lb, flags=FLAG_RESPONSE)])
+    lb = struct.pack("<BBBBIIIQQIIII", 3, 3, 2, 3, 1599, 0, 1600, 20000000, 19996000, 2, 8 << 20, 40012, 0)
+    f = frame(CMDS["LOG_STOP"], 93, lb, flags=FLAG_RESPONSE)
+    add("resp_log_stop_1_27", f, [],
+        "1.27 (fw-d4) LOG_STOP response: state 3 stopped, CH1 + CH2, format 2, flags 3 (a lap gap and a gap because the "
+        "DDR ring was full), divider 1599, until stopped, 1600 clocks, 20 MB produced, 4000 bytes still unread, 2 gaps, "
+        "8 MiB ring, 40.012 s",
+        [decoded(CMDS["LOG_STOP"], 93, lb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<IIIBBH", 3, 150, 20, 0x03, 0, 0) + bytes(((w * 7 + k) & 0xFF) for w in range(150, 160) for k in range(2))
+    f = frame(CMDS["LOG_READ"], 94, cb, flags=FLAG_RESPONSE)
+    add("resp_log_read_1_27_gap", f, [],
+        "1.27 (fw-d4) LOG_READ response: chunk 3, words 150..159 of a CH1 format 0 log (2 bytes per word: core B then "
+        "core A), 20 bytes, flags 0x03 = running | gap (the counter jumped from 100 to 150: 50 words lost)",
+        [decoded(CMDS["LOG_READ"], 94, cb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<IIIBBH", 7, 4242, 0, 0x04, 1, 0)
+    f = frame(CMDS["LOG_READ"], 95, cb, flags=FLAG_RESPONSE)
+    add("resp_log_read_1_27_ended", f, [],
+        "1.27 (fw-d4) LOG_READ response after the end with nothing left: 0 bytes, flags 0x04 ended, format 1",
+        [decoded(CMDS["LOG_READ"], 95, cb, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 1) + b"rate > 500 kB/s: 500k 1ch 8b, 250k 16b or 2ch, 125k 2ch 16b"
+    f = frame(CMDS["LOG_START"], 96, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_log_start_e_bad_arg_rate", f, [],
+        "1.27 (fw-d4) LOG_START E_BAD_ARG detail 1: the rate is above the contract's tiers (sample rate x bytes per sample "
+        "x channels > 500,000 B/s); details 0 channels, 2 format (or the SET_DECIM filter does not fit it), 4 divider",
+        [decoded(CMDS["LOG_START"], 96, ep, status=4, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 9) + b"logging: LOG_STOP first"
+    f = frame(CMDS["ARM"], 97, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_e_state_logging", f, [],
+        "1.27 (fw-d4) any command outside the F_BUSY / read-only sets and LOG_READ / LOG_STOP while logging: E_STATE "
+        "detail 9",
+        [decoded(CMDS["ARM"], 97, ep, status=8, flags=FLAG_RESPONSE)])
+
+    # 5i. D5 pattern: protocol 1.27 (fw-d5, section 14 row 67): FPGA 0x153D, the generator on the pattern generator.
+    # SET_GEN keeps 20 bytes: freq_mode 1 = bytes 4..11 u64 P16 (the period in 1/65536 of a 5 ns clock), duty_mode 1 =
+    # bytes 12..19 u64 H16 (the high time, same unit). GEN 40 bytes: 0 enable, 1 0x39 byte 0, 2 u16 bursts done, 4 u32 0,
+    # 8 u32 0, 12 u64 freq_mhz, 20 u16 duty_bp, 22 0x39 byte 3, 23 source (0 the square, 1 a SET_PATTERN pattern), 24 u64
+    # P16, 32 u64 H16. SET_PATTERN 12 + 8 n bytes: 0 mode, 1 flags (bit 0 pin hi-Z, 2 idle level, 3 marker is a trigger
+    # source, 7..6 start source), 2 u16 R, 4 u32 gap_ns, 8 n, 9 commit, 10 start, 11 0, n x { flags (bit 0 level, bit 1
+    # mark), 0, u16 fraction, u32 duration clocks }. PATTERN response 24 + 8 n. SET_PATTERN_TRIGGER 28 bytes: the 24 of
+    # SET_TRIGGER2 (hold-off 0), 24 armed, 25 rearm, 26 u16 0; response 32: the body, 24 armed, 25 rearm, 26 u16 0, 28 0x42
+    # byte 0, 29 0, 30 u16 edges still to count
+    p16 = (65536 * 200_000_000_000 + 999_500 // 2) // 999_500
+    h16 = (p16 * 5000 + 5000) // 10000
+    p = struct.pack("<BBBBQQ", 0x06, 0, 1, 1, p16, h16)
+    f = frame(CMDS["SET_GEN"], 90, p)
+    add("req_set_gen_p16_h16", f, [ev_frame(CMDS["SET_GEN"], 90, p)],
+        "1.27: raw period and high time: P16 = %d (999.5 Hz: 200100.05 clocks of 5 ns), H16 = %d (50.00 %%); the "
+        "enable unchanged" % (p16, h16), [decoded(CMDS["SET_GEN"], 90, p)])
+    g = struct.pack("<BBHIIQHBBQQ", 1, 0x20, 0, 0, 0, 999500, 5000, 0x01, 0, p16, h16)
+    assert len(g) == 40
+    f = frame(CMDS["SET_GEN"], 91, g, flags=FLAG_RESPONSE)
+    add("resp_gen_1_27", f, [],
+        "1.27 GEN response (40 bytes): enabled, 0x39 byte 0 = 0x20 (pending: the commit is taken at the next step "
+        "boundary; poll GET_GEN until bit 5 clears before the next chirp step), 0 bursts, 12 freq 999500 mHz, 20 duty "
+        "5000 bp, 22 0x39 byte 3 = 0x01 (mode active), 23 source 0 (the square), 24 P16, 32 H16",
+        [decoded(CMDS["SET_GEN"], 91, g, flags=FLAG_RESPONSE)])
+    steps = struct.pack("<BBHI", 0x03, 0, 0, 10000) + struct.pack("<BBHI", 0x00, 0, 0, 190000)
+    p = struct.pack("<BBHIBBBB", 2, 0x08, 10, 0, 2, 1, 1, 0) + steps
+    f = frame(CMDS["SET_PATTERN"], 92, p)
+    add("req_set_pattern_pulse_train", f, [ev_frame(CMDS["SET_PATTERN"], 92, p)],
+        "1.27: a 50 us high step with the marker, 950 us low, 10 bursts (mode 2) without a gap, the marker a capture "
+        "trigger source (flags bit 3; with SET_TRIGGER source 3), the pin driven, committed and started by the MCU",
+        [decoded(CMDS["SET_PATTERN"], 92, p)])
+    r = struct.pack("<BBHIBBBB", 2, 0x08, 10, 0, 2, 1, 1, 0) + bytes([0x80, 0x01]) + struct.pack("<HQ", 0, 200000 << 16) + steps
+    assert len(r) == 40
+    f = frame(CMDS["SET_PATTERN"], 93, r, flags=FLAG_RESPONSE)
+    add("resp_set_pattern", f, [],
+        "1.27 PATTERN response (24 + 8 n bytes): the header as written (gap echoed as clocks x 5 ns), 12 0x39 byte 0 = "
+        "0x80 (running, step 0), 13 0x39 byte 3 = 0x01, 14 u16 bursts done 0, 16 u64 the burst length 200000 clocks in "
+        "1/65536 clock (1 ms), 24 the steps",
+        [decoded(CMDS["SET_PATTERN"], 93, r, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 28) + b"duration >= 2 clocks"
+    f = frame(CMDS["SET_PATTERN"], 94, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_set_pattern_e_bad_arg_duration", f, [],
+        "1.27 SET_PATTERN E_BAD_ARG: detail = the byte offset (here step 1's duration, 12 + 8 + 4 + 4 = 28); 0 mode, 1 "
+        "flags, 8 steps, 9 commit, 10 start, 11 byte 11, 12 + 8 i step flags, + 1 byte 1, + 4 duration",
+        [decoded(CMDS["SET_PATTERN"], 94, ep, status=4, flags=FLAG_RESPONSE)])
+    p = struct.pack("<BBBBIIHHII", 2, 0, 0, 1, 3, 1000, 140, 0, 0, 0) + struct.pack("<BBH", 1, 1, 0)
+    f = frame(CMDS["SET_PATTERN_TRIGGER"], 95, p)
+    add("req_set_pattern_trigger_nth_ch2", f, [ev_frame(CMDS["SET_PATTERN_TRIGGER"], 95, p)],
+        "1.27: the pattern trigger engine on CH2: the 3rd rising edge after 1000 idle samples, level 140, armed, re-armed "
+        "after each burst (SET_PATTERN start source 1 or 2 makes the event start a burst)",
+        [decoded(CMDS["SET_PATTERN_TRIGGER"], 95, p)])
+    r = struct.pack("<BBBBIIHHII", 2, 0, 0, 1, 3, 1000, 140, 0, 0, 0) + struct.pack("<BBHBBH", 1, 1, 0, 0xA2, 0, 2)
+    assert len(r) == 32
+    f = frame(CMDS["SET_PATTERN_TRIGGER"], 96, r, flags=FLAG_RESPONSE)
+    add("resp_set_pattern_trigger", f, [],
+        "1.27 SET_PATTERN_TRIGGER response (32 bytes): the body in effect, armed, re-arm, 28 0x42 byte 0 = 0xA2 (own "
+        "engine, counting, type 2), 30 u16 edges still to count 2",
+        [decoded(CMDS["SET_PATTERN_TRIGGER"], 96, r, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 8) + b"shared trigger engine: the capture uses another qualified trigger"
+    f = frame(CMDS["SET_PATTERN_TRIGGER"], 97, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_set_pattern_trigger_e_state_shared", f, [],
+        "1.27 SET_PATTERN_TRIGGER E_STATE detail 8: the FPGA has the routed fallback (0x42 byte 0 bit 7 = 0) and the "
+        "capture uses a different qualified trigger",
+        [decoded(CMDS["SET_PATTERN_TRIGGER"], 97, ep, status=8, flags=FLAG_RESPONSE)])
+    p = struct.pack("<BBBBIIHHII", 0, 0, 0, 3, 0, 0, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 98, p)
+    add("req_set_trigger2_marker", f, [ev_frame(CMDS["SET_TRIGGER2"], 98, p)],
+        "1.27: capture trigger source 3 = the pattern's marker (edge type only; with SET_PATTERN flags bit 3)",
+        [decoded(CMDS["SET_TRIGGER2"], 98, p)])
 
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")

@@ -499,7 +499,7 @@ module tb;
         wr1(8'h1A, {7'd0, rnd[2]});
         wr1(8'h0F, {7'd0, rnd[3]});
         wr4(8'h0D, dv);
-        wr1(8'h56, {rnd[20:14], rnd[12]});                  // bits 7..1 random (reserved, ignored)
+        wr1(8'h56, {rnd[20:15], 1'b0, rnd[12]});            // bits 7..2 random (reserved, ignored); bit 1 = peak detect (0x153C), off
         pre_r = 13'd20 + (rnd[24:16] % 13'd200);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
         wr2(8'h0B, {3'd0, pre_r});
@@ -693,7 +693,7 @@ module tb;
     ok29 = 1;
     wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;
     rd2(8'h29); if (rd16_d !== 16'h870C || rd16_r !== 16'h870C) begin ok29 = 0; $display("0x29 FIR off: %h", rd16_d); end
-    wr1(8'h56, 8'hFF); #200;
+    wr1(8'h56, 8'hFD); #200;                                 // reserved bits 7..2 set; bit 1 (peak detect, 0x153C) clear
     rd2(8'h29); if (rd16_d !== 16'hE70C) begin ok29 = 0; $display("0x29 FIR on, D 14: %h", rd16_d); end
     wr4(8'h0D, 32'd15); #200;
     rd2(8'h29); if (rd16_d !== 16'hE70C) begin ok29 = 0; $display("0x29 FIR on, D 15: %h", rd16_d); end
@@ -707,8 +707,8 @@ module tb;
     rd2(8'h29); if (rd16_d !== 16'hE70C) begin ok29 = 0; $display("0x29 FIR on, D 0x40000002: %h", rd16_d); end
     wr4(8'h0D, 32'd14); wr1(8'h53, 8'h00); #200;
     rd2(8'h29); if (rd16_d !== 16'h400C) begin ok29 = 0; $display("0x29 FIR on, K 0: %h", rd16_d); end
-    wr1(8'h56, 8'hFE); wr1(8'h53, 8'h01); #200;
-    rd2(8'h29); if (rd16_d !== 16'h810C) begin ok29 = 0; $display("0x29 0x56 = 0xFE: %h", rd16_d); end
+    wr1(8'h56, 8'hFC); wr1(8'h53, 8'h01); #200;
+    rd2(8'h29); if (rd16_d !== 16'h810C) begin ok29 = 0; $display("0x29 0x56 = 0xFC: %h", rd16_d); end
     check(ok29, "0x29 byte 0 bit 6 = 0x56 bit 0, bit 5 = FIR active (K >= 1, divider >= 14, bit 1 set)");
 
     //-------------------------------------------------------------------------------

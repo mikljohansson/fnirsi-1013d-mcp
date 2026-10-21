@@ -78,8 +78,17 @@ typedef struct
   pc_hw_trigger  trg;
   uint8_t        gen_en, gen_duty;
   uint32_t       gen_hz;
-  uint32_t       gen_phase, gen_thr, gen_writes;
+  uint64_t       gen_p16, gen_h16;   //1.27 (fw-d5): the square written (0 / 0: none yet)
+  uint32_t       gen_writes, gen_pin_writes;
   uint8_t        gen_hw_en;
+  //D5 pattern
+  pc_hw_pattern  pat;
+  uint32_t       pat_writes;
+  uint8_t        pat_st[4];          //0x39 as the mock answers it
+  uint32_t       pat_status_reads;
+  pc_hw_ptrig    ptrig;
+  uint32_t       ptrig_writes;
+  uint8_t        ptrig_st[3];        //0x42 (byte 0 bit 7: own engine)
 
   //Trace
   uint8_t  trace[2][16384];
@@ -172,6 +181,24 @@ void mock_rx_push(const uint8_t *data, uint32_t len);
 int  mock_ui_modal_pass(void *session);
 void mock_tx_release(void);
 void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors);   //eGON header + valid checksum
+
+//D4 logger: the mock's log (mock_hal.c), reset by mock_reset
+#include "pc_logring.h"
+#include "fpga_log.h"
+typedef struct
+{
+  int          start_rc;          //what pc_hal_log_start answers (0, -1, -2)
+  uint32_t     starts, stops, reads;
+  uint8_t      state, ch_mask, format, flags, stop_state;
+  uint32_t     divider, gaps, ms0, ms1;
+  uint64_t     limit, next;
+  pc_decim_cfg dc;
+  pc_logring   ring;
+} mock_log_state;
+extern mock_log_state mock_log;
+void mock_log_reset(void);
+//Append words (bytes (w * 7 + k) & 0xFF) after skipping skip words (a gap: the counter jumps, PC_LOG_CF_GAP)
+void mock_log_feed(uint32_t words, uint64_t skip, uint8_t flags);
 
 //Captured responses (most recent last)
 #define MOCK_MAX_RESP 32

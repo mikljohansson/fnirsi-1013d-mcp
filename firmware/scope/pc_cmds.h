@@ -119,6 +119,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 #define PC_ACQ_TRIGGERED  2
 #define PC_ACQ_DONE       3
 #define PC_ACQ_ABORTED    4
+#define PC_ACQ_LOGGING    5     //D4 logger (1.27): the streaming logger runs (LOG_START .. its end)
 
 //Responses cached for duplicate requests (P-4.3)
 #define PC_CACHE_PAYLOAD  256
@@ -266,6 +267,14 @@ typedef struct
   //returned (or none was returned yet)
   uint8_t    cnt_seen;
   uint8_t    cnt_seen_seq;
+  //D4 logger: what LOG_START took, the chunk sequence and the host watchdog
+  uint8_t    log_used;          //a LOG_START ran since boot (LOG_READ refused before)
+  uint8_t    log_link_lost;     //a link reset or DTR drop while logging: stopped at the next MAIN poll
+  uint32_t   log_divider;
+  uint32_t   log_duration_ms;
+  uint32_t   log_clocks;        //5 ns clocks per sample: D + 1 (format 0), N (16-bit path)
+  uint32_t   log_seq;           //non-empty chunks returned
+  uint32_t   log_read_ms;       //the last LOG_READ (or the start)
   uint8_t    ui_trig;           //0x18 at the UI capture's DONE
   uint16_t   ui_addr;           //0x14 of the UI capture
 
@@ -317,14 +326,23 @@ typedef struct
   uint8_t    tb_raw_sr;
   uint32_t   tb_divider;
 
-  //Generator values set by SET_GEN (raw DDS words)
+  //Generator state set by SET_GEN / SET_PATTERN (1.27, fw-d5: the two-step square as P16 / H16, 1/65536 of a 5 ns clock)
   uint8_t    gen_valid;
   uint8_t    gen_enable;
-  uint32_t   gen_phase;
-  uint32_t   gen_thr;
-  uint8_t    gen_ui_en;         //UI copy right after SET_GEN: a UI change of it drops the raw values
+  uint8_t    gen_src;           //0 the generator's square, 1 a SET_PATTERN pattern (GEN byte 23)
+  uint8_t    gen_duty_raw;      //1: the duty is gen_h16 as given (duty_mode 1), 0: gen_duty_bp of the period
+  uint16_t   gen_duty_bp;
+  uint64_t   gen_p16;
+  uint64_t   gen_h16;
+  uint8_t    gen_ui_en;         //UI copy right after SET_GEN: a UI change of it drops the host's values
   uint8_t    gen_ui_pct;
   uint32_t   gen_ui_hz;
+
+  //D5 pattern (fw-d5)
+  uint8_t    ctx;               //the dispatch context of the running request (PC_CTX_*)
+  uint8_t    pat_st[4];         //0x39 as last read
+  uint8_t    ptrig_st[3];       //0x42 as last read
+  pc_hw_pattern pat;            //the latest SET_PATTERN
 
   //Deferred request (WAIT)
   uint8_t    def_active;
@@ -404,6 +422,14 @@ int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a
 #define PC_STATUS_LEN     52      //48 in 1.17-1.25; 1.26: 48 u8 0x37, 49 u8 0x34 byte 0, 50 u16 edges still to count
 #define PC_TRIGGER_LEN    52      //28 up to 1.25; 1.26: 28.. the SET_TRIGGER2 body that reproduces the trigger
 #define PC_CAPTURE_INFO_LEN 112   //96 in 1.17-1.25; 1.26: 96 type, 97 flags, 98 u16 0, 100 u32 N, 104 u32 H, 108 u32 hold-off
+#define PC_LOG_LEN        48      //D4 logger (1.27): LOG_START / LOG_STOP response (protocol row 67)
+#define PC_LOG_HDR        16      //D4 logger (1.27): LOG_READ chunk header
+#define PC_LOG_READ_MAX   65536u  //D4 logger: LOG_READ max_bytes 1..65536
+#define PC_LOG_HOST_MS    10000u  //D4 logger: a running log with no LOG_READ for this long is stopped (state 4): the host
+                                  //went away, and the frozen screen must not stay frozen
+#define PC_STATE_LOGGING  9       //D4 logger: E_STATE detail of a command refused while logging
+#define PC_STATE_LOG_VIEW 10      //D4 logger: E_STATE detail of LOG_START outside the Scope view
+#define PC_GEN_LEN        40      //24 up to 1.26; 1.27 (fw-d5): 0x39 status, source, P16, H16 (docs/protocol.md row 67)
 #define PC_COUNTER_LEN    24      //1.26 (fw-c7): GET_COUNTER: flags, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz
 #define PC_HEALTH_LEN     128     //96 in 1.16-1.18, 104 in 1.19-1.23, 124 in 1.24 (layout 2); layout 3: 124 built-for word,
                                   //126 fpga_flags, 127 0
@@ -418,10 +444,6 @@ int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, ui
 void     pc_variant_init(uint16_t version, pc_variant *v);    //the fixed geometry and caps; mismatch from the word read
 void     pc_variant_core_order(pc_variant *v);               //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
 int      pc_decim_has(void);                                 //PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES: what pc_decim_config gets
-uint32_t pc_gen_phase_from_mhz(uint64_t freq_mhz);
-uint64_t pc_gen_mhz_from_phase(uint32_t phase_inc);
-uint32_t pc_gen_thr_from_bp(uint32_t duty_bp);
-uint16_t pc_gen_bp_from_thr(uint32_t threshold);
 uint32_t pc_ring_mod(int64_t addr, uint32_t ring_words);
 void     pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern);
 

@@ -23,7 +23,7 @@ ALL_TOOLS = {
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel", "scope_report", "scope_cal_probe", "scope_decode", "scope_export_csv", "scope_mask_test",
-    "scope_dvm", "scope_counter",
+    "scope_dvm", "scope_counter", "scope_pattern", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop",
 }
 
 
@@ -118,7 +118,7 @@ async def test_tiers_limit_registration(sim, tmp_path):
 
 async def test_info_profile_status_config_cal(client):
     info = await client.call("scope_info")
-    assert info["fpga_variant"] == "al3" and info["fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}" and "GENERATOR_DDS" in info["caps"]
+    assert info["fpga_variant"] == "al3" and info["fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}" and "GENERATOR" in info["caps"]
     prof = await client.call("scope_profile")
     assert "200 MS/s" in prof["static"]["max_sample_rate"] and prof["live"]["max_total_samples"] == 16382
     assert any("T3" in u for u in prof["unverified"])

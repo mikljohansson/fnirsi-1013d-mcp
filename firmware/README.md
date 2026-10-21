@@ -545,6 +545,113 @@ source change restarts the gate, a same-value write and a level change do not. T
   screen, the mismatch refusal), `test_ui.c` `test_counter_cards` (the card rule and the texts), the 1.26 counter
   vectors in `docs/protocol-vectors.json`.
 
+### Streaming logger (FPGA 0x153D, fw-d4, protocol 1.27 row 67)
+
+Contract `docs/plans/fpga-0x153c.md` section 6 (item D4), register semantics as fpga-d1 built them (tb_stream.v): 0x69 bit 0
+stream (the capture never stops or triggers), bit 1 clear the lap flag; 0x6A the next ring word the MCU reads; read 0x38 = 8
+bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread count (0..8192); a word written while
+8192 are unread sets the lap flag; 0x01 = 1 zeroes the reader, the count and the counter, not the flag.
+
+- **Rates** (the contract's documented specification, owner 2026-10-20 22:38): sample rate x bytes per sample x channels
+  <= 500,000 B/s: 500 kS/s for one 8-bit channel (format 0 legacy or 1 the filtered word's high byte), 250 kS/s for one
+  16-bit (format 2) or peak (3) channel or two 8-bit channels, 125 kS/s for two 16-bit channels. LOG_START refuses more
+  (E_BAD_ARG detail 1 with the tiers as the hint). The format must match the SET_DECIM setting at the divider (0: filter
+  off; 1 / 2: a filter; 3: peak).
+- **The log loop** (`pc_hal_scope.c` `pc_log_loop`, entered from `pc_glue_poll_main` after the MAIN poll that ran
+  LOG_START): one drain step (`fpga_log_drain`) and one MAIN poll per iteration until the log ends; no UI pass runs (the
+  FPGA ring holds 16.4 ms at 500 kwords/s, a UI pass takes 15-40 ms). The Scope view stays frozen, its notice slot reads
+  "Logging to the host: 12 s, 6.0 MB, 1 gap" (redrawn every 500 ms); at the end the UI's 0x0D is written back and "Log
+  ended: ..." shows as the slot's notice. While logging every command outside the F_BUSY and read-only sets and
+  LOG_READ / LOG_STOP answers E_STATE detail 9 (`pc_dispatch`); acq_state reads 5. The person at the scope cannot stop a
+  log on the screen (no new control, decided): the host does (LOG_STOP), or the firmware when the host is gone (a link
+  reset or DTR drop, or no LOG_READ for 10 s: state 4).
+- **Start** (`fpga_log_start`): 0x0D = divider, the filter / peak registers through `pc_dec_apply` (settled), the
+  sequencer off (`pc_seq_hw_pre_reset` and 0x57 = 0), 0x69 = 1, 0x1A = 0, the sampling reset with 0x0B = 0x0C = 0x0E = 0,
+  a 0x38 snapshot (bit 7 clear: no stream, E_FPGA detail 1; base = (W - count) mod 8192), 0x6A = base, 0x69 = 3.
+- **Drain step**: up to 2048 words from the next unread one, one pass per lane as READ_RAW (0x1F, the read command, the
+  dummy strobe; `fpga_read_lane`) straight into the DDR ring at the word's byte offset, then a second 0x38: the chunk is
+  kept when the lap flag is clear and the counter is at most 8176 words ahead of the chunk's first word, else it is a gap;
+  then 0x6A. Per step one 0x38 read (9 strobes), 5 + n strobes per lane, the 0x6A write (3). Wire layout per word: the
+  enabled channels CH1, CH2; format 0 core B then core A (0x21, 0x20), 1 the high byte (0x21), 2 u16 little-endian (0x20,
+  0x21), 3 min then max (0x20, 0x21); CH2 + 2.
+- **Gaps** (the overflow): the words between the last one read and the counter are lost, the drain resumes at the newest
+  word (0x6A, 0x69 = 3 clears the flag), the next chunk carries the gap flag and its counter jumps; the log continues. A
+  full DDR ring stops the drain (the words wait in the FPGA ring); if the host does not read in time the FPGA ring laps
+  and that gap also carries the DDR flag (bit 3).
+- **DDR ring** (`pc_logring.c`, host-buildable): **8 MiB** in the NOLOAD section `.logring` right after `.bss` (fnirsi_1013d.ld;
+  not in the image, not cleared at boot; 0x80882000..0x81082000 on the GCC 10 build of 2101a2c, 9.5 MiB below the
+  restart record section at 0x81A00000, which the linker asserts). Why 8 MiB: every tier produces the same 500 kB/s, so
+  the ring rides out 16.8 s of host stall (Windows transport stalls of several seconds were seen on the bench,
+  hardware-status 2026-10-17), the contract's proposal, a power of two (masking), and it leaves 9.5 MiB of growth room for
+  image and `.bss` (17.5 MiB were free). Whole words only, segments at gaps (64 unread at most), so every chunk is
+  contiguous and its counter exact. Readable after the end until the next LOG_START.
+- **Duration**: the drain never reads past ceil(duration_ms x 200,000 / word clocks) words and ends there (state 2).
+  LOG_STOP writes 0x69 = 0; the FPGA stops writing at the next write clock edge (auto mode, 0x0E = 0) and the tail is
+  read into the ring (state 3).
+- **Cost** (`host_tests/test_log.c` against `fpga_model.c`'s stream; strobes at the measured 0.30 / 0.35 us per bus byte,
+  the USB side as CPU time at 0.43 / 1.0 us per byte in 512-byte packets between drain steps, a 25 ns per byte build,
+  a 1 ms host turnaround per LOG_READ): every tier delivers 500 kB/s for 2 s without a gap at the worst case; CPU duty
+  52-60 % best, 78-82 % worst (the contract's per-byte sum: 0.73 .. 1.35 us per byte = 37-68 %, plus the per-chunk
+  overheads). Twice the 1 ch 8-bit tier (1 MS/s) with a 256 KiB ring falls behind and logs gaps with the DDR flag,
+  every delivered byte right.
+- **Host tests**: `test_log` (above, plus every format and channel mask byte for byte, the DDR wrap, a 40 ms stall's gap,
+  a lap flag with nothing lost, the DDR-full gap, the duration limit, the start's write order, a leftover lap flag, the
+  0x153C refusal, the bounded ready wait, the tail after a stop), `test_session` `test_logger` (caps, features, every
+  refusal and tier boundary, the 48-byte LOG and a gap chunk byte for byte, the E_STATE 9 gate and what still answers,
+  ENDED, the host watchdog and DTR drop), the 1.27 vectors.
+
+### The generator as a pattern, the pattern generator, the chirp (FPGA 0x153D, fw-d5, protocol 1.27 row 67)
+
+Bitstream 0x153D (fpga-d2; contract `docs/plans/fpga-0x153c.md` sections 7.2-7.5) removes Atlan4's DDS (0x51 / 0x52): the
+calibration pin is driven by a **pattern generator** on the 200 MHz clock, and the generator is its two-step continuous
+pattern. The firmware on this branch is still built for 0x153C (`PC_FW_FPGA_VERSION`): the generator only works once
+0x153D is flashed and the version word moves with the integration.
+
+- **The pattern** (`fpga_bus.c` / `fpga_bus.h` block "D5 pattern", `fpga_pat`): up to 8 steps (0x6C: { end, mark, level,
+  index }, u32 duration in 5 ns clocks >= 2, u16 fraction in 1/65536 clock), 0x6D control (mode 0 off at the idle level,
+  1 one burst per start, 2 R bursts (0x6E) with the gap (0x6F) between them, 3 continuous with the gap after each; bit 2
+  idle level, bit 3 the marker is a capture trigger source, bit 4 start, bit 5 commit, bits 7..6 start source MCU /
+  pattern trigger engine / both), 0x50 the pin driver (1 = the pattern's level, 0 = hi-Z, the EXT input). One 16-bit
+  fraction accumulator: a step lasts n + the carry of acc + f, so the mean is exact and every edge lands within one 5 ns
+  clock of its ideal time; it is cleared at a start only (two bursts are identical edge for edge). Entries 0 and 1 are
+  double-buffered: a write goes to a shadow, the commit makes them pending, and the FPGA takes them at a step boundary
+  (it prefetches two steps: a commit during step k is taken at the boundary into k + 1 and applies from step k + 3; a
+  start takes them before step 0). Read 0x39:
+  { running, in gap, pending, step }, bursts done, { marker seen, mode active }.
+- **The generator** (`gen_pat.c`, host-buildable; `fpga_control.c` `fpga_set_generator_freq` / `_duty` /
+  `fpga_on_off_generator`): the contract's integer formulas P16 = (2^16 x 2e11 + f / 2) / f (f in mHz), H16 = (P16 x d +
+  5000) / 10000 (d in basis points), n_h = H16 >> 16, f_h = H16 & 0xFFFF, the low step from P16 - H16. The square is
+  entry 0 (high) and entry 1 (low, end) in mode 3; a change of a running square is 0x6C x 2 + 0x6D commit, **18 strobes,
+  5.4 us**, glitch-free and phase-continuous, so the menu's frequency and duty can be written in any order; a first
+  enable stops the engine (0x6D = 0, and 0x6F = 0 after a pattern with a gap) and starts it with commit + start in one
+  write (0x6D = 0x33). The UI's whole Hz / whole percent go through the same formulas with the high time clamped to
+  2 .. P - 2 clocks; 0 Hz or 0 % hold the pin low and 100 % high (mode 0 with the idle level, the DDS's behaviour at the
+  extremes). While the generator is off nothing is written for a frequency or duty change; off is the pattern stopped
+  low and the pin hi-Z. The 1 kHz is exact: n_h = n_l = 100,000 clocks, no fraction (the wizard's, the boot default).
+  The wizard's gain step holds the post at a static level with `fpga_pat_level` + 0x50 = 1 (`cal_wiz_ui.c`).
+- **Host** (`pc_cmds.c`): SET_GEN keeps 20 bytes with the raw modes P16 (bytes 4..11) and H16 (12..19); GEN is 40 bytes
+  (the 0x39 status, the source byte, P16, H16); GET_GEN reads 0x39 in the main loop, so a host chirp can poll the pending
+  bit. **SET_PATTERN 0x0217** loads a host pattern (steps, mode, flags incl. bit 0 "pin hi-Z", R, gap in ns, commit,
+  start); **SET_PATTERN_TRIGGER 0x021A** configures the pattern's own trigger engine (0x76..0x7D: the SET_TRIGGER2 body
+  through the same byte builder as the capture trigger's registers with the pattern's code table; armed, re-arm; the
+  routed fallback's refusal E_STATE 8); capture trigger source 3 is the marker (SET_TRIGGER / SET_TRIGGER2, the edge type;
+  the UI keeps EXT as its channel and the trigger button reads "PAT"; `fpga_trig_marker`). Byte layouts: `docs/protocol.md`
+  row 67.
+- **The chirp** (contract 7.3): no sweep logic in the FPGA and no device command; a host steps SET_GEN (18 strobes per
+  step on the bus; a USB round trip each, about 2,000 steps per second from the host) and paces on GEN byte 1 bit 5
+  (pending) or by keeping steps at least one period apart: a second commit before the take overwrites the first.
+- **Bode** (`bode_dsp.c`, `bode_sweep.c`, `pc_bode.c`): the stimulus is an integer period P of 5 ns clocks (n_h = ceil(P /
+  2)), f = 200 MHz / P; every plan of the DDS era maps with P = 4 M and the grid is four times finer (legacy up to P 133;
+  at N = 16 an even P above 4095 so a record holds two blocks). The record is exactly coherent (no Hann window), the DFT
+  steps the phase by round(N 2^34 / P). READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
+- **Host tests**: `test_fpga_bus.c` (`fpga_model.c` runs the pattern engine on the 5 ns grid): `test_gen_formulas` (14
+  frequencies x 9 duties: P16 the nearest unit, the split, the back conversions, the worked examples, the limits, the UI
+  and Bode squares), `test_gen_square` (eight squares from 47 Hz to 10 MHz: every edge within one clock, the mean period
+  exact over up to 1500 periods; the write sequences, 18 strobes per change), `test_gen_change` (a change mid-run: only
+  complete old or new steps, the take at the prefetch boundary, the pending bit, a commit lost to a second one),
+  `test_pattern_bursts`, `test_pattern_marker`, `test_ptrig`; `test_session.c` `test_generator` / `test_pattern` /
+  `test_pattern_trigger`; `test_bode.py` / `test_bode_sweep.c` on P; the 1.27 vectors (section 5i of `gen_vectors.py`).
+
 ### Build options
 
 | make variable | default | effect |
@@ -619,7 +726,7 @@ Hooks in the 1.00o5 code (up to 0.2.46 all under `#if PC_PROTOCOL`, since 0.2.47
 
 Maintainer policy: the UI offers only what the running hardware can do, and what the 1013D can never do is removed in
 code, not hidden (maintainer, 2026-10-18). Removed in 0.2.47 (settings sector and waveform file slots stay, written 0):
-the generator's Wave (SQUR / SINE / TRGL), Ampl, Offset and Phase rows (no DAC: the generator is the FPGA's DDS
+the generator's Wave (SQUR / SINE / TRGL), Ampl, Offset and Phase rows (no DAC: the generator is the FPGA's square (the DDS, since 0x153D the pattern)
 square wave on the calibration pin; 1.00o5 never sent them anywhere), the trigger Hold off row (never sent to the
 FPGA), Long memory (1.00o5 forced it off; its main-loop branch was empty) and the channel menus' FFT switch
 (1.00o5 stored `fftenable` and drew nothing). The menus are compact (maintainer: no gaps; generator 3 rows, 169 px:

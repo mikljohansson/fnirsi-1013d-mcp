@@ -35,6 +35,9 @@
 //    period, width and duty of CH1 / CH2 / EXT over a 10 ms / 100 ms / 1 s gate, the source's raw min and max over the
 //    gate). With 0x61 = 0 (power-on) nothing runs; the counter never touches the capture. Write 0x35 (CH2 offset) is
 //    unchanged (docs/plans/fpga-0x153c.md section 5, fpga/al3/README.md section 13).
+//  - 0x56 bit 1 (0x153C), 0x29 byte 1 bits 7 / 6: peak detect, { max, min } words of the window's raw samples on the
+//    16-bit path, a one-register switch (0x53 may stay 0: K = 1 geometry, N from 0x0D). With bit 1 = 0 (power-on) the
+//    design behaves exactly as 0x153B.
 //  - 0x6C, 0x6D, 0x6E, 0x6F (new writes), 0x39 (new read), 0x51 / 0x52 retired, 0x15 value 3 (0x153D D2, docs/plans/
 //    fpga-0x153c.md section 7, fpga/al3/README.md section 15): the pulse pattern generator is the generator. Atlan4's
 //    DDS is gone; 0x50 = 1 drives the calibration pin with the pattern's level (power-on: the idle level 0). The square
@@ -130,13 +133,16 @@
             8'h29: //Reading of the decimation geometry (0x1534 and later), 2 bytes
                   4'h0:
                     o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
-                    //bit7 = 1: 16-bit samples, one per channel per memory word (K >= 1)
+                    //bit7 = 1: 16-bit samples, one per channel per memory word (K >= 1, or peak detect: 0x153C)
                     //bit6 = 0x56 bit 0 (FIR enable as written), bit5 = FIR active now: enable, K >= 1 and
-                    //divider >= 14 with divider bit 1 set (N >= 16, N a multiple of 4); both 0 before 0x1535
+                    //divider >= 14 with divider bit 1 set (N >= 16, N a multiple of 4), and peak detect off;
+                    //both 0 before 0x1535
                     //bit4/bit3 = B/A cores captured on the falling write clock edge, bit2 = core order swap,
-                    //bits 1..0 = K (0x53)
+                    //bits 1..0 = K (0x53) as written (0 with peak detect at K = 0)
                   4'h1:
-                    o_mcu_data <= { 2'b0, dec_shift };   //output shift (0x54)
+                    o_mcu_data <= { peak_act, peak_en, dec_shift };   //output shift (0x54); 0x153C: bit7 peak detect
+                                                                      //active, bit6 0x56 bit 1 as written (equal:
+                                                                      //peak is active whenever written)
 
             8'h2A: //Sequencer status (0x1536), 8 bytes
                   4'h0:
@@ -399,8 +405,21 @@
 // Latency pin to memory: 25 write clocks; EXT data lag 250 + 17.5 N + 1.25 K (N - 2) ns.
 // After changing 0x0D, 0x53, 0x54 or 0x56 wait (K + 10) * N * 5 ns + 1 us before 0x01.
 
-            8'h56: //CIC compensation FIR, 1 byte
-                    fir_en <= io_mcu_data[0];       //1 = FIR on where eligible; bits 7..1 reserved, write 0
+            8'h56: //CIC compensation FIR and peak detect, 1 byte
+                    fir_en  <= io_mcu_data[0];      //1 = FIR on where eligible
+                    peak_en <= io_mcu_data[1];      //1 = peak detect (0x153C, below); bits 7..2 reserved, write 0
+
+//---------------------------------------------------------------------------------------
+// Peak detect (0x153C, 0x56 bit 1). Details: fpga/al3/README.md "Changes" section 14.
+// A one-register switch: bit 1 alone selects the 16-bit path (0x29 byte 0 bit 7 = 1 whatever 0x53 holds), the ADCs
+// and the write clock at full rate, and a window of N = 2 * (floor(divider / 2) + 1) raw samples per output word
+// (both cores), exactly the K = 1 boxcar's window with the boxcar's latency (12 write clocks from adc*_w). Each
+// word = { max (high byte, 0x21 / 0x23), min (low byte, 0x20 / 0x22) } of the window's raw 8-bit codes. The FIR is
+// off while peak detect is on (0x29 byte 0 bit 5 = 0), the shift 0x54 is not applied, 0x53 / 0x54 keep their values
+// for the way back (0x56 = 0 with 0x53 = 0: the legacy path at the divided rate again). Trigger: the 16-bit compare
+// takes the window max (rising) or min (falling) as the high byte, so write 0x55 = level << 8. 0x0B, 0x0C, 0x0E and
+// 0x14 count words as for K >= 1; segments allowed; averaging of peak words is refused by the firmware. Settle after
+// a 0x56 write as after a filter write: (K + 10) * N * 5 ns + 1 us (K = 0 counts as 1).
 
 //---------------------------------------------------------------------------------------
 // Segmented capture and hardware averaging (0x1536). Details: fpga/al3/README.md "Changes" section 6 and

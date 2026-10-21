@@ -153,10 +153,58 @@ void     pc_hal_counter_read(pc_hw_counter *c);                                 
 void     pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst); //any context; level 0 = follow the trigger level
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// Generator (Atlan4 DDS, FPGA 0x50-0x52)
+// Generator (FPGA 0x153D: the pattern generator's two-step square, gen_pat.h; 0x50 the pin driver)
 
 void     pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct);    //fpgasettings gen_*
-void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable);      //[UI][FPGA] duty, freq, enable; UI copy rounded
+//[UI][FPGA] the square of P16 / H16 (1/65536 clocks, both steps >= 2 clocks: gen_pat.h gp_split) and 0x50 = enable; the
+//UI copy rounded to Hz / %. p16 = 0: 0x50 alone (a host pattern keeps running behind it)
+void     pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable);
+
+//D5 pattern: SET_PATTERN / SET_PATTERN_TRIGGER (FPGA 0x153D, fpga_bus.h "D5 pattern")
+#define PC_PAT_STEPS        8
+#define PC_PAT_F_HIZ        0x01     //SET_PATTERN flags bit 0: the pin stays hi-Z (0x50 = 0), the post is the EXT input
+#define PC_PAT_F_IDLE       0x04     //bit 2: idle level (0x6D bit 2)
+#define PC_PAT_F_MARKTRIG   0x08     //bit 3: the marker is a trigger source (0x6D bit 3)
+#define PC_PAT_F_SRC        0xC0     //bits 7..6: start source 0 MCU, 1 the pattern trigger engine, 2 both (0x6D bits 7..6)
+#define PC_PAT_S_LEVEL      0x01     //step flags bit 0: level
+#define PC_PAT_S_MARK       0x02     //bit 1: marker at the step's first clock
+
+typedef struct
+{
+  uint8_t  flags;                    //PC_PAT_S_*
+  uint16_t frac;                     //1/65536 clock
+  uint32_t dur;                      //5 ns clocks, >= 2
+} pc_hw_pat_step;
+
+typedef struct
+{
+  uint8_t  mode;                     //0 off, 1 single burst, 2 R bursts, 3 continuous
+  uint8_t  flags;                    //PC_PAT_F_*
+  uint16_t r;                        //0 = 65536
+  uint32_t gap;                      //5 ns clocks
+  uint8_t  n;                        //steps 1..8
+  uint8_t  commit, start;
+  pc_hw_pat_step step[PC_PAT_STEPS];
+} pc_hw_pattern;
+
+//[FPGA] the steps, 0x6E, 0x6F, 0x50 (driven when mode != 0 and not HIZ), 0x6D with commit / start; the generator's UI
+//copy is left as it is (the square is replaced until the next generator change)
+void     pc_hal_pattern_write(const pc_hw_pattern *p);
+void     pc_hal_pattern_status(uint8_t st[4]);                                         //[FPGA] read 0x39
+
+typedef struct
+{
+  uint8_t        source, polarity, level;     //0x76 (0 CH1, 1 CH2, 2 EXT), 0x77, 0x78
+  pc_hw_trig_ext x;                           //0x7A (type, flags LONGER), 0x7B N, 0x7C H; holdoff 0
+  uint8_t        armed, rearm;                //0x7D bits 0, 1
+  uint8_t        route;                       //0x7D bit 3: the shared fallback's engine routed to the pattern
+} pc_hw_ptrig;
+
+void     pc_hal_ptrig_read(pc_hw_ptrig *p);                                            //any context (a memory read)
+//[FPGA] the engine's registers (0x79 from level through the decimation the capture runs, as 0x55 is derived) and 0x7D
+void     pc_hal_ptrig_write(const pc_hw_ptrig *p);
+void     pc_hal_ptrig_status(uint8_t st[3]);                                           //[FPGA] read 0x42
+//D5 pattern end
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition [FPGA]
@@ -475,5 +523,34 @@ void     pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst);
 #define PC_BODE_CTRL_RESP 58         //row 60: 40, fw 0.2.91 48, 0.2.93 50 (planned switches), 0.2.94 58 (AUTO SET CH2)
 int      pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail);
 uint32_t pc_hal_bode_read(uint32_t first, uint32_t max_rows, uint8_t *resp);
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger (fw-d4, FPGA 0x153D, protocol 1.27 row 67; fpga_log.h, pc_logring.h). The scope keeps one log: the FPGA side
+//(fpga_log) and the DDR ring of PC_LOG_RING_BYTES in the `.logring` section (fnirsi_1013d.ld). While it runs, the main loop
+//is the log loop (pc_hal_scope.c): drain steps and MAIN polls, the Scope view frozen with a "Logging to the host" line.
+#define PC_LOG_RING_BYTES (8u << 20)     //8 MiB: 16.8 s of the 500 kB/s every tier produces (host stalls)
+
+typedef struct
+{
+  uint8_t  state;               //FPGA_LOG_IDLE .. _ERROR (fpga_log.h): 0 idle, 1 running, 2 ended, 3 stopped, 4 error
+  uint8_t  ch_mask;
+  uint8_t  format;
+  uint8_t  flags;               //FPGA_LOG_FL_*: bit 0 a gap, bit 1 a gap because the DDR ring was full
+  uint64_t produced;            //bytes into the DDR ring since the start
+  uint64_t sent;                //bytes taken by LOG_READ
+  uint32_t gaps;
+  uint32_t ring_bytes;
+  uint32_t ms;                  //since the start, frozen at the end
+} pc_hw_log;
+
+//[FPGA][UI] 0x0D = divider, the decimation registers of dc (settled), the UI's conversions stopped, the stream armed
+//(fpga_log_start) for limit words (0 = until stopped). 0 running, -1 the FPGA never became ready, -2 the bitstream does not
+//stream (0x38). The main loop enters the log loop after this MAIN poll
+int      pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit);
+void     pc_hal_log_stop(uint8_t state);                     //[FPGA] FPGA_LOG_STOPPED (the tail is read) or _ERROR
+void     pc_hal_log_info(pc_hw_log *l);                      //memory, any context
+//MAIN (the drain shares the ring): up to max bytes, whole words, of the oldest unread segment; *word = the FPGA word
+//counter of the first word, *flags = PC_LOG_CF_GAP / _HOST on a segment's first chunk. Returns the bytes
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags);
 
 #endif /* PC_HAL_H */

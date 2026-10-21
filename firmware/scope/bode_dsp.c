@@ -153,39 +153,39 @@ uint64 bode_exp2_round(int64 y)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Planner
 
-uint32 bode_phase_inc(uint32 m)
+void bode_plan_p0(uint32 p0, bode_plan *pp)
 {
-  return (uint32)(((1ull << 32) + m / 2) / m);
-}
-
-void bode_plan_m0(uint32 m0, bode_plan *pp)
-{
-  uint32 n, m, j, jp, jb;
+  uint32 n, per, j, jp, jb;
   uint64 g, num, err, tgt;
 
-  if(m0 < 2)
-    m0 = 2;
+  if(p0 < BODE_P_MIN)
+    p0 = BODE_P_MIN;
 
-  if(m0 <= BODE_LEGACY_M_MAX)
+  if(p0 <= BODE_LEGACY_P_MAX)
   {
-    n = 1;
-    m = m0;
+    n   = 1;
+    per = p0;
   }
   else
   {
     n = 16;
-    while(4ull * m0 > (uint64)BODE_MAX_SPP * n)
+    while(p0 > (uint64)BODE_MAX_SPP * n)
       n *= 2;
 
-    //Below 24 kHz the samples per period must be an integer S (else p keeps M's odd part and no record fits)
-    m = (n == 16) ? m0 : (uint32)(div_round_even(4ull * m0, n) * n / 4);
+    //Below 24 kHz the samples per period must be an integer S (else p keeps P's odd part and no record fits)
+    per = (n == 16) ? p0 : (uint32)(div_round_even(p0, n) * n);
+
+    //At N = 16 a block is p = P / gcd(P, 16) samples: an odd P above 4095 would leave one block per record (no noise
+    //estimate, no halves; P = 8191 no record at all), so there P is even (two blocks of at most 4095 samples fit)
+    if((n == 16) && (per > BODE_MAX_RECORD / 2))
+      per = (uint32)(div_round_even(p0, 2) * 2);
   }
 
-  g = gcd64(4ull * m, n);
-  pp->m = m;
-  pp->n = n;
-  pp->p = (uint32)(4ull * m / g);
-  pp->q = (uint32)(n / g);
+  g = gcd64(per, n);
+  pp->period = per;
+  pp->n      = n;
+  pp->p      = (uint32)(per / g);
+  pp->q      = (uint32)(n / g);
 
   jp = (BODE_MIN_RECORD + pp->p - 1) / pp->p;
   jb = (BODE_MIN_PERIODS + pp->q - 1) / pp->q;
@@ -195,19 +195,18 @@ void bode_plan_m0(uint32 m0, bode_plan *pp)
   if((j & 1) && ((j + 1) * pp->p <= BODE_MAX_RECORD))
     j++;
 
-  //Cannot exceed in range (p <= 2084, q <= 4 at N = 16; the host raises): clamp
+  //Cannot exceed in range (p <= 8190, q <= 16 at N = 16; the host raises): clamp
   while((j > 1) && (j * pp->p > BODE_MAX_RECORD))
     j--;
 
-  pp->blocks    = (uint16)j;
-  pp->record    = (uint16)(j * pp->p);
-  pp->phase_inc = bode_phase_inc(m);
+  pp->blocks = (uint16)j;
+  pp->record = (uint16)(j * pp->p);
+  pp->f_mhz  = div_round_even(200000000000ull, per);
+  pp->step   = (((uint64)n << 34) + per / 2) / per;
 
-  //f = inc x 50e9 / 2^32 mHz = inc x 97656250 / 2^23
-  pp->f_mhz = div_round_even((uint64)pp->phase_inc * 97656250ull, 1ull << 23);
-
-  //Coherence error in periods: |record x inc x n / 2^34 - blocks x q| > 1e-3 -> Hann (the host's window rule)
-  num = (uint64)pp->record * pp->phase_inc * n;
+  //Coherence error in periods: |record x step / 2^34 - blocks x q| > 1e-3 -> Hann (the host's window rule; the integer
+  //period makes the record exactly whole, the step's rounding leaves it under 2.5e-7 turn off)
+  num = (uint64)pp->record * pp->step;
   tgt = ((uint64)j * pp->q) << 34;
   err = (num > tgt) ? num - tgt : tgt - num;
   pp->hann = (uint8)((err * 1000) > (1ull << 34));
@@ -218,7 +217,7 @@ int bode_plan_point(uint64 f_mhz, bode_plan *pp)
   if((f_mhz < BODE_FMIN_MHZ) || (f_mhz > BODE_FMAX_MHZ))
     return -1;
 
-  bode_plan_m0((uint32)div_round_even(50000000000ull, f_mhz), pp);
+  bode_plan_p0((uint32)div_round_even(200000000000ull, f_mhz), pp);
   return 0;
 }
 
@@ -234,27 +233,27 @@ int bode_plan_sweep(uint64 start_mhz, uint64 stop_mhz, int points, bode_plan *ou
 
   l_lo  = bode_log2_q32(lo);
   l_hi  = bode_log2_q32(hi);
-  l_gen = bode_log2_q32(50000000000ull);
+  l_gen = bode_log2_q32(200000000000ull);
 
   for(i = 0; i < points; i++)
   {
     bode_plan pp;
-    uint32    m0;
+    uint32    p0;
 
     if(i == 0)
-      m0 = (uint32)div_round_even(50000000000ull, lo);
+      p0 = (uint32)div_round_even(200000000000ull, lo);
     else if(i == points - 1)
-      m0 = (uint32)div_round_even(50000000000ull, hi);
+      p0 = (uint32)div_round_even(200000000000ull, hi);
     else
     {
       int64 lf = l_lo + ((l_hi - l_lo) * i) / (points - 1);
 
-      m0 = (uint32)bode_exp2_round(l_gen - lf);
+      p0 = (uint32)bode_exp2_round(l_gen - lf);
     }
 
-    bode_plan_m0(m0, &pp);
+    bode_plan_p0(p0, &pp);
 
-    if(n && (out[n - 1].m == pp.m))
+    if(n && (out[n - 1].period == pp.period))
       continue;
 
     if(n >= max)
@@ -288,8 +287,8 @@ uint32 bode_record_us(const bode_plan *pp, uint32 total)
 
 uint32 bode_settle_ms(const bode_plan *pp, uint32 periods_x10)
 {
-  //periods / f = periods x 2^32 / (inc x 50e6) s
-  uint64 ms = (((uint64)periods_x10 << 32) + (uint64)pp->phase_inc * 500000 - 1) / ((uint64)pp->phase_inc * 500000);
+  //periods / f = periods x P / 200e6 s: ms = periods_x10 x P / 2e6, rounded up
+  uint64 ms = ((uint64)periods_x10 * pp->period + 1999999) / 2000000;
 
   return (ms < 1) ? 1 : (uint32)ms;
 }
@@ -393,7 +392,7 @@ static uint32 noise_mad(const uint16 *x, uint32 L, uint32 p, uint32 blocks, uint
 static void dft_core(const bode_plan *pp, const uint16 *x1, const uint16 *x2, int32 *work, bode_dft *d)
 {
   uint32 L = pp->record, n, half = L / 2, p = pp->p;
-  uint64 step = (uint64)pp->phase_inc * pp->n, ph = 0;
+  uint64 step = pp->step, ph = 0;
   uint64 lstep = ((1ull << 34) * (pp->hann ? 2 : 1) + L / 2) / L, phl = 0;
   uint64 wstep = ((1ull << 34) + L / 2) / L, phw = wstep / 2;
   int    c, nch = x2 ? 2 : 1;

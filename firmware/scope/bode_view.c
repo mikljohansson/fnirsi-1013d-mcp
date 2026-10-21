@@ -205,7 +205,7 @@ int bode_view_active(void)
 
 int bode_view_available(void)
 {
-  return ((pc_glue_caps() & (PC_CAP_DECIM | PC_CAP_GENERATOR_DDS)) == (PC_CAP_DECIM | PC_CAP_GENERATOR_DDS)) &&
+  return ((pc_glue_caps() & (PC_CAP_DECIM | PC_CAP_GENERATOR)) == (PC_CAP_DECIM | PC_CAP_GENERATOR)) &&
          !scopesettings.waveviewmode;
 }
 

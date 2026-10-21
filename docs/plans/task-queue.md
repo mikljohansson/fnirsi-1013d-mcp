@@ -276,6 +276,67 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- Coordinator 10:2x: fpga-d2 reported its detached WSL runs dying with empty logs (a broad `pkill -f` from another agent on
+  the shared WSL instance); rule sent to fpga-c4 and fpga-d1 and to be written into fpga/al3/AGENTS.md "Build" by C4: kill
+  only by PID or by a pattern with your own work directory, never by vvp / run.sh / td / build.sh / tb_.
+- fpga-c4 (Fable, dispatched 09:54, branch fpga-c4): 0x153C integration: the C0 cruft removal (section 13 list, 0x1B kept,
+  div20), version byte 0x3C, the timing re-roll on the merged source (known misses on q_pass / pp_i), contract_0x153C.txt,
+  run.sh 16 steps on two seeds, dist entry as a candidate (min_firmware 0.2.104), BITSTREAMS.md row, AGENTS.md status
+  with the owner's flash checklist.
+- fpga-c2 (Fable, dispatched 22:21, cut off and resumed, done 09:5x, merged 09:53 as 50cbc71): peak detect as the one-
+  register switch (dec_on includes peak_en; decim_chan at order 0 already behaves as K = 1); the shared dec_trig_sample
+  lines take the window max / min as the trigger byte; the reserved-bit writes in tb_decim / tb_fir / tb_seg keep bit 1
+  clear; tb_peak 45; full run.sh 16 steps ALL PASS both seeds on the merged source; TD +136 LUT alone with a -0.504 ns
+  miss on the sequencer's pp_i enable (lottery). WSL note: detached runs die when no wsl.exe stays attached.
+- mcp-d6 (Opus, dispatched 09:05, done 10:2x, merged 10:23 as fc71df7): protocol 1.27 on the host, byte-matched to fw-d4 and
+  fw-d5 (test_d27 holds their vector payloads; bode-plan-vectors.json v2 byte-identical): scope_log / scope_log_status /
+  scope_log_stop (raw sample files + log.json, pumped in the background under the session lock), scope_pattern (tier 3,
+  capture=true arms first), scope_sweep (host-stepped, ~2,000 steps/s), source "pattern", GEN exact frequency, report
+  kinds log / pattern; 549 tests; README 40 tools. Note: the self-test's fast square is 200 MHz / 201 now (an even period
+  puts every edge on the same core, so the T4 interleave check lost its information: bench item). Main with fw-d5 +
+  mcp-d6: host tests green, check_vectors OK, gcc10 builds (817,152 B), ruff clean; pushed when pytest finishes.
+- fw-d5 re-push 2bd7042 merged 10:01 as 238ee86 (local only): host tests green except test_bode.py (PointPlan.period comes
+  with mcp-d6's bode.py), check_vectors OK; main is pushed together with mcp-d6 so CI stays green. fpga-d2's final rule: a
+  commit during step k applies from step k+3, step 0 starts about 35-40 ns after the start write (the model follows).
+- fw-d5 (Opus, dispatched 09:03, reported 09:4x, merge handed back 09:50): the generator as a fractional two-step pattern
+  behind SET_GEN (P16 / H16 raw modes; GEN response 40 B with the 0x39 status), SET_PATTERN 0x0217 (12 + 8n B, start at
+  offset 10, pin hi-Z flag), SET_PATTERN_TRIGGER 0x021A (28 B, response 32 B), trigger source 3 = the marker (button
+  "PAT"), Bode on P = 4 M (vectors file version 2, even P above 4095 at N = 16), 18 strobes per frequency step; caps
+  bits 1 GENERATOR / 24 / 27, features 12 / 13; gcc10 e900d830 (provisional). Its push predates fw-d4's merge: 14 files
+  conflict, so fw-d5 merges origin/main (-X renormalize) in its worktree and pushes again; the two Bode tests wait for
+  mcp-d6's bode.py. fpga-d2 rule: a commit during step k applies from step k+2.
+- fw-d4 (Opus, dispatched 09:03, done 09:3x, merged 09:40 as a304273): the streaming logger: LOG_START 16 B / LOG 48 B /
+  LOG_READ (16 B header + whole words, oldest first, never across a gap) / LOG_STOP, 8 MiB NOLOAD .logring in DDR, acq_state
+  5, the contract tiers at 500 kB/s with 52-82 % CPU duty in the host model, gap and lap flags, the Scope view's "Logging
+  to the host" notice with no UI pass while logging, auto-stop 10 s without a LOG_READ; register semantics agreed with
+  fpga-d1 (0x6A = next word to read, full detector, 0x38 byte 0 = { stream, lap, 0, W[12:8] }), bytes agreed with mcp-d6;
+  test_log 344, 151 vectors; gcc10 488d2827 (provisional). Deviations: LOG_READ returns at once, header 4..7 = the FPGA
+  word counter, features bit 11, LOG_START needs the Scope view and a format matching the Filter.
+- Coordinator 09:42: the fw-d4 merge brought 30 files in with CRLF on every line (and Atlan's vendor files had been CRLF
+  since the start); the coordinator's CR check with the shell escape never worked. Fixed 0f177ca: every text file LF,
+  .gitattributes text=auto eol=lf (al_ip sources excluded), merge.renormalize on; host tests, vectors and the gcc10
+  build re-verified after the normalisation.
+- mcp-c8b (Opus, dispatched 09:00, done 09:1x, merged 09:17 as 2c29614): counter level 0 = follow (simulator), the host bug where
+  read_counter re-sent the level it read and pinned it on any gate change (fixed: the client remembers the level it set;
+  scope_counter level='trigger'), peak detect aligned with all 41 decim_peak device vectors (legacy cases write nothing,
+  FIR dropped / refused with peak, settle 11 N x 5 ns + 1 us), the simulator's GET_CAL gated flag follows the divider,
+  README 35 tools / release notes 37 and 35; 524 tests. Remaining host-vs-firmware differences are timing-of-application
+  only (the firmware applies a counter configuration on the next pass; the simulator at once).
+- Coordinator 09:03: the fw-d5 and mcp-d6 briefs wrongly named a SET_SWEEP 0x0218; the contract has none (the chirp is the
+  host stepping SET_GEN through the double buffer). fw-d5 caught it; both agents told to follow the contract.
+- fw-d4 / fw-d5 / mcp-d6 (Opus, dispatched 09:03-09:05, branches of the same names): 0x153D firmware and host from the
+  contract in parallel with the RTL: D4 LOG_START / LOG_READ / LOG_STOP with the DDR ring, acq_state 5, the contract
+  rates; D5 the generator as a two-step fractional pattern behind SET_GEN (P16 / H16), SET_PATTERN / SET_PATTERN_TRIGGER /
+  SET_SWEEP, Bode P = 4 M; D6 MCP 1.27 (scope_log, scope_pattern, scope_sweep, source "pattern", simulator). The firmware
+  writes its bytes into protocol.md row 67; D6 matches at the merge (as C5 / C8). PC_FW_FPGA_VERSION stays 0x153C until
+  the 0x153D integration (D3).
+- fpga-d1 / fpga-d2 (Fable, dispatched 09:0x, branches of the same names): 0x153D items D1 (logger RTL: 0x69 / 0x6A / 0x38,
+  stream gating, word counter, lap; tb_stream step 17) and D2 (pat_gen: 8 steps u32 + u16 fraction, double buffer, bursts /
+  repeat / gap / continuous, marker as trigger source 0x15 = 3, the DDS removed, the pattern trigger engine 0x76-0x7D /
+  0x42 as a third trig_qual instance with the routed fallback if timing fails; tb_pattern step 18). Both start from main
+  with C1 + C3 (C2 and C4 land in parallel); C4 owns the version byte, the contract file, dist and the C0 cruft removal.
+- mcp-c8b (Opus, dispatched 09:0x, branch mcp-c8b): host follow-ups to fw 0.2.104: simulator counter level 0 = follow, the
+  full-class peak correction and the "not written" legacy case, the tool count in README / release notes, mcp/AGENTS.md.
 - fw 0.2.104 numbered 08:5x (built for 0x153C: fw-c5, fw-c6, fw-c7, ui-type, ui-sample merged; ui-sample done 08:5x, merged
   08:57 as 2d4861f): host tests green on merged main, check_vectors OK (140); gcc10 sha256 7c640ab5fe1f9b1c75dc321c96038e7dc3fe8fb88fd9e105e81cf344351d2cbc pinned as
   backups/fw-0.2.104_7c640ab5.bin. Needs the 0x153C bitstream on the unit (C4 pending on fpga-c2); on 0x153B it shows the

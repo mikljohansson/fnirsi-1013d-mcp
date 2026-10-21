@@ -19,34 +19,35 @@ VECTORS = Path(__file__).resolve().parents[2] / "docs" / "bode-plan-vectors.json
 # --- planner ----------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("f,m,n,record", [
-    (1e3, 50048, 512, 3128),  # design 3.2 worked example: 999.0 Hz, S = 391, 8 periods
-    (10.0, 4997120, 65536, 2440),  # design 3.4 table: N 65,536, L 2440
-    (100e3, 500, 16, 2250),
-    (1e6, 50, 16, 2050),
-    (2e6, 25, 1, 2200),
+@pytest.mark.parametrize("f,period,n,record", [
+    # the design's examples on the DDS (M) map exactly with P = 4 M (contract 7.4)
+    (1e3, 4 * 50048, 512, 3128),  # design 3.2 worked example: 999.0 Hz, S = 391, 8 periods
+    (10.0, 4 * 4997120, 65536, 2440),  # design 3.4 table: N 65,536, L 2440
+    (100e3, 2000, 16, 2250),
+    (1e6, 200, 16, 2050),
+    (2e6, 100, 1, 2200),
+    (1.01e6, 198, 16, 2178),  # the finer grid: P 198 was not reachable with M (4 M = 196, 200)
 ])
-def test_plan_design_examples(f, m, n, record):
+def test_plan_design_examples(f, period, n, record):
     pp = B.plan_point(f)
-    assert (pp.m, pp.n, pp.record) == (m, n, record)
+    assert (pp.period, pp.n, pp.record) == (period, n, record)
 
 
 def test_plan_clean_edges_and_actual_frequency():
     for f in np.geomspace(1.0, 10e6, 300):
         pp = B.plan_point(float(f))
-        assert pp.phase_inc == round(2 ** 32 / pp.m)
-        assert pp.f_actual == pp.phase_inc * 50e6 / 2 ** 32
-        # integer M: the DDS frequency is 50 MHz / M up to the 32-bit increment rounding
-        assert abs(pp.f_actual * pp.m / 50e6 - 1) <= 0.5 / pp.phase_inc + 1e-12
-        # within 0.2 % of the request below 24 kHz (S >= 257) or the nearest integer M above, plus the increment's
-        # 0.5 / inc (up to 0.6 % at 1 Hz)
-        assert abs(pp.f_actual / f - 1) < (0.0021 if pp.n > 16 else 1 / pp.m) + 0.5 / pp.phase_inc
+        # an integer period of 5 ns clocks: f = 200 MHz / P exactly (protocol 1.27)
+        assert pp.f_actual == 200e6 / pp.period
+        assert P.gen_period_p16(pp.period) == (pp.period << 16, ((pp.period + 1) // 2) << 16)
+        # within 0.1 % of the request below 24 kHz (S >= 257, P a multiple of N) or the nearest integer P above
+        # (and the even P of N = 16 above 4095 clocks)
+        assert abs(pp.f_actual / f - 1) < (0.0021 if pp.n > 16 else 1.01 / pp.period * (2 if pp.period > 4095 else 1))
 
 
 def test_plan_rate_rules():
     for f in np.geomspace(1.0, 10e6, 400):
         pp = B.plan_point(float(f))
-        spp = 4 * pp.m / pp.n
+        spp = pp.period / pp.n
         if pp.f_actual > B.LEGACY_ABOVE_HZ:
             assert pp.n == 1 and pp.divider == 0 and not pp.fir_expected
             continue
@@ -54,13 +55,14 @@ def test_plan_rate_rules():
         assert pp.n == 16 * 2 ** k and pp.divider == pp.n - 1
         assert P.decim_n(pp.divider) == pp.n  # the filter's N = 2 (floor(D / 2) + 1) for the odd divider
         assert 8 <= spp <= 512  # inside the FIR's flat band (fo / 4) and at most 512 samples per period
-        if pp.n > 16:  # below 24 kHz: S = 4M / N an integer 256..512, M a multiple of N / 4
-            assert pp.q == 1 and 256 <= pp.p <= 512 and pp.m % (pp.n // 4) == 0
+        if pp.n > 16:  # below 24 kHz: S = P / N an integer 256..512, P a multiple of N
+            assert pp.q == 1 and 256 <= pp.p <= 512 and pp.period % pp.n == 0
         else:
-            assert 4 * pp.m <= 512 * 16
-        # N is the smallest ladder step with 4 M0 / N <= 512
-        m0 = round(50e6 / f)
-        assert 4 * m0 <= 512 * pp.n and (pp.n == 16 or 4 * m0 > 512 * pp.n // 2)
+            assert pp.period <= 512 * 16
+            assert pp.period <= B.MAX_RECORD // 2 or pp.period % 2 == 0  # above 4095: even, two blocks fit
+        # N is the smallest ladder step with P0 / N <= 512
+        p0 = round(200e6 / f)
+        assert p0 <= 512 * pp.n and (pp.n == 16 or p0 > 512 * pp.n // 2)
 
 
 def test_plan_fir_eligibility_and_filter_fallback():
@@ -88,7 +90,8 @@ def test_plan_records_are_coherent():
         assert pp.periods == pp.blocks * pp.q >= B.MIN_PERIODS
         assert B.MIN_RECORD <= pp.record <= B.MAX_RECORD
         assert pp.total_samples % 2 == 0 and pp.total_samples <= P.DECIM_MAX_TOTAL
-        assert pp.record * pp.n == pp.periods * 4 * pp.m  # exactly C periods of the planned M in L samples
+        assert pp.record * pp.n == pp.periods * pp.period  # exactly C periods of P in L samples
+        assert pp.coherence_error < 1e-6 and pp.window == "rect"
         assert pp.halves or (pp.blocks + 1) * pp.p > B.MAX_RECORD  # even block counts wherever they fit
 
 
@@ -96,8 +99,10 @@ def test_plan_sweep_order_merge_determinism():
     a = B.plan_sweep(1e6, 100.0, 50)
     assert a == B.plan_sweep(100.0, 1e6, 50)  # either order, measured low to high, deterministic
     assert [p.f_actual for p in a] == sorted(p.f_actual for p in a)
-    hi = B.plan_sweep(2e6, 10e6, 100)  # 2 % .. 20 % steps: requests that round to the same M merge
-    assert len({p.m for p in hi}) == len(hi) < 100
+    hi = B.plan_sweep(2e6, 10e6, 100)  # 1 % .. 5 % steps: requests that round to the same P merge
+    assert len({p.period for p in hi}) == len(hi) < 100
+    # the finer grid (contract 7.4): a 100-per-decade sweep no longer merges points below 2 MHz
+    assert len(B.plan_sweep(100e3, 1e6, 100)) == 100
     assert len(B.plan_sweep(100.0, 1e6, 50)) == 50
     with pytest.raises(ValueError):
         B.plan_point(20e6)
@@ -150,17 +155,16 @@ def test_tone_exact_on_a_coherent_square():
     assert np.angle(X) == pytest.approx(0.3, abs=1e-5)
 
 
-def test_tone_low_frequency_rounding_uses_hann():
-    """Very low f: inc = round(2^32 / M) is only about 90 at 1 Hz, so f_a can be 0.5 % off 50 MHz / M and the
-    record is not a whole number of periods; the plan then picks a Hann window and the square's harmonics no longer
-    leak into the fundamental (rectangular: about 1e-2)."""
-    worst = max((B.plan_point(float(f)) for f in np.geomspace(1.0, 50.0, 200)), key=lambda p: p.coherence_error)
-    assert worst.coherence_error > 0.02 and worst.window == "hann"
-    x = _square_record(worst, lambda f: 1.0)
-    rect = abs(B.tone(x, worst.f_actual, worst.sample_rate)) / (4 / math.pi) - 1
-    hann = abs(B.tone(x, worst.f_actual, worst.sample_rate, "hann")) / (4 / math.pi) - 1
-    assert abs(hann) < 2e-4 < abs(rect)
-    assert sum(B.plan_point(float(f)).window == "hann" for f in np.geomspace(50.0, 1e7, 300)) == 0
+def test_tone_low_frequency_is_coherent_and_hann_still_works():
+    """Protocol 1.27: the integer-period stimulus makes every record coherent, down to 1 Hz (the DDS's increment
+    rounding needed a Hann window below about 50 Hz). The Hann path stays for an off-grid tone: a square 0.3 % off
+    the plan's frequency leaks into the rectangular DFT, not into the Hann one."""
+    assert all(B.plan_point(float(f)).window == "rect" for f in np.geomspace(1.0, 1e7, 300))
+    pp = B.plan_point(1.7)
+    x = _square_record(pp, lambda f: 1.0, f_scale=1.003)
+    rect = abs(B.tone(x, pp.f_actual * 1.003, pp.sample_rate)) / (4 / math.pi) - 1
+    hann = abs(B.tone(x, pp.f_actual * 1.003, pp.sample_rate, "hann")) / (4 / math.pi) - 1
+    assert abs(hann) < 1e-4 < 1e-3 < abs(rect)
 
 
 def test_residual_noise_is_the_bin_noise():
