@@ -276,13 +276,17 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fw-cruft done 14:5x, merged 15:0x: the 0x0F writes gone (check_retired_regs.py in make test), READ_LIVE 0x0206 + cap bit 9
+- fpga-d2 status 15:06 (on request): both full runs alive in step 16 of 18, push expected about 16:10; build b6 of its merged
+  pre-C4 source 7351 LUT / 6416 reg / 8321 LE (96 % of the LEs), clk_200MHz 22 errors at 6.49 ns (divider compare, accumulator
+  RAM; pattern paths clean); two tb_decim K = 0 equivalence mismatches on both seeds under investigation, documented rather
+  than holding the push. Relayed to fpga-d3: the integrated 0x153D is LE-bound; report the cut order with numbers before cutting.
+- fw-cruft done 14:4x, merged 15:0x: the 0x0F writes gone (check_retired_regs.py in make test), READ_LIVE 0x0206 + cap bit 9
   retired in row 67, 0x53 carries K alone (SET_DECIM drops flags bits 0..2, GET_DECIM reports 0; mcp DECIM_SWAP / NEG_* gone),
   fpga_model 0x29 reads bits 4..2 as 0 on 0x153C+. Host tests green, check_vectors OK, ruff clean, 548 mcp tests, gcc10 sha256
   4ec3bd0f267265270b775fa1183e65ef518de8ba8feaf6e3fa7abdece9c7933e. Found: the roll mode (100 ms/div to 50 s/div,
   test.c scope_get_long_timebase_data / scope_check_long_trigger via fpga_average_trace_data, averagecommand 0x24 / 0x26)
   reads the live ADC pins 0x153C removed; the roll trace is invalid on 0x153C (fw 0.2.104 + 0x153C is a bisect pair only).
-- fw-roll (Opus explicitly, dispatched 15:0x, branch fw-roll): roll mode on the streaming logger per the owner's decision
+- fw-roll (Opus explicitly, dispatched 15:08, branch fw-roll): roll mode on the streaming logger per the owner's decision
   below: the long timebases take their points from the 0x153D stream (fpga_log / pc_logring on 0x69 / 0x6A / 0x38) instead
   of the 0x24 / 0x26 live-pin averages; averagecommand and fpga_average_trace_data(_long) go.
 - fpga-d3 (Fable, dispatched 14:03, branch fpga-d3): 0x153D integration per contract item D3: merge fpga-d1 (pushed) and
