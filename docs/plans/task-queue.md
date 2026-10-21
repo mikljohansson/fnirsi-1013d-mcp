@@ -306,6 +306,16 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3 ran out of context 18:4x (prompt too long) mid-way through the full-rate testbench work; its WIP saved and pushed as
+  fc367e7 on fpga-d3; successor fpga-d3b (Fable) dispatched 18:4x to finish: testbenches, two-seed run.sh, timing, dist, docs.
+- fw-fullrate merged 18:4x (6fe3dad): one calibration class (GET_CAL / card layout kept, gated slots reserved 0, card header
+  classes = 1 so older firmware rejects new blocks, old blocks load with the full-rate values, no forced recalibration), the
+  class probe removed, the FPGA model at full-rate encodes, the encode check's flag part on every capture; 542 mcp tests.
+- fw-acqui merged 18:5x (06e7c4e): trigger keys in 24 px, ACQ grids in five columns (74 x 25 cells), Filter Off / Hi-Res /
+  Anti-alias (a host mode shows by name, a press goes to Off), defaults Scope Hi-Res / Spectrum Anti-alias with the old
+  defaults migrated on load (owner 18:4x). Open: the Frequency response rows still use 16 px - / + keys.
+  0.2.105 re-pinned from 06e7c4e: 801,280 B, sha256 e184e47aaf2f1ca9a4f151d26c4b3af0b318444d21caea8ae751d8cfaf52fe82,
+  backups/fw-0.2.105_e184e47a.bin (supersedes d7935f94). Needs 0x153D (fpga-d3b).
 - fpga-d3 18:0x, full-rate encodes: RTL about -60 lines (the write clock toggles every falling clk_200MHz edge at every rate;
   the divider counter, sample_clock_enable, sce_q and the encode prediction collapse to the toggle; a 20-bit skip counter
   stores one pair per D + 1 edges for K = 0; sequencer timestamps +2 per write clock; 0x05 ready wait 60 ns at slow rates);
