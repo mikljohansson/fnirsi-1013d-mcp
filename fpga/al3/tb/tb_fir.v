@@ -288,6 +288,10 @@ module tb;
 
   reg [7:0] rd_d, rd_r;
   integer   bus_cmp_on = 0;
+  // 0x153C: the reads 0x05 / 0x0A / 0x18 load bit 0 only; bits 7..1 are what the last full-byte read left, which differs
+  // by design after a time-out stop (0x14, 0x153B) and has no identical refill read any more (0x41 is gone), so those
+  // three are compared on bit 0; every other read is compared whole
+  wire [7:0] rd_mask = ((dut.mcu_command == 8'h05) || (dut.mcu_command == 8'h0A) || (dut.mcu_command == 8'h18)) ? 8'h01 : 8'hFF;
   task rd_byte;
     begin
       mcu_rws = 0; mcu_dcs = 0;
@@ -295,7 +299,7 @@ module tb;
       rd_d = bus_dut; rd_r = bus_ref;
       if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
-        if (rd_d !== rd_r) begin
+        if (((rd_d ^ rd_r) & rd_mask) !== 8'h00) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 30) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
         end
@@ -374,7 +378,7 @@ module tb;
   task set_fir(input [1:0] k, input swap, input [5:0] sh, input [31:0] divider, input fir);
     begin
       wr1(8'h56, {7'd0, fir});
-      wr1(8'h53, {3'd0, negab, swap, k});
+      wr1(8'h53, {3'd0, negab, 1'b0, k});               // 0x153C: bit 2 (swap) is gone, written 0 (negab: bits 4..3, inert since 0x153A)
       wr1(8'h54, {2'd0, sh});
       wr4(8'h0D, divider);
       #((k + 10) * ((divider / 2) + 1) * 10 + 500);
@@ -457,7 +461,7 @@ module tb;
   // Phase 1 / 4: random equivalence with 0x1534 (FIR off, or on at a divider it does not engage at)
 
   integer it, k, nread;
-  reg [31:0] rnd, rnd2, dv;
+  reg [31:0] rnd, rnd2, dv, rnd_ptr;
   reg [12:0] pre_r, tot_r;
   reg [1:0]  kr;
   reg [5:0]  shr;
@@ -490,18 +494,18 @@ module tb;
         if (rnd[12] && kr != 0) fir_set_cnt = fir_set_cnt + 1;
         shr = (kr == 0) ? rnd2[13:8] : rec_shift(kr, dv) - ((rnd2[3] && rec_shift(kr, dv) > 0) ? 6'd1 : 6'd0);
         wr1(8'h56, 8'h00);                                  // off while K and the divider change
-        wr1(8'h53, {3'd0, 2'b00, rnd[7], kr});        // 0x153A: bits 3 / 4 are inert in the dut, keep the reference equal
+        wr1(8'h53, {6'd0, kr});                           // 0x153C: bits 7..2 are gone (bit 2, the swap, was random here); the reference gets 0 too
         wr1(8'h54, shr);
         wr2(8'h55, (kr == 0) ? $random(seed) : (16'd128 << (rnd2[7:6])) + rnd2[31:20]);
         wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT
         wr1(8'h16, {7'd0, rnd[1]});
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));
         wr1(8'h1A, {7'd0, rnd[2]});
-        wr1(8'h0F, {7'd0, rnd[3]});
         wr4(8'h0D, dv);
         wr1(8'h56, {rnd[20:15], 1'b0, rnd[12]});            // bits 7..2 random (reserved, ignored); bit 1 = peak detect (0x153C), off
         pre_r = 13'd20 + (rnd[24:16] % 13'd200);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
+        $display("phase 1 iteration %0d t=%0t: K %0d fir %0d D %0d shift %0d src %0d edge %0d mode %0d pre %0d tot %0d", it, $time, kr, rnd[12], dv, shr, rnd[9:8], rnd[1], rnd[2], pre_r, tot_r);
         wr2(8'h0B, {3'd0, pre_r});
         wr2(8'h0C, {3'd0, tot_r});
         wr4(8'h0E, (kr == 0) ? 32'd2000 + ($random(seed) & 32'h3FFF) : {19'd0, tot_r} + ($random(seed) & 32'h00FF));
@@ -509,7 +513,7 @@ module tb;
         wr1(8'h33, $random(seed) % 6); wr1(8'h36, $random(seed) % 6);
         wr1(8'h34, $random(seed)); wr1(8'h37, $random(seed));
         wr2(8'h38, $random(seed));
-        wr2(8'h3C, $random(seed));
+        rnd_ptr = $random(seed);                          // 0x153C: was written to 0x3C and read back through 0x41 as the read pointer below
         gen_on = rnd[6];
         wr1(8'h50, {7'd0, gen_on});
         wr4(8'h51, 32'd85899346 + ($random(seed) & 32'h00FFFFFF));
@@ -537,19 +541,11 @@ module tb;
         rd1(8'h18);
         if (!rnd[2] && !rd_d[0])
           check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
-        rd2(8'h41);                                       // refills the read register's stale bits identically in both
         bus_cmp_on = 1;
         rd1(8'h28);
-        rd2(8'h41);
-        wr2(8'h1F, {3'd0, rd16_d[12:0]});
+        wr2(8'h1F, {3'd0, rnd_ptr[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
-        // live ADC pins: the dut returns its IOB registers, the reference its (delayed) pins: not compared; 0x41 then
-        // refills all eight bits of the read register (0x05 / 0x0A / 0x18 keep the others)
-        bus_cmp_on = 0;
-        for (k = 0; k < 4; k = k + 1) rd1(8'h24 + k);
-        bus_cmp_on = 1;
-        rd2(8'h41);
         rd1(8'h05);
         disable ext_noise;
         ext_en = 0;
@@ -570,7 +566,7 @@ module tb;
       set_fir(kk, swap, sh, divider, 1'b1);
       setup_capture(2'd0, 1'b0, 1'b0, divider, 13'd10, total);
       wr4(8'h0E, {19'd0, total});                        // auto mode: stops after about total samples
-      $fdisplay(logf, "C %0d %0d %0d %0d 0 0 1", kk, divider, swap, sh);   // 0x153A: 0x53 bits 3 / 4 are inert
+      $fdisplay(logf, "C %0d %0d %0d %0d 0 0 1", kk, divider, 1'b0, sh);   // 0x153A: 0x53 bits 3 / 4 are inert; 0x153C: no swap
       check(dut.fir_act === 1'b1, "FIR engaged for the logged capture");
       log_on = 1;
       start_capture;
@@ -684,23 +680,23 @@ module tb;
     // Version word and the 0x29 FIR bits (byte 0 bit 6 = 0x56 bit 0, bit 5 = FIR active)
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
+    check(rd16_d == 16'h153C, "cmd 0x06 reads 0x153C");
     check(rd16_r == 16'h1534, "reference cmd 0x06 reads 0x1534");
     ok29 = 1;
     wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;
-    rd2(8'h29); if (rd16_d !== 16'h870C || rd16_r !== 16'h870C) begin ok29 = 0; $display("0x29 FIR off: %h", rd16_d); end
+    rd2(8'h29); if (rd16_d !== 16'h830C || rd16_r !== 16'h870C) begin ok29 = 0; $display("0x29 FIR off: %h", rd16_d); end   // 0x153C: the dut's bits 4..2 read 0
     wr1(8'h56, 8'hFD); #200;                                 // reserved bits 7..2 set; bit 1 (peak detect, 0x153C) clear
-    rd2(8'h29); if (rd16_d !== 16'hE70C) begin ok29 = 0; $display("0x29 FIR on, D 14: %h", rd16_d); end
+    rd2(8'h29); if (rd16_d !== 16'hE30C) begin ok29 = 0; $display("0x29 FIR on, D 14: %h", rd16_d); end
     wr4(8'h0D, 32'd15); #200;
-    rd2(8'h29); if (rd16_d !== 16'hE70C) begin ok29 = 0; $display("0x29 FIR on, D 15: %h", rd16_d); end
+    rd2(8'h29); if (rd16_d !== 16'hE30C) begin ok29 = 0; $display("0x29 FIR on, D 15: %h", rd16_d); end
     wr4(8'h0D, 32'd13); #200;
-    rd2(8'h29); if (rd16_d !== 16'hC70C) begin ok29 = 0; $display("0x29 FIR on, D 13: %h", rd16_d); end
+    rd2(8'h29); if (rd16_d !== 16'hC30C) begin ok29 = 0; $display("0x29 FIR on, D 13: %h", rd16_d); end
     wr4(8'h0D, 32'd16); #200;
-    rd2(8'h29); if (rd16_d !== 16'hC70C) begin ok29 = 0; $display("0x29 FIR on, D 16: %h", rd16_d); end
+    rd2(8'h29); if (rd16_d !== 16'hC30C) begin ok29 = 0; $display("0x29 FIR on, D 16: %h", rd16_d); end
     wr4(8'h0D, 32'd10); #200;
-    rd2(8'h29); if (rd16_d !== 16'hC70C) begin ok29 = 0; $display("0x29 FIR on, D 10: %h", rd16_d); end
-    wr4(8'h0D, 32'h40000002); #200;
-    rd2(8'h29); if (rd16_d !== 16'hE70C) begin ok29 = 0; $display("0x29 FIR on, D 0x40000002: %h", rd16_d); end
+    rd2(8'h29); if (rd16_d !== 16'hC30C) begin ok29 = 0; $display("0x29 FIR on, D 10: %h", rd16_d); end
+    wr4(8'h0D, 32'h40000002); #200;                          // 0x153C (div20): bits 31..20 are ignored, this is divider 2
+    rd2(8'h29); if (rd16_d !== 16'hC30C) begin ok29 = 0; $display("0x29 FIR on, D 0x40000002 (= 2 since 0x153C): %h", rd16_d); end
     wr4(8'h0D, 32'd14); wr1(8'h53, 8'h00); #200;
     rd2(8'h29); if (rd16_d !== 16'h400C) begin ok29 = 0; $display("0x29 FIR on, K 0: %h", rd16_d); end
     wr1(8'h56, 8'hFC); wr1(8'h53, 8'h01); #200;
@@ -711,17 +707,17 @@ module tb;
     // Phase 2: FIR captures, logged for cic_model.py
     adc_mode = 1;
     fir_run(2'd1, 1'b0, rec_shift_fir(1, 14),  32'd14,  13'd120);   // N = 16
-    fir_run(2'd1, 1'b1, rec_shift_fir(1, 15),  32'd15,  13'd100);   // N = 16, odd divider
+    fir_run(2'd1, 1'b0, rec_shift_fir(1, 15),  32'd15,  13'd100);   // N = 16, odd divider
     fir_run(2'd1, 1'b0, rec_shift_fir(1, 19),  32'd19,  13'd80);    // N = 20
     fir_run(2'd1, 1'b0, rec_shift_fir(1, 62),  32'd62,  13'd50);    // N = 64
     fir_run(2'd1, 1'b0, rec_shift_fir(1, 1999), 32'd1999, 13'd30);  // N = 2000
     fir_run(2'd2, 1'b0, rec_shift_fir(2, 14),  32'd14,  13'd120);
-    fir_run(2'd2, 1'b1, rec_shift_fir(2, 18),  32'd18,  13'd80);    // N = 20
+    fir_run(2'd2, 1'b0, rec_shift_fir(2, 18),  32'd18,  13'd80);    // N = 20
     fir_run(2'd2, 1'b0, rec_shift_fir(2, 63),  32'd63,  13'd50);    // N = 64
     fir_run(2'd2, 1'b0, rec_shift_fir(2, 198), 32'd198, 13'd30);    // N = 200
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 14),  32'd14,  13'd120);
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 22),  32'd22,  13'd80);    // N = 24
-    fir_run(2'd3, 1'b1, rec_shift_fir(3, 30),  32'd30,  13'd60);    // N = 32
+    fir_run(2'd3, 1'b0, rec_shift_fir(3, 30),  32'd30,  13'd60);    // N = 32
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 99),  32'd99,  13'd40);    // N = 100
     fir_run(2'd3, 1'b0, rec_shift_fir(3, 398), 32'd398, 13'd30);    // N = 400
     // (the three runs with 0x53 bits 3 / 4 set are phase 5, after the last equivalence phase: see there)
@@ -735,7 +731,7 @@ module tb;
     rnd = $random(seed);
     kq = (rnd[1:0] == 0) ? 2 : rnd[1:0];
     dv = 32'd14 + 4 * rnd[11:4] + rnd[2];
-    fir_run(kq, rnd[3], rec_shift_fir(kq, dv), dv, 13'd40);
+    fir_run(kq, 1'b0, rec_shift_fir(kq, dv), dv, 13'd40);
     $fdisplay(logf, "C 0 0 0 0 0 0 0");
     $fflush(logf);
 
@@ -848,8 +844,6 @@ module tb;
     wait_done(40000);
     check(done && dut.sampling_triggered == 1'b0, "resync capture ran to the time-out");
     adc_mode = 0;
-    rd2(8'h41);                                          // fpga-gen12: the read register's stale bits equal again
-                                                         // (the last full-byte read was a 0x14 that differs by design)
     mm0 = eq_mismatch;
     compare_memory;
     random_phase(15);
@@ -867,7 +861,7 @@ module tb;
     // follows these runs now.
     adc_mode = 0;
     negab = 2'b01; fir_run(2'd3, 1'b0, rec_shift_fir(3, 14), 32'd14, 13'd60);
-    negab = 2'b10; fir_run(2'd2, 1'b1, rec_shift_fir(2, 18), 32'd18, 13'd60);
+    negab = 2'b10; fir_run(2'd2, 1'b0, rec_shift_fir(2, 18), 32'd18, 13'd60);
     negab = 2'b11; fir_run(2'd1, 1'b0, rec_shift_fir(1, 15), 32'd15, 13'd60);
     negab = 2'b00;
 

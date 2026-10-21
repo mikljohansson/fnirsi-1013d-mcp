@@ -1,6 +1,8 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x3A (0x153A = 0x1539 with the ADC data captured through IOB registers at a per-core stage
+//  - 0x06 returns 0x15 0x3C (0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
+//    the cruft removal listed last below; 0x153B = 0x153A with records that end on the auto time-out or the forced stop
+//    reported at the write pointer; 0x153A = 0x1539 with the ADC data captured through IOB registers at a per-core stage
 //    (write 0x63, read 0x36 with outlier counters, write 0x64), B first by T/2 at every rate; 0x1539 = 0x1538 with the
 //    read byte loaded on the falling edge of the MCU clock, the
 //    start of the strobe, so it is settled on the pins before the MCU reads it; values, pointer advance and dummy strobe
@@ -40,6 +42,13 @@
 //    design behaves exactly as 0x153B.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
+//  - Gone in 0x153C (docs/plans/fpga-0x153c.md section 13, the one-bitstream rule: our firmware never wrote or read
+//    them): write 0x3C and read 0x41 (touch panel address), reads 0x24..0x27 (live ADC pins), write 0x0F
+//    (sample_read_enable; both arms of its mux were the MCU clock), 0x53 bits 4..2 (core order swap, falling-edge
+//    capture; 0x29 byte 0 bits 4..2 read 0). 0x0D keeps 4 bytes but bits 31..20 are ignored (div20; the firmware caps
+//    the divider at 0xFFFFF). A removed write does nothing; a removed read returns the previous read byte.
+//  - Capability bits the firmware derives from the version word 0x153C (contract section 2.3): 2 HOLDOFF, 20
+//    TRIG_TYPES, 21 PEAK_DETECT, 22 COUNTER, with 1 GENERATOR (the DDS stays until 0x153D).
 // Multi-byte values are high byte first. Details: fpga/al3/README.md, section "Changes".
 
 //================================ FPGA commands table ==================================
@@ -59,8 +68,10 @@
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h3A;       //0x153A = AL3 with external trigger, decimation filter, FIR, segments, averaging,
-                                               //         encode self-check, settled readout, staged ADC capture
+                    o_mcu_data <= 8'h3C;       //0x153C = AL3 with external trigger, decimation filter, FIR, segments, averaging,
+                                               //         encode self-check, settled readout, staged ADC capture, records that
+                                               //         end at the write pointer, trigger types and hold-off, peak detect,
+                                               //         hardware counter
             
             //When sampling finishes the writing is disabled. Enabled again with a reset.
             8'h0A: //Reading of the sampling done state
@@ -105,20 +116,6 @@
             8'h23: //Reading of the sample data for channel 2 ADC 2 from memory
               o_mcu_data <= o_adc2B_d;
            
-            //0x24..0x27 (0x153A): the pin as the IOB register took it on the last rising clk_200MHz edge (a liveness
-            //read; it is not one of the capture stages)
-            8'h24: //Reading of the sample data for channel 1 ADC 1
-              o_mcu_data <= adc_q1[7:0];
-            
-            8'h25: //Reading of the sample data for channel 1 ADC 2
-              o_mcu_data <= adc_q1[15:8];
-            
-            8'h26: //Reading of the sample data for channel 2 ADC 1
-              o_mcu_data <= adc_q1[23:16];
-            
-            8'h27: //Reading of the sample data for channel 2 ADC 2
-              o_mcu_data <= adc_q1[31:24];
-
             8'h28: //Reading of the external trigger status (0x1533 and later)
                     o_mcu_data <= { 5'b0, ext_activity, gen_out_enable, ext_level };
                     //bit0 ext_level:      EXT pin level after the synchroniser and the majority filter
@@ -127,12 +124,12 @@
 
             8'h29: //Reading of the decimation geometry (0x1534 and later), 2 bytes
                   4'h0:
-                    o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
+                    o_mcu_data <= { dec_on, fir_en, fir_act, 3'b000, dec_order };
                     //bit7 = 1: 16-bit samples, one per channel per memory word (K >= 1, or peak detect: 0x153C)
                     //bit6 = 0x56 bit 0 (FIR enable as written), bit5 = FIR active now: enable, K >= 1 and
                     //divider >= 14 with divider bit 1 set (N >= 16, N a multiple of 4), and peak detect off;
                     //both 0 before 0x1535
-                    //bit4/bit3 = B/A cores captured on the falling write clock edge, bit2 = core order swap,
+                    //bits 4..2 = 0 (0x153C; up to 0x153B the 0x53 falling-edge and swap bits as written),
                     //bits 1..0 = K (0x53) as written (0 with peak detect at K = 0)
                   4'h1:
                     o_mcu_data <= { peak_act, peak_en, dec_shift };   //output shift (0x54); 0x153C: bit7 peak detect
@@ -219,11 +216,7 @@
                   //frequency = E / (T x 5 ns), period = T x 5 ns / E, +width = W x 5 ns / E, duty = W / T. One read per
                   //screen pass: the command byte plus 16 data strobes.
 //---------------------------------------------------------------------------------------
-            8'h41: //Reading of the touch panel address needs loading of high byte first
-                  4'h0:
-                    o_mcu_data <= touch_panel_address[15:8];
-                  4'h1:
-                    o_mcu_data <= touch_panel_address[7:0];
+            //0x41 (touch panel address): gone in 0x153C
 
 //***************************************************************************************
 //********************************* WRITING commands ************************************
@@ -245,6 +238,7 @@
                     total_samples[7:0] <= io_mcu_data;
         
             8'h0D: //Loading of the four bytes of the sample rate divider high byte first
+                   //0x153C: bits 31..20 are ignored (div20); the write clock toggles every (divider + 1) clocks of 200 MHz
                   4'h0:
                     sample_rate_divider[31:24] <= io_mcu_data;
                   4'h1:
@@ -267,8 +261,7 @@
                   4'h3:
                     time_base_set[7:0] <= io_mcu_data;
             
-            8'h0F: //Setting start of the conversion
-                    sample_read_enable <= io_mcu_data[0];
+            //0x0F (sample_read_enable, "start of the conversion"): gone in 0x153C; the firmware's writes of it do nothing
 
             8'h15: //Setting the trigger source: 0 = CH1, 1 = CH2, 2 = EXT, 3 = reserved (acts as EXT)
                     trigger_channel <= io_mcu_data[0];
@@ -334,11 +327,7 @@
                   4'h1:
                     display_brigthness[7:0] <= io_mcu_data;
 //---------------------------------------------------------------------------------------           
-            8'h3C: //Loading two bytes of the touch panel read address high byte first
-                  4'h0:
-                    touch_panel_address[15:8] <= io_mcu_data;
-                  4'h1:
-                    touch_panel_address[7:0] <= io_mcu_data;
+            //0x3C (touch panel address): gone in 0x153C
                     
             8'h50: //Setting the output on or tristate (off = pin usable as EXT trigger input)
                    gen_out_enable <= io_mcu_data[0];
@@ -373,9 +362,8 @@
 
             8'h53: //Decimation filter configuration, 1 byte
                     dec_order <= io_mcu_data[1:0];  //K: 0 = sample skipping (0x1533), 1 = boxcar, 2 = CIC2, 3 = CIC3
-                    dec_swap  <= io_mcu_data[2];    //0 = core B is the earlier sample of a pair (firmware interleave)
-                    dec_neg_a <= io_mcu_data[3];    //0x1534..0x1539: A cores captured on the falling write clock edge;
-                    dec_neg_b <= io_mcu_data[4];    //0x153A: read back in 0x29, no effect (0x63 selects the capture)
+                    //bits 7..2 ignored. 0x153C removed bit 2 (core order swap: B is the earlier sample of a pair by
+                    //construction since 0x1538) and bits 4..3 (falling-edge capture, inert since 0x153A)
 
             8'h54: //Decimation filter output shift, 1 byte
                     dec_shift <= io_mcu_data[5:0];  //recommended max(0, bitlen(255 * N^K) - 16)

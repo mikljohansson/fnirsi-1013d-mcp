@@ -259,6 +259,10 @@ module tb;
 
   reg [7:0] rd_d, rd_r;
   integer   bus_cmp_on = 0;
+  // 0x153C: the reads 0x05 / 0x0A / 0x18 load bit 0 only; bits 7..1 are what the last full-byte read left, which differs
+  // by design after a time-out stop (0x14, 0x153B) and has no identical refill read any more (0x41 is gone), so those
+  // three are compared on bit 0; every other read is compared whole
+  wire [7:0] rd_mask = ((dut.mcu_command == 8'h05) || (dut.mcu_command == 8'h0A) || (dut.mcu_command == 8'h18)) ? 8'h01 : 8'hFF;
   task rd_byte;
     begin
       mcu_rws = 0; mcu_dcs = 0;
@@ -266,7 +270,7 @@ module tb;
       rd_d = bus_dut; rd_r = bus_ref;
       if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
-        if (rd_d !== rd_r) begin
+        if (((rd_d ^ rd_r) & rd_mask) !== 8'h00) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 30) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
         end
@@ -351,7 +355,7 @@ module tb;
   task set_fir(input [1:0] k, input swap, input [5:0] sh, input [31:0] divider, input fir);
     begin
       wr1(8'h56, {7'd0, fir});
-      wr1(8'h53, {3'd0, negab, swap, k});
+      wr1(8'h53, {3'd0, negab, 1'b0, k});               // 0x153C: bit 2 (swap) is gone, written 0
       wr1(8'h54, {2'd0, sh});
       wr4(8'h0D, divider);
       #((k + 10) * ((divider / 2) + 1) * 10 + 500);
@@ -578,14 +582,13 @@ module tb;
         wr4(8'h5C, $random(seed) & 32'h000003FF);
         wr1(8'h5D, $random(seed));
         wr1(8'h56, 8'h00);
-        wr1(8'h53, {3'd0, 2'b00, rnd[7], kr});        // 0x153A: bits 3 / 4 are inert in the dut, keep the reference equal
+        wr1(8'h53, {6'd0, kr});                           // 0x153C: bits 7..2 are gone (bit 2, the swap, was random here); the reference gets 0 too
         wr1(8'h54, shr);
         wr2(8'h55, (kr == 0) ? $random(seed) : (16'd128 << (rnd2[7:6])) + rnd2[31:20]);
         wr1(8'h15, {6'd0, rnd[9:8]});
         wr1(8'h16, {7'd0, rnd[1]});
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));
         wr1(8'h1A, {7'd0, rnd[2]});
-        wr1(8'h0F, {7'd0, rnd[3]});
         wr4(8'h0D, dv);
         wr1(8'h56, {rnd2[24:19], 1'b0, rnd[12]});          // bit 1 = peak detect (0x153C), off
         pre_r = 13'd20 + (rnd[24:16] % 13'd200);
@@ -626,7 +629,6 @@ module tb;
         rd1(8'h18);
         if (!rnd[2] && !rd_d[0])
           check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
-        rd2(8'h41);                                       // refills the read register's stale bits identically in both
         bus_cmp_on = 1;
         rd1(8'h28);
         rd2(8'h29);
@@ -637,12 +639,6 @@ module tb;
         wr2(8'h1F, {3'd0, rd16_d[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
-        // live ADC pins: the dut returns its IOB registers, the reference its (delayed) pins: not compared; 0x41 then
-        // refills all eight bits of the read register (0x05 / 0x0A / 0x18 keep the others)
-        bus_cmp_on = 0;
-        for (k = 0; k < 4; k = k + 1) rd1(8'h24 + k);
-        bus_cmp_on = 1;
-        rd2(8'h41);
         rd1(8'h05);
         disable ext_noise;
         ext_en = 0;
@@ -669,9 +665,7 @@ module tb;
       wait_done(40000);
       check(done && dut.sampling_triggered == 1'b0, "resync capture ran to the time-out");
       wr2(8'h1F, 16'd0);                                 // 0x2B..0x32 reads moved the dut's read pointer
-      rd2(8'h41);                                        // full-byte read: o_mcu_data equal again (0x05 and
-                                                         // 0x0A only set bit 0). fpga-gen12: 0x41, not 0x14,
-                                                         // which differs by design after the time-out (0x153B)
+                                                         // (0x153C: the bit-0 compare of rd_byte replaced the 0x41 refill)
       set_fir(2'd0, 1'b0, 6'd0, 32'd1, 1'b0);
       adc_mode = 0;
     end
@@ -794,7 +788,7 @@ module tb;
     ext_en = 0;
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
+    check(rd16_d == 16'h153C, "cmd 0x06 reads 0x153C");
     check(rd16_r == 16'h1535, "reference cmd 0x06 reads 0x1535");
     wr1(8'h57, 8'h00);
     rd_status;

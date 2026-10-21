@@ -89,6 +89,18 @@ SET_PATTERN, SET_PATTERN_TRIGGER, source 3), 4743591 (Bode on P), 4f12433 (model
 - Frequency response: the stimulus period is P clocks of 5 ns (P = 4 M of the DDS era), the frequency grid four times
   finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
 
+#### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
+
+- The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):
+  the trigger types (pulse width, Nth edge, timeout on CH1 / CH2 / EXT) and the trigger hold-off (fpga-c1, README section
+  12), peak-detect acquisition (fpga-c2, section 14), the hardware counter with min / max (fpga-c3, section 13), and the
+  cruft removal of the one-bitstream rule (write 0x3C / read 0x41, reads 0x24..0x27, write 0x0F, 0x53 bits 4..2; the
+  sample-rate divider taken on 20 bits; -206 LUT against the merged source; 78ccaa0). Timing closed at 4.772 ns on
+  clk_200MHz with the post-pass lane adders in one stage and the hold-off block placed (1f1ded4; bd24bdf removes a div20
+  alias wire that only changed iverilog's ordering of a same-timestep race, same bytes); contract transcript
+  `tb/contract_0x153C.txt` with the firmware's 0.2.104 sequences (ddb10ed); README section 15 has the build, the tests and
+  the bench checks. Not flashed: the owner flashes from dist per `fpga/al3/AGENTS.md` "0x153C built, fpga-c4".
+
 #### 0.2.104 - 2026-10-21 (protocol 1.26, row 66): built for FPGA 0x153C
 
 One firmware for bitstream 0x153C: trigger types (pulse width, Nth edge, timeout) with hold-off, peak detect, the

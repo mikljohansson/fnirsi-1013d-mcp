@@ -1,5 +1,5 @@
-// Contract testbench: the firmware's 0x1536 / 0x1537 sequencer byte sequences against the simulated FPGA.
-// Run with fpga/al3/tb/run.sh (ONLY=contract) or vvp +transcript=<file>.
+// Contract testbench: the firmware's 0x1536 / 0x1537 sequencer byte sequences and the 0x153C register sequences against
+// the simulated FPGA. Run with fpga/al3/tb/run.sh (ONLY=contract) or vvp +transcript=<file>.
 //
 // The MCU side replays, strobe by strobe, the sequences of fw-seg's protocol 1.17 firmware (fw 0.2.56 branch,
 // commit 65abebf: pc_hal_arm, pc_seq_hw.c, h_read_seq, h_read_raw; listed in fpga/al3/README.md section 6,
@@ -18,6 +18,14 @@
 //   A  legacy averaging: 10 MSa/s (D = 19), EXT, 1 position, N = 4, pre 8, total 32; read at S = 2 and raw
 //   F  16-bit averaging: CIC2 + FIR at N = 20 (D = 19), CH1, 2 positions, N = 8, pre 6, total 24; read at S = 3
 //   P  circular segments stopped with 0x5D = 1 then 0x1A = 0
+//   T  (0x153C C1, fw-c5) SET_TRIGGER2 pulse width longer than N = 5 words on CH1 at D = 9 with a hold-off, a host
+//      capture: three 3-word pulses do not trigger, the trailing edge of a 10-word pulse does; the 0x37 / 0x34 status
+//   PK (0x153C C2, fw-c6) peak detect: 0x53 = 1, 0x56 = 2, 0x54 = 0, 0x55 = 128 << 8 at N = 20, CH1 rising; the 0x29
+//      read-back and READ_RAW layout 3 (min bytes through 0x20, max bytes through 0x21)
+//   K  (0x153C C3, fw-c7) the counter: 0x62 / 0x61 (gate 10 ms on the trigger source), a 100 kHz square, the 0x35 snapshot
+// 0x153C: the boot writes fpga_trig_write(edge, hold-off 0, clear) and the counter's 0x62 / 0x61 (gate 100 ms) after the
+// version read, and ARM 7 carries the trigger type registers (0x5E always; 0x5F, 0x60 for a qualified type) as
+// fpga_trig_arm does, before 0x0E. The firmware still writes 0x0F in every arm (a no-op since 0x153C).
 // Checks against independent expectations: status bytes, table entries (valid, triggered, offset = 0x14 mod 2^m
 // for the last segment, the step at record index pre + 1 in every slot), averaged lanes equal to N x the
 // single-record value, raw lanes equal to the sums, the stop.
@@ -63,7 +71,7 @@ module tb;
     end
   endtask
 
-  task note(input [8*100-1:0] s);
+  task note(input [8*200-1:0] s);                 // 0x153C: 200 characters (longer scenario lines)
     begin $fdisplay(tf, "# %0s", s); end
   endtask
 
@@ -146,14 +154,60 @@ module tb;
   reg [7:0] st [0:7], st2 [0:7];
   integer   polls, i, j, b, agree, tries;
 
-  // 1-8: host ARM; mode 0 = off (0x57 = 00 written), 1 segments, 2 averaging
-  task fw_arm(input [1:0] k, input fir, input [5:0] sh, input [15:0] lvl16, input normal,
+  // 0x153C (fw-c5, fpga_bus.c fpga_trig_arm / fpga_trig_write): the trigger type registers inside the arm window, and the
+  // SET_TRIGGER2 / boot write with the hold-off and the one-shot clear
+  reg [7:0]  t_type = 0;                                 // the 0x5E value: bits 2..0 type, bit 3 longer
+  reg [23:0] t_n = 0, t_h = 0;                           // 0x5F, 0x60
+  task fw_trig_arm;
+    begin
+      wr1(8'h5E, t_type);
+      if (t_type[2:0] != 3'd0) begin
+        wr_cmd(8'h5F); wr_byte(t_n[23:16]); wr_byte(t_n[15:8]); wr_byte(t_n[7:0]);
+        wr_cmd(8'h60); wr_byte(t_h[23:16]); wr_byte(t_h[15:8]); wr_byte(t_h[7:0]);
+      end
+    end
+  endtask
+  task fw_trig_write(input [7:0] typ, input [23:0] n, input [23:0] h, input [31:0] holdoff, input clear);
+    begin
+      t_type = typ; t_n = n; t_h = h;
+      fw_trig_arm;
+      wr4(8'h1B, holdoff);
+      if (clear) wr1(8'h66, 8'h01);
+    end
+  endtask
+  reg [7:0] ts37;
+  reg [7:0] ts34 [0:2];
+  task fw_trig_status;
+    begin
+      wr_cmd(8'h37); rd_byte; ts37 = rd_d;
+      wr_cmd(8'h34); rd_byte; ts34[0] = rd_d; rd_byte; ts34[1] = rd_d; rd_byte; ts34[2] = rd_d;
+    end
+  endtask
+
+  // 0x153C (fw-c7, fpga_counter.c): 0x62 level / hysteresis, then 0x61 gate / source (a value change restarts the gate);
+  // the main-loop pass reads 0x35, 16 bytes from one snapshot
+  reg [7:0] cnt [0:15];
+  task fw_counter_config(input [7:0] level, input [7:0] hyst, input [1:0] gate, input [1:0] src);
+    begin
+      wr_cmd(8'h62); wr_byte(level); wr_byte(hyst);
+      wr1(8'h61, {4'd0, src, gate});
+    end
+  endtask
+  task fw_counter_read;
+    begin
+      wr_cmd(8'h35);
+      for (i = 0; i < 16; i = i + 1) begin rd_byte; cnt[i] = rd_d; end
+    end
+  endtask
+
+  // 1-8: host ARM; mode 0 = off (0x57 = 00 written), 1 segments, 2 averaging; c56 = 0x56 (bit 0 FIR, bit 1 peak detect)
+  task fw_arm(input [1:0] k, input [1:0] c56, input [5:0] sh, input [15:0] lvl16, input normal,
               input [12:0] pre, input [12:0] total, input [1:0] mode, input circ, input [11:0] count,
               input [3:0] m, input [15:0] n, input [31:0] hold5, input [31:0] tmo);
     begin
       note("ARM 1: filter (0x53, 0x56, 0x54, 0x55) and the settle wait");
       wr1(8'h53, {6'd0, k});
-      wr1(8'h56, {7'd0, fir});
+      wr1(8'h56, {6'd0, c56});
       if (k != 0) begin
         wr1(8'h54, {2'd0, sh});
         wr2(8'h55, lvl16);
@@ -182,9 +236,10 @@ module tb;
       while (rd_d[0] !== 1'b1 && polls < 100000) begin rd_byte; polls = polls + 1; end
       quiet = 0;
       $fdisplay(tf, "R %h", rd_d);
-      note("ARM 7: 0x0B, 0x0C again, 0x0E time-out");
+      note("ARM 7: 0x0B, 0x0C again, the trigger type (0x5E; 0x5F, 0x60 for a qualified type), 0x0E time-out");
       wr2(8'h0B, {3'd0, pre});
       wr2(8'h0C, {3'd0, total});
+      fw_trig_arm;
       wr4(8'h0E, tmo);
       note("ARM 8: 0x01 = 00");
       wr1(8'h01, 8'h00);
@@ -309,7 +364,7 @@ module tb;
   //---------------------------------------------------------------------------------
 
   reg [8*80-1:0] tname;
-  integer xcr, okc, base, off, slot, sh16, n_rec, w;
+  integer xcr, okc, base, off, slot, sh16, n_rec, w, ke, kt, kw;
   reg [15:0] lane, rec16 [0:63];
   reg [7:0]  recA [0:63];
   reg [63:0] rawsum;
@@ -326,6 +381,9 @@ module tb;
     wr1(8'h16, 8'h00);
     wr1(8'h17, 8'd128);
     wr_cmd(8'h06); rd_byte; rd_byte;
+    note("boot (0x153C, fw-c5 / fw-c7): fpga_trig_write(edge, hold-off 0, clear), counter 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source");
+    fw_trig_write(8'h00, 24'd0, 24'd0, 32'd0, 1'b1);
+    fw_counter_config(8'd128, 8'd6, 2'd2, 2'd0);
     #2000;
 
     //-------------------------------------------------------------------------------
@@ -447,6 +505,82 @@ module tb;
     fw_read_table(0, 4);
     check(ent[2][63] == 1'b0 && ent[0][63] && ent[1][63] && ent[3][63], "P: the slot being refilled (2) is invalid");
     wr1(8'h57, 8'h00);
+
+    //-------------------------------------------------------------------------------
+    // T: pulse width trigger (0x153C C1): longer than N = 5 words on CH1 at D = 9 (word 100 ns), hold-off 500 clocks
+    $fdisplay(tf, "#");
+    note("=== T: SET_TRIGGER2 pulse width longer than N = 5 words, CH1 positive pulse, D = 9, hold-off 500 x 5 ns; host ARM pre 10, total 40");
+    wr4(8'h0D, 32'd9);
+    fw_trig_write(8'h09, 24'd5, 24'd0, 32'd500, 1'b1);
+    fork
+      fw_arm(2'd0, 2'd0, 6'd0, 16'd0, 1'b1, 13'd10, 13'd40, 2'd0, 1'b0, 12'd0, 4'd0, 16'd0, 32'd0, 32'h00FFFFFF);
+      begin wait (dut.sample_system_reset === 1'b1); wait (dut.sample_system_reset === 1'b0);
+            steps(3, 2500, 700, 300);                    // three 3-word pulses: shorter than N, no trigger
+            steps(1, 0, 3000, 1000); end                 // one 10-word pulse: the trigger on its trailing edge
+    join
+    fw_poll_done(20000);
+    fw_finish;
+    note("status: 0x37 then 0x34 (fpga_trig_status)");
+    fw_trig_status;
+    check(r18[0] == 1'b1, "T: triggered");
+    check(ts34[0][1:0] == 2'd1 && ts34[0][2] == 1'b1 && ts34[0][4] == 1'b1 && ts37[3] == 1'b0,
+          "T: 0x34 = pulse width, longer, a pulse began; 0x37 type bit 2 = 0");
+    // the record: the trailing (falling) edge of the 10-word pulse at record index pre + 1 (core A), nine HI words before it
+    xcr = -1;
+    for (j = 1; j < 40 && xcr < 0; j = j + 1)
+      if (dut.samples.mem[(ta[12:0] - 10 + j - 1) & 8191][7:0] >= 128 && dut.samples.mem[(ta[12:0] - 10 + j) & 8191][7:0] < 128)
+        xcr = j;
+    okc = 1;
+    for (j = 2; j < 11; j = j + 1) if (dut.samples.mem[(ta[12:0] - 10 + j) & 8191][7:0] < 128) okc = 0;
+    check(xcr == 11 && okc, "T: the falling edge of the long pulse at record index pre + 1 with nine HI words before it (the short pulses did not trigger)");
+    fw_trig_write(8'h00, 24'd0, 24'd0, 32'd0, 1'b1);     // SET_TRIGGER: back to the edge type, no hold-off
+
+    //-------------------------------------------------------------------------------
+    // PK: peak detect (0x153C C2): 0x56 bit 1 with 0x53 = 1 (fw-c6), N = 20 (D = 19), CH1 rising at 128 << 8
+    $fdisplay(tf, "#");
+    note("=== PK: peak detect, 0x53 = 01, 0x56 = 02, 0x54 = 00, 0x55 = 128 << 8, D = 19 (N = 20), CH1 rising, pre 6, total 24");
+    wr4(8'h0D, 32'd19);
+    fork
+      fw_arm(2'd1, 2'd2, 6'd0, 16'h8000, 1'b1, 13'd6, 13'd24, 2'd0, 1'b0, 12'd0, 4'd0, 16'd0, 32'd0, 32'h00FFFFFF);
+      begin wait (dut.sample_system_reset === 1'b1); wait (dut.sample_system_reset === 1'b0);
+            steps(1, 2500, 3000, 3000); end
+    join
+    fw_poll_done(20000);
+    fw_finish;
+    note("0x29 after the peak arm");
+    wr_cmd(8'h29); rd_byte; st[0] = rd_d; rd_byte; st[1] = rd_d;
+    check(st[0] == 8'h81 && st[1] == 8'hC0, "PK: 0x29 = 0x81 0xC0 (16-bit, K 1; peak active and written)");
+    note("READ_RAW layout 3: CH1 min bytes (0x20) then max bytes (0x21), 0x1F = 0x14 - pre, dummy strobe, count reads");
+    pass(8'h20, (ta[12:0] - 6) & 8191, 24);
+    for (j = 0; j < 24; j = j + 1) recA[j] = pb[j];
+    pass(8'h21, (ta[12:0] - 6) & 8191, 24);
+    okc = 1;
+    for (j = 0; j < 24; j = j + 1)
+      if ({pb[j], recA[j]} !== dut.samples.mem[(ta[12:0] - 6 + j) & 8191][15:0]) okc = 0;
+    check(okc, "PK: the min / max bytes read over the bus equal the memory words");
+    check(recA[0] == LO && pb[0] == LO && recA[23] == HI && pb[23] == HI, "PK: { max, min } = { LO, LO } before and { HI, HI } after the step");
+    check(recA[7] == LO && pb[7] == HI && recA[6] == LO && pb[6] == LO && recA[8] == HI,
+          "PK: the window with the edge reads { HI, LO } at record index pre + 1 (the trigger word)");
+    wr1(8'h56, 8'h00); wr1(8'h53, 8'h00);
+
+    //-------------------------------------------------------------------------------
+    // K: counter (0x153C C3): the gate restarted at 10 ms on the trigger source (CH1), a 100 kHz square, the 0x35 snapshot
+    $fdisplay(tf, "#");
+    note("=== K: counter, 0x62 = 128 / 6, 0x61 = 01 (gate 10 ms, source = the trigger source, CH1), 100 kHz square for 10.5 ms, then the 0x35 read");
+    fw_counter_config(8'd128, 8'd6, 2'd1, 2'd0);
+    steps(1050, 0, 5000, 5000);
+    note("pass: 0x35, 16 bytes");
+    fw_counter_read;
+    ke = {cnt[2], cnt[3], cnt[4], cnt[5]};
+    kt = {cnt[6], cnt[7], cnt[8], cnt[9]};
+    kw = {cnt[10], cnt[11], cnt[12], cnt[13]};
+    $display("K: 0x35 flags %h seq %0d E %0d T %0d W %0d min %0d max %0d", cnt[0], cnt[1], ke, kt, kw, cnt[14], cnt[15]);
+    check(cnt[0][7] == 1'b1 && cnt[0][1:0] == 2'd1 && cnt[0][5:4] == 2'b00, "K: new result, gate 10 ms, source CH1");
+    check(ke >= 999 && ke <= 1001, "K: E = 999 .. 1001 periods in the 10 ms gate at 100 kHz");
+    check(ke > 0 && kt == ke * 2000, "K: T = E x 2000 clocks (10 us periods)");
+    check(ke > 0 && kw * 2 >= kt - 2 * ke && kw * 2 <= kt + 2 * ke, "K: duty 50 % within one sample per period");
+    check(cnt[14] == LO && cnt[15] == HI, "K: min / max = the square's codes");
+    wr1(8'h61, 8'h00);
 
     $fclose(tf);
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");

@@ -249,6 +249,10 @@ module tb;
 
   reg [7:0] rd_d, rd_r;
   integer   bus_cmp_on = 0;
+  // 0x153C: the reads 0x05 / 0x0A / 0x18 load bit 0 only; bits 7..1 are what the last full-byte read left, which differs
+  // by design after a time-out stop (0x14, 0x153B) and has no identical refill read any more (0x41 is gone), so those
+  // three are compared on bit 0; every other read is compared whole
+  wire [7:0] rd_mask = ((dut.mcu_command == 8'h05) || (dut.mcu_command == 8'h0A) || (dut.mcu_command == 8'h18)) ? 8'h01 : 8'hFF;
   task rd_byte;
     begin
       mcu_rws = 0; mcu_dcs = 0;
@@ -256,7 +260,7 @@ module tb;
       rd_d = bus_dut; rd_r = bus_ref;
       if (eq_on && bus_cmp_on && !cut_ref) begin
         eq_samples = eq_samples + 1;
-        if (rd_d !== rd_r) begin
+        if (((rd_d ^ rd_r) & rd_mask) !== 8'h00) begin
           eq_mismatch = eq_mismatch + 1;
           if (eq_mismatch <= 30) $display("MISMATCH t=%0t bus read %h/%h cmd %h/%h", $time, rd_d, rd_r, dut.mcu_command, refd.mcu_command);
         end
@@ -334,7 +338,7 @@ module tb;
   reg [1:0] negab = 0;                                  // 0x53 bits 4..3 used by set_decim
   task set_decim(input [1:0] k, input swap, input [5:0] sh, input [31:0] divider);
     begin
-      wr1(8'h53, {3'd0, negab, swap, k});
+      wr1(8'h53, {3'd0, negab, 1'b0, k});               // 0x153C: bit 2 (swap) is gone, written 0 (negab: bits 4..3, inert since 0x153A)
       wr1(8'h54, {2'd0, sh});
       wr4(8'h0D, divider);
       #((k + 3) * ((divider / 2) + 1) * 10 + 300);
@@ -383,7 +387,7 @@ module tb;
   // Phase 1: random equivalence with 0x1533 at K = 0
 
   integer it, k, nread;
-  reg [31:0] rnd;
+  reg [31:0] rnd, rnd_ptr;
   reg [12:0] pre_r, tot_r;
   reg gen_on;
 
@@ -393,7 +397,7 @@ module tb;
       for (it = 0; it < iterations; it = it + 1) begin
         rnd = $random(seed);
         // new 0x1534/0x1535 commands with K = 0: must not change anything
-        wr1(8'h53, {5'd0, rnd[7], 2'b00});
+        wr1(8'h53, 8'h00);                                // 0x153C: bits 7..2 of 0x53 are gone (bit 2, the swap, was random here)
         wr1(8'h54, $random(seed));
         wr1(8'h56, $random(seed) & 8'hFD);                // bit 1 is peak detect since 0x153C (not reserved)
         wr2(8'h55, $random(seed));
@@ -401,7 +405,6 @@ module tb;
         wr1(8'h16, {7'd0, rnd[1]});
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));
         wr1(8'h1A, {7'd0, rnd[2]});
-        wr1(8'h0F, {7'd0, rnd[3]});
         wr4(8'h0D, rnd[5:4] + (rnd[10] ? 32'd0 : 32'd6));  // write clock 100 .. 12.5 MHz
         pre_r = 13'd20 + (rnd[24:16] % 13'd280);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
@@ -412,7 +415,7 @@ module tb;
         wr1(8'h33, $random(seed) % 6); wr1(8'h36, $random(seed) % 6);
         wr1(8'h34, $random(seed)); wr1(8'h37, $random(seed));
         wr2(8'h38, $random(seed));
-        wr2(8'h3C, $random(seed));
+        rnd_ptr = $random(seed);                          // 0x153C: was written to 0x3C and read back through 0x41 as the read pointer below
         gen_on = rnd[6];
         wr1(8'h50, {7'd0, gen_on});
         wr4(8'h51, 32'd85899346 + ($random(seed) & 32'h00FFFFFF));
@@ -440,19 +443,11 @@ module tb;
         rd1(8'h18);
         if (!rnd[2] && !rd_d[0])
           check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
-        rd2(8'h41);                                       // refills the read register's stale bits identically in both
         bus_cmp_on = 1;
         rd1(8'h28);
-        rd2(8'h41);
-        wr2(8'h1F, {3'd0, rd16_d[12:0]});
+        wr2(8'h1F, {3'd0, rnd_ptr[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
-        // live ADC pins: the dut returns its IOB registers, the reference its (delayed) pins: not compared; 0x41 then
-        // refills all eight bits of the read register (0x05 / 0x0A / 0x18 keep the others)
-        bus_cmp_on = 0;
-        for (k = 0; k < 4; k = k + 1) rd1(8'h24 + k);
-        bus_cmp_on = 1;
-        rd2(8'h41);
         rd1(8'h05);
         disable ext_noise;
         ext_en = 0;
@@ -476,7 +471,7 @@ module tb;
       wr4(8'h0E, {19'd0, total});                        // auto mode: stops after about total samples
       // 0x153A: 0x53 bits 3 / 4 select nothing any more (the decimator gets registered samples), so the model
       // sees neg = 0 whatever was written; the negab runs below only prove the bits are inert
-      $fdisplay(logf, "C %0d %0d %0d %0d 0 0", kk, divider, swap, sh);
+      $fdisplay(logf, "C %0d %0d %0d %0d 0 0", kk, divider, 1'b0, sh);   // 0x153C: no swap
       log_on = 1;
       start_capture;
       wait_done(400000);
@@ -519,7 +514,7 @@ module tb;
     // Version word and geometry register
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153B, "cmd 0x06 reads 0x153B");
+    check(rd16_d == 16'h153C, "cmd 0x06 reads 0x153C");
     check(rd16_r == 16'h1533, "reference cmd 0x06 reads 0x1533");
     wr1(8'h53, 8'h00); wr1(8'h54, 8'h00);
     rd2(8'h29);
@@ -527,10 +522,10 @@ module tb;
     wr1(8'h53, 8'h07); wr1(8'h54, 8'hED);
     rd2(8'h29);
     $display("0x29 after 0x53 = 0x07, 0x54 = 0xED: %h", rd16_d);
-    check(rd16_d == 16'h872D, "0x29 = {bit7 16-bit, swap, K}, {shift[5:0]}");
+    check(rd16_d == 16'h832D, "0x29 = {bit7 16-bit, 000, K}, {shift[5:0]} (0x153C: bits 4..2 read 0)");
     wr1(8'h53, 8'h1A);
     rd2(8'h29);
-    check(rd16_d[15:8] == 8'h9A, "0x29 byte 0 bits 4..3 = falling-edge capture bits");
+    check(rd16_d[15:8] == 8'h82, "0x29 byte 0 bits 4..2 read 0 with 0x53 bits 4..2 written (0x153C: no swap / falling-edge bits)");
     wr1(8'h53, 8'h00);
     rd2(8'h29);
     check(rd16_d[15] == 1'b0, "0x29 bit7 clears at K = 0");
@@ -540,19 +535,19 @@ module tb;
     // dividers: N = 2, 4, 10, 20, 64 (even divider 63 -> N = 64), 200, plus a random odd one
     decim_run(2'd1, 1'b0, rec_shift(1, 1),  32'd1,   13'd200);
     decim_run(2'd1, 1'b0, rec_shift(1, 9),  32'd9,   13'd150);
-    decim_run(2'd1, 1'b1, rec_shift(1, 399), 32'd399, 13'd40);
+    decim_run(2'd1, 1'b0, rec_shift(1, 399), 32'd399, 13'd40);
     decim_run(2'd1, 1'b0, 6'd2,            32'd1999, 13'd24);   // N = 2000, shift 2 (3 recommended): partly saturated
     decim_run(2'd2, 1'b0, rec_shift(2, 3),  32'd3,   13'd200);
-    decim_run(2'd2, 1'b1, rec_shift(2, 19), 32'd19,  13'd120);
+    decim_run(2'd2, 1'b0, rec_shift(2, 19), 32'd19,  13'd120);
     decim_run(2'd2, 1'b0, rec_shift(2, 62), 32'd62,  13'd60);   // even divider: N = 64
     decim_run(2'd2, 1'b0, rec_shift(2, 199), 32'd199, 13'd30);
     decim_run(2'd3, 1'b0, rec_shift(3, 1),  32'd1,   13'd200);
     decim_run(2'd3, 1'b0, rec_shift(3, 9),  32'd9,   13'd150);
-    decim_run(2'd3, 1'b1, rec_shift(3, 39), 32'd39,  13'd80);
+    decim_run(2'd3, 1'b0, rec_shift(3, 39), 32'd39,  13'd80);
     decim_run(2'd3, 1'b0, rec_shift(3, 199), 32'd199, 13'd30);
     decim_run(2'd3, 1'b0, rec_shift(3, 0),  32'd0,   13'd100);  // divider 0: N = 2
     negab = 2'b01; decim_run(2'd3, 1'b0, rec_shift(3, 9), 32'd9, 13'd100);   // A cores on the falling edge
-    negab = 2'b10; decim_run(2'd2, 1'b1, rec_shift(2, 3), 32'd3, 13'd100);   // B cores on the falling edge
+    negab = 2'b10; decim_run(2'd2, 1'b0, rec_shift(2, 3), 32'd3, 13'd100);   // B cores on the falling edge
     negab = 2'b11; decim_run(2'd1, 1'b0, rec_shift(1, 1), 32'd1, 13'd100);   // both
     negab = 2'b00;
     decim_run(2'd3, 1'b0, 6'd11,           32'd99,  13'd40);    // shift 11 (12 recommended): partly saturated
@@ -560,7 +555,7 @@ module tb;
     kq = (rnd[1:0] == 0) ? 2 : rnd[1:0];
     nq = rec_shift(kq, 32'd5 + 2 * (rnd[12:8]));
     if (rnd[3] && nq > 0) nq = nq - 1;                          // sometimes one below: partly saturated
-    decim_run(kq, rnd[2], nq, 32'd5 + 2 * (rnd[12:8]), 13'd60);
+    decim_run(kq, 1'b0, nq, 32'd5 + 2 * (rnd[12:8]), 13'd60);
     negab = 2'b00;
     $fdisplay(logf, "C 0 0 0 0 0 0");
     $fflush(logf);
@@ -705,7 +700,6 @@ module tb;
     wait_done(20000);
     check(done && dut.sampling_triggered == 1'b0, "resync capture ran to the time-out");
     adc_mode = 0;
-    rd2(8'h41);
     mm0 = eq_mismatch;
     random_phase(10);
     $display("phase 4: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
