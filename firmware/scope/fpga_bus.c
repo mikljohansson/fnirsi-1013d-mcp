@@ -177,12 +177,14 @@ int fpga_bus_note_write(uint8_t cmd, uint32_t value)
   {
     case 0x0D:
       fpga_bus_wr.rate++;
+      fpga_bus_wr.wclk++;                            //C7 counter
       fpga_bus_wr.divider = value;
       fpga_bus_wr.held   |= FPGA_HELD_DIVIDER;
       break;
 
     case 0x53:
       fpga_bus_wr.filter++;
+      fpga_bus_wr.wclk++;                            //C7 counter
       fpga_bus_wr.mode  = (uint8_t)value;
       fpga_bus_wr.held |= FPGA_HELD_MODE;
       break;

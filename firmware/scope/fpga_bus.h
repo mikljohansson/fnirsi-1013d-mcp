@@ -122,6 +122,8 @@ typedef struct
   uint32_t rate;            //0x0D writes
   uint32_t filter;          //0x53, 0x54, 0x55 and 0x56 writes (0x54 / 0x55 since fw 0.2.87)
   uint32_t resets;          //0x01 = 1 writes
+  uint32_t wclk;            //C7 counter: 0x0D and 0x53 writes, the ones that re-align the write clock (fpga_counter.c
+                            //restarts its gate at the next pass, fpga/al3/AGENTS.md "0x153C C3 counter" rate changes)
   uint8_t  since_reset;     //a 0x0D / 0x53 / 0x56 write since the last 0x01 = 1
 
   //What the FPGA holds (fw 0.2.87): the last value written to each register, valid per FPGA_HELD_* bit
