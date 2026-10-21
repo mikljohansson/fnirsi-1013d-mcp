@@ -1643,7 +1643,7 @@ only while they apply; "MSa/s" everywhere as in the top bar):
 | warning | when |
 |---|---|
 | CHn overrange: increase V/div | the shown channel's last readout clipped |
-| Aliasing possible: set Acquisition > Filter | below 200 MSa/s with the Filter off (0x1534+); "use a faster time base" without the filter |
+| Aliasing possible: set Acquisition > Filter | below 200 MSa/s with the Filter off |
 | Stopped: press RUN to fill the view | stopped in a history view, or no record yet |
 | Auto needs RUN: press RUN / Auto needs trigger mode Auto or Normal | Auto pressed while stopped / in single mode |
 | Stopped: press RUN to zoom further | 4 s after a zoom tap while stopped where the record's rate ends the zoom but the ladder would go on (fw 0.2.77) |

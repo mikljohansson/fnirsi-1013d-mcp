@@ -10,10 +10,7 @@
 
 //UI features the running hardware may lack (fw 0.2.6, firmware/README.md "Hidden menu options"). PC_UI_HAS(f) goes
 //into a touch condition, PC_UI_MASK(m) paints over the unsupported parts of a menu just drawn.
-#define PC_FEAT_GEN_DDS       1     //generator menu: Atlan DDS bitstreams only (not stock 0x1432)
 #define PC_FEAT_RTC           4     //DS3231 module (probed at boot)
-#define PC_FEAT_EXT_TRIGGER   6     //EXT trigger source: AL3 bitstream 0x1533+ only (calibration pin as input)
-#define PC_FEAT_DECIM         8     //acquisition "Filter" selector: AL3 bitstream 0x1534+ (decimation filter)
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
 
 //Settings sector word for the acquisition Filter setting: FPGA_SETTING_OFFSET (192) + 15, unused by 1.00o5
@@ -33,7 +30,6 @@
 //217: fw 0.2.84, the Spectrum MEASURES Capture card's rank (ui_meas.h UI_MS_SPEC_WORD_CAPTURE, 0xCA00 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
-#define PC_MASK_TRIG_CHANNEL  2     //trigger menu: EXT source box (0x1533+)
 #define PC_MASK_ACQ_FILTER    4     //acquisition menu: the Filter box
 #define PC_MASK_ACQ_MEMORY    5     //acquisition menu: memory depths the bitstream holds, pass time
 

@@ -717,7 +717,7 @@ void scan_for_touch(void)
     //===========================================================================================================
     //******************
     //Check if in generator settings button range
-    else if((xtouch >= GEN_BUTTON_XPOS) && (xtouch <= GEN_BUTTON_XPOS+GEN_BUTTON_BG_WIDTH) PC_UI_HAS(PC_FEAT_GEN_DDS))    
+    else if((xtouch >= GEN_BUTTON_XPOS) && (xtouch <= GEN_BUTTON_XPOS+GEN_BUTTON_BG_WIDTH))    
     {
       //Set the button active
       scope_generator_settings(1);
@@ -2626,7 +2626,7 @@ void handle_acquisition_menu_touch(void)
 
           //Filter selector in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3, each with the FIR
           //fw 0.2.64: a filter shortens the record to 8190 samples (16-bit layout): the time/div follows
-          if((box == UI_ACQ_FILTER) && pc_glue_ui_has(PC_FEAT_DECIM) && pc_glue_acq_box_live(UI_ACQ_FILTER))
+          if((box == UI_ACQ_FILTER) && pc_glue_acq_box_live(UI_ACQ_FILTER))
           {
             pc_glue_decim_tap();
             acq_view_fit(1);
@@ -2902,7 +2902,7 @@ void handle_trigger_menu_touch(void)
               tp_i2c_wait_for_touch_release();
             }
           }
-          else if((xtouch >= TRIGGER_MENU_XPOS+172) && (xtouch <= TRIGGER_MENU_XPOS+205) PC_UI_HAS(PC_FEAT_EXT_TRIGGER))
+          else if((xtouch >= TRIGGER_MENU_XPOS+172) && (xtouch <= TRIGGER_MENU_XPOS+205))
           {
             //Only when the channel is enabled
             //if(scopesettings.channel2.enable)

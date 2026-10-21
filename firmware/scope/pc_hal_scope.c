@@ -1780,11 +1780,6 @@ int pc_glue_ui_has(int feature)
 
   switch(feature)
   {
-    case PC_FEAT_GEN_DDS:
-    case PC_FEAT_EXT_TRIGGER:
-    case PC_FEAT_DECIM:
-      return 1;
-
     case PC_FEAT_RTC:
       return pc_rtc_present;
 
@@ -1818,16 +1813,10 @@ void pc_glue_ui_mask(int menu)
   switch(menu)
   {
 
-    case PC_MASK_TRIG_CHANNEL:
-      if(!pc_glue_ui_has(PC_FEAT_EXT_TRIGGER))
-        pc_mask_rect(TRIGGER_MENU_XPOS + 170, TRIGGER_MENU_YPOS + 127, 37, 26);
-      break;
-
     case PC_MASK_ACQ_FILTER:
       //1.00o5's Long memory slot holds the decimation Filter selector; ui-sample: the Average, Filter and Sample boxes
       //and the Memory column's note, drawn together (Peak greys two of them)
-      if(pc_glue_ui_has(PC_FEAT_DECIM))
-        pc_glue_acq_row_draw();
+      pc_glue_acq_row_draw();
       break;
 
     case PC_MASK_ACQ_MEMORY:
