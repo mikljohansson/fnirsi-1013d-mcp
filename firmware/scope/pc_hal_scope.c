@@ -31,6 +31,7 @@
 #include "pc_hal.h"
 #include "pc_cmds.h"
 #include "pc_hooks.h"
+#include "peak_bars.h"
 #include "spectrum.h"
 #include "phosphor.h"
 #include "spec_fmt.h"
@@ -1374,6 +1375,33 @@ int pc_glue_peak_record(int ch, const uint16 **pairs, uint32 *n, uint32 *gain, i
   *gain  = pc_dec_peak_gain[ch];
   *off   = pc_dec_peak_off[ch];
   return 1;
+}
+
+//fw-small: a peak record's Vmax / Vmin / Vpp (settings max / min / peakpeak, the cards' sources) from the lowest min byte and
+//the highest max byte, as the bars draw them (docs/plans/ui-rows.md 3.3): the midpoint trace shows a narrow spike at about
+//half its height. Called after the readout; center, average, rms and the timing values stay the midpoint's
+void pc_glue_peak_extremes(void *settings)
+{
+  PCHANNELSETTINGS s = (PCHANNELSETTINGS)settings;
+  uint32  ch;
+  int32_t lo, hi;
+
+  if(s == &scopesettings.channel1)
+    ch = 0;
+  else if(s == &scopesettings.channel2)
+    ch = 1;
+  else
+    return;
+
+  if(!pc_dec_raw_peak[ch] || !pc_dec_raw_n[ch])
+    return;
+
+  pb_extremes(pc_dec_raw[ch], pc_dec_raw_n[ch], pc_dec_peak_gain[ch], pc_dec_peak_off[ch], s->invert, &lo, &hi);
+
+  //The same dc shift the readout adds to every sample before its min / max (fpga_read_adc_data)
+  s->min      = lo + s->dcshift;
+  s->max      = hi + s->dcshift;
+  s->peakpeak = s->max - s->min;
 }
 
 //Memory depth for the 16-bit layout: the largest offered step that fits, trigger point kept at the same fraction
