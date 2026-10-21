@@ -13,7 +13,7 @@
 // - Start: 0x69 = 1, 0x57 = 0 (sequencer off), 0x1A = 0 (auto), the sampling reset (fpga_arm_reset: 0x0B = 0x0C = 0,
 //   0x0E = 0 in the window). 0x01 = 1 sets the FPGA's reader, unread count and word counter to 0 (not the lap flag).
 //   Then a 0x38 snapshot: base = (W - count) mod 8192 is the ring address of word 0 (0 on the RTL: W == count mod 8192
-//   at every snapshot). Bit 7 clear = the bitstream does not stream (0x153C and older read the stale bus byte): refused.
+//   at every snapshot). The stream bit (0x38 byte 0 bit 7) is checked at every drain step (fpga_log_drain).
 //   Then 0x6A = base, then 0x69 = 3 (stream on, a lap flag of an earlier session cleared).
 // - 0x6A holds the NEXT word to read ((base + consumed) mod 8192). The FPGA's unread count (0x38 bytes 6..7) becomes
 //   (W - 0x6A) mod 8192 at a 0x6A write and counts every write up to 8192 (full); a write at 8192 sets the lap flag (it
@@ -95,8 +95,7 @@ typedef struct
 uint8_t  fpga_log_bpw(uint8_t ch_mask, uint8_t format);
 
 //Arm the stream: the rate and decimation registers must be written already. ring / size: the DDR ring. max_polls: the
-//bounded 0x05 wait (fpga_arm_cfg). 0 running, -1 the FPGA never became ready, -2 the bitstream does not stream (0x38
-//bit 7 clear after the arm): 0x69 = 0 written, state FPGA_LOG_ERROR
+//bounded 0x05 wait (fpga_arm_cfg). 0 running, -1 the FPGA never became ready: 0x69 = 0 written, state FPGA_LOG_ERROR
 int      fpga_log_start(fpga_log *l, uint8_t ch_mask, uint8_t format, uint64_t limit, uint8_t *ring, uint32_t size,
                         uint32_t max_polls);
 //One step of the log loop; returns the words appended to the DDR ring

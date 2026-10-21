@@ -181,7 +181,7 @@ void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors);   //eG
 #include "fpga_log.h"
 typedef struct
 {
-  int          start_rc;          //what pc_hal_log_start answers (0, -1, -2)
+  int          start_rc;          //what pc_hal_log_start answers (0, -1)
   uint32_t     starts, stops, reads;
   uint8_t      state, ch_mask, format, flags, stop_state;
   uint32_t     divider, gaps, ms0, ms1;

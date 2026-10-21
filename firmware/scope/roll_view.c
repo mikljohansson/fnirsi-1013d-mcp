@@ -119,7 +119,7 @@ void roll_view_pass(void)
 
     if(r)
     {
-      roll_view_stop((r == -2) ? "Roll mode needs FPGA bitstream 0x153D" : "FPGA not ready: roll mode stopped");
+      roll_view_stop("FPGA not ready: roll mode stopped");
       return;
     }
 

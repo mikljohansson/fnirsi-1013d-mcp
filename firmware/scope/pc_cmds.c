@@ -3401,11 +3401,8 @@ static int h_log_start(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
 
   r = pc_hal_log_start(ch, fmt, div, &dc, limit);
 
-  if(r == -1)
-    return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
-
   if(r)
-    return pc_error(s, PC_E_FPGA, 1, "0x38: the FPGA does not stream (needs 0x153D)");
+    return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
 
   s->acq_state = PC_ACQ_LOGGING;
   *rl = pc_log_body(s, resp);

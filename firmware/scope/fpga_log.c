@@ -109,12 +109,6 @@ int fpga_log_start(fpga_log *l, uint8_t ch_mask, uint8_t format, uint64_t limit,
 
   fpga_log_snapshot(l);
 
-  if(!(l->snap[0] & 0x80))
-  {
-    fpga_log_end(l, FPGA_LOG_ERROR);
-    return -2;
-  }
-
   //0x01 = 1 put the FPGA's reader and counters at 0, so word 0 is at address 0 (W == count mod 8192); the formula keeps
   //the firmware independent of that
   l->base     = (uint16_t)((fpga_log_waddr(l) - (uint32_t)l->count) & (FPGA_LOG_RING - 1));
