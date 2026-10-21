@@ -47,17 +47,17 @@
 //     ({ streaming, lap, 0, W[12:8] }, W[7:0], u32 words since the release, u16 occ). With 0x69 = 0 the capture
 //     returns to the normal rules (auto with 0x0E = 0: the writes stop at the next edge). Older versions read 0. strobe_ns != 0
 //     makes every strobe take exactly that long (the drain cost test runs at the measured 0.30 / 0.35 us per byte).
-//   - The generator (fw-d5, 0x153D, cut to the square by fw-nopat / fpga-d3; docs/plans/fpga-0x153c.md 2.1 and fpga-d2's
-//     RTL semantics): the fractional two-step square on the 5 ns clock grid, event-driven per step: 0x6C entries 0 and
-//     1 (double-buffered: a write goes to the shadow, 0x6D bit 5 commit makes them pending; other indices ignored; the
-//     engine prefetches two steps ahead (fpga-d2 after the first build), so a commit during step k is taken at the
-//     boundary into k + 1 (pending 0 from there) and gives old k, k + 1 and k + 2, new from k + 3; a start takes the
-//     pending shadows before step 0, which begins 40..45 ns after the 0x6D strobe, as tb_pattern measured), one 16-bit
-//     fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start only), 0x6D mode 3 running
-//     (a mode-3 write starts an idle engine, ignored while it runs), any other mode stopping at once at the idle level
-//     (bit 2), 0x50 the pin driver, read 0x39 byte 0 = { running, 0, pending, 0 x 4, step }. Writes to the cut pattern
-//     registers (0x6E, 0x6F, 0x76..0x7D) are ignored. The pin's level changes are logged (fm.gen_edge) for the period
-//     and edge-placement checks.
+//   - The generator (fw-d5, 0x153D, cut to the square by fw-nopat / fpga-d3 d60a0ad): the fractional two-step square
+//     on the 5 ns clock grid, event-driven per step: 0x6C entries 0 (high) and 1 (low), double-buffered (a write goes
+//     to the shadow; byte 0 bits 7 / 6 and indices >= 2 ignored); a 0x6D commit (bit 5) is taken 2 clocks after the
+//     write when the step in progress has at least 3 clocks left (that step completes with its old length, every
+//     step from its boundary on is new; PENDING for those 2 clocks), else at that boundary; two commits in a row take
+//     effect in order; one 16-bit fraction accumulator (step k lasts n_k + the carry of acc + f_k, cleared at a start
+//     only); 0x6D mode 3 running (a mode-3 write while idle starts it, step 0 8 clocks after the strobe; ignored while
+//     it runs), any other mode stopping at once at the idle level (bit 2); 0x50 the pin driver; read 0x39 = { running,
+//     0, pending, 0 x 4, step }, 0, 0, { 0 x 7, mode active }. Writes to the cut pattern registers (0x6E, 0x6F,
+//     0x76..0x7D) are ignored. The pin's level changes are logged (fm.gen_edge) for the period and edge-placement
+//     checks.
 // Every completed write is recorded in a trace (command, value) for the order checks, and passed to fpga_bus_note_write
 // as fpga_control.c's trace does on the scope (fw 0.2.87: the values the FPGA holds, fpga_bus_wr.held).
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -156,16 +156,16 @@ typedef struct
   uint8_t  buf[16];                 //data bytes of the command in progress (0x6C has 7)
   struct
   {
-    uint8_t  flags;                 //0x6C byte 0 bits 7, 5: end, level
+    uint8_t  flags;                 //0x6C byte 0 bit 5: level
     uint32_t dur;
     uint16_t frac;
-  } gen_act[2], gen_sh[2], gen_q, gen_q2;   //active entries, their shadows, the two prefetched steps
+  } gen_act[2], gen_sh[2];          //active entries, their shadows
   uint8_t  gen_pending;             //0x39 byte 0 bit 5
+  uint64_t gen_take_clk;            //a commit taken at once: at this clock (0: at the step boundary)
   uint8_t  gen_mode, gen_ctl;       //0x6D bits 1..0 and bit 2
   uint8_t  gen_drive;               //0x50 bit 0
   uint8_t  gen_run;                 //running
   uint8_t  gen_step;                //the step running
-  uint8_t  gen_q_idx, gen_q2_idx;   //the prefetched steps' indices
   uint8_t  gen_level;               //the square's level (the idle level when not running)
   uint16_t gen_acc;                 //the fraction accumulator
   uint64_t gen_end_clk;             //the running step ends at this clock

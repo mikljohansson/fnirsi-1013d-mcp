@@ -414,9 +414,9 @@ void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
   }
 }
 
-uint8_t pc_hal_gen_status(void)
+void pc_hal_gen_status(uint8_t st[2])
 {
-  return fpga_gen_status();
+  fpga_gen_status(st);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

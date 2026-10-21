@@ -291,7 +291,7 @@ void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
   mock.gen_en = enable;
 }
 
-uint8_t pc_hal_gen_status(void) { mock.fpga_ops++; mock.gen_status_reads++; return mock.gen_st; }
+void pc_hal_gen_status(uint8_t st[2]) { mock.fpga_ops++; mock.gen_status_reads++; memcpy(st, mock.gen_st, 2); }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 

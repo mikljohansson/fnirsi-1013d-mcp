@@ -687,12 +687,13 @@ static uint32_t pc_gen_body(pc_session *s, uint8_t *p, int refresh)
   pc_gen_now(s, &en, &p16, &h16);
 
   if(refresh)
-    s->gen_st = pc_hal_gen_status();
+    pc_hal_gen_status(s->gen_st);
 
-  //2..11, 22, 23 reserved (0): the bursts, the marker and the source of the 1.27 drafts' patterns
+  //2..11 and 23 reserved (0): the bursts and the source of the 1.27 drafts' patterns
   memset(p, 0, PC_GEN_LEN);
   p[0] = en;
-  p[1] = s->gen_st;
+  p[1] = s->gen_st[0];
+  p[22] = s->gen_st[1];
 
   if(p16)
   {

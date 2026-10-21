@@ -965,17 +965,17 @@ static void test_generator(void)
   }
 
   //The UI's 1 kHz 50 %: GEN 40 bytes, P16 / H16 of the contract's formulas, the status read in the main loop
-  mock.gen_st = 0xA1;
+  mock.gen_st[0] = 0xA1; mock.gen_st[1] = 0x01;
   r = req(PC_CMD_GET_GEN, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_GEN_LEN); T_EQ(r.p[0], 0);
-  T_EQ(r.p[1], 0xA1); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(r.p[22], 0); T_EQ(r.p[23], 0);
+  T_EQ(r.p[1], 0xA1); T_EQ(pc_get_u16(r.p + 2), 0); T_EQ(r.p[22], 0x01); T_EQ(r.p[23], 0);
   T_EQ(pc_get_u32(r.p + 4), 0); T_EQ(pc_get_u32(r.p + 8), 0);
   T_EQ(pc_get_u64(r.p + 12), 1000000); T_EQ(pc_get_u16(r.p + 20), 5000);
   T_EQ(pc_get_u64(r.p + 24), 13107200000ull); T_EQ(pc_get_u64(r.p + 32), 6553600000ull);
   T_EQ(mock.gen_status_reads, 1);
 
   //Inside a menu (modal context) no FPGA access: the last status read is reported
-  mock.gen_st = 0;
+  mock.gen_st[0] = 0;
   r = req_ctx(PC_CMD_GET_GEN, 0, 0, PC_CTX_MODAL);
   T_EQ(r.h.status, 0); T_EQ(r.p[1], 0xA1); T_EQ(mock.gen_status_reads, 1);
 

@@ -157,13 +157,14 @@ int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator (FPGA 0x153D, fw-d5; cut to the square by fw-nopat, docs/plans/fpga-0x153c.md 2.1). The DDS (0x51 /
-// 0x52) is gone: the generator is a fractional two-step square (gen_pat.h). Writes: 0x6C (7 bytes) entry = { end, 0,
-// level, index[4:0] }, u32 duration in 5 ns clocks (>= 2), u16 fraction in 1/65536 clock; entries 0 (high) and 1 (low,
-// end) are double-buffered (a write goes to the shadow, 0x6D bit 5 commit makes them pending, the next step boundary or a
-// start takes them). 0x6D control = mode[1:0] (0 off: the pin holds the idle level, 3 continuous), bit 2 idle level,
-// bit 4 start (self-clearing; clears the fraction accumulator), bit 5 commit (self-clearing). 0x50 (unchanged) 1 = the
-// pin is driven with the square's level, 0 = hi-Z (the EXT input). Read 0x39 byte 0 = { running, 0, pending, 0, 0, 0,
-// 0, step }.
+// 0x52) is gone: the generator is a fractional two-step square (gen_pat.h; fpga-d3's RTL d60a0ad). Writes: 0x6C (7
+// bytes) entry = { -, -, level, index[4:0] }, u32 duration in 5 ns clocks (>= 2), u16 fraction in 1/65536 clock;
+// entries 0 (high) and 1 (low) are double-buffered (a write goes to the shadow; 0x6D bit 5 commit: taken at once when
+// the step in progress has at least 3 clocks left, which completes with its old length, else at its boundary; a start
+// takes it before step 0). 0x6D control = mode[1:0] (0 off: the pin holds the idle level, 3 continuous; 1 / 2 act as
+// off), bit 2 idle level, bit 4 start (self-clearing; clears the fraction accumulator), bit 5 commit (self-clearing).
+// 0x50 (unchanged) 1 = the pin is driven with the square's level, 0 = hi-Z (the EXT input). Read 0x39 (4 bytes) =
+// { running, 0, pending, 0, 0, 0, 0, step }, 0, 0, { 0 x 7, mode active }.
 
 #define FPGA_GEN_OFF          0
 #define FPGA_GEN_CONT         3
@@ -173,12 +174,12 @@ int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift);
 #define FPGA_GEN_CTL_COMMIT   0x20     //0x6D bit 5 (self-clearing)
 
 #define FPGA_GEN_S_LEVEL      0x01     //entry flags (the firmware's; 0x6C byte 0 bit 5)
-#define FPGA_GEN_S_END        0x04     //(bit 7)
 
 #define FPGA_GEN_ST_RUNNING   0x80     //0x39 byte 0 bit 7: the square runs
 #define FPGA_GEN_ST_PENDING   0x20     //0x39 byte 0 bit 5: a commit not yet taken
 #define FPGA_GEN_ST_STEP      0x01     //0x39 byte 0 bit 0: the entry running (0 high, 1 low)
 #define FPGA_GEN_ST_MASK      (FPGA_GEN_ST_RUNNING | FPGA_GEN_ST_PENDING | FPGA_GEN_ST_STEP)
+#define FPGA_GEN_ST3_ACTIVE   0x01     //0x39 byte 3 bit 0: mode 3 (continuous) in effect
 
 typedef struct
 {
@@ -192,7 +193,7 @@ typedef struct
   uint8_t  mode;           //0x6D bits 1..0: FPGA_GEN_OFF or FPGA_GEN_CONT
   uint8_t  ctl;            //0x6D bit 2 (FPGA_GEN_CTL_IDLE)
   uint8_t  drive;          //0x50 as last written
-  fpga_gen_step step[2];   //entries 0 (high) and 1 (low, end)
+  fpga_gen_step step[2];   //entries 0 (high) and 1 (low)
 } fpga_gen_cfg;
 
 extern fpga_gen_cfg fpga_gen;      //what the FPGA holds, the firmware's copy (power-on: all 0, off, hi-Z)
@@ -200,13 +201,13 @@ extern fpga_gen_cfg fpga_gen;      //what the FPGA holds, the firmware's copy (p
 void fpga_gen_step_write(uint8_t index, const fpga_gen_step *st);   //0x6C
 void fpga_gen_ctl(uint8_t v);                                       //0x6D
 void fpga_gen_drive(int on);                                        //0x50
-//The square: entries 0 (high) and 1 (low, END) and 0x6D = continuous + commit, + start when the square was not running
-//already (then 0x6D = 0 first). A running square changes glitch-free at the next step boundary: 18 strobes
+//The square: entries 0 (high) and 1 (low) and 0x6D = continuous + commit, + start when the square was not running
+//already (then 0x6D = 0 first). A running square changes glitch-free, the step in progress completing: 18 strobes
 void fpga_gen_square(const gp_square *sq);
 //A static level: 0x6D = mode 0 with the idle level (the wizard's gain step, duty 0 / 100 %)
 void fpga_gen_level(uint8_t level);
-//0x39 byte 0 masked to FPGA_GEN_ST_MASK
-uint8_t fpga_gen_status(void);
+//0x39 (4 bytes): st[0] = byte 0 masked to FPGA_GEN_ST_MASK, st[1] = byte 3 masked to FPGA_GEN_ST3_ACTIVE
+void fpga_gen_status(uint8_t st[2]);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bus primitives: fpga_control.c / fpga_control.h on the scope, fpga_model.c in the host test

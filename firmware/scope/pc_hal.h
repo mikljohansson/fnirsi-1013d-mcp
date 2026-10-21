@@ -159,7 +159,9 @@ void     pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pc
 //[UI][FPGA] the square of P16 / H16 (1/65536 clocks, both steps >= 2 clocks: gen_pat.h gp_split) and 0x50 = enable; the
 //UI copy rounded to Hz / %. p16 = 0: 0x50 alone (the Bode engine's stop: the square keeps running behind it)
 void     pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable);
-uint8_t  pc_hal_gen_status(void);     //[FPGA] read 0x39 byte 0: bit 7 running, bit 5 pending (a change not yet taken), bit 0 step
+//[FPGA] read 0x39: st[0] = byte 0 (bit 7 running, bit 5 pending: a change not yet taken, bit 0 step), st[1] = byte 3
+//bit 0 (mode active)
+void     pc_hal_gen_status(uint8_t st[2]);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition [FPGA]

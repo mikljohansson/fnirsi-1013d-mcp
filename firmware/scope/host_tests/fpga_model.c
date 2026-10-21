@@ -312,7 +312,7 @@ void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-//The generator's square (fw-d5, the RTL cut to the square by fpga-d3; fpga_model.h header)
+//The generator's square (fw-d5, the RTL cut to the square by fpga-d3, d60a0ad; fpga_model.h header)
 
 static int fm_gen_has(void)
 {
@@ -345,68 +345,58 @@ static uint8_t fm_gen_idle(void)
   return (uint8_t)((fm.gen_ctl >> 2) & 1);
 }
 
-//The step after index k (whose entry is e): 0 after an end step (or entry 1)
-static uint8_t fm_gen_after(uint8_t k, uint8_t eflags)
+//The shadows become the active pair (the commit taken)
+static void fm_gen_take(void)
 {
-  return ((eflags & 0x80) || (k == 1)) ? 0 : (uint8_t)(k + 1);
+  fm.gen_act[0]  = fm.gen_sh[0];
+  fm.gen_act[1]  = fm.gen_sh[1];
+  fm.gen_pending = 0;
 }
 
-static void fm_gen_take_pending(void)
+//Begin step idx at clock clk (a pending commit is taken at the boundary first): n + the carry of acc + f clocks
+static void fm_gen_begin(uint8_t idx, uint64_t clk)
 {
+  uint32_t sum, dur;
+
   if(fm.gen_pending)
-  {
-    fm.gen_act[0]  = fm.gen_sh[0];
-    fm.gen_act[1]  = fm.gen_sh[1];
-    fm.gen_pending = 0;
-  }
-}
+    fm_gen_take();
 
-//Begin the first queued step at clock clk; then take a pending commit and queue the step after the second one. The
-//engine prefetches two steps (fpga-d2, after the first 0x153D build): a commit during step k is taken at the boundary
-//into k + 1 (pending clears there), k + 1 and k + 2 run the old entries, k + 3 the new
-static void fm_gen_begin(uint64_t clk)
-{
-  uint32_t sum = (uint32_t)fm.gen_acc + fm.gen_q.frac;
-  uint32_t dur = fm.gen_q.dur + (sum >> 16);
-  uint8_t  idx = fm.gen_q_idx;
-
+  sum = (uint32_t)fm.gen_acc + fm.gen_act[idx].frac;
+  dur = fm.gen_act[idx].dur + (sum >> 16);
   fm.gen_acc     = (uint16_t)sum;
   fm.gen_step    = idx;
   fm.gen_end_clk = clk + dur;
-  fm_gen_set_level((uint8_t)((fm.gen_q.flags >> 5) & 1), clk);
-
-  fm_gen_take_pending();
-  fm.gen_q      = fm.gen_q2;
-  fm.gen_q_idx  = fm.gen_q2_idx;
-  fm.gen_q2_idx = fm_gen_after(fm.gen_q_idx, fm.gen_q.flags);
-  fm.gen_q2     = fm.gen_act[fm.gen_q2_idx];
+  fm_gen_set_level((uint8_t)((fm.gen_act[idx].flags >> 5) & 1), clk);
 }
 
-//A start: the pending shadows are taken first, so every step is new from step 0
+//A start: the pending shadows are taken first, so step 0 is new; the accumulator cleared
 static void fm_gen_start(uint64_t clk)
 {
-  fm_gen_take_pending();
-  fm.gen_acc    = 0;
-  fm.gen_run    = 1;
+  fm.gen_acc = 0;
+  fm.gen_run = 1;
   fm.gen_starts++;
-  fm.gen_q_idx  = 0;
-  fm.gen_q      = fm.gen_act[0];
-  fm.gen_q2_idx = fm_gen_after(0, fm.gen_q.flags);
-  fm.gen_q2     = fm.gen_act[fm.gen_q2_idx];
-  fm_gen_begin(clk);
+  fm_gen_begin(0, clk);
 }
 
 static void fm_gen_stop(uint64_t clk)
 {
   fm.gen_run = 0;
+  fm.gen_step = 0;
   fm_gen_set_level(fm_gen_idle(), clk);
 }
 
-//Run the square up to clock clk (every boundary at or before it)
+//Run the square up to clock clk (every boundary at or before it); the pending bit of a commit taken at once clears
+//2 clocks after it
 static void fm_gen_run(uint64_t clk)
 {
   while(fm.gen_run && (fm.gen_end_clk <= clk))
-    fm_gen_begin(fm.gen_end_clk);
+    fm_gen_begin((uint8_t)(fm.gen_step ^ 1), fm.gen_end_clk);
+
+  if(fm.gen_pending && fm.gen_take_clk && (clk >= fm.gen_take_clk))
+  {
+    fm_gen_take();
+    fm.gen_take_clk = 0;
+  }
 }
 
 static void fm_time(uint64_t ps)
@@ -443,10 +433,10 @@ static void fm_gen_write(uint8_t cmd)
     {
       uint8_t idx = b[0] & 0x1F;
 
-      //Entries 0 and 1 only (double-buffered); other indices are ignored
+      //Entries 0 (high) and 1 (low) only, double-buffered; bits 7 / 6 of byte 0 and other indices are ignored
       if(idx < 2)
       {
-        fm.gen_sh[idx].flags = b[0] & 0xA0;
+        fm.gen_sh[idx].flags = b[0] & 0x20;
         fm.gen_sh[idx].dur   = ((uint32_t)b[1] << 24) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 8) | b[4];
         fm.gen_sh[idx].frac  = (uint16_t)((b[5] << 8) | b[6]);
       }
@@ -457,12 +447,21 @@ static void fm_gen_write(uint8_t cmd)
     {
       uint8_t v = b[0];
 
-      //Mode 3 runs (a write while idle, or the start bit, starts it; ignored while running), any other mode is off
+      //Mode 3 runs (a write while idle starts it 8 clocks after the strobe; ignored while running), any other mode
+      //is off at once at the idle level (bit 2). The commit: taken 2 clocks after the write when the step in progress
+      //has at least 3 clocks left (that step completes with its old length, every step from its boundary is new),
+      //else at that boundary; the accumulator is not cleared
       fm.gen_mode = v & 3;
       fm.gen_ctl  = v & 0x04;
 
       if(v & 0x20)
-        fm.gen_pending = 1;
+      {
+        if(fm.gen_pending && fm.gen_take_clk)
+          fm_gen_take();                                       //an earlier commit, still in its 2 clocks, first
+
+        fm.gen_pending  = 1;
+        fm.gen_take_clk = (fm.gen_run && (fm.gen_end_clk >= now + 3)) ? now + 2 : 0;
+      }
 
       if(fm.gen_mode != 3)
       {
@@ -814,12 +813,18 @@ uint8_t fpga_io_strobe_read(void)
       }
       break;
 
-    //The generator: 0x39 = { running, 0, pending, 0, 0, 0, 0, step }; further strobes read 0
+    //The generator: 0x39 = { running, 0, pending, 0, 0, 0, 0, step }, 0, 0, { 0 x 7, mode active (mode 3) }
     case 0x39:
-      if(fm_gen_has() && (fm.nbytes++ == 0))
+      if(fm_gen_has())
       {
         fm_gen_run(fm_clk());
-        out = (uint8_t)((fm.gen_run ? 0x80 : 0) | (fm.gen_pending ? 0x20 : 0) | (fm.gen_step & 0x01));
+
+        switch(fm.nbytes++)
+        {
+          case 0:  out = (uint8_t)((fm.gen_run ? 0x80 : 0) | (fm.gen_pending ? 0x20 : 0) | (fm.gen_step & 0x01)); break;
+          case 3:  out = (uint8_t)(fm.gen_mode == 3); break;
+          default: out = 0; break;
+        }
       }
       break;
 

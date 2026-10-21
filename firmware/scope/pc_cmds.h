@@ -338,7 +338,7 @@ typedef struct
   uint32_t   gen_ui_hz;
 
   uint8_t    ctx;               //the dispatch context of the running request (PC_CTX_*)
-  uint8_t    gen_st;            //0x39 (the square's status byte) as last read
+  uint8_t    gen_st[2];         //0x39 bytes 0 and 3 (the square's status) as last read
 
   //Deferred request (WAIT)
   uint8_t    def_active;

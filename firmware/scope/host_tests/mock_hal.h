@@ -81,7 +81,7 @@ typedef struct
   uint64_t       gen_p16, gen_h16;   //1.27 (fw-d5): the square written (0 / 0: none yet)
   uint32_t       gen_writes, gen_pin_writes;
   uint8_t        gen_hw_en;
-  uint8_t        gen_st;             //0x39 byte 0 as the mock answers it
+  uint8_t        gen_st[2];          //0x39 bytes 0 and 3 as the mock answers them
   uint32_t       gen_status_reads;
 
   //Trace

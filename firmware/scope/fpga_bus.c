@@ -280,8 +280,7 @@ fpga_gen_cfg fpga_gen;
 void fpga_gen_step_write(uint8_t index, const fpga_gen_step *st)
 {
   fpga_write_cmd(0x6C);
-  fpga_write_byte((uint8_t)(((st->flags & FPGA_GEN_S_END) ? 0x80 : 0) | ((st->flags & FPGA_GEN_S_LEVEL) ? 0x20 : 0) |
-                            (index & 0x1F)));
+  fpga_write_byte((uint8_t)(((st->flags & FPGA_GEN_S_LEVEL) ? 0x20 : 0) | (index & 0x1F)));
   fpga_write_int(st->dur);
   fpga_write_short(st->frac);
 }
@@ -303,7 +302,7 @@ void fpga_gen_drive(int on)
 void fpga_gen_square(const gp_square *sq)
 {
   fpga_gen_step hi = { FPGA_GEN_S_LEVEL, sq->f_h, sq->n_h };
-  fpga_gen_step lo = { FPGA_GEN_S_END, sq->f_l, sq->n_l };
+  fpga_gen_step lo = { 0, sq->f_l, sq->n_l };
   int running = (fpga_gen.mode == FPGA_GEN_CONT);
 
   if(!running)
@@ -332,8 +331,11 @@ void fpga_gen_level(uint8_t level)
   fpga_gen_ctl(fpga_gen.ctl);
 }
 
-uint8_t fpga_gen_status(void)
+void fpga_gen_status(uint8_t st[2])
 {
   fpga_write_cmd(0x39);
-  return (uint8_t)(fpga_read_byte() & FPGA_GEN_ST_MASK);
+  st[0] = (uint8_t)(fpga_read_byte() & FPGA_GEN_ST_MASK);
+  (void)fpga_read_byte();
+  (void)fpga_read_byte();
+  st[1] = (uint8_t)(fpga_read_byte() & FPGA_GEN_ST3_ACTIVE);
 }

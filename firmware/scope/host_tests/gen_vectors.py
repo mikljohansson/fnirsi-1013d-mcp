@@ -815,7 +815,8 @@ def build():
     # 5i. The generator: protocol 1.27 (fw-d5, section 14 row 67; the pattern features cut by fw-nopat): FPGA 0x153D,
     # the fractional two-step square. SET_GEN keeps 20 bytes: freq_mode 1 = bytes 4..11 u64 P16 (the period in 1/65536 of
     # a 5 ns clock), duty_mode 1 = bytes 12..19 u64 H16 (the high time, same unit). GEN 40 bytes: 0 enable, 1 0x39 byte 0
-    # ({ running, 0, pending, 0 x 4, step }), 2..11 0, 12 u64 freq_mhz, 20 u16 duty_bp, 22 0, 23 0, 24 u64 P16, 32 u64 H16
+    # ({ running, 0, pending, 0 x 4, step }), 2..11 0, 12 u64 freq_mhz, 20 u16 duty_bp, 22 0x39 byte 3 (bit 0 mode
+    # active), 23 0, 24 u64 P16, 32 u64 H16
     p16 = (65536 * 200_000_000_000 + 999_500 // 2) // 999_500
     h16 = (p16 * 5000 + 5000) // 10000
     p = struct.pack("<BBBBQQ", 0x06, 0, 1, 1, p16, h16)
@@ -823,13 +824,14 @@ def build():
     add("req_set_gen_p16_h16", f, [ev_frame(CMDS["SET_GEN"], 90, p)],
         "1.27: raw period and high time: P16 = %d (999.5 Hz: 200100.05 clocks of 5 ns), H16 = %d (50.00 %%); the "
         "enable unchanged" % (p16, h16), [decoded(CMDS["SET_GEN"], 90, p)])
-    g = struct.pack("<BBHIIQHBBQQ", 1, 0xA1, 0, 0, 0, 999500, 5000, 0, 0, p16, h16)
+    g = struct.pack("<BBHIIQHBBQQ", 1, 0xA1, 0, 0, 0, 999500, 5000, 1, 0, p16, h16)
     assert len(g) == 40
     f = frame(CMDS["SET_GEN"], 91, g, flags=FLAG_RESPONSE)
     add("resp_gen_1_27", f, [],
         "1.27 GEN response (40 bytes): enabled, 0x39 byte 0 = 0xA1 (running, step 1 (low), pending: the commit is taken "
-        "at the next step boundary; poll GET_GEN until bit 5 clears before the next chirp step), 2..11 0, 12 freq "
-        "999500 mHz, 20 duty 5000 bp, 22 0, 23 0, 24 P16, 32 H16",
+        "within 3 clocks, or at the boundary of a step with less left; poll GET_GEN until bit 5 clears before the next "
+        "chirp step), 2..11 0, 12 freq "
+        "999500 mHz, 20 duty 5000 bp, 22 0x39 byte 3 = 1 (mode active), 23 0, 24 P16, 32 H16",
         [decoded(CMDS["SET_GEN"], 91, g, flags=FLAG_RESPONSE)])
 
     # 6. ASCII probe (section 10)

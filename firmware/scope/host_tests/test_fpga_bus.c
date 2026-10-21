@@ -24,9 +24,9 @@
 //     followed into 0x62, a host configuration applied by the next pass, the trigger source followed through 0x15.
 //   - fw-d5 (0x153D, protocol 1.27, firmware/AGENTS.md sections 75 and 79): the generator as a fractional two-step square
 //     (gen_pat.c: the P16 / H16 formulas at many frequencies and duties, exact mean period, every edge within one 5 ns
-//     clock of its ideal time on the model's square), the double-buffered frequency change (glitch-free, the prefetch
-//     take, the pending bit, a commit lost to a second one), the bus cost of one chirp step (18 strobes), the 0x39 status
-//     byte, entries other than 0 / 1 and the cut pattern registers ignored by the model.
+//     clock of its ideal time on the model's square), the double-buffered frequency change (glitch-free, taken at once
+//     with the step in progress completing, two commits in one step), the bus cost of one chirp step (18 strobes), the
+//     0x39 status, entries other than 0 / 1 and the cut pattern registers ignored by the model (fpga-d3's RTL d60a0ad).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "test_util.h"
@@ -1442,7 +1442,7 @@ static void test_gen_square(void)
     T_EQ(fm.trace[0].cmd, 0x6D); T_EQ(fm.trace[0].value, 0);
     T_EQ(fm.trace[1].cmd, 0x6C); T_EQ(fm.trace[2].cmd, 0x6C);
     T_EQ(fm.trace[3].cmd, 0x6D); T_EQ(fm.trace[3].value, 0x33);
-    T_EQ(fm.gen_act[0].dur, 100000); T_EQ(fm.gen_act[0].flags, 0x20); T_EQ(fm.gen_act[1].flags, 0x80);
+    T_EQ(fm.gen_act[0].dur, 100000); T_EQ(fm.gen_act[0].flags, 0x20); T_EQ(fm.gen_act[1].flags, 0);
     s0 = fm.strobes;
     fpga_gen_square(&b);
     T_EQ(fm.strobes - s0, 18);
@@ -1468,15 +1468,17 @@ static void test_gen_square(void)
   }
 }
 
-//The double buffer: a frequency change while the square runs is glitch-free (every step a complete old or new one),
-//taken at the prefetch boundary (commit during step k: old k, k + 1 and k + 2, new from k + 3), the pending bit set until
-//then; the accumulator is not cleared (phase-continuous); a second commit before the take overwrites the first
+//The double buffer (fpga-d3's RTL): a frequency change while the square runs is glitch-free (every step a complete old
+//or new one), taken at once (pending for 2 clocks: clear by the next bus read), the step in progress completing with its
+//old length and every step from its boundary new; the accumulator is not cleared (phase-continuous); two commits within
+//one step: the second wins at the boundary
 static void test_gen_change(void)
 {
   gp_square a, b, c;
   uint64_t  pa = gp_p16_from_mhz(999500), pb = gp_p16_from_mhz(1234567), pc = gp_p16_from_mhz(2000000);
   uint32_t  from, i, bad = 0, news = 0, first_new = 0;
   uint64_t  t_commit;
+  uint8_t   st[2];
 
   (void)gp_split(pa, gp_h16_from_bp(pa, 5000), &a);
   (void)gp_split(pb, gp_h16_from_bp(pb, 2500), &b);
@@ -1490,9 +1492,10 @@ static void test_gen_change(void)
   t_commit = fm_clk();
   fpga_gen_square(&b);
 
-  T_EQ(fpga_gen_status() & 0xA0, 0xA0);                    //running, pending
+  fpga_gen_status(st);
+  T_EQ(st[0] & 0xA0, 0x80);                                 //running, the commit already taken
+  T_EQ(st[1], 1);                                           //mode 3
   gen_advance(20000000);
-  T_EQ(fpga_gen_status() & 0x20, 0);                        //taken
 
   for(i = from; i + 1 < fm.gen_nedge; i++)
   {
@@ -1517,12 +1520,11 @@ static void test_gen_change(void)
 
   T_EQ(bad, 0);
   T_TRUE(news > 10);
-  //The step running at the commit and the two prefetched ones are old: the first new step is the third complete edge
-  //interval after the commit (k + 1, k + 2 old, k + 3 new)
-  T_EQ(first_new, 3);
+  //The step running at the commit completes old; the first complete edge interval after it (step k + 1) is new
+  T_EQ(first_new, 1);
   T_TRUE((fm.gen_edge[from % FM_GEN_EDGES] >> 1) >= t_commit);
 
-  //A commit lost to a second commit before the take: B never runs
+  //Two commits within one step: B is taken, C replaces it before the boundary, so B never runs
   fm_reset(GEN_VER, 199999, 22);
   {
     gp_square slow = { 200000000, 200000000, 0, 0 };       //1 s steps
@@ -1530,11 +1532,11 @@ static void test_gen_change(void)
     fpga_gen_square(&slow);
     fpga_gen_drive(1);
     gen_advance(1000000);
-    fpga_gen_square(&b);                                    //pending
-    fpga_gen_square(&c);                                    //overwrites the shadow
+    fpga_gen_square(&b);                                    //taken at once
+    fpga_gen_square(&c);                                    //taken at once over it
     T_EQ(fm.gen_sh[0].dur, c.n_h);
     from = fm.gen_nedge;
-    gen_advance(4500000000ull);                             //the slow step, its prefetched one, then C
+    gen_advance(4500000000ull);                             //the slow step completes, then C
     for(i = from; i + 1 < fm.gen_nedge; i++)
     {
       uint64_t d = (fm.gen_edge[(i + 1) % FM_GEN_EDGES] >> 1) - (fm.gen_edge[i % FM_GEN_EDGES] >> 1);
@@ -1548,26 +1550,29 @@ static void test_gen_change(void)
   }
 }
 
-//The 0x39 status byte (running, pending, the step bit; one strobe pair) through high and low; the stop. Entries other
-//than 0 / 1 and the cut pattern registers (0x6E, 0x6F, 0x76..0x7D) change nothing on the model, as on fpga-d3's RTL
+//The 0x39 status (bytes 0 and 3: running, pending, the step bit, mode active; 5 strobes) through high and low; the stop.
+//Entries other than 0 / 1 and the cut pattern registers (0x6E, 0x6F, 0x76..0x7D) change nothing on the model, as on
+//fpga-d3's RTL
 static void test_gen_status(void)
 {
   gp_square sq = { 1000, 3000, 0, 0 };                      //5 us high, 15 us low
   uint32_t  s0;
-  uint8_t   st;
+  uint8_t   st[2];
 
   fm_reset(GEN_VER, 199999, 23);
-  T_EQ(fpga_gen_status(), 0);
+  fpga_gen_status(st);
+  T_EQ(st[0], 0); T_EQ(st[1], 0);
   fpga_gen_square(&sq);
   fpga_gen_drive(1);
   fm_advance_ns(1000);
   s0 = fm.strobes;
-  st = fpga_gen_status();
-  T_EQ(fm.strobes - s0, 2);
-  T_EQ(st, 0x80);                                           //running, entry 0 (high), the commit taken by the start
+  fpga_gen_status(st);
+  T_EQ(fm.strobes - s0, 5);
+  T_EQ(st[0], 0x80); T_EQ(st[1], 1);                        //running, entry 0 (high), the commit taken by the start
   T_EQ(fm_pin(), 1);
   fm_advance_ns(10000);
-  T_EQ(fpga_gen_status(), 0x81);                            //entry 1 (low)
+  fpga_gen_status(st);
+  T_EQ(st[0], 0x81);                                        //entry 1 (low)
   T_EQ(fm_pin(), 0);
 
   //Index 2 and above, 0x6E, 0x6F and the engine's 0x76..0x7D: ignored
@@ -1590,9 +1595,10 @@ static void test_gen_status(void)
     T_EQ(fm.gen_run, 1); T_EQ(fm.gen_starts, 1);
   }
 
-  //Off: mode 0 at the low idle level, the status reads 0 apart from the step
+  //Off: mode 0 at the low idle level, the status reads 0
   fpga_gen_level(0);
-  T_EQ(fpga_gen_status() & 0xA0, 0);
+  fpga_gen_status(st);
+  T_EQ(st[0], 0); T_EQ(st[1], 0);
   T_EQ(fm_pin(), 0);
 }
 
