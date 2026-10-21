@@ -15,8 +15,58 @@ static uint32_t fm_rnd(void)
   return fm.seed >> 8;
 }
 
+//C6 peak detect: the model's 0x56 bit 1 (a register on 0x153C), the 16-bit path and the window
+int fm_peak_on(void)
+{
+  return (fm.version >= 0x153C) && (fm.reg_56 & 0x02);
+}
+
+int fm_dec_on(void)
+{
+  return ((fm.reg_53 & 3) != 0) || fm_peak_on();
+}
+
+uint32_t fm_window(void)
+{
+  return 2u * ((fm.divider >> 1) + 1u);
+}
+
+//Synthetic raw 200 MSa/s stream per channel: a sawtooth 64..191 (period 128 samples, channel 2 offset by 50) with a
+//255 spike every 1000 samples and a 0 dip every 1777, so a window of N >= 2 samples catches what sample skipping misses
+uint8_t fm_raw_sample(uint32_t ch, uint64_t j)
+{
+  if((j % 1000) == 0)
+    return 255;
+  if((j % 1777) == 0)
+    return 0;
+
+  return (uint8_t)(64 + ((j * 7 + (uint64_t)ch * 50) % 128));
+}
+
+void fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx)
+{
+  uint32_t n = fm_window(), i;
+  uint64_t j = (uint64_t)w * n;
+  uint8_t  lo = 255, hi = 0;
+
+  for(i=0;i<n;i++)
+  {
+    uint8_t s = fm_raw_sample(ch, j + i);
+
+    if(s < lo) lo = s;
+    if(s > hi) hi = s;
+  }
+
+  *mn = lo;
+  *mx = hi;
+}
+
+//One word per write clock edge: 10 (D + 1) ns in the legacy layout, N x 5 ns on the 16-bit path (filter or peak)
 static uint64_t fm_period_ps(void)
 {
+  if(fm_dec_on())
+    return (uint64_t)5000 * fm_window();
+
   return (uint64_t)10000 * (fm.divider + 1);
 }
 
@@ -39,8 +89,15 @@ static void fm_capture_edge(void)
   {
     uint32_t w = fm.n % fm.ring, l;
 
-    for(l=0;l<4;l++)
-      fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
+    if(fm_peak_on())
+    {
+      //C6: { max, min } of the window's synthetic raw samples per channel: lanes 0x20 / 0x22 min, 0x21 / 0x23 max
+      fm_peak_word(0, fm.n, &fm.mem[w][0], &fm.mem[w][1]);
+      fm_peak_word(1, fm.n, &fm.mem[w][2], &fm.mem[w][3]);
+    }
+    else
+      for(l=0;l<4;l++)
+        fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
 
     //The trigger compares the word written on this edge (after the pretrigger words, as sampling_half_way)
     if(!fm.triggered && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at) && (fm.n >= pre))
@@ -321,6 +378,21 @@ uint8_t fpga_io_strobe_read(void)
     case 0x37:
       if(fm.version >= 0x153C)
         out = (uint8_t)((fm_holdoff_running() ? 0x10 : 0) | ((fm.reg_5e & 0x04) << 1));
+      break;
+
+    //Decimation state (0x1534+): byte 0 = { dec_on, fir_en, fir_act, 0, 0, swap, K }, byte 1 = the shift; 0x153C (C6):
+    //byte 1 bits 7 / 6 = peak active / peak as written (equal: active whenever written), the FIR off while peak is on
+    case 0x29:
+      if(fm.version >= 0x1534)
+      {
+        uint32_t n   = fm_window();
+        int      fir = (fm.reg_56 & 1) && (fm.reg_53 & 3) && (n >= 16) && ((n & 3) == 0) && !fm_peak_on();
+
+        if(fm.nbytes++ == 0)
+          out = (uint8_t)((fm_dec_on() ? 0x80 : 0) | ((fm.reg_56 & 1) ? 0x40 : 0) | (fir ? 0x20 : 0) | (fm.reg_53 & 0x07));
+        else
+          out = (uint8_t)((fm_peak_on() ? 0xC0 : 0) | (fm.reg_54 & 0x3F));
+      }
       break;
   }
 
