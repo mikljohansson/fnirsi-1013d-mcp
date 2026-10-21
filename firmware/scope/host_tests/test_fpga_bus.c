@@ -12,6 +12,8 @@
 //   - fw 0.2.97 (firmware/AGENTS.md section 64): records that end on the auto time-out or a forced stop on the
 //     built-for bitstream 0x153B (the model's capture logic, fpga/al3/README.md section 11): the forced stop reads the
 //     newest total words, a triggered FPGA-auto record completes; the model of 0x153A shows the fault that was fixed;
+//     fw-small: the forced stop (fpga_force_stop: 0x0E = 0, then 0x1A = 0) ends a capture armed with 0x0E = twice the
+//     deadline within two write clocks;
 //   - fw-c5 (0x153C, protocol 1.26, firmware/AGENTS.md section 69): the trigger extension registers (fpga_trig_write,
 //     fpga_trig_arm): every type's arm sequence (0x5E, and 0x5F / 0x60 for the qualified types, inside the 0x01 = 1
 //     window after the geometry and before 0x0E), the 0x66 one-shot consumed by the next 0x01 = 1, the hold-off masking
@@ -445,10 +447,10 @@ static void to_arm(uint16_t pre, uint32_t reg0e, int normal)
   T_EQ(fpga_arm_reset(&c), 0);
 }
 
+//The firmware's forced stop (pc_hal_force): 0x0E = 0, then 0x1A = 0
 static void to_force(void)
 {
-  fpga_write_cmd(0x1A);
-  fpga_write_byte(0x00);
+  fpga_force_stop();
 }
 
 static int to_done(void)
@@ -620,6 +622,40 @@ static void test_timeout_records(void)
   printf("  time-out records: the forced stop spliced %u of %u records on the 0x153A model (expected about %u), none on 0x153B\n",
          (unsigned)spliced_old, (unsigned)runs_old, (unsigned)(runs_old * TO_TOTAL / 8192));
   T_TRUE(spliced_old > 0);
+}
+
+//fw-small: the deadline force with an explicit auto_timeout. The host's SET_TRIGGER auto_timeout goes to 0x0E as is
+//(pc_auto_timeout -> fpga_arm_reset), and the firmware's deadline (pc_host_auto_ms) comes at about that many samples:
+//in the legacy layout 0x0E then holds twice the deadline in words. The force must stop the capture at the deadline
+//(within the two write clocks of the 0x1A synchroniser), not when the FPGA's own count expires up to twice later;
+//0x1A = 0 alone (fw 0.2.41 .. fw-small) left time_base_cnt <= 0x0E and the capture running.
+static void test_force_deadline(void)
+{
+  static const uint16_t vers[] = { 0x153B, 0x153C, 0x153D };
+  static const uint32_t deadlines[] = { 3 * TO_TOTAL, 8192 + 777, 3 * 8192 + 5 };
+  uint32_t v, d;
+  int newest;
+
+  for(v = 0; v < 3; v++)
+    for(d = 0; d < 3; d++)
+    {
+      uint32_t dl = deadlines[d], n_force;
+
+      to_reset(vers[v], 300 + 7 * v + d);
+      to_arm(d ? 200 : 0, 2 * dl, 1);                          //firmware auto: armed normal, 0x0E = 2 x the deadline
+      fm_advance_ns(dl * 10);                                  //the deadline (divider 0: one word per 10 ns)
+      T_TRUE(!to_done());
+      to_force();
+      n_force = fm.n;
+      T_TRUE(n_force < 2 * dl);                                //the FPGA's own count is far away
+
+      fm_advance_ns(2 * 10);                                   //two write clocks
+      T_TRUE(to_done());
+      T_TRUE(fm.stop_n <= n_force + 2);
+      T_EQ(fm.reg_0e, 0);
+      T_EQ(to_trig(), 0);
+      T_TRUE(to_read(d ? 200 : 0, to_addr(), &newest)); T_TRUE(newest);
+    }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1741,6 +1777,7 @@ int main(void)
   test_ready_bound();
   test_decim_write();
   test_timeout_records();
+  test_force_deadline();
   test_trig_ext();
   test_peak();
   test_counter_derive();

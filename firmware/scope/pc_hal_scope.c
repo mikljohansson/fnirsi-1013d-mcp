@@ -665,9 +665,8 @@ void pc_glue_ext_selected(void)
 
 void pc_hal_force(void)
 {
-  //Auto mode: the Atlan4 stop condition ~trigger_mode && time_base_timeout becomes true    BENCH: T7
-  fpga_write_cmd(0x1A);
-  fpga_write_byte(0x00);
+  //0x0E = 0, then auto mode: the Atlan4 stop condition ~trigger_mode && time_base_timeout becomes true at once  BENCH: T7
+  fpga_force_stop();
 }
 
 void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
