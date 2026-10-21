@@ -6,6 +6,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Pattern feature cut** (owner decision 2026-10-21 15:55, "Yes, let's do the cut. I guess we'll need to compromise here"):
+  0x153D was projected at about 96 % of the LEs, register-bound, not closing timing even without the engine. The pattern
+  generator (8 double-buffered steps, repeat / gap, the marker and its capture source 0x15 = 3, the pattern trigger engine
+  0x76-0x7D / 0x42) is cut; the generator stays an accurate fractional two-step square (exact frequencies, the DDS stays
+  removed), the host-stepped chirp (scope_sweep), the Bode analyser, the logger and roll mode stay. RTL: fpga-d3 strips D2
+  to the square keeping the register subset the firmware's square path writes (0x6C entries 0..1, 0x6D, 0x50); firmware /
+  MCP / docs: fw-nopat. Lost: multi-pulse transmit patterns, bursts, pattern-synchronised capture triggers.
 - **Roll mode on the logger** (owner decision 2026-10-21 14:5x, from the three options: logger-based roll in the 0x153D
   firmware, restore 0x24 / 0x26 in the RTL, or drop roll mode): the long timebases (100 ms/div to 50 s/div) draw real
   decimated samples from the 0x153D stream, both channels, continuous, instead of averaging 10 or 100 live-pin peeks; no RTL
