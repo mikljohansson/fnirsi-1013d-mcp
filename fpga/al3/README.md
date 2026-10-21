@@ -2351,7 +2351,8 @@ hold-off), C3 (section 13, counter) and C2 (section 14, peak detect). The versio
 the capability bits the firmware derives from the word are 2 HOLDOFF, 20 TRIG_TYPES, 21 PEAK_DETECT and 22 COUNTER
 (contract section 2.3; 1 GENERATOR as before, the DDS stays until 0x153D). Registers: `src/FPGA commands.txt`; the
 firmware's byte sequences: `tb/contract_0x153C.txt`. Images: `dist/al3-0x153C.bin` (sha256 `2580b090...c7f2`), flash
-image `07393bf5...1f77` (`tools/bitstreams.py pack` writes it), source commit 1f1ded4. **Not flashed.**
+image `07393bf5...1f77` (`tools/bitstreams.py pack` writes it), source commit bd24bdf (1f1ded4 builds the same bytes;
+bd24bdf only removes an alias wire, see "Tests"). **Not flashed.**
 
 #### Cruft removal (C0, contract section 13: the one-bitstream rule)
 
@@ -2396,7 +2397,7 @@ merge). Builds of this integration, TD 4.6.8 SP1, `build.sh`, the slack of the w
 | a4, r1-r3 | `pp_l*` renamed / register declarations reordered | = a0 / a2 | byte-identical: not a re-roll | |
 | h1 | a0 + the hold-off block before "Capture of the trigger address" | 6122 | 5.430 ns, 9 errors, -0.430 | post-pass |
 | h2 | a0 + the hold-off block before "Segmented capture and averaging" | 6120 | 5.222 ns, 2 errors, -0.222 | post-pass |
-| **h4** | a0 + the hold-off block before "Sampling triggered detect" (**= the committed source 1f1ded4**) | **6126** | **4.772 ns, 0 errors, +0.228** | `q_untrig` saturating adder (the 0x1536 path) |
+| **h4** | a0 + the hold-off block before "Sampling triggered detect" (**= the committed source: 1f1ded4, and bd24bdf with the same bytes**) | **6126** | **4.772 ns, 0 errors, +0.228** | `q_untrig` saturating adder (the 0x1536 path) |
 
 Two lessons for the next integrator. (1) The only neutral edit that re-rolled TD's placement was the position of the hold-off
 `always` block; swapping instances, moving a pure `always` block, renaming registers and reordering declarations gave
@@ -2419,7 +2420,21 @@ training after flashing may move CH1 A and CH2 B to stage 3 (1.96 / 1.76 ns). `b
 #### Tests
 
 `tb/run.sh`, 16 steps, `-DSIM`, references 0x1532 / 0x1533 / 0x1534 / 0x1535 / 0x1538 unchanged (the removed registers
-still exist there): RUN_RESULT_TEXT. Step 8's transcript is `tb/contract_0x153C.txt` (24 checks): the firmware's
+still exist there): RUN_RESULT_TEXT.
+
+A simulator race found by the first full run (tb_fir seed 12345, 158 checks 1 failed; seed 4242 passed): from
+t = 9305.61 us the dut's and the reference's decimators ran one write clock apart for the rest of the run. The VCD window
+showed the last byte of an 0x0D write (divider 0 -> 33 in the iteration that also switched K 0 -> 1) landing on the same
+simulation instant as a write clock edge; the reference's `dec_pc` reloaded on that edge, the dut's one edge later. The
+cause was the first div20 text's alias wire (`div20 = sample_rate_divider[19:0]`, `dec_ph = div20[19:1]`): one more
+continuous-assignment step, and iverilog ordered the same-timestep race between the MCU write and the write-clock block
+the other way than in the reference's one-level slice. In hardware both orders are outcomes of an asynchronous write; in
+the lockstep comparison the difference is permanent. Main's RTL with the same testbench had 0 mismatches; the slices now
+come from the register directly (bd24bdf), the fixed source has 0 mismatches over the ten iterations around the
+divergence, and the bitstream is byte-identical (the alias never reached synthesis). tb_fir now prints each phase-1
+iteration's configuration with its start time, so a MISMATCH time maps to an iteration without a reproduction. Lesson:
+keep the divider slices one assignment deep in `zaklad.v`, as the references have them, or the equivalence steps turn an
+asynchronous-write race into a mismatch. Step 8's transcript is `tb/contract_0x153C.txt` (24 checks): the firmware's
 sequences of 0.2.104 with the boot writes of fw-c5 / fw-c7 (0x5E, 0x1B, 0x66; 0x62 = 128 / 6, 0x61 = gate 100 ms), 0x5E
 (0x5F / 0x60 for a qualified type) in every arm after 0x0B / 0x0C, and three new scenarios: T (SET_TRIGGER2 pulse width
 longer than 5 words on CH1 with a hold-off: three 3-word pulses do not trigger, the trailing edge of a 10-word pulse does

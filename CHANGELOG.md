@@ -58,7 +58,8 @@ integration, and on 0x153C LOG_START answers E_FPGA detail 1.
   12), peak-detect acquisition (fpga-c2, section 14), the hardware counter with min / max (fpga-c3, section 13), and the
   cruft removal of the one-bitstream rule (write 0x3C / read 0x41, reads 0x24..0x27, write 0x0F, 0x53 bits 4..2; the
   sample-rate divider taken on 20 bits; -206 LUT against the merged source; 78ccaa0). Timing closed at 4.772 ns on
-  clk_200MHz with the post-pass lane adders in one stage and the hold-off block placed (1f1ded4); contract transcript
+  clk_200MHz with the post-pass lane adders in one stage and the hold-off block placed (1f1ded4; bd24bdf removes a div20
+  alias wire that only changed iverilog's ordering of a same-timestep race, same bytes); contract transcript
   `tb/contract_0x153C.txt` with the firmware's 0.2.104 sequences (ddb10ed); README section 15 has the build, the tests and
   the bench checks. Not flashed: the owner flashes from dist per `fpga/al3/AGENTS.md` "0x153C built, fpga-c4".
 

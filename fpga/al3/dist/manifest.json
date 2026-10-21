@@ -163,7 +163,7 @@
    "size": 282898,
    "sha256": "2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2",
    "flash_image_sha256": "07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77",
-   "source_commit": "1f1ded4b9efc92008635f82add1b27c01b6c821b",
+   "source_commit": "bd24bdfe0c8eeb76d0a418b9c8cd0189d9aa6ed4",
    "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
    "min_firmware": "0.2.104",
    "features": [

@@ -146,7 +146,7 @@ wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compar
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x153C, commit 1f1ded4) gives `build/FPGA.bin` sha256
+- Current `src/` (0x153C, commit bd24bdf) gives `build/FPGA.bin` sha256
   `2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2` (= `dist/al3-0x153C.bin`; about 90 s). The testbench
   scripts compile with `-DSIM` (w_last). The older lines below are history.
 - 0x1537 `src/` gave `build/FPGA.bin` sha256 `426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17`
@@ -412,7 +412,7 @@ was systematic, so it is restructured (cycle-identical: the 16-bit format's lane
 `pp_l2` in the `pp_s` stage, `pp_w` a plain select; +60 LUT): a0 -0.648 (the new adder's routing), a2 (hold-off after the
 qualifiers) -0.047 (EXT qualifier `rem`), a3 (before the trigger types) -0.516, a4 / r1-r3 (renames, declaration order)
 byte-identical, h1 -0.430, h2 -0.222, **h4 (hold-off block before "Sampling triggered detect") +0.228, 0 errors on every
-clock: the committed source 1f1ded4**. 6126 LUT (70.9 %) / 5451 reg / 7103 LE, `clk_200MHz` 4.772 ns, `sample_write_clock`
+clock: the committed source** (1f1ded4; bd24bdf builds the same bytes, see Tests). 6126 LUT (70.9 %) / 5451 reg / 7103 LE, `clk_200MHz` 4.772 ns, `sample_write_clock`
 9.053, `i_mcu_clk` 19.538, `clkc[1]` 2.197, `clkc[0]` 40 (SDC artefact); capture margins >= 1.31 ns at the power-on stages
 (CH1 A 1.31, CH1 B 1.67, CH2 A 2.14, CH2 B 1.52 ns; retrain after flashing). **The one neutral edit that re-rolls TD's
 placement is the position of the hold-off `always` block**; instance order, declaration order, renames and moving other
@@ -425,7 +425,12 @@ hold-off, 0x37 / 0x34), PK (peak detect, 0x29 = 0x81 0xC0, READ_RAW layout 3), K
 T 1,998,000, W 999,000, min 40 / max 210; the step takes about 5 min of simulation for that gate). The older scenarios'
 bytes moved with the added strobes.
 
-**Tests.** `tb/run.sh` 16 steps on the committed source: RUN_RESULT_TEXT.
+**Tests.** `tb/run.sh` 16 steps on the committed source: RUN_RESULT_TEXT. The first full run on 1f1ded4 found a
+simulator race (tb_fir seed 12345, 158 checks 1 failed): the first div20 text's alias wire (`div20 = divider[19:0]`,
+`dec_ph = div20[19:1]`) made iverilog order an 0x0D write that lands on the same instant as a write clock edge the other
+way than in the 0x1534 reference, and the two decimators ran one write clock apart from then on (README section 15
+"Tests"). bd24bdf takes the slices from the register directly (same bytes); tb_fir prints each phase-1 iteration's
+configuration with its start time. **Keep the divider slices one assignment deep**, as the references have them.
 
 **Dist.** `dist/al3-0x153C.bin` sha256 `2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2`, flash image
 (1 MiB, `tools/bitstreams.py pack` writes it; also `build/FPGA_padded.bin`, gitignored)
