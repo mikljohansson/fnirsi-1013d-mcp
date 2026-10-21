@@ -142,7 +142,7 @@ static void set_range(bode_eng *e, int c, int r, int32 v_uv)
 
 static void gen_set(bode_eng *e, const bode_plan *pp, int on)
 {
-  e->hw->gen(e->hw->ctx, pp ? pp->phase_inc : 0, on);
+  e->hw->gen(e->hw->ctx, pp ? pp->period : 0, on);
 
   if((on != 0) != (e->gen_on != 0))
     e->disturbed = 1;
@@ -224,7 +224,7 @@ static void finish(bode_eng *e, uint8 state, uint8 err)
 
     for(i = 0; i < e->np; i++)
     {
-      t->m[i]      = e->plans[i].m;
+      t->period[i] = e->plans[i].period;
       t->n[i]      = e->plans[i].n;
       t->h_mdb[i]  = e->pts[i].h_mdb;
       t->h_mdeg[i] = e->pts[i].h_mdeg;
@@ -426,7 +426,7 @@ static int ref_check(bode_eng *e, const bode_plan *pp, const bode_meas *m, int *
 
   *stop = 0;
 
-  if(e->have_ref2 && (pp->m == e->plans[0].m) && (e->range[1] != 1) && (e->cfg.ch2_mode == BODE_CH2_AUTO))
+  if(e->have_ref2 && (pp->period == e->plans[0].period) && (e->range[1] != 1) && (e->cfg.ch2_mode == BODE_CH2_AUTO))
     coll = collapsed(&e->ref2, m);
 
   if(flat2(m, coll) && (e->cfg.ch2_mode == BODE_CH2_HOLD))
@@ -914,7 +914,7 @@ int bode_start(bode_eng *e, const bode_cfg *cfg, int thru, int hold_r2)
   //A new frequency plan clears the table; the same plan keeps it (RUN overwrites point by point)
   same = (n == e->np);
   for(i = 0; same && (i < n); i++)
-    same = (plans[i].m == e->plans[i].m);
+    same = (plans[i].period == e->plans[i].period);
 
   for(i = 0; i < n; i++)
     e->plans[i] = plans[i];
@@ -1278,13 +1278,13 @@ uint32 bode_estimate_ms(const bode_cfg *cfg)
   return t;
 }
 
-//Index of the thru point with this (M, N), -1 = none
-static int thru_find(const bode_thru *t, uint32 m, uint32 n)
+//Index of the thru point with this (P, N), -1 = none
+static int thru_find(const bode_thru *t, uint32 period, uint32 n)
 {
   int i;
 
   for(i = 0; i < t->count; i++)
-    if((t->m[i] == m) && (t->n[i] == n))
+    if((t->period[i] == period) && (t->n[i] == n))
       return i;
 
   return -1;
@@ -1329,7 +1329,7 @@ int bode_point_get(const bode_eng *e, int i, bode_point *out)
   //The thru calibration divides out (not from the thru sweep itself)
   if(t->measured && t->applied && !(e->thru_sweep && (e->state == BODE_ST_RUNNING)))
   {
-    int k = thru_find(t, e->plans[i].m, e->plans[i].n);
+    int k = thru_find(t, e->plans[i].period, e->plans[i].n);
 
     if(k < 0)
       out->flags |= BODE_F_NO_CAL;
@@ -1403,7 +1403,7 @@ uint32 bode_proto_rows(const bode_eng *e, uint32 first, uint32 max, uint8 *p)
     for(k = 0; k < BODE_ROW_BYTES; k++)
       p[k] = 0;
 
-    put32(p + 0, e->plans[i].m);
+    put32(p + 0, e->plans[i].period);                         //1.27: P in 5 ns clocks (was M in 50 MHz clocks)
     put32(p + 4, (uint32)((e->plans[i].f_mhz + 5) / 10));
 
     if(!bode_point_get(e, (int)i, &pt))

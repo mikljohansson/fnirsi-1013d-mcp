@@ -45,7 +45,7 @@ typedef struct
 
   //State
   uint32 now;
-  uint32 inc;
+  uint32 period;
   int    gen;
   int    range[2];
   int32  off[2];
@@ -77,13 +77,13 @@ static double gauss(dut *d)
 
 static uint32 h_ms(void *ctx) { return ((dut *)ctx)->now; }
 
-static void h_gen(void *ctx, uint32 inc, int on)
+static void h_gen(void *ctx, uint32 period, int on)
 {
   dut *d = ctx;
 
   d->gen = on;
   if(on)
-    d->inc = inc;
+    d->period = period;
 }
 
 static void h_channel(void *ctx, int c, int r, int32 off)
@@ -196,7 +196,7 @@ static void dut_volts(dut *d, double f, double t, double dt, double band, double
 static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 {
   dut *d = ctx;
-  double f = d->inc * 50e6 / 4294967296.0, fs = 200e6 / pp->n, dt = (pp->n > 1) ? 1 / fs : 0;
+  double f = 200e6 / d->period, fs = 200e6 / pp->n, dt = (pp->n > 1) ? 1 / fs : 0;
   double band = (pp->n > 1) ? 0.45 * fs : 30e6;
   double sig = (pp->n > 1) ? 0.7 / sqrt((double)pp->n) : 0.7;
   uint32 i;
@@ -1183,7 +1183,7 @@ static void test_snap(void)
   T_TRUE(bode_point_get(&eng, 3, &p1));
   same = (p0.h_mdb == p1.h_mdb) && (p0.h_mdeg == p1.h_mdeg) && (p0.flags == p1.flags);
   for(i = 0; i < 10; i++)
-    same = same && (bode_plans(&eng)[i].m == snap.plans[i].m);
+    same = same && (bode_plans(&eng)[i].period == snap.plans[i].period);
   T_TRUE(same);
 }
 

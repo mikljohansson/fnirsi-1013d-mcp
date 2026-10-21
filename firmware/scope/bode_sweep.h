@@ -84,7 +84,7 @@ typedef struct
 {
   void   *ctx;
   uint32 (*ms)(void *ctx);
-  void   (*gen)(void *ctx, uint32 phase_inc, int on);                      //generator on at the increment (duty 50 %) or off
+  void   (*gen)(void *ctx, uint32 period, int on);                         //generator on at P clocks of 5 ns (duty ceil(P / 2)) or off
   void   (*channel)(void *ctx, int c, int range, int32 dcoffset);          //enable, DC, range 0..5, offset
   void   (*chan_info)(void *ctx, int c, int range, bode_chinfo *ci);
   int    (*arm)(void *ctx, const bode_plan *pp, uint32 total, uint8 level);  //0 ok, else the FPGA was not ready;
@@ -113,7 +113,7 @@ typedef struct
   uint16 count;
   uint64 start_mhz, stop_mhz; //the plan it was measured with
   uint16 points;
-  uint32 m[BODE_MAX_POINTS];
+  uint32 period[BODE_MAX_POINTS];
   uint32 n[BODE_MAX_POINTS];
   int32  h_mdb[BODE_MAX_POINTS], h_mdeg[BODE_MAX_POINTS];
   uint8  r1[BODE_MAX_POINTS], r2[BODE_MAX_POINTS];

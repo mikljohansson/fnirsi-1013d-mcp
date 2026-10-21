@@ -5,6 +5,7 @@ step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-d4 (2026-10-21): fw 0.2.104 + D4 (version provisional), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built-for word still 0x153C; section 74.**
+**Branch fw-d5 (2026-10-21): fw 0.2.104 + D5 (version provisional), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M; still built for 0x153C until D3; section 75.**
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (fw 0.2.104), protocol 1.26 (row 66 "Peak detect"): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (fw 0.2.104), protocol 1.26 (row 66 addition): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
 **Branch ui-sample (2026-10-21): fw 0.2.103 + C6 + ui-sample (fw 0.2.104), protocol 1.26 unchanged: the ACQ menu's Sample row (478 px menu, Normal / Peak, the greyed Filter / Average with the Memory column's note, word 211 bit 3), peak records drawn as bars per column (`peak_bars.c`), phosphor bars, Trace style "Bars"; section 73.**
@@ -68,6 +69,8 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
   build_id.c               the build identity as data (commit hash, commit time), linked last (section 25)
   pc_decim.c/.h            decimation filter maths for FPGA 0x1534 (N, K fallback, S, L16, Q24 scale, settle). Pure C,
                            host-buildable (section 19)
+  gen_pat.c/.h             the generator as the FPGA 0x153D pattern: P16 / H16 maths, the split into two steps. Pure C,
+                           host-buildable (section 75)
   adc_cal.c/.h             calibration data v3: per-core zero and gain model, sector 708 block, correction maths,
                            zero and gain step checks. Pure C, host-buildable (sections 21, 23)
   cal_wiz.c/.h             calibration wizard steps: state machine, actions, summary texts. Pure C, host-buildable
@@ -5774,3 +5777,105 @@ returning after a log (the loop's exit), the UI's time base wrong after a log (t
 - mcp-d6: chunk flag bit 3 and LOG flags bit 1 (mine), ENDED on every later read, E_STATE 9 / 10; the host's caveat for a
   gap (the counter jump x word clocks x 5 ns of missing time).
 - The device could show the log on the screen (a strip of the last chunk) later; out of scope (MCP-only feature).
+
+## 75. fw-d5: generator as a pattern, pattern generator and its trigger (fw 0.2.104 + D5, version provisional, protocol 1.27, row 67)
+
+Branch `fw-d5` (worktree) from main 55e5f6b (fw 0.2.104, protocol 1.26). Brief: item **D5** of `docs/plans/fpga-0x153c.md`
+section 10 (sections 2.1 / 2.2 / 2.3, 7.2-7.5, 9.3) against fpga-d2's 0x153D RTL semantics (agreed by message, listed
+below). Commits 30fe638 (firmware), 4743591 (Bode on P), 4f12433 (model and bus tests), 5e5545f (vectors), then the
+docs. **Nothing benched, nothing flashed**, `PC_FW_VERSION` and `PC_FW_FPGA_VERSION` (0x153C) unchanged: the generator
+needs 0x153D (on 0x153C its writes go to unused codes), so this lands with D3's integration that moves the word.
+
+**What was built**
+- **`gen_pat.c` / `.h`** (new, pure C, no FPU): the contract's formulas `gp_p16_from_mhz`, `gp_h16_from_bp`,
+  `gp_mhz_from_p16`, `gp_bp_from_h16`, `gp_split` (0 / 1 period / 2 a step outside 2 .. 2^32 - 1 clocks), `gp_ui_square`
+  (whole Hz / %, high time clamped to 2 .. P - 2 clocks, 0 Hz / 0 % / 100 % = a static level), `gp_bode_square` (integer
+  P, n_h = ceil(P / 2)). Linked in the scope build and in test_session / test_diag / test_fpga_bus.
+- **`fpga_bus.c` / `.h` block "D5 pattern"**: the trigger code tables (`fpga_trig_cap_codes` {0x15, 0x16, 0x17, 0x55,
+  0x5E, 0x5F, 0x60}, `fpga_trig_pat_codes` {0x76 .. 0x7C}) feeding one byte builder (`fpga_trig_type_regs`,
+  `fpga_trig_edge_regs`; `fpga_trig_arm` is the capture's table now, same bytes as fw-c5's); `fpga_pat` (the firmware's
+  copy of the pattern), `fpga_pat_step_write` (0x6C, 7 bytes), `fpga_pat_ctl` (0x6D), `fpga_pat_drive` (0x50, 4 bytes as
+  1.00o5), `fpga_pat_square` (a running square: 0x6C x 2 + 0x6D = 0x23, 18 strobes; otherwise 0x6D = 0, 0x6F = 0 after a
+  gap, the entries, 0x6D = 0x33), `fpga_pat_level` (mode 0 at the idle level), `fpga_pat_load` (SET_PATTERN: END on the
+  last step, 0x6E, 0x6F, 0x6D with commit / start), `fpga_pat_status` (0x39); `fpga_ptrig` + `fpga_ptrig_write` (0x7D = 0,
+  0x76..0x79, 0x7A (+ 0x7B / 0x7C), 0x7D = armed | rearm << 1 | 0x04 | route << 3), `fpga_ptrig_level16` (0x79),
+  `fpga_ptrig_status` (0x42); `fpga_trig_marker` (capture source 3).
+- **`fpga_control.c`**: `fpga_on_off_generator` / `fpga_set_generator_freq` / `_duty` through `fpga_gen_program`
+  (gp_ui_square, then the square or a level); the set functions write nothing while the generator is off (the values are
+  programmed at the switch-on); off = 0x50 = 0 and the pattern stopped low. `fpga_set_trigger_channel` writes 3 for the
+  EXT channel with `fpga_trig_marker`, and clears the flag for CH1 / CH2. **`cal_wiz_ui.c`** `cal_gen_level`: the level +
+  0x50 = 1 (was 0x52 / 0x51 / 0x50). **`menu.c`**: the trigger button reads "PAT" for the marker.
+- **`pc_hal.h` / `pc_hal_scope.c`**: `pc_hal_gen_write(p16, h16, enable)` (p16 = 0: 0x50 alone), `pc_hal_pattern_write`
+  (with start or mode 0 a stop first, then 0x50, then the load; the UI's generator switch follows the pin),
+  `pc_hal_pattern_status`, `pc_hal_ptrig_read / _write / _status` (0x79 from `pc_dec_level16`, the 0x55 derivation split
+  out of `pc_dec_apply`, which re-writes 0x79 at every arm while the engine is armed); boot writes `fpga_ptrig` (zeros:
+  disarmed); source 3 in `pc_hal_trigger_read / _write` (the UI channel stays 2; `pc_glue_ext_selected` clears the flag);
+  the settings fingerprint carries the flag.
+- **`pc_cmds.c`**: `pc_gen_now` / `pc_gen_body` (GEN 40 bytes, `PC_GEN_LEN`), `h_set_gen` on P16 / H16 (a bp duty follows
+  the period, a raw H16 is kept as a time; mask bit 0 alone over a pattern writes 0x50 only), `h_set_pattern`,
+  `pc_trig2_check` (SET_TRIGGER2's checks shared with the engine; source 3 = edge type only), `h_set_pattern_trigger` (the
+  fallback refusal E_STATE 8 when 0x42 bit 7 = 0), SET_TRIGGER source 3, `s->ctx` (GET_GEN reads 0x39 in the main loop
+  only), caps 24 / 27, features 0x1000 / 0x2000, GET_INFO 24 = 200 MHz, `PC_PROTO_MINOR` 27, the DDS helpers removed.
+- **Bode** (`bode_dsp.c/h`, `bode_sweep.c/h`, `pc_bode.c`): `bode_plan.period` replaces `m` / `phase_inc`, `bode_plan_p0`,
+  `step` (round(n 2^34 / P)), `BODE_LEGACY_P_MAX` 133, the even-P rule above 4095 at N = 16, settle from P, the thru by
+  (P, N), READ_BODE field 0 = P, the gen callback takes the period; `docs/bode-plan-vectors.json` version 2.
+- **Host tests**: `fpga_model.c` runs the pattern (see its header): `test_fpga_bus.c` `test_gen_formulas`,
+  `test_gen_square`, `test_gen_change`, `test_pattern_bursts`, `test_pattern_marker`, `test_ptrig` (the 0x153D model also
+  joins `versions[]`); `test_session.c` `test_generator`, `test_pattern`, `test_pattern_trigger`; `test_bode.py` and
+  `test_bode_sweep.c` on P; vectors section 5i. `make -s test` green except `test_bode.py`, which needs mcp-d6's bode.py
+  (PointPlan.period, agreed by message): against a scratch copy of bode.py patched to the agreed planner it reports 0
+  failures, and its `plan_vectors()` writes `docs/bode-plan-vectors.json` byte for byte.
+
+**Agreed with fpga-d2 (the RTL semantics the model and the firmware assume)**: a start (0x6D bit 4, a mode-3 write while
+idle, or the engine's event) is a step boundary and takes pending shadows before step 0; commit + start in one byte use
+the new entries; a start or mode-3 write while running is ignored; the FPGA prefetches two steps (fpga-d2's correction after the first
+TD build), so a commit during step k gives old k, k + 1 and k + 2 and new from k + 3, pending 0 from the start of k + 1;
+step 0 of a start begins 4 clocks after the start is seen (about 35-40 ns after a 0x6D strobe, 20 ns after an event); the accumulator is cleared at a start only;
+mode 0 stops at once; bursts done reset at a start; the marker needs both 0x15 = 3 and 0x6D bit 3; 0x39 byte 3 bit 1
+clears at 0x01 = 1; 0x6C index >= 8 ignored, entry 7 acts as end; 0x50's last data byte wins; one-shot engine events
+disarm, re-arm holds the qualifier in reset during the burst; 0x42 bit 7 reads 1 (own engine) unless D2's timing forces
+the fallback.
+
+**Agreed with mcp-d6 (row 67 is the contract between us)**: the SET_GEN / GEN / SET_PATTERN / PATTERN /
+SET_PATTERN_TRIGGER layouts, the planner on P (P0 = round(200e9 / f), legacy P0 <= 133, the even-P rule, vectors v2 rows
+and notes text), no SET_SWEEP.
+
+**Decided and why**
+- The generator's square is mode 3 with entries 0 / 1, written for every change with the commit (no "frequency first"
+  order any more); the set functions write nothing while the generator is off (the DDS ran hidden; a pattern running
+  hi-Z would only cost a stale marker).
+- GET_GEN stays F_MODAL and reads 0x39 only in the main loop (`s->ctx`): a menu's modal loop may sit between bus
+  transactions of its own, the cached status is reported there. No GET_PATTERN: the poll is GET_GEN (mcp-d6's layout).
+- SET_PATTERN flags bit 0 "pin hi-Z" (not in the contract): the pattern trigger engine on EXT needs the pin as an input,
+  with the marker triggering the capture internally (contract 9.2 check 10b).
+- Source 3 rides on the UI's EXT channel (`fpga_trig_marker`) rather than a fourth UI channel value: sixty UI sites test
+  the channel with if / else chains that would treat 3 as CH2; the marker uses EXT's apply path and position convention
+  anyway, so the EXT corrections are the right ones. The generator may stay on with source 3.
+- The engine's 0x79 is derived like 0x55 for the capture's current decimation and re-written at every arm while armed.
+- At N = 16 an odd P above 4095 is rounded to an even P (one block per record otherwise: no noise estimate, no halves;
+  P 8191 had no record at all). Found by test_bode.py's 30 kHz case.
+
+**Deviations from the contract**: no SET_SWEEP (coordinator, 2026-10-21: the contract wins; the brief's request was
+withdrawn); SET_PATTERN's start byte at offset 10 and flags bit 0 hi-Z (the contract's layout left both open); the gap in
+ns rounded to clocks and echoed; GEN's layout (the contract only says "P16 and H16 beside mHz and bp"); the Bode even-P
+rule at N = 16 above 4095 (the contract's "every plan maps with P = 4 M" holds; the finer grid needed it).
+
+**Bench (coordinator; after D3's 0x153D is flashed and `PC_FW_FPGA_VERSION` moved, never without the backup)**
+1. `#VER` proto=1.27; GET_INFO 24 = 200000000, caps bits 1, 24, 27; GET_GEN 40 bytes, byte 23 = 0, P16 13107200000 for
+   the boot 1 kHz; the probe on the post: 1.000000 kHz on the counter (GET_COUNTER) at the 1 s gate.
+2. Generator menu 10 kHz 25 %: counter 10.0000 kHz, duty 25 %; change to 12 kHz with the Scope view showing the square at
+   50 traces: no short or long pulse (persistence / phosphor).
+3. SET_GEN freq 999500 mHz: the counter reads 999.5000 Hz at the 1 s gate; GET_GEN byte 1 bit 5 = 0 within one period.
+4. Calibration wizard gain step passes (static levels), the 1 kHz back after it.
+5. SET_PATTERN pulse train (vector `req_set_pattern_pulse_train`) with SET_TRIGGER source 3, segments of 10: timestamps
+   1 ms apart, the pulse at the pretrigger point (contract 9.2 check 10).
+6. SET_PATTERN_TRIGGER Nth edge 3 on CH2 with SET_PATTERN start source 1: a burst after every third CH2 edge (check 10b).
+7. Frequency response sweep 100 Hz .. 1 MHz, 50 points: READ_BODE rows carry P (4 x the old M), the RC's -3 dB as before.
+Regression signs: a 0x51 / 0x52 in the event log's write trace, GEN 24 bytes, the generator dead on 0x153C (expected
+there), the square restarting (a phase jump) on every frequency change.
+
+**Open**
+- `test_bode.py` and mcp's `tests/test_bode.py` need mcp-d6's bode.py (PointPlan.period, vectors v2) at the merge.
+- The coordinator moves `PC_FW_FPGA_VERSION` to 0x153D (D3), numbers the version and benches.
+- No UI for patterns (host only, as decided); the generator menu shows the square's frequency while a host pattern drives
+  the pin.

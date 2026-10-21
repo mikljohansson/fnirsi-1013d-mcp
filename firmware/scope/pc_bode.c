@@ -34,7 +34,7 @@ void   pc_glue_ring_taken(void);
 
 static uint16 bh_legacy[2][BODE_MAX_RECORD + 2] __attribute__((aligned(4)));
 static uint32 bh_divider = 0xFFFFFFFF;    //the 0x0D value the engine wrote last (0xFFFFFFFF: write at the next arm)
-static uint32 bh_inc;
+static uint32 bh_period;
 static uint8  bh_wide;
 static uint32 bh_pre;
 
@@ -61,14 +61,25 @@ static uint32 bh_ms(void *ctx)
   return pc_hal_ms();
 }
 
-static void bh_gen(void *ctx, uint32 inc, int on)
+//fw-d5 (FPGA 0x153D): the square of P clocks (n_h = ceil(P / 2), n_l = floor(P / 2)); off = the pin hi-Z, the square left
+//running behind it (as the DDS was)
+static void bh_gen(void *ctx, uint32 period, int on)
 {
+  uint64 p16, h16;
+
   (void)ctx;
 
   if(on)
-    bh_inc = inc;
+    bh_period = period;
 
-  pc_hal_gen_write(bh_inc ? bh_inc : 0x00020000u, 0x80000000u, (uint8)(on != 0));
+  if(!on)
+  {
+    pc_hal_gen_write(0, 0, 0);
+    return;
+  }
+
+  gp_bode_square(bh_period, &p16, &h16);
+  pc_hal_gen_write(p16, h16, 1);
 }
 
 //Enable, DC, range r, offset: only what differs is written (every coupling or range write clicks a relay)
