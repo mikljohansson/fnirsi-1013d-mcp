@@ -94,6 +94,12 @@ uint32 pc_glue_ui_read_start(uint32 addr);        //UI record start word: (0x14 
 void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_data: 16-bit read + convert, odd pass
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
+//ui-sample: the ACQ menu's Sample row and the peak-detect record on screen (docs/plans/ui-rows.md section 3)
+void   pc_glue_acq_row_draw(void);    //the Average, Filter and Sample boxes and the Memory column's note (ui_acq_row_build)
+int    pc_glue_acq_box_live(int box); //1 when that box of the row takes a tap (drawn and not grey; UI_ACQ_* in ui_ctrl.h)
+void   pc_glue_sample_tap(void);      //the Sample box touched: Normal <-> Peak
+int    pc_glue_sample_peak(void);     //1 while Sample Peak is applied (Scope view, not roll): Trace style greys
+int    pc_glue_peak_record(int ch, const uint16 **pairs, uint32 *n, uint32 *gain, int32 *off); //its pairs, or 0
 void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DEFAULT button, sector load failure)
 uint16 pc_glue_decim_setting_word(void);         //settings sector word 207, the Scope Filter (scope_save_config_data)
 uint16 pc_glue_decim_spec_setting_word(void);    //fw 0.2.64: word 212, the Spectrum Filter

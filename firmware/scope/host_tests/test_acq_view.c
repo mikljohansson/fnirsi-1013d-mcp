@@ -508,6 +508,10 @@ static void test_mem_chips(void)
 
   T_EQ(acq_view_mem_chips(16382, 0, 8190), 0x1Fu);          //Atlan's AL3 record: 3000 .. 15000
   T_EQ(acq_view_mem_chips(16382, 1, 8190), 0x03u);          //a filter: 3000, 6000
+  //ui-sample: Sample Peak runs the same 16-bit layout (pc_hal_scope.c pc_dec_ui_wide passes it as filter_on): two chips,
+  //with the Filter off too; back to Normal with the Filter off, all five again
+  T_EQ(acq_view_mem_chips(16382, 0 || 1, 8190), 0x03u);
+  T_EQ(acq_view_mem_chips(16382, 0 || 0, 8190), 0x1Fu);
   T_EQ(acq_view_mem_chips(3000, 0, 8190), 0x01u);           //stock bitstream: 3000 only
   T_EQ(acq_view_mem_chips(16382, 0, 0), 0x1Fu);             //the filter limit only counts with a filter on
 

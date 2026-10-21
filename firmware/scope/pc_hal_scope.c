@@ -688,9 +688,12 @@ static uint8         pc_dec_set_mode[2] = { PC_DECIM_DEFAULT_SCOPE, PC_DECIM_DEF
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
 //C6 peak detect (0x153C, docs/plans/fpga-0x153c.md section 4; the ACQ Sample row of docs/plans/ui-rows.md section 3): one
-//Scope setting, not per mode (the Spectrum always acquires Normal), not saved yet (the UI row item puts it in word 211
-//bit 3). SET_DECIM filter 4 sets it and keeps the Filter's K / FIR for the way back; filter 0..3 clears it
+//Scope setting, not per mode (the Spectrum always acquires Normal), saved in word 211 bit 3 (ui-sample). SET_DECIM
+//filter 4 and the ACQ menu's Sample box set it and keep the Filter's K / FIR for the way back; filter 0..3 clears it
 static uint8         pc_dec_peak;
+static uint8         pc_dec_raw_peak[2];              //ui-sample: pc_dec_raw holds that channel's peak pairs
+static uint32        pc_dec_peak_gain[2];             //and the correction their midpoints took (pc_peak_gain / _off)
+static int32         pc_dec_peak_off[2];
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
 static uint8         pc_dec_last_ui;                  //the last one was (the full-rate check's re-arm repeats it)
 static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
@@ -721,8 +724,14 @@ uint32_t pc_hal_divider_now(void)
 //The UI acquisition's setting: the mode on screen's Filter, plus Sample Peak in the Scope view (C6)
 static uint8 pc_dec_ui_set(void)
 {
-  return (uint8)((pc_dec_setting & (PC_DECIM_SET_FIR | 3)) |
-                 ((pc_dec_peak && (spectrum_mode() == SPECTRUM_MODE_SCOPE)) ? PC_DECIM_SET_PEAK : 0));
+  return ui_acq_decim_set(pc_dec_setting, pc_dec_peak, spectrum_mode() != SPECTRUM_MODE_SCOPE);
+}
+
+//ui-sample: the UI record is 16-bit by its setting (the mode's Filter, or Sample Peak in the Scope view): the memory
+//depth limit of the 16-bit layout applies (pc_dec_fit_memory, the ACQ menu's chips), in roll too as for the Filter
+static int pc_dec_ui_wide(void)
+{
+  return (pc_dec_ui_set() & (3 | PC_DECIM_SET_PEAK)) != 0;
 }
 
 //set: bits 1:0 K, PC_DECIM_SET_FIR, PC_DECIM_SET_PEAK (pc_dec_ui_set, or 0 for the legacy path)
@@ -812,7 +821,7 @@ uint32 pc_glue_trig_tw5(void)
 {
   pc_decim_cfg c;
 
-  pc_dec_config(&c, pc_dec_setting);
+  pc_dec_config(&c, pc_dec_ui_set());                 //ui-sample: Sample Peak runs the 16-bit word period too
   return tui_tw5(pc_hal_divider_now(), c.k != 0, scopesettings.triggerchannel == 2);
 }
 
@@ -1012,7 +1021,8 @@ void pc_glue_decim_read(void *settings, uint32 start)
   else
     return;
 
-  pc_dec_raw_n[ch] = 0;
+  pc_dec_raw_n[ch]    = 0;
+  pc_dec_raw_peak[ch] = 0;
 
   //UI averaging: the corrected codes of the mean (the hardware run's lane sums or the MCU's sums), both passes from
   //memory as for the 16-bit path
@@ -1059,7 +1069,10 @@ void pc_glue_decim_read(void *settings, uint32 start)
     }
 
     s->ADoverload |= ov;
-    pc_dec_raw_n[ch]  = n;
+    pc_dec_raw_n[ch]     = n;
+    pc_dec_raw_peak[ch]  = 1;
+    pc_dec_peak_gain[ch] = gain;
+    pc_dec_peak_off[ch]  = off;
     pc_decim_src      = &pc_dec_feed[1];
     pc_dec_even_src   = &pc_dec_feed[0];
     return;
@@ -1120,7 +1133,7 @@ static void pc_dec_follow_mode(void)
 
   pc_dec_mode_seen = m;
 
-  if(pc_dec_has() && (pc_dec_setting & 3))
+  if(pc_dec_has() && pc_dec_ui_wide())
   {
     pc_dec_fit_memory();
     acq_view_fit(0);
@@ -1139,22 +1152,116 @@ static uint32 pc_dec_name_index(void)
   return ((pc_dec_has() >= PC_DECIM_HAS_FIR) && (pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
 }
 
-//Acquisition menu: Filter box in 1.00o5's Long memory slot, same style as the Roll mode box
-static void pc_dec_draw_box(void)
+//ui-sample (docs/plans/ui-rows.md section 3): the ACQ menu's row as data (ui_ctrl.h ui_acq_row_build)
+static void pc_acq_row(ui_acq_row *r)
 {
-  uint16    fg   = displaydata.fg_color;
-  PFONTDATA font = displaydata.font;
-  int       on   = (pc_dec_setting & 3) != 0;
-  uint32    len  = strlen(pc_dec_names[pc_dec_name_index()]);
+  ui_acq_in in;
 
-  display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
-  display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
+  in.roll         = scopesettings.long_mode != 0;
+  in.average      = scopesettings.average_mode != 0;
+  in.filter_on    = (pc_dec_setting & 3) != 0;
+  in.peak         = pc_dec_peak;
+  in.spectrum     = spectrum_mode() != SPECTRUM_MODE_SCOPE;
+  in.filter_value = pc_dec_names[pc_dec_name_index()];
+  ui_acq_row_build(&in, r);
+}
+
+//A box of the row in the menu's construction (Roll mode's): the label line and the value line centred on their measured
+//widths; a NONE box leaves its slot as the menu's background
+static void pc_acq_box(const ui_acq_row *r, int i)
+{
+  uint32 x = ACQ_MENU_XPOS + UI_ACQ_BOX_X(i), xc = x + UI_ACQ_BOX_W / 2;
+
+  if(r->state[i] == UI_ACQ_BOX_NONE)
+  {
+    display_set_fg_color(DARKGREY_COLOR);
+    display_fill_rect(x, ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H);
+    return;
+  }
+
+  display_set_fg_color((r->state[i] == UI_ACQ_BOX_ON) ? GREEN_COLOR : LIGHTGREY_COLOR);
+  display_fill_rounded_rect(x, ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H, 3);
   display_set_font(&font_2);
-  display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 231, ACQ_MENU_YPOS + 168, "Filter");
-  display_text(ACQ_MENU_XPOS + 249 - 3 * len, ACQ_MENU_YPOS + 182, (int8 *)pc_dec_names[pc_dec_name_index()]);
+  display_set_fg_color((r->state[i] == UI_ACQ_BOX_ON) ? BLACK_COLOR : (r->state[i] == UI_ACQ_BOX_GREY) ? LIGHTGREY1_COLOR : WHITE_COLOR);
+  display_text(xc - ui_text_width(&font_2, r->line1[i]) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE1_Y, (int8 *)r->line1[i]);
+  display_text(xc - ui_text_width(&font_2, r->line2[i]) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE2_Y, (int8 *)r->line2[i]);
+}
+
+//The Average, Filter and Sample boxes and the Memory column's note (Roll mode is pc_glue_roll_label's): on opening, after
+//every tap in the row and after the roll toggle (scope_acquisition_Average_mode_select). Into the current buffer.
+void pc_glue_acq_row_draw(void)
+{
+  uint16     fg   = displaydata.fg_color;
+  PFONTDATA  font = displaydata.font;
+  ui_acq_row r;
+  int        i;
+
+  pc_acq_row(&r);
+
+  for(i = UI_ACQ_AVERAGE; i < UI_ACQ_BOXES; i++)
+    pc_acq_box(&r, i);
+
+  display_set_fg_color(DARKGREY_COLOR);
+  display_fill_rect(ACQ_MENU_XPOS + UI_ACQ_NOTE_X, ACQ_MENU_YPOS + UI_ACQ_NOTE_Y, UI_ACQ_NOTE_W, UI_ACQ_NOTE_LINES * UI_ACQ_NOTE_DY);
+  display_set_font(&font_2);
+  display_set_fg_color(0x00A0A0A0);                   //the pass time label's grey: a note, not a value
+
+  for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+    if(r.note[i])
+      display_text(ACQ_MENU_XPOS + UI_ACQ_NOTE_X, ACQ_MENU_YPOS + UI_ACQ_NOTE_Y + i * UI_ACQ_NOTE_DY, (int8 *)r.note[i]);
+
   displaydata.fg_color = fg;
   displaydata.font     = font;
+}
+
+//A tap in the row is taken by a box that is not grey (and drawn)
+int pc_glue_acq_box_live(int box)
+{
+  ui_acq_row r;
+
+  pc_acq_row(&r);
+  return (box >= 0) && (box < UI_ACQ_BOXES) && ((r.state[box] == UI_ACQ_BOX_ON) || (r.state[box] == UI_ACQ_BOX_OFF));
+}
+
+//Sample Peak applied to the Scope's acquisition (the CTRL page greys Trace style with it: the record is bars)
+int pc_glue_sample_peak(void)
+{
+  ui_acq_in in = { 0 };
+
+  in.roll     = scopesettings.long_mode != 0;
+  in.peak     = pc_dec_peak;
+  in.spectrum = spectrum_mode() != SPECTRUM_MODE_SCOPE;
+  return ui_acq_peak_applied(&in);
+}
+
+//The Sample box: Normal <-> Peak. Peak runs the 16-bit path (the depth limit as with the Filter); Normal brings the
+//Filter back as it was (the setting byte kept it) and the depths it allows. The next UI pass arms with it.
+void pc_glue_sample_tap(void)
+{
+  pc_dec_peak ^= 1;
+
+  if(pc_dec_ui_wide())
+    pc_dec_fit_memory();
+
+  scope_acquisition_memory_deep_select();
+  pc_glue_acq_row_draw();
+  scopesettings.display_data_done = 1;
+}
+
+//ui-sample: the record on screen is a peak-detect record for channel ch: its pairs and the correction their midpoints
+//took (the Scope view's bars and the phosphor map, peak_bars.h); 0 in roll mode and in the waveform viewer
+int pc_glue_peak_record(int ch, const uint16 **pairs, uint32 *n, uint32 *gain, int32 *off)
+{
+  ch &= 1;
+
+  if(!pc_dec_raw_peak[ch] || !pc_dec_raw_n[ch] || scopesettings.long_mode || scopesettings.waveviewmode)
+    return 0;
+
+  *pairs = pc_dec_raw[ch];
+  *n     = pc_dec_raw_n[ch];
+  *gain  = pc_dec_peak_gain[ch];
+  *off   = pc_dec_peak_off[ch];
+  return 1;
 }
 
 //Memory depth for the 16-bit layout: the largest offered step that fits, trigger point kept at the same fraction
@@ -1185,7 +1292,7 @@ void pc_glue_settings_defaults(void)
 {
   pc_dec_set_mode[0] = PC_DECIM_DEFAULT_SCOPE;
   pc_dec_set_mode[1] = PC_DECIM_DEFAULT_SPEC;
-  pc_dec_peak        = 0;                                   //C6: Sample Normal
+  pc_dec_peak        = 0;                                   //C6: Sample Normal (word 211 bit 3 clear when saved)
 
 #if PC_FORCE_CDC
   //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
@@ -1235,7 +1342,7 @@ void pc_glue_decim_tap(void)
   //(owner, 0.2.76: they stayed masked until something else redrew the menu)
   scope_acquisition_memory_deep_select();
 
-  pc_dec_draw_box();
+  pc_glue_acq_row_draw();
   scopesettings.display_data_done = 1;
 }
 
@@ -1658,9 +1765,9 @@ int pc_glue_ui_has(int feature)
       return pc_rtc_present;
 
     default:
-      //With the Filter on, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL (acq_view.h)
+      //With the Filter on or Sample Peak, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
       if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + ACQ_MEM_CHIPS))
-        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_has() && (pc_dec_setting & 3), PC_DECIM_MAX_TOTAL) >>
+        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_has() && pc_dec_ui_wide(), PC_DECIM_MAX_TOTAL) >>
                 (feature - PC_FEAT_MEM_BASE)) & 1;
 
       return 1;
@@ -1693,15 +1800,16 @@ void pc_glue_ui_mask(int menu)
       break;
 
     case PC_MASK_ACQ_FILTER:
-      //1.00o5's Long memory slot holds the decimation Filter selector on 0x1534+ (empty menu background otherwise)
+      //1.00o5's Long memory slot holds the decimation Filter selector; ui-sample: the Average, Filter and Sample boxes
+      //and the Memory column's note, drawn together (Peak greys two of them)
       if(pc_glue_ui_has(PC_FEAT_DECIM))
-        pc_dec_draw_box();
+        pc_glue_acq_row_draw();
       break;
 
     case PC_MASK_ACQ_MEMORY:
       for(i=0;i<5;i++)
         if(!pc_glue_ui_has(PC_FEAT_MEM_BASE + i))
-          pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
+          pc_mask_rect(ACQ_MENU_XPOS + UI_ACQ_CHIP_X - 2, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
 
       //fw 0.2.38 (owner): the main-loop pass time in the Memory column, so the cost of a longer record shows where it
       //is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it is open),
@@ -2031,19 +2139,27 @@ void pc_glue_scope_warning(void)
 }
 
 //Settings sector word 211 (fw 0.2.56): 0xC700 marker, bit 0 Grid, bits 1-2 the spectrum's Display variant. The scope's
-//variants are kept where they were (X-Y: 1.00o5's word; Phosphor: word 210 bit 3).
+//variants are kept where they were (X-Y: 1.00o5's word; Phosphor: word 210 bit 3). ui-sample: bit 3 Sample Peak (the
+//codec is ui_ctrl.c's ui_word_ui, marker check 0xFFF0; a sector written before reads Normal)
 uint16 pc_glue_ui_setting_word(void)
 {
-  return (uint16)(0xC700 | ((spectrum_view() & 3) << 1) | (scopesettings.gridenable ? 1 : 0));
+  return ui_word_ui(scopesettings.gridenable, spectrum_view(), pc_dec_peak);
 }
 
 static void pc_ui_setting_restore(uint16 w)
 {
-  if((w & 0xFFF8) != 0xC700)
+  uint8 grid, view, peak;
+
+  if(!ui_word_ui_restore(w, &grid, &view, &peak))
     return;
 
-  scopesettings.gridenable = w & 1;
-  spectrum_set_view((w >> 1) & 3);
+  scopesettings.gridenable = grid;
+  spectrum_set_view(view);
+  pc_dec_peak = peak;
+
+  //Sample Peak runs the 16-bit layout: the depth limit as for the Filter (fixed up before this for the Filter alone)
+  if(pc_dec_has() && pc_dec_ui_wide())
+    pc_dec_fit_memory();
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): the fold-out rows of ui_settings.h, Time and date only

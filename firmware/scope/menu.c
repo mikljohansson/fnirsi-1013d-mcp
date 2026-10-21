@@ -5058,7 +5058,8 @@ void scope_open_acquisition_menu(void)
   //display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(ACQ_MENU_YPOS +  211, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);//-84
   
-  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
+  //ui-sample: the Memory column's rule one box pitch right of 1.00o5's x + 304 (the Sample box is the row's fourth)
+  display_draw_vert_line(ACQ_MENU_XPOS + UI_ACQ_COL_X, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5072,7 +5073,7 @@ void scope_open_acquisition_menu(void)
   display_text(ACQ_MENU_XPOS + 111, ACQ_MENU_YPOS +   8, "Sample Rate");
   display_text(ACQ_MENU_XPOS +  97, ACQ_MENU_YPOS + 216, "Time per Division");//166
   
-  display_text(ACQ_MENU_XPOS + 317, ACQ_MENU_YPOS +   8, "Memory"); //tab +6   
+  display_text(ACQ_MENU_XPOS + UI_ACQ_MEM_HEAD_X, ACQ_MENU_YPOS +   8, "Memory");
   //display_text(ACQ_MENU_XPOS + 324, ACQ_MENU_YPOS +   20, "deep"); //tab +6 
 
   
@@ -5112,8 +5113,7 @@ void scope_open_acquisition_menu(void)
   scope_acquisition_speed_select();
   scope_acquisition_timeperdiv_select();
   //scope_acquisition_ACQ_mode_select();
-  scope_acquisition_Average_mode_select();
-  PC_UI_MASK(PC_MASK_ACQ_FILTER);    //the decimation Filter box (bitstream 0x1534+) in 1.00o5's Long memory slot
+  scope_acquisition_Average_mode_select();    //ui-sample: Average, Filter, Sample and the Memory column's note
 
   scope_acquisition_memory_deep_select();
   //fw 0.2.56: acquisition only; Trace style and the Display variants are on the CTRL page
@@ -5327,34 +5327,12 @@ void scope_acquisition_ACQ_mode_select(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//ui-sample: the Average box is one of the row's boxes drawn from ui_acq_row_build (grey in roll and with Sample Peak,
+//its value kept); the Filter and Sample boxes and the Memory column's note come with it, so the roll toggle and every
+//tap in the row redraw them together
 void scope_acquisition_Average_mode_select(void)
-{                  
-    if ((scopesettings.average_mode)&&(!scopesettings.long_mode))
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(GREEN_COLOR);
-        //Clear the boxes for the not selected items (Average)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in black
-        display_set_fg_color(BLACK_COLOR);        
-    }
-    else
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(LIGHTGREY_COLOR);
-        //Clear the boxes for the not selected items (Average)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in white
-        display_set_fg_color(WHITE_COLOR); 
-    }
-    
-    //Select the font for the texts
-    display_set_font(&font_2);
-  
-    //Display average text
-    display_text(ACQ_MENU_XPOS + 128, ACQ_MENU_YPOS +  168, "Average");
-    display_text(ACQ_MENU_XPOS + 136, ACQ_MENU_YPOS +  182, "mode");       
-
+{
+  PC_UI_MASK(PC_MASK_ACQ_FILTER);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5380,7 +5358,7 @@ void scope_acquisition_memory_deep_select(void)
   for(i=0;i<(sizeof(memory_deep_texts) / sizeof(int8 *));i++)
   { 
     //Get the position of the item
-    x = 315 + ACQ_MENU_XPOS;
+    x = UI_ACQ_CHIP_X + ACQ_MENU_XPOS;
     y = (i * 36) + 33 + ACQ_MENU_YPOS;
 
     //Set yellow color for the box behind the selected text
@@ -5407,7 +5385,7 @@ void scope_acquisition_memory_deep_select(void)
     }
 
     //Calculate the position of this text
-    x = 315 + memory_deep_texts_x_offsets[c];
+    x = UI_ACQ_CHIP_X + memory_deep_texts_x_offsets[c];
     y = (c * 36) +  38;
 
     //Display the text from the table

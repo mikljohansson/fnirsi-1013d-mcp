@@ -79,7 +79,8 @@ void acq_view_notice_queue(int slot, const char *head, const char *mid, const ch
 //fw 0.2.84: the ACQ menu's memory depth chips that can be chosen, bit i for (i + 1) x 3000 samples (i 0 .. 4): those
 //within the record the bitstream holds (`max_total`) and, with the decimation Filter on, within the 16-bit layout's
 //`filter_max` (one sample per word halves the memory). The menu draws its Memory column from this on opening and again
-//on every Filter change, so the depths a filter hid come back at once when it goes Off (owner, fw 0.2.76).
+//on every Filter change, so the depths a filter hid come back at once when it goes Off (owner, fw 0.2.76). ui-sample:
+//`filter_on` is "the record is 16-bit", the Filter on or Sample Peak (the same layout), and the Sample box redraws it too.
 #define ACQ_MEM_CHIPS  5
 uint32 acq_view_mem_chips(uint32 max_total, int filter_on, uint32 filter_max);
 

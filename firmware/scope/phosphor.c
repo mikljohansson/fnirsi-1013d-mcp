@@ -21,6 +21,7 @@
 #include "menu.h"
 #include "pc_hooks.h"
 #include "ui_ctrl.h"
+#include "peak_bars.h"
 
 #include <string.h>
 
@@ -152,7 +153,7 @@ static uint32 phos_xkey(int32 dx)
   h = fnv(h, (uint32)scopesettings.triggerhorizontalposition);
   h = fnv(h, fpgasettings.totalsamples);
   h = fnv(h, fpgasettings.settriggerpoint);
-  h = fnv(h, dc.k | (dc.fir << 4));
+  h = fnv(h, dc.k | (dc.fir << 4) | (dc.peak << 5));          //ui-sample: bars and lines do not mix
   h = fnv(h, scopesettings.xymodedisplay);
 
   return fnv(h, phos.persist);
@@ -373,6 +374,20 @@ void phosphor_draw(void)
     for(ch = 0; ch < 2; ch++)
       if(phos_ch(ch)->enable && n)
       {
+        const uint16 *pairs;
+        uint32        pn, gain;
+        int32         off;
+
+        //ui-sample (docs/plans/ui-rows.md 3.3): a peak record adds its bars, each column's min .. max once per record
+        if(pc_glue_peak_record(ch, &pairs, &pn, &gain, &off))
+        {
+          pb_walk w;
+
+          pb_start(&w, pairs, pn, first, (uint32)(disp_sample_step * 65536.0 + 0.5), gain, off, phos_ch(ch)->invert);
+          pb_phos_record(&phos_m[ch], &w, PHOS_LUT(ch), disp_xstart - PHOS_X0, disp_xend - PHOS_X0, inc);
+          continue;
+        }
+
         phos_add_record(&phos_m[ch], phos_ch(ch)->tracebuffer + first, n, PHOS_LUT(ch), (disp_xstart - PHOS_X0) << 16, dx,
                         disp_xstart - PHOS_X0, disp_xend - PHOS_X0, inc);
       }
