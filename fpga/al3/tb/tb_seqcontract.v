@@ -26,12 +26,14 @@
 //   L  (0x153D D1, fw-d4 fpga_log.c) the streaming logger: LOG_START CH1 format 0 at D = 399 (the 500 kS/s tier), two
 //      drain steps (the lanes with fpga_read_lane, the second 0x38, 0x6A), LOG_STOP with the tail; the 0x38 snapshots
 //      against the memory, W = count mod 8192, no lap, the write stopped and 0x14 = W after the stop
+//   G  (0x153D, fw-d5 pc_hal_gen_write) the generator as the fractional square: SET_GEN 10 kHz 25 % from idle (0x6D = 0, the two
+//      entries, 0x6D = 0x33, 0x50 = 1) and 12 kHz 50 % on the run (the entries, 0x6D = 0x23); the pad's period and high
+//      time, the 0x39 pending bit
 // 0x153C: the boot writes fpga_trig_write(edge, hold-off 0, clear) and the counter's 0x62 / 0x61 (gate 100 ms) after the
 // version read, and ARM 7 carries the trigger type registers (0x5E always; 0x5F, 0x60 for a qualified type) as
 // fpga_trig_arm does, before 0x0E. The firmware still writes 0x0F in every arm (a no-op since 0x153C).
-// 0x153D: the generator is the pattern (fw-d5): "generator off" at the setup is fpga_pat_drive(0) (0x50 with four data
-// bytes, as 1.00o5 writes it) and fpga_pat_level(0) (0x6D = 0); the boot adds fpga_ptrig_write(zeros) (0x7D = 0, 0x76 ..
-// 0x7A, 0x7D = 04: the pattern trigger engine disarmed) between the trigger write and the counter's.
+// 0x153D: the generator is the fractional square (fw-d5 reduced by the owner's cut, fw-nopat): "generator off" at the
+// setup is fpga_pat_drive(0) (0x50 with four data bytes, as 1.00o5 writes it) and fpga_pat_level(0) (0x6D = 0).
 // Checks against independent expectations: status bytes, table entries (valid, triggered, offset = 0x14 mod 2^m
 // for the last segment, the step at record index pre + 1 in every slot), averaged lanes equal to N x the
 // single-record value, raw lanes equal to the sums, the stop.
@@ -56,6 +58,7 @@ module tb;
   wire pad;
   assign pad = ext_en ? sig : 1'bz;
   assign (weak0, weak1) pad = 1'b0;
+  wire adc_in = sig;
 
   wire e1A, e1B, e2A, e2B, o1, r11, r12, r13, ac1, o2, r21, r22, r23, ac2, pwm;
 
@@ -91,13 +94,13 @@ module tb;
   initial for (ia = 0; ia < 8; ia = ia + 1) begin pA[ia] = LO; pB[ia] = LO; end
   always @(posedge e1A) begin
     for (ia = 7; ia > 0; ia = ia - 1) pA[ia] = pA[ia - 1];
-    pA[0] = sig ? HI : LO;
+    pA[0] = adc_in ? HI : LO;
     adc1A <= #3.3 pA[4];
     adc2A <= #3.3 8'd255 - pA[4];
   end
   always @(posedge e1B) begin
     for (ib = 7; ib > 0; ib = ib - 1) pB[ib] = pB[ib - 1];
-    pB[0] = sig ? HI : LO;
+    pB[0] = adc_in ? HI : LO;
     adc1B <= #3.3 pB[4];
     adc2B <= #3.3 8'd255 - pB[4];
   end
@@ -206,21 +209,6 @@ module tb;
     end
   endtask
 
-  // 0x153D (fw-d5, fpga_bus.c fpga_ptrig_write): 0x7D = 0, the edge registers 0x76 .. 0x79, the type registers 0x7A (0x7B,
-  // 0x7C for a qualified type), 0x7D = armed | rearm << 1 | 0x04 (clear the event flag) | route << 3
-  task fw_ptrig_write(input [7:0] src, input [7:0] pol, input [7:0] lvl, input [15:0] lvl16, input [7:0] typ,
-                      input [23:0] n, input [23:0] h, input armed, input rearm);
-    begin
-      wr1(8'h7D, 8'h00);
-      wr1(8'h76, src); wr1(8'h77, pol); wr1(8'h78, lvl); wr2(8'h79, lvl16);
-      wr1(8'h7A, typ);
-      if (typ[2:0] != 3'd0) begin
-        wr_cmd(8'h7B); wr_byte(n[23:16]); wr_byte(n[15:8]); wr_byte(n[7:0]);
-        wr_cmd(8'h7C); wr_byte(h[23:16]); wr_byte(h[15:8]); wr_byte(h[7:0]);
-      end
-      wr1(8'h7D, {5'd0, 1'b1, rearm, armed});
-    end
-  endtask
 
   // 0x153D (fw-d4, fpga_log.c): fw_log_snapshot = fpga_log_snapshot (0x38, 8 bytes); fw_log_start = pc_hal_log_start (0x0D,
   // pc_dec_apply's filter writes) + fpga_log_start (0x69 = 1, 0x57 = 0, 0x1A = 0, fpga_arm_reset with pre = total = 0 and
@@ -294,6 +282,59 @@ module tb;
       end
     end
   endtask
+  // 0x153D (fw-d5, fpga_bus.c): the square generator's sequences. fw_pat_step = fpga_pat_step_write (0x6C: { end, mark,
+  // level, index }, u32 n, u16 f; the stripped design reads the level and the index); fw_gen_square = pc_hal_gen_write
+  // (fpga_pat_square: from idle 0x6D = 0, the two entries, 0x6D = 0x33; on the run the two entries and 0x6D = 0x23; then
+  // fpga_pat_drive = 0x50 with four data bytes); fw_pat_status = fpga_pat_status (0x39)
+  reg [63:0] g_p16, g_h16, g_l16;
+  reg        g_running = 0;
+  task fw_pat_step(input [4:0] idx, input lvl, input mark, input e, input [31:0] n, input [15:0] f);
+    begin
+      wr_cmd(8'h6C);
+      wr_byte({e, mark, lvl, idx});
+      wr_byte(n[31:24]); wr_byte(n[23:16]); wr_byte(n[15:8]); wr_byte(n[7:0]);
+      wr_byte(f[15:8]); wr_byte(f[7:0]);
+    end
+  endtask
+  // f in mHz, duty in basis points: the contract's P16 / H16 formulas (gen_pat.c), then fpga_pat_square + fpga_pat_drive(1)
+  task fw_gen_square(input [63:0] f_mhz, input [31:0] duty_bp);
+    begin
+      g_p16 = (64'd65536 * 64'd200000000000 + f_mhz / 2) / f_mhz;
+      g_h16 = (g_p16 * duty_bp + 64'd5000) / 64'd10000;
+      g_l16 = g_p16 - g_h16;
+      if (!g_running) begin
+        note("SET_GEN from idle: 0x6D = 00, entry 0 (high), entry 1 (low, end), 0x6D = 33 (continuous, start, commit), 0x50 = 1 (four bytes)");
+        wr1(8'h6D, 8'h00);
+      end else
+        note("SET_GEN on the run: entry 0, entry 1, 0x6D = 23 (continuous, commit): taken at a step boundary, glitch-free");
+      fw_pat_step(5'd0, 1'b1, 1'b0, 1'b0, g_h16[47:16], g_h16[15:0]);
+      fw_pat_step(5'd1, 1'b0, 1'b0, 1'b1, g_l16[47:16], g_l16[15:0]);
+      wr1(8'h6D, g_running ? 8'h23 : 8'h33);
+      g_running = 1;
+      wr4(8'h50, 32'd1);
+    end
+  endtask
+  reg [7:0] ps [0:3];
+  task fw_pat_status;
+    begin
+      wr_cmd(8'h39);
+      for (i = 0; i < 4; i = i + 1) begin rd_byte; ps[i] = rd_d; end
+    end
+  endtask
+  // the generator off (fpga_on_off_generator with the switch off): 0x50 = 0 (four bytes), 0x6D = 0
+  task fw_gen_off;
+    begin
+      note("generator off: 0x50 = 0 (four bytes), 0x6D = 00");
+      wr4(8'h50, 32'd0);
+      wr1(8'h6D, 8'h00);
+      g_running = 0;
+    end
+  endtask
+  // pad edge times, ns; t_pr / t_pf = the last rising / falling pad edge seen by the monitors
+  realtime t_r1, t_r2, t_f1, t_r3, t_pr = 0, t_pf = 0;
+  always @(posedge pad) t_pr = $realtime;
+  always @(negedge pad) t_pf = $realtime;
+
   // the lanes of the last chunk against the memory words it came from (lane 0 = core B [15:8] / 16-bit high byte, lane 1 =
   // core A [7:0] / low byte for CH1), and how many LO -> HI transitions core A holds
   integer lg_tr;
@@ -491,9 +532,8 @@ module tb;
     wr1(8'h16, 8'h00);
     wr1(8'h17, 8'd128);
     wr_cmd(8'h06); rd_byte; rd_byte;
-    note("boot (0x153C / 0x153D, fw-c5 / fw-d5 / fw-c7): fpga_trig_write(edge, hold-off 0, clear), fpga_ptrig_write(zeros: the engine disarmed), counter 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source");
+    note("boot (0x153C, fw-c5 / fw-c7): fpga_trig_write(edge, hold-off 0, clear), counter 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source");
     fw_trig_write(8'h00, 24'd0, 24'd0, 32'd0, 1'b1);
-    fw_ptrig_write(8'h00, 8'h00, 8'h00, 16'h0000, 8'h00, 24'd0, 24'd0, 1'b0, 1'b0);
     fw_counter_config(8'd128, 8'd6, 2'd2, 2'd0);
     #2000;
 
@@ -740,6 +780,38 @@ module tb;
     note("log ended: the UI's 0x0D restored (pc_log_finish), normal mode again");
     wr4(8'h0D, 32'd9);
     wr1(8'h1A, 8'h01);
+
+    //-------------------------------------------------------------------------------
+    // G: the generator is the pattern (0x153D D2, fw-d5): SET_GEN 10 kHz 25 % from idle, then 12 kHz 50 % on the run
+    $fdisplay(tf, "#");
+    note("=== G: SET_GEN 10 kHz 25 % (P16 = 20000 clocks, H16 = 5000) from idle, then 12 kHz 50 % on the run; the pad's edges; 0x39");
+    fw_gen_square(64'd10000000, 32'd2500);
+    check(g_p16 == 64'd20000 * 65536 && g_h16 == 64'd5000 * 65536, "G: P16 = 20000 clocks, H16 = 5000 clocks for 10 kHz 25 %");
+    @(posedge pad);                                      // the pin's enable (0x50 = 1) inside the first high step
+    @(posedge pad); t_r1 = $realtime;
+    @(negedge pad); t_f1 = $realtime;
+    @(posedge pad); t_r2 = $realtime;
+    check(t_r2 - t_r1 > 99999.0 && t_r2 - t_r1 < 100001.0 && t_f1 - t_r1 > 24999.0 && t_f1 - t_r1 < 25001.0,
+          "G: the pad runs a 100 us period with 25 us high (10 kHz 25 %)");
+    note("GET_GEN: 0x39 (4 bytes)");
+    fw_pat_status;
+    check(ps[0][7] == 1'b1 && ps[0][5] == 1'b0 && ps[3][0] == 1'b1, "G: 0x39 running, no commit pending, mode active");
+    fw_gen_square(64'd12000000, 32'd5000);
+    check(g_p16 == 64'd1092266667 && g_h16 == 64'd546133334, "G: P16 / H16 of 12 kHz 50 % as gen_pat.c computes them (1092266667 / 546133334)");
+    note("GET_GEN right after the commit: 0x39 (the pair is taken at once while the old step runs: pending reads 0 again)");
+    fw_pat_status;
+    check(ps[0][7] == 1'b1 && ps[0][5] == 1'b0, "G: 0x39 running, the commit already taken (pending 0)");
+    // the old period completes (at most 100 us), the first new step follows; measure from the second new rising edge
+    @(posedge pad); @(posedge pad); @(posedge pad); t_r1 = $realtime;
+    @(negedge pad); t_f1 = $realtime;
+    @(posedge pad); t_r2 = $realtime;
+    @(posedge pad); t_r3 = $realtime;
+    check(t_r3 - t_r1 > 166661.0 && t_r3 - t_r1 < 166672.0 && t_f1 - t_r1 > 41660.0 && t_f1 - t_r1 < 41675.0,
+          "G: two new periods = 166.67 us (12 kHz) with a 41.67 us high: the change took effect, every edge within a clock");
+    fw_pat_status;
+    check(ps[0][7] == 1'b1 && ps[0][5] == 1'b0, "G: 0x39 running, pending cleared");
+    note("teardown: the generator off");
+    fw_gen_off;
 
     $fclose(tf);
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");

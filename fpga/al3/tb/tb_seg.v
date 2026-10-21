@@ -585,7 +585,7 @@ module tb;
         wr1(8'h53, {6'd0, kr});                           // 0x153C: bits 7..2 are gone (bit 2, the swap, was random here); the reference gets 0 too
         wr1(8'h54, shr);
         wr2(8'h55, (kr == 0) ? $random(seed) : (16'd128 << (rnd2[7:6])) + rnd2[31:20]);
-        wr1(8'h15, {6'd0, rnd[9:8]});
+        wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT (3 acts as EXT)
         wr1(8'h16, {7'd0, rnd[1]});
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));
         wr1(8'h1A, {7'd0, rnd[2]});
@@ -603,7 +603,7 @@ module tb;
         gen_on = rnd[6];
         wr1(8'h50, {7'd0, gen_on});
         wr4(8'h51, 32'd85899346 + ($random(seed) & 32'h00FFFFFF));
-        wr4(8'h52, $random(seed));
+        wr4(8'h52, $random(seed) & 32'd0);               // 0x153D: 0x52 retired; the reference's DDS stays low (= the pattern's idle level)
         d1 = 1 + (rnd[27:25]); d2 = -(1 + rnd[30:28]);
         adc_mode = rnd[11] ? 1 : 0;
         if (!gen_on) begin
@@ -776,6 +776,10 @@ module tb;
     logf = $fopen(logname, "w");
     $display("tb_seg: seed %0d, log %0s", seed, logname);
     #200;
+    //0x153D: the DUT has no DDS (its pin carries the pattern's idle level, 0, while driven); the reference's DDS output is
+    //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
+    wr4(8'h52, 32'd0);
+    wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
 
     //-------------------------------------------------------------------------------
     // Phase 1: equivalence with 0x1535, sequencer off

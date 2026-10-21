@@ -84,6 +84,16 @@
 //    snapshot) gives the write address, the words written since 0x01 = 0 and the unread words, with a lap flag that
 //    sets when a write overwrites the oldest unread word (0x69 bit 1 clears it). With 0x69 = 0 (power-on) the capture
 //    is cycle-identical to 0x153C.
+//  - 0x153D (D2 / D3, docs/plans/fpga-0x153c.md section 7 reduced by the owner's cut of 2026-10-21): the generator is an
+//    accurate fractional square. Atlan4's DDS (freq_generator_dds_pwm, 0x51 / 0x52) is removed; module sq_gen drives the
+//    calibration pin (0x50 = 1) with a two-step continuous pattern: 0x6C index 0 = the high step, 1 = the low step, each
+//    u32 + u16 / 65536 clocks of 5 ns (f = 200 MHz x 65536 / P16, every edge within one clock of ideal, the mean period
+//    exact); the two entries are double-buffered behind 0x6D bit 5 (commit), so a change on the run is glitch-free and
+//    phase-continuous. 0x6D: mode 3 continuous / 0 off, the idle level bit, start, commit. Read 0x39 = { running, 0,
+//    pending, 0, 0, 0, 0, step }, 0, 0, { 0 .., mode active }. The pulse pattern generator's step table, bursts, gap,
+//    marker, trigger source 0x15 = 3 and the pattern trigger engine (0x6E, 0x6F, 0x76-0x7D, read 0x42) of the D2 branch
+//    are not in this bitstream: writes to those codes are ignored, 0x15 = 3 acts as EXT as before. With 0x6D = 0
+//    (power-on) the pin, when driven, holds the idle level and the capture is unchanged.
 //-------------------------------------------------------------------------------------
 
 //A simple clock divider module for which the width and the last count can be set
@@ -139,24 +149,6 @@ reg [15:0] count = 0;
 
           pwm <= count < pulsewidth;
         end
-    end
-
-endmodule
-
-//-------------------------------------------------------------------------------------
-
-module freq_generator_dds_pwm(
-    input  wire        clk_in,         // 50 MHz
-    input  wire [31:0] phase_inc,      // DDS krok vypočítaný v uP
-    input  wire [31:0] duty_threshold, // duty v rozsahu 0..2^32-1 vypočítaný v uP
-    output reg         clk_out
-);
-
-    reg [31:0] phase_acc = 0;
-
-    always @(posedge clk_in) begin
-        phase_acc <= phase_acc + phase_inc;
-        clk_out   <= (phase_acc < duty_threshold);
     end
 
 endmodule
@@ -564,6 +556,142 @@ assign rem_o = rem;
 endmodule
 
 //-------------------------------------------------------------------------------------
+//Fractional square generator (0x153D, docs/plans/fpga-0x153c.md section 7.2 / 7.4 reduced by the owner's cut of
+//2026-10-21: the pulse pattern generator, bursts, gap, marker and the pattern trigger engine are gone), clk_200MHz: the
+//generator since Atlan4's DDS went. Two entries (0x6C index 0 = the high step, 1 = the low step), each { level, n[31:0],
+//f[15:0] }: the step holds level for n + f / 65536 clocks of 5 ns on average (n >= 2). Mode (0x6D bits 1..0): 3 =
+//continuous (0 .. 1 .. 0 .. 1 ...), 0 = off (the pin at the idle level, 0x6D bit 2); 1 and 2 are not modes of this
+//design and act as 0. A start is the write of mode 3 while idle (0x6D bit 4 is accepted with it and means nothing on its
+//own); a mode-3 write while running is not a restart.
+//  Durations: cnt is a 33-bit down counter with a frozen sign loaded at each step boundary with n - 2 + carry; the sign
+//  sets n + carry - 1 clocks later and the next boundary is the clock after that: the step lasts exactly n + carry clocks.
+//  Fraction (Bresenham, one accumulator): at the start of step k, acc <= acc + f_k and carry = the overflow of that add;
+//  acc is cleared at a start, never at a commit or a wrap, so the mean period is exactly (n_h + n_l) + (f_h + f_l) /
+//  65536 clocks and every edge lies within one clock of its ideal time (the cumulative actual time is floor(ideal)).
+//  Pipeline (two clocks per step at least): nx_e is the entry of the next step, registered every clock from the active
+//  pair (e0 / e1) by the step in progress, and acc_sum = acc + nx_e.f is registered from it; the boundary's one 33-bit
+//  add with a carry-in reads both. The entries nx_e / acc_sum come from are therefore 1 and 2 clocks old at the boundary.
+//  Double buffer: 0x6C writes land in the shadows sh0 / sh1 (index 0 / 1; others are ignored); 0x6D bit 5 (commit) marks
+//  them pending. The pending pair is copied into e0 / e1 as a whole at the first clock at which the step in progress
+//  still has at least three clocks to run (cnt >= 1, or the boundary clock itself; at once while idle or at a start), so
+//  nx_e and acc_sum are consistent again before the next boundary reads them: the step in progress completes with its
+//  old duration and every step from the next boundary on is new. Glitch-free, phase-continuous; a commit during the high
+//  step changes the low step of the same period already, during the low step the next period. A second commit before the
+//  take replaces the first. (The 2-clock step n = 2 with a commit landing in its first clock would read the old f with
+//  the new n once: below the firmware's range, whose shortest step is 4 clocks.)
+//  MCU side (i_mcu_clk): the staged 0x6C entry and the 0x6D byte are registers there; wr_t / ctl_t toggle on the last byte
+//  of a 0x6C / on every 0x6D write and are synchronised here (three flops), so the data they refer to is settled when the
+//  toggle is seen (the next bus strobe is >= 50 ns away).
+//  Start: the start condition is registered (go); that clock (S) takes a pending pair, clears acc and sets cnt = 0 (its
+//  sign sets at S + 2); the boundary is masked until S + 4, so step 0 (entry 0) begins at S + 5: 6 clocks after the 0x6D
+//  write is seen, 8 .. 9 clocks (40 .. 45 ns) after its data strobe, as the pattern generator this replaces (measured in tb_square.v).
+//  Stop (mode 0 written): at once, the pin at the idle level. Idle: the level follows 0x6D bit 2.
+
+module sq_gen
+(
+  input  wire        clk,
+  input  wire        wr_t,           //toggles when the 7th byte of a 0x6C write has landed
+  input  wire [4:0]  wr_idx,
+  input  wire        wr_lvl,         //0x6C byte 0 bit 5: the step's level
+  input  wire [31:0] wr_n,
+  input  wire [15:0] wr_f,
+  input  wire        ctl_t,          //toggles on every 0x6D write
+  input  wire [7:0]  ctl,            //the 0x6D byte: { -, -, commit, start, -, idle level, mode }
+  output reg         level = 0,      //what the pin carries while 0x50 = 1
+  output reg         running = 0,
+  output reg         pending = 0,    //a commit not yet taken
+  output wire        step,           //the step in progress: 0 = entry 0 (high), 1 = entry 1 (low); 0 when idle
+  output wire        mode_on
+);
+localparam EW = 49;                                        //entry: [48] level, [47:16] n, [15:0] f
+
+reg [EW-1:0] e0 = 0, e1 = 0;                               //the active pair
+reg [EW-1:0] sh0 = 0, sh1 = 0;                             //the shadows (0x6C writes)
+reg [EW-1:0] nx_e = 0;                                     //the entry of the next step (prefetch register)
+reg [2:0]  wr_s = 0, ct_s = 0;
+reg [1:0]  mode = 0;
+reg        idle_lv = 0;
+reg        cur = 0;                                        //the step in progress: 0 = entry 0, 1 = entry 1
+reg [32:0] cnt = 0;
+reg [15:0] acc = 0;
+reg [16:0] acc_sum = 0;
+reg        go = 0;
+reg [2:0]  go_d = 0;
+
+wire wr_ev  = wr_s[2] ^ wr_s[1];
+wire ct_ev  = ct_s[2] ^ ct_s[1];
+wire [EW-1:0] wr_e = { wr_lvl, wr_n, wr_f };
+wire commit = ct_ev & ctl[5];
+wire stop   = ct_ev & (ctl[1:0] != 2'd3);
+wire go_c   = ct_ev & (ctl[1:0] == 2'd3) & ~running & ~go & ~(|go_d);
+wire bd     = running & cnt[32] & ~go & ~(|go_d);          //boundary: the step in progress ends on this clock
+//the pending pair may be taken now: idle, at the start, at a boundary, or with at least three clocks of the step left
+wire take_ok = ~running | go | cnt[32] | (cnt[31:0] != 32'd0);
+
+assign step    = running & cur;
+assign mode_on = (mode == 2'd3);
+
+  always @(posedge clk)
+    begin
+      wr_s <= { wr_s[1:0], wr_t };
+      ct_s <= { ct_s[1:0], ctl_t };
+      go   <= go_c;
+      go_d <= { go_d[1:0], go };
+      nx_e    <= cur ? e0 : e1;
+      acc_sum <= { 1'b0, acc } + { 1'b0, nx_e[15:0] };
+
+      if(wr_ev & (wr_idx == 5'd0))
+        sh0 <= wr_e;
+      if(wr_ev & (wr_idx == 5'd1))
+        sh1 <= wr_e;
+
+      if((pending | commit) & take_ok)
+        begin
+          e0      <= sh0;
+          e1      <= sh1;
+          pending <= 0;
+        end
+      else if(commit)
+        pending <= 1;
+
+      if(ct_ev)
+        begin
+          mode    <= ctl[1:0];
+          idle_lv <= ctl[2];
+        end
+
+      if(stop)
+        begin
+          running <= 0;
+          level   <= ctl[2];
+        end
+      else if(go)
+        begin
+          running <= 1;
+          cnt     <= 33'd0;                                 //the sign sets at S + 2; bd is masked until S + 4
+          acc     <= 16'd0;
+          cur     <= 1'b1;                                  //so that the first boundary loads entry 0
+          level   <= idle_lv;
+        end
+      else if(running)
+        begin
+          if(bd)
+            begin
+              cnt   <= { 1'b0, nx_e[47:16] } + { {32{1'b1}}, acc_sum[16] };   //n - 2 + carry
+              acc   <= acc_sum[15:0];
+              level <= nx_e[48];
+              cur   <= ~cur;
+            end
+          else if(~cnt[32])
+            cnt <= cnt - 33'd1;
+        end
+      else
+        level <= idle_lv;
+    end
+
+endmodule
+
+//-------------------------------------------------------------------------------------
 //Sequencer RAMs (0x1536), TD logic block RAM macros as the IP generator writes them.
 //Accumulator / segment table: 2048 x 64, written and read on clk_200MHz, read output registered.
 //Record mirror: 2048 x 32 copy of the sample memory's write side (written on the write clock),
@@ -710,7 +838,6 @@ module fnirsi_1013D
   //wire clk_ADC0;
   
   wire clk_50MHz;
-  wire clk_1KHz;//
   wire clk_out;
 
   wire sample_clock_enable;
@@ -761,12 +888,20 @@ module fnirsi_1013D
 
   //input wire       i_mcu_rws, 
   //Initial values in this file are for simulation only: TD 4.6.8 configures every flop to 0 (0x153A notes), so on the
-  //hardware the generator is off and silent until the firmware writes 0x50..0x52 (it does, at boot), and
+  //hardware the pin is hi-Z and the pattern off until the firmware writes 0x50 and the pattern (it does, at boot), and
   //pretrigger_samples / total_samples / seq_count / seg_m / avg_n are 0 until written (the firmware writes them before
   //every capture that uses them).
-  reg gen_out_enable = 1;
-  reg [31:0] clk_out_divider = 85899;      //For controlling the clk out frekvency  1kHz
-  reg [31:0] clk_out_duty = 32'h80000000;  //For controlling the clk out duty       50%
+  reg gen_out_enable = 0;                  //Command 0x50 bit 0: 1 = the pin is driven with the pattern's level, 0 = hi-Z (EXT)
+
+  //Square generator (0x153D), MCU-side registers; sq_gen takes them over through the toggles
+  reg [4:0]  pat_wr_idx = 0;               //Command 0x6C byte 0 bits 4..0: entry index (0 = the high step, 1 = the low step)
+  reg        pat_wr_lvl = 0;               //Command 0x6C byte 0 bit 5: the step's level (bits 7, 6 are ignored)
+  reg [31:0] pat_wr_n = 0;                 //Command 0x6C bytes 1..4: integer duration, 5 ns clocks
+  reg [15:0] pat_wr_f = 0;                 //Command 0x6C bytes 5..6: fraction, 1/65536 clock
+  reg        pat_wr_t = 0;                 //toggles on byte 6 of 0x6C: the entry is complete
+  reg [7:0]  pat_ctl = 0;                  //Command 0x6D as written
+  reg        pat_ctl_t = 0;                //toggles on every 0x6D write
+  wire       pat_level, pat_running, pat_pending, pat_step, pat_mode_on;
 
   reg relay1_1 = 0;                        //Relay control for channel 1
   reg relay1_2 = 0;
@@ -921,20 +1056,29 @@ module fnirsi_1013D
   );
 
 //-------------------------------------------------------------------------------------
-// frequency generator
+// Generator (0x153D): the fractional square generator drives the calibration pin while 0x50 = 1. Atlan4's DDS
+// (freq_generator_dds_pwm on clk_50MHz, 0x51 / 0x52) was here up to 0x153C; the square wave is now the two-step
+// continuous pattern the firmware programs (module sq_gen above the sequencer RAMs).
 
-freq_generator_dds_pwm u_freq
+  sq_gen u_sq
   (
-    .clk_in(clk_50MHz),
-    .phase_inc(clk_out_divider),    // DDS step calculated in uP
-    .duty_threshold(clk_out_duty),  // duty in the range 0..2^32-1
-    .clk_out(clk_1KHz)
+    .clk       (clk_200MHz),
+    .wr_t      (pat_wr_t),
+    .wr_idx    (pat_wr_idx),
+    .wr_lvl    (pat_wr_lvl),
+    .wr_n      (pat_wr_n),
+    .wr_f      (pat_wr_f),
+    .ctl_t     (pat_ctl_t),
+    .ctl       (pat_ctl),
+    .level     (pat_level),
+    .running   (pat_running),
+    .pending   (pat_pending),
+    .step      (pat_step),
+    .mode_on   (pat_mode_on)
   );
 
 //Control of the bidirectional bus for input and output
-  assign o_1khz_calib = gen_out_enable ? clk_1KHz : 1'bZ; 
-
-  //assign o_1khz_calib = clk_1KHz;
+  assign o_1khz_calib = gen_out_enable ? pat_level : 1'bZ;
 
 //-------------------------------------------------------------------------------------
 //External trigger input on the calibration pin
@@ -2479,17 +2623,19 @@ assign sampling_enable = ~(
       else if((((mcu_command == 8'h0B) | (mcu_command == 8'h0C) | (mcu_command == 8'h0D) | (mcu_command == 8'h0E) 
               | (mcu_command == 8'h1B) | (mcu_command == 8'h1F)
               | (mcu_command == 8'h32) | (mcu_command == 8'h35) | (mcu_command == 8'h38)
-              | (mcu_command == 8'h51) | (mcu_command == 8'h52) | (mcu_command == 8'h55)
+              | (mcu_command == 8'h55)                                                               //0x153D: 0x51 / 0x52 retired
               | (mcu_command == 8'h58) | (mcu_command == 8'h5A) | (mcu_command == 8'h5C) | (mcu_command == 8'h63)
               | (mcu_command == 8'h5F) | (mcu_command == 8'h60)                                     //0x153C triggers
               | (mcu_command == 8'h62)                                                               //0x153C counter
               | (mcu_command == 8'h6A)                                                               //0x153D logger
+              | (mcu_command == 8'h6C)                                                               //0x153D square generator
               ) & i_mcu_rws) |
               (((mcu_command == 8'h06) | (mcu_command == 8'h14) | (mcu_command == 8'h29)
               | (mcu_command == 8'h2A) | (mcu_command == 8'h36)
               | (mcu_command == 8'h34)                                                               //0x153C triggers
               | (mcu_command == 8'h35)                                                               //0x153C counter
               | (mcu_command == 8'h38)                                                               //0x153D logger
+              | (mcu_command == 8'h39)                                                               //0x153D square generator
               ) & ~i_mcu_rws))
         mcu_state <= mcu_state + 1;
     end
@@ -2695,39 +2841,10 @@ assign sampling_enable = ~(
                 endcase
               end
 
-            //Setting the output on or tristate
+            //Setting the output on or tristate (0x153D: the square generator's level is what is driven; 0x51 / 0x52, the
+            //DDS phase increment and duty of 0x1532..0x153C, are retired: no decoder entry, writes are ignored)
             8'h50:
               gen_out_enable <= io_mcu_data[0];
-
-            //Loading of the four bytes of the clk out divider high byte first 
-            8'h51:
-              begin
-                case(mcu_state)
-                  4'h0:
-                    clk_out_divider[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_divider[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_divider[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_divider[7:0] <= io_mcu_data;
-                endcase
-              end
-
-            //Loading of the four bytes of the clk out duty divider high byte first
-            8'h52:
-              begin
-                case(mcu_state)
-                  4'h0:
-                    clk_out_duty[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_duty[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_duty[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_duty[7:0] <= io_mcu_data;
-                endcase
-              end
 
             //Decimation filter order (0x1534); bits 7..2 are ignored (0x153C: the swap and falling-edge bits are gone)
             8'h53:
@@ -2909,6 +3026,46 @@ assign sampling_enable = ~(
                       rd_t   <= ~rd_t;
                     end
                 endcase
+              end
+
+            //Square generator step (0x153D), 7 bytes: { -, -, level, index[4:0] }, u32 integer duration in 5 ns clocks
+            //(>= 2), u16 fraction in 1/65536 clock, high byte first; the entry is handed to the generator on the last byte
+            //into the shadow of index 0 (the high step) or 1 (the low step), taken at the next commit (0x6D bit 5); other
+            //indices are ignored. Bits 7 and 6 of byte 0 (the pattern generator's end and mark flags) are ignored
+            8'h6C:
+              begin
+                case(mcu_state)
+                  4'h0:
+                    begin
+                      pat_wr_lvl <= io_mcu_data[5];
+                      pat_wr_idx <= io_mcu_data[4:0];
+                    end
+                  4'h1:
+                    pat_wr_n[31:24] <= io_mcu_data;
+                  4'h2:
+                    pat_wr_n[23:16] <= io_mcu_data;
+                  4'h3:
+                    pat_wr_n[15:8] <= io_mcu_data;
+                  4'h4:
+                    pat_wr_n[7:0] <= io_mcu_data;
+                  4'h5:
+                    pat_wr_f[15:8] <= io_mcu_data;
+                  4'h6:
+                    begin
+                      pat_wr_f[7:0] <= io_mcu_data;
+                      pat_wr_t     <= ~pat_wr_t;
+                    end
+                endcase
+              end
+
+            //Square generator control (0x153D), 1 byte: bits 1..0 mode (3 continuous, 0 off; 1 and 2 act as 0), bit 2
+            //idle level (the pin while off), bit 4 start (meaningful with mode 3 only; a mode-3 write while idle starts by
+            //itself, one while running is not a restart), bit 5 commit the shadow entries 0 / 1; bits 3, 7..6 (the pattern
+            //generator's marker enable and start source) are ignored
+            8'h6D:
+              begin
+                pat_ctl   <= io_mcu_data;
+                pat_ctl_t <= ~pat_ctl_t;
               end
 
           endcase
@@ -3112,6 +3269,20 @@ assign sampling_enable = ~(
                   4'h5:  o_mcu_data <= l_cnt[7:0];
                   4'h6:  o_mcu_data <= { 2'b00, l_occ[13:8] };
                   4'h7:  o_mcu_data <= l_occ[7:0];
+                endcase
+              end
+
+            //Square generator status (0x153D), 4 bytes: { running, 0, pending commit, 0, 0, 0, 0, step } (step: the step
+            //in progress, 0 = the high step / entry 0, 1 = the low step / entry 1; 0 when idle), 0, 0, { 0 x 7, mode
+            //active }. The pattern generator's in-gap bit, bursts count and marker bit of the D2 branch read 0.
+            //Asynchronous (the generator runs on clk_200MHz).
+            8'h39:
+              begin
+                case(mcu_state)
+                  4'h0:  o_mcu_data <= { pat_running, 1'b0, pat_pending, 4'b0000, pat_step };
+                  4'h1:  o_mcu_data <= 8'h00;
+                  4'h2:  o_mcu_data <= 8'h00;
+                  4'h3:  o_mcu_data <= { 7'd0, pat_mode_on };
                   default: o_mcu_data <= 8'h00;
                 endcase
               end

@@ -155,13 +155,33 @@ module tb;
     end
   end
 
+  // 0x153B (ported from tb_fir.v for 0x153D): words the dut wrote while the reference had already stopped (a triggered
+  // auto-mode capture the reference cut at its time-out, or a time-out capture whose stop the two designs place
+  // differently) differ until both write them again; they are skipped by the memory compare and counted. With the DDS
+  // gone an EXT capture with the pin driven never triggers and always runs to its time-out, which made these words show.
+  reg     mem_dirty [0:8191];
+  integer mdi, mem_dirty_n;
+  initial for (mdi = 0; mdi < 8192; mdi = mdi + 1) mem_dirty[mdi] = 0;
+  always @(posedge dut.sample_write_clock)
+    if (dut.sample_write_enable && dut.swc_adv)
+      mem_dirty[dut.sample_write_address_phys] <= !refd.sample_write_enable;
+
   // Whole-memory compare (K = 0 phase)
   integer mi, mem_diff;
   task compare_memory;
     begin
-      mem_diff = 0;
+      mem_diff = 0; mem_dirty_n = 0;
       for (mi = 0; mi < 8192; mi = mi + 1)
-        if (dut.samples.mem[mi] !== refd.samples.mem[mi]) mem_diff = mem_diff + 1;
+        if (mem_dirty[mi]) mem_dirty_n = mem_dirty_n + 1;
+        else if (dut.samples.mem[mi] !== refd.samples.mem[mi]) begin
+          mem_diff = mem_diff + 1;
+          // fpga-d2: the first differing words with both values and the capture's geometry, for the 0x153D decim question
+          if (eq_mismatch < 30 && mem_diff <= 4)
+            $display("  word %0d: dut %h ref %h (wa %0d/%0d, w_last %0d, ta %0d/%0d, trig %b/%b, swe %b/%b, pre %0d tot %0d)", mi,
+                     dut.samples.mem[mi], refd.samples.mem[mi], dut.sample_write_address, refd.sample_write_address, dut.w_last,
+                     dut.trigger_address, refd.trigger_address, dut.sampling_triggered, refd.sampling_triggered,
+                     dut.sample_write_enable, refd.sample_write_enable, pre_r, tot_r);
+        end
       eq_samples = eq_samples + 1;
       if (mem_diff != 0) begin
         eq_mismatch = eq_mismatch + 1;
@@ -401,7 +421,7 @@ module tb;
         wr1(8'h54, $random(seed));
         wr1(8'h56, $random(seed) & 8'hFD);                // bit 1 is peak detect since 0x153C (not reserved)
         wr2(8'h55, $random(seed));
-        wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT
+        wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT (3 acts as EXT)
         wr1(8'h16, {7'd0, rnd[1]});
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));
         wr1(8'h1A, {7'd0, rnd[2]});
@@ -419,7 +439,7 @@ module tb;
         gen_on = rnd[6];
         wr1(8'h50, {7'd0, gen_on});
         wr4(8'h51, 32'd85899346 + ($random(seed) & 32'h00FFFFFF));
-        wr4(8'h52, $random(seed));
+        wr4(8'h52, $random(seed) & 32'd0);               // 0x153D: 0x52 retired; the reference's DDS stays low (= the pattern's idle level)
         d1 = 1 + (rnd[27:25]); d2 = -(1 + rnd[30:28]);
         adc_mode = rnd[11] ? 1 : 0;
         if (!gen_on) begin
@@ -435,7 +455,8 @@ module tb;
         end else
           ext_en = 0;
         start_capture;
-        wait_done(4000);
+        wait_done(100000);                                // 0x153D: an EXT capture with the pin driven (pattern off) never
+                                                          // triggers and runs to its time-out (up to 1.8 ms at divider 9)
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
         bus_cmp_on = rnd[2];
@@ -497,6 +518,10 @@ module tb;
     logf = $fopen(logname, "w");
     $display("tb_decim: seed %0d, log %0s", seed, logname);
     #200;
+    //0x153D: the DUT has no DDS (its pin carries the pattern's idle level, 0, while driven); the reference's DDS output is
+    //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
+    wr4(8'h52, 32'd0);
+    wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
 
     //-------------------------------------------------------------------------------
     // Phase 1: K = 0 equivalence with 0x1533

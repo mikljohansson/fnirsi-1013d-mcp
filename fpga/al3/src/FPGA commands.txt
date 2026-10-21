@@ -47,6 +47,14 @@
 //    0x01 = 0 and the unread words with a lap flag (set when a write overwrites the oldest unread word, cleared by 0x69
 //    bit 1). With 0x69 = 0 (power-on) the capture is cycle-identical to 0x153C. Write 0x38 (display brightness) is
 //    unchanged (docs/plans/fpga-0x153c.md section 6, fpga/al3/README.md section 16).
+//  - 0x6C (index 0 / 1), 0x6D (new writes), 0x39 (new read), 0x51 / 0x52 retired (0x153D D2 / D3, docs/plans/fpga-0x153c.md
+//    section 7 reduced by the owner's cut of 2026-10-21; fpga/al3/README.md section 17): the generator is an accurate
+//    fractional square. Atlan4's DDS is gone; 0x50 = 1 drives the calibration pin with the square generator's level
+//    (power-on: the idle level 0). The square is a two-step continuous pattern (high n_h + f_h / 65536 clocks of 5 ns,
+//    low n_l + f_l / 65536), double-buffered behind 0x6D bit 5 so a change on the run is glitch-free and phase-continuous.
+//    The pulse pattern generator's steps 2..7, bursts, gap, marker, trigger source 0x15 = 3 and its trigger engine (0x6E,
+//    0x6F, 0x76-0x7D, read 0x42) of the fpga-d2 branch are not in this bitstream: writes to those codes are ignored, 0x15
+//    = 3 acts as EXT as up to 0x153C.
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 //  - Gone in 0x153C (docs/plans/fpga-0x153c.md section 13, the one-bitstream rule: our firmware never wrote or read
@@ -237,6 +245,18 @@
                   //0x1F / 0x20..0x23 at once. Read cost: the command byte plus 8 data strobes.
 //---------------------------------------------------------------------------------------
             //0x41 (touch panel address): gone in 0x153C
+            8'h39: //Square generator status (0x153D), 4 bytes; asynchronous (the generator runs on the 200 MHz clock)
+                  4'h0:  o_mcu_data <= { running, 1'b0, pending, 4'b0000, step };
+                    //bit7 the square runs (mode 3 started); bit5 a commit (0x6D bit 5) not yet taken (set for a few clocks
+                    //at most: the pair is taken as soon as the step in progress has three clocks left); bit0 the step in
+                    //progress (0 = the high step / entry 0, 1 = the low step / entry 1; 0 when idle). Bits 6, 4..1 read 0
+                    //(the pattern generator's in-gap bit and step index of the fpga-d2 branch)
+                  4'h1..4'h2: 0                      //(the fpga-d2 branch's bursts count) read 0
+                  4'h3:  o_mcu_data <= { 7'd0, mode_active };
+                    //bit0 0x6D mode == 3; bit1 (the fpga-d2 branch's marker seen) reads 0
+
+            //0x41 (touch panel address): gone in 0x153C; 0x42 (the fpga-d2 branch's pattern trigger engine status): not
+            //decoded, a read returns the previous read byte
 
 //***************************************************************************************
 //********************************* WRITING commands ************************************
@@ -291,6 +311,7 @@
                     //EXT: calibration pin P133, 3.3 V logic, generator must be off (cmd 0x50 = 0).
                     //Edge from cmd 0x16, mode/pretrigger/total/time-out unchanged, level (0x17) unused.
                     //trigger_address (cmd 0x14) = last sample written before the EXT edge, as for CH1/CH2.
+                    //0x153D: value 3 stays EXT (the pattern marker source of the fpga-d2 branch was cut).
 
             8'h16: //Setting the trigger edge (0x153C: the polarity per type, see 0x5E; edge type unchanged)
                     trigger_edge <= io_mcu_data[0] ^ (0x5E type is pulse width);   //the detect direction: the
@@ -351,26 +372,12 @@
                     
             8'h50: //Setting the output on or tristate (off = pin usable as EXT trigger input)
                    gen_out_enable <= io_mcu_data[0];
-                    
-            8'h51: //Loading of the four bytes of the clk out divider high byte first 
-                  4'h0:
-                    clk_out_divider[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_divider[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_divider[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_divider[7:0] <= io_mcu_data;
-            
-            8'h52: //Loading four bytes of the clk_out_duty divider high byte first
-                  4'h0:
-                    clk_out_duty[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_duty[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_duty[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_duty[7:0] <= io_mcu_data;               
+                    //0x153D: 1 = the pin carries the square generator's level (0x6C / 0x6D below; with the generator
+                    //off, the idle level of 0x6D bit 2, power-on 0). Every data byte writes bit 0 (the firmware's
+                    //4-byte write ends with the low byte).
+
+            8'h51, 8'h52: //Retired in 0x153D (the DDS phase increment and duty of 0x1532 .. 0x153C): no decoder entry,
+                          //the bytes are ignored. The square wave is the two-step generator of 0x6C / 0x6D.
 
 //---------------------------------------------------------------------------------------
 // Decimation filter (0x1534). Details: fpga/al3/README.md "Changes" section 3.
@@ -519,6 +526,48 @@
             8'h66: //Hold-off clear request, 1 byte
                     ho_clr_req <= io_mcu_data[0];      //1: the next 0x01 = 1 also clears the hold-off timer of 0x1B
                                                        //(one-shot, consumed by that 0x01 = 1)
+
+//---------------------------------------------------------------------------------------
+// Fractional square generator (0x153D, D2 / D3). Details: fpga/al3/README.md "Changes" section 17, docs/plans/fpga-0x153c.md
+// section 7 (reduced by the owner's cut of 2026-10-21 to the square the firmware's generator path uses). The generator
+// since the DDS went: 0x50 = 1 drives the calibration pin with the generator's level. Two entries (0x6C index 0 = the
+// high step, 1 = the low step), each a level and a duration of n + f / 65536 clocks of 5 ns (n >= 2): the edges land
+// within one clock of their ideal time and the mean period is exactly (n_h + n_l) + (f_h + f_l) / 65536 clocks (one
+// Bresenham accumulator, cleared at a start only). Mode (0x6D bits 1..0): 3 = continuous, 0 = off (the pin at the idle
+// level); 1 and 2 are not modes of this design and act as 0. A start = the write of mode 3 while idle (bit 4 accepted
+// with it); a mode-3 write while running is not a restart. The two entries are double-buffered: their writes land in
+// shadows, 0x6D bit 5 commits the pair; it is taken at once when the step in progress has at least three clocks left
+// (always, for the firmware's steps of 4 clocks and more), else at that step's boundary, so the step in progress completes
+// with its old duration and every step from the next boundary on is new: glitch-free, phase-continuous, the accumulator
+// kept. The square wave of the generator menu: entry 0 = high (n_h, f_h), entry 1 = low (n_l, f_l), mode 3: f = 200 MHz x
+// 65536 / P16, P16 = the period in 1/65536 clocks (section 7.4's P16 / H16 arithmetic, gen_pat.c). Power-on: everything 0
+// (off, the pin hi-Z until 0x50 = 1, then the idle level 0). The firmware's sequences (fpga_bus.c fpga_pat_square):
+// enable = 0x6D = 0, entry 0, entry 1, 0x6D = 0x33; a change on the run = entry 0, entry 1, 0x6D = 0x23; a static level =
+// 0x6D = 0x04 / 0x00 (fpga_pat_level); the pin = 0x50 (fpga_pat_drive).
+
+            8'h6C: //Square generator step, 7 bytes
+                  4'h0:
+                    { -, -, level, index[4:0] } <= io_mcu_data;   //index 0 = the high step, 1 = the low step (2 .. 31: the
+                                                    //write is ignored); bits 7, 6 (the fpga-d2 branch's end and mark
+                                                    //flags) are ignored
+                  4'h1..4'h4:
+                    n[31:0] <= io_mcu_data;         //integer duration, 5 ns clocks, high byte first; >= 2
+                  4'h5..4'h6:
+                    f[15:0] <= io_mcu_data;         //fraction, 1/65536 clock, high byte first; the entry is handed to the
+                                                    //generator's shadow on this byte
+
+            8'h6D: //Square generator control, 1 byte
+                    mode      <= io_mcu_data[1:0];  //3 continuous (starts by itself when written while idle), 0 off (the
+                                                    //pin at the idle level, at once); 1 and 2 act as 0
+                    idle      <= io_mcu_data[2];    //the level while off
+                    start     <= io_mcu_data[4];    //start now (meaningful with mode 3 only, which starts by itself)
+                    commit    <= io_mcu_data[5];    //the shadow entries 0 / 1 become the active pair (see above)
+                    //bits 3, 7..6 (the fpga-d2 branch's marker enable and start source) are ignored.
+                    //A 0x6D write takes effect 3 .. 4 clocks (15 .. 20 ns) after the data strobe's rising edge; step 0 of a
+                    //start begins 6 clocks after that (8 .. 9 clocks, 40 .. 45 ns after the strobe; tb_square.v measures it).
+
+            //0x6E, 0x6F, 0x76 .. 0x7D (the fpga-d2 branch's bursts, gap and pattern trigger engine): not decoded, the bytes
+            //are ignored (no mcu_state step either: every byte of such a write is the same ignored byte)
 
 //---------------------------------------------------------------------------------------
 // Hardware counter with min / max (0x153C, C3). Details: fpga/al3/README.md "Changes" section 13, the contract

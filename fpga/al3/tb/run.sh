@@ -56,7 +56,13 @@
 #      sequences at the contract's rate tiers contiguous across the ring end, the lap flag exactly at the write that
 #      overwrites the oldest unread word, the resync, the empty ring, stop and restart, normal captures before and after
 #      (0x69 = 0 = 0x153C). STREAM_CHUNKS chunks per keep-up tier (default 2).
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter|stream runs one testbench.
+#  18. tb_square.v (0x153D D2 / D3): the fractional square generator (0x6C index 0 / 1, 0x6D, 0x50, read 0x39; the pulse
+#      pattern generator of the D2 branch was cut to this by the owner): the generator on 0x50 alone (the cut registers
+#      and the retired DDS registers change nothing), the start latency, the firmware's SET_GEN square waves (1 kHz,
+#      999.5 Hz, 10 kHz 25 %, 1 MHz, 10 MHz, 7.3 MHz, 3.5 + 2.25 clocks, 2 + 2 clocks) with every edge within one clock
+#      of ideal and the mean period exact, the double buffer (glitch-free change at once, accumulator kept, two commits
+#      in a row, a commit while idle, modes 1 / 2 as off, stop, index >= 2 ignored).
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter|stream|square runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -181,6 +187,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = stream ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_stream.vvp" +seed=$SEED +chunks=${STREAM_CHUNKS:-2} | tee "$WORK/sim_stream.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_stream.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = square ]; then
+  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_square.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_square.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_square.vvp" +seed=$SEED +logfile="$WORK/square.log" | tee "$WORK/sim_square.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_square.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"

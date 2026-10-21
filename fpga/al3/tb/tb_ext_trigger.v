@@ -6,7 +6,7 @@
 // Phase 1 (equivalence): random CH1/CH2 trigger captures, generator settings and EXT pin activity
 //   with trigger source 0/1. Every output pin, the MCU read bus and the capture registers of dut
 //   and ref are compared continuously and must stay identical.
-// Phase 2 (directed): version word, 0x28 status, generator, EXT rising/falling trigger and
+// Phase 2 (directed): version word, 0x28 status, generator (0x153D: the 1 MHz pattern), EXT rising/falling trigger and
 //   trigger_address, glitch filter, short pulses, EXT ignored for source 0/1, EXT vs ADC trigger.
 `timescale 1ns / 1ps
 
@@ -346,7 +346,7 @@ module tb;
         gen_on = rnd[6];
         wr1(8'h50, {7'd0, gen_on});
         wr4(8'h51, 32'd85899346 + ($random(seed) & 32'h00FFFFFF)); // about 1 MHz
-        wr4(8'h52, $random(seed));
+        wr4(8'h52, $random(seed) & 32'd0);               // 0x153D: 0x52 retired; the reference's DDS stays low (= the pattern's idle level)
         d1 = 1 + (rnd[27:25]); d2 = -(1 + rnd[30:28]);
         // EXT activity only while the generator is off (else it would fight the pin)
         if (!gen_on) begin
@@ -362,7 +362,8 @@ module tb;
         end else
           ext_en = 0;
         start_capture;
-        wait_done(4000);
+        wait_done(100000);                                // 0x153D: an EXT capture with the pin driven (pattern off) never
+                                                          // triggers and runs to its time-out (up to 1.8 ms at divider 9)
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
         bus_cmp_on = rnd[2];
@@ -397,6 +398,10 @@ module tb;
 
     // Let the PLL model and the dividers start
     #200;
+    //0x153D: the DUT has no DDS (its pin carries the pattern's idle level, 0, while driven); the reference's DDS output is
+    //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
+    wr4(8'h52, 32'd0);
+    wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
 
     //-------------------------------------------------------------------------------
     // Phase 1: equivalence with Atlan4's 0x1532 design for trigger sources 0/1
@@ -413,30 +418,32 @@ module tb;
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------
-    // Generator mode unchanged: 1 MHz, 50 %, compared with the reference on the pin
-    mm0 = eq_mismatch;
-    eq_on = 1;
+    // Generator: 1 MHz, 50 % on the pin. 0x153D: the two-step continuous pattern (0x6C / 0x6D) replaced the DDS, so
+    // the pin is checked on its own (the reference's DDS is not written: its pin stays low, the pattern's idle level)
+    eq_on = 0;
     ext_en = 0;
     wr1(8'h50, 8'h01);
-    wr4(8'h51, 32'd85899346);
-    wr4(8'h52, 32'h80000000);
+    wr_cmd(8'h6C); wr_byte(8'h20); wr_byte(0); wr_byte(0); wr_byte(0); wr_byte(8'd100); wr_byte(0); wr_byte(0);   // entry 0: high 100 clocks
+    wr_cmd(8'h6C); wr_byte(8'h81); wr_byte(0); wr_byte(0); wr_byte(0); wr_byte(8'd100); wr_byte(0); wr_byte(0);   // entry 1: low 100 clocks, end
+    wr1(8'h6D, 8'h33);                                    // mode 3 | start | commit
     @(posedge pad_dut); t_rise1 = $time;
     repeat (10) @(posedge pad_dut);
     t_rise2 = $time;
     period_ns = (t_rise2 - t_rise1) / 10;
     $display("generator: mean period %0d ns over 10 cycles (expect 1000)", period_ns);
-    check(period_ns >= 990 && period_ns <= 1010, "generator 1 MHz period");
+    check(period_ns == 1000, "generator 1 MHz period (the 100 + 100 clock pattern)");
     $sformat(strength, "%v", pad_dut);
     check(strength[23:0] == "St1" || strength[23:0] == "St0", "generator drives the pin strongly when enabled");
     rd1(8'h28);
     check(rd8_d[1] == 1'b1, "0x28 bit1 = 1 while the generator is on");
+    wr1(8'h6D, 8'h00);                                    // pattern off: the pin at the idle level 0 while driven
+    #100;
+    check(pad_dut === 1'b0, "pattern off: the pin holds the idle level");
     wr1(8'h50, 8'h00);
     #100;
     $sformat(strength, "%v", pad_dut);
     $display("pin strength with generator off: %0s", strength[23:0]);
     check(strength[23:0] == "We0", "pin hi-Z with generator off (only the pull-down)");
-    check(eq_mismatch == mm0, "generator pin identical to reference");
-    eq_on = 0;
 
     //-------------------------------------------------------------------------------
     // 0x28 live level
@@ -616,7 +623,7 @@ module tb;
     check(done && rd16_d[12:0] == dut.w_last - 13'd200 + 13'd100, "auto mode time-out with EXT source: trigger_address = W - total + pretrigger");
 
     //-------------------------------------------------------------------------------
-    // Source 3 (reserved) acts as EXT
+    // Source 3 (reserved) acts as EXT (0x153D as built: the pattern marker source of the D2 branch was cut)
     setup_capture(2'd3, 1'b0, 1'b1, 32'd49, 13'd100, 13'd200);
     ext_val = 0;
     start_capture;
