@@ -254,6 +254,9 @@ class CaptureContext:
                              "pretrigger_samples": tr.pretrigger_samples, "total_samples": tr.total_samples}
         if self.decim is not None:
             d["decim"] = f"{self.decim.filter_name} N {self.decim.n} S {self.decim.shift}" if self.decim.k else "off"
+        if tr.trigger2 is not None:  # 1.26: the same text as CaptureInfo.settings_key
+            t2 = tr.trigger2
+            d["trig2"] = f"type {t2.type} flags {t2.flags} N {t2.n} H {t2.h} holdoff {t2.holdoff}"
         for i, c in sorted(self.channels.items()):
             for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
                 d[f"CH{i + 1}.{k}"] = getattr(c, k)
@@ -651,22 +654,34 @@ class Scope:
 
     def set_trigger2(self, *, type: int | str | None = None, polarity: int | str | None = None,
                      longer: bool | None = None, source: int | None = None, n: int | None = None, h: int | None = None,
-                     n2: int | None = None, level: int | None = None, level2: int | None = None,
-                     holdoff_ns: int | None = None, clear_holdoff: bool = False, both_cores: bool | None = None,
-                     range_: bool | None = None) -> P.Trigger:
-        """SET_TRIGGER2 (protocol 1.26, FPGA 0x153C, caps TRIG_TYPES): the trigger type and its parameters in the
-        contract's units. Starts from GET_TRIGGER's current block and changes what is given: ``type`` (P.TRIG_* or
-        'edge' / 'pulse_width' / 'nth_edge' / 'timeout' / 'runt' / 'window'), ``polarity`` (0 / 1 or the type's name,
+                     level: int | None = None, holdoff: int | None = None, holdoff_s: float | None = None,
+                     level2: int | None = None, both_cores: bool | None = None, range_: bool | None = None
+                     ) -> P.Trigger:
+        """SET_TRIGGER2 (protocol 1.26, FPGA 0x153C, caps TRIG_TYPES, row 66): the trigger type and its parameters in
+        the wire's units. Starts from GET_TRIGGER's current block and changes what is given: ``type`` (P.TRIG_* or
+        'edge' / 'pulse_width' / 'nth_edge' / 'timeout'), ``polarity`` (0 / 1 or the type's name,
         P.TRIG_POLARITY_NAMES), ``longer`` (pulse width: longer than ``n`` instead of shorter), ``n`` (pulse width /
         timeout: samples of the trigger stream; Nth edge: the count), ``h`` (Nth edge: idle samples, 0 = from the
-        arm), ``n2`` (0x153E range), ``level`` (raw 8-bit code), ``level2`` (0x153E), ``holdoff_ns`` (0 off),
-        ``clear_holdoff`` (the next ARM clears the running hold-off), ``both_cores`` / ``range_`` (0x153E flags)."""
+        arm), ``level`` (raw 8-bit code), ``holdoff`` (5 ns units) or ``holdoff_s`` (seconds, rounded), and the 0x153E
+        fields ``level2`` / ``both_cores`` / ``range_`` (refused by 1.26 firmware). A type change zeroes the fields the
+        new type does not use (the firmware refuses them otherwise) and gives N 1 where it must be at least 1. The
+        firmware writes 0x66 with every SET_TRIGGER2: the next ARM clears a hold-off still running."""
         cur = self.get_trigger(cached=False)
         if cur.trigger2 is None:
             raise ScopeError("set_trigger2 needs firmware with protocol 1.26 (GET_TRIGGER 52 bytes)")
         t2 = P.Trigger2(**cur.trigger2.__dict__)
         if type is not None:
-            t2.type = P.TRIG_TYPE_NAMES.index(type) if isinstance(type, str) else int(type)
+            new_type = P.TRIG_TYPE_NAMES.index(type) if isinstance(type, str) else int(type)
+            if new_type != t2.type:
+                t2.type = new_type
+                if new_type == P.TRIG_EDGE:
+                    t2.n, t2.h, t2.flags = 0, 0, t2.flags & ~P.TRIG2_F_LONGER
+                elif new_type == P.TRIG_NTH_EDGE:
+                    t2.n, t2.flags = max(1, min(P.TRIG2_MAX_NTH, t2.n)), t2.flags & ~P.TRIG2_F_LONGER
+                else:
+                    t2.n, t2.h = max(1, t2.n), 0
+                    if new_type != P.TRIG_PULSE_WIDTH:
+                        t2.flags &= ~P.TRIG2_F_LONGER
         if polarity is not None:
             if isinstance(polarity, str):
                 names = P.TRIG_POLARITY_NAMES.get(t2.type, ("0", "1"))
@@ -678,21 +693,22 @@ class Scope:
         for flag, bit in ((longer, P.TRIG2_F_LONGER), (range_, P.TRIG2_F_RANGE), (both_cores, P.TRIG2_F_BOTH_CORES)):
             if flag is not None:
                 t2.flags = (t2.flags & ~bit) | (bit if flag else 0)
-        t2.flags = (t2.flags & ~P.TRIG2_F_CLEAR_HOLDOFF) | (P.TRIG2_F_CLEAR_HOLDOFF if clear_holdoff else 0)
         if source is not None:
             t2.source = int(source)
         if n is not None:
             t2.n = int(n)
         if h is not None:
-            t2.n2_or_h = int(h)
-        if n2 is not None:
-            t2.n2_or_h = int(n2)
+            t2.h = int(h)
         if level is not None:
             t2.level = int(level)
         if level2 is not None:
             t2.level2 = int(level2)
-        if holdoff_ns is not None:
-            t2.holdoff_ns = int(holdoff_ns)
+        if holdoff is not None and holdoff_s is not None:
+            raise ValueError("give holdoff (5 ns units) or holdoff_s, not both")
+        if holdoff is not None:
+            t2.holdoff = int(holdoff)
+        if holdoff_s is not None:
+            t2.holdoff = P.holdoff_units(holdoff_s)
         t2.reserved = 0
         self._trig = P.Trigger.unpack(self._req(P.Cmd.SET_TRIGGER2, t2.pack()))
         return self._trig
