@@ -276,6 +276,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- ui-type (Opus, dispatched 05:13, done 05:4x, merged 05:48 as ae449b8): the trigger menu's Type row per ui-rows.md: trig_ui
+  module (ladder, word period, ranges, snap, settings words 202/203 with 0xA000, glyphs), the Pulse polarity row, the
+  keypad for N, a two-slot notice queue (time/div first), the shared No-trigger hint, the menu edits through fpga_trig_write
+  (SET_TRIGGER2's path), a host SET_TRIGGER2 syncs the menu; the Frequency response sweep arms the edge type around
+  pc_hal_arm; test_trig_ui 340 checks; gcc10 d14151b1 (provisional). Deviations: row labels stay white in the viewer, a
+  host timeout type shows no chosen box, the Nth glyph is two short steps with stubs (the mockup's comb renders solid).
 - mcp-c8 (Opus, dispatched 04:32, done 05:3x, merged 05:38 as bcb269b): protocol 1.26 on the host; Trigger2
   byte-identical to fw-c5; peak detect and GET_COUNTER wire formats from the contract (sent to fw-c6 / fw-c7 to match:
   SET_DECIM filter 4, shift-byte bits 7/6, mode 0x81, READ_RAW layout 3 = minima then maxima per channel, GET_CAPTURE_INFO
