@@ -297,6 +297,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- docs-153d (Sonnet, dispatched 17:31, branch docs-153d) and fw-left (Opus, dispatched 17:31, branch fw-left), owner 17:31 "do the
+  leftovers with Sonnet and Opus agents": docs-153d makes the user-facing docs name 0x153D as the release's bitstream (install,
+  agent-runbook, first-run, skills, README; no invented hashes; no patterns / runt / window / 0x153E); fw-left removes
+  pc_bode.c's has_fir and other always-true capability tests, ACAL_E_GAIN_NONE, and makes FORCE during a sequencer run
+  sensible. fw-left changes the image: the 0.2.105 pin is redone after its merge.
 - fw-105 done 17:0x, merged as 83df598: fw 0.2.105, PC_FW_FPGA_VERSION 0x153D; removed the dead checks (the logger's -2 / E_FPGA
   detail 1, roll's "needs 0x153D", the wizard's no-generator screen, Frequency response's caps test); CHANGELOG 0.2.105
   section, protocol row 67 numbered, firmware/AGENTS.md section 80 (bench checklist). Host tests green, check_vectors OK,
