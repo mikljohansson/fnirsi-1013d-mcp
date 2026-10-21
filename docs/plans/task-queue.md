@@ -297,6 +297,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-105 done 17:0x, merged as 83df598: fw 0.2.105, PC_FW_FPGA_VERSION 0x153D; removed the dead checks (the logger's -2 / E_FPGA
+  detail 1, roll's "needs 0x153D", the wizard's no-generator screen, Frequency response's caps test); CHANGELOG 0.2.105
+  section, protocol row 67 numbered, firmware/AGENTS.md section 80 (bench checklist). Host tests green, check_vectors OK,
+  ruff clean, 541 mcp tests. gcc10 image of 83df598: 811,008 B, sha256
+  8f92c74814a91cab06718613bf15c85f350756030f7185bd6b0b68811066b42d, pinned as backups/fw-0.2.105_8f92c748.bin. Needs the 0x153D
+  bitstream (fpga-d3, full runs in progress). Open: pc_bode.c has_fir test, ACAL_E_GAIN_NONE unused, install.md /
+  agent-runbook.md / first-run.md still name 0x153B (for the 0.3.0 docs pass).
 - fpga-c4's rerun on the final 0x153C source bd24bdf finished 16:5x: ALL PASS on both seeds (16 steps each, tb_fir 158 / 162
   checks, counter 115); the run text in the manifest, fpga/al3/README.md and fpga/al3/AGENTS.md updated by the coordinator
   (fpga-c4 was cut off by the 15:10 session limit and is retired). 0x153C stays unbenched until the owner's batch.
