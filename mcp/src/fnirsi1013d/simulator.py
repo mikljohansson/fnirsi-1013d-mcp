@@ -2624,10 +2624,7 @@ class Device:
         if self.pat_start_dev is None:
             return pend, 0, st3
         c = int((now - self.pat_start_dev) * P.PAT_CLOCK_HZ)
-        running, gap, step, bursts = pat.state_at(c)
-        if pat.mark_clocks(0, c + 1).size:
-            self.pat_marker_seen = True
-            st3 |= P.PAT_ST3_MARKER
+        running, gap, step, bursts = pat.state_at(c)  # the marker bit: a marker inside an armed capture (0x01 = 1)
         return (P.PAT_ST_RUNNING if running else 0) | (P.PAT_ST_GAP if gap else 0) | pend | (step & 0x0F), \
             min(bursts, 0xFFFF), st3
 
@@ -3712,7 +3709,7 @@ class Device:
             g.p16, g.h16, g.source, g.pattern = p16, h16, P.GEN_SOURCE_SQUARE, None
             if running:  # the step in progress completes with its old length
                 n_h, _, n_l, _ = P.gen_steps(cur.p16, cur.h16)
-                self.pat_pending_until = max(self.pat_pending_until, self.now()) + (max(n_h, n_l) + 1) * 5e-9
+                self.pat_pending_until = max(self.pat_pending_until, self.now()) + (2 * max(n_h, n_l) + 1) * 5e-9  # taken from step k + 2
             self.pat_start_dev = None
         if r.mask & P.SetGenReq.M_ENABLE:
             g.enable = 1 if r.enable else 0
@@ -3945,7 +3942,7 @@ class Device:
                              tuple((s.level, int(s.mark), s.d16) for s in steps))
         self.settings.gen = replace(g, source=P.GEN_SOURCE_PATTERN, pattern=pat, enable=int(driven))
         if h.commit and running_old:
-            self.pat_pending_until = self.now() + max(dd for _, _, dd in old.steps) / 65536 * 5e-9
+            self.pat_pending_until = self.now() + 2 * max(dd for _, _, dd in old.steps) / 65536 * 5e-9
         if h.mode == P.PAT_OFF:
             self.pat_start_dev = None
         armed = self.acq_state == P.AcqState.ARMED
@@ -4022,6 +4019,7 @@ class Device:
     def _ptrig_resp(self) -> P.PatternTriggerResp:
         t = self.ptrig
         st = P.PTRIG_ST_OWN | (P.PTRIG_ST_EVENT if self.ptrig_event else 0) | (t.type & 3) | \
+            (P.STATUS34_COUNTING if self.ptrig_armed and t.type != P.TRIG_EDGE else 0) | \
             (P.STATUS34_LONGER if t.flags & P.TRIG2_F_LONGER else 0) | \
             (P.STATUS34_EXT if t.source == P.TRIG_SOURCE_EXT else 0)
         left = max(0, (t.n & 0xFFFF) - 1) if t.type == P.TRIG_NTH_EDGE and self.ptrig_armed else 0

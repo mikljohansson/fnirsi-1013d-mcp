@@ -145,6 +145,56 @@ def test_logger_structs_match_the_firmware_vectors():
     assert h.ended and not h.running and data == b"" and h.format == P.LOG_FMT_HIGH8
 
 
+#: fw-d5's vectors (branch fw-d5 bda4607, docs/protocol-vectors.json section 5i)
+FW_D5 = {
+    "req_set_gen_p16_h16": "06000101ce0ca40d030000006706d28601000000",
+    "resp_gen_1_27": "0120000000000000000000004c400f000000000088130100ce0ca40d030000006706d28601000000",
+    "req_set_pattern_pulse_train": "02080a00000000000201010003000000102700000000000030e60200",
+    "resp_set_pattern": "02080a000000000002010100800100000000400d0300000003000000102700000000000030e60200",
+    "req_set_pattern_trigger_nth_ch2": "0200000103000000e80300008c000000000000000000000001010000",
+    "resp_set_pattern_trigger": "0200000103000000e80300008c000000000000000000000001010000a2000200",
+    "req_set_trigger2_marker": "000000030000000000000000800000000000000000000000",
+}
+
+
+def test_generator_and_pattern_structs_match_the_firmware_vectors():
+    v = {k: bytes.fromhex(x) for k, x in FW_D5.items()}
+    p16 = P.gen_p16(999_500)
+    h16 = P.gen_h16(p16, 5000)
+    assert (p16, h16) == (13113756878, 6556878439)
+    r = P.SetGenReq(P.SetGenReq.M_FREQ | P.SetGenReq.M_DUTY, 0, 1, 1, p16, h16)
+    assert r.pack() == v["req_set_gen_p16_h16"]
+    g = P.Gen(1, P.PAT_ST_PENDING, 0, P.gen_freq_mhz(p16), P.gen_duty_bp(h16, p16), P.PAT_ST3_ACTIVE,
+              P.GEN_SOURCE_SQUARE, p16, h16)
+    assert g.pack() == v["resp_gen_1_27"] and P.Gen.unpack(v["resp_gen_1_27"]).pending
+    steps = [P.PatternStep.from_seconds(50e-6, 1, True), P.PatternStep.from_seconds(950e-6, 0)]
+    hdr = P.PatternHeader(P.PAT_REPEAT, P.PAT_F_MARKER_TRIGGER, 10, 0, 2, 1, 1)
+    assert P.SetPatternReq(hdr, steps).pack() == v["req_set_pattern_pulse_train"]
+    resp = P.PatternResp(hdr, P.PAT_ST_RUNNING, P.PAT_ST3_ACTIVE, 0, P.pattern_burst16(steps), steps)
+    assert resp.pack() == v["resp_set_pattern"] and P.PatternResp.unpack(v["resp_set_pattern"]) == resp
+    t2 = P.Trigger2(P.TRIG_NTH_EDGE, 0, 0, P.TRIG_SOURCE_CH2, 3, 1000, 140, 0, 0, 0)
+    assert P.PatternTriggerReq(t2, 1, 1).pack() == v["req_set_pattern_trigger_nth_ch2"]
+    pr = P.PatternTriggerResp(t2, 1, 1, P.PTRIG_ST_OWN | P.STATUS34_COUNTING | P.TRIG_NTH_EDGE, 2)
+    assert pr.pack() == v["resp_set_pattern_trigger"]
+    assert P.Trigger2(source=P.TRIG_SOURCE_PATTERN).pack() == v["req_set_trigger2_marker"]
+
+
+def test_simulator_answers_the_firmware_vectors(sim_factory):
+    """The simulator's answers to fw-d5's requests have the firmware's bytes where they are deterministic."""
+    srv = gen_sim(sim_factory, ch2="square:freq=1kHz,amp=0.3")
+    v = {k: bytes.fromhex(x) for k, x in FW_D5.items()}
+    with Scope.connect(srv.url) as s:
+        s.set_gen(enable=True)
+        g = P.Gen.unpack(s.t.request(P.Cmd.SET_GEN, v["req_set_gen_p16_h16"]).payload)
+        assert g.pack()[2:] == v["resp_gen_1_27"][2:] and g.pending  # byte 1: the step in progress may differ
+        r = s.t.request(P.Cmd.SET_PATTERN_TRIGGER, v["req_set_pattern_trigger_nth_ch2"]).payload
+        assert r == v["resp_set_pattern_trigger"]
+        r = s.t.request(P.Cmd.SET_PATTERN, v["req_set_pattern_pulse_train"]).payload
+        assert r[:12] + r[13:] == v["resp_set_pattern"][:12] + v["resp_set_pattern"][13:]  # 12: the step now
+        assert s.t.request(P.Cmd.SET_TRIGGER2, v["req_set_trigger2_marker"]).payload[28:] == \
+            v["req_set_trigger2_marker"]
+
+
 # --- the pattern model (contract 7.2)----------------------------------------------------------------------------
 
 
