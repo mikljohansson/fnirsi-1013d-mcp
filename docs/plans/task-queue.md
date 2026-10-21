@@ -306,6 +306,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3b 19:0x: tb_seqcontract scenario L found an RTL fault in the full-rate source 646c453: the logger's W (read 0x38)
+  loaded only on a stored write; with the 0x05 ready wait now six write clocks (60 ns) instead of six words, no stored write
+  falls in the reset window at slow K = 0 rates and W kept the previous record's end (first 0x38 after LOG_START read W 46,
+  count 0; the firmware's base went 46 words off, occ wrapped, lap set). Fix: p_wa also loads at a reset edge (one OR term);
+  approved. Asked for an audit of every register loaded only on stored writes, with a check at D = 199999. The earlier
+  closing roll is void; rebuild and re-roll after the sims.
 - fpga-d3 ran out of context 18:4x (prompt too long) mid-way through the full-rate testbench work; its WIP saved and pushed as
   fc367e7 on fpga-d3; successor fpga-d3b (Fable) dispatched 18:4x to finish: testbenches, two-seed run.sh, timing, dist, docs.
 - fw-fullrate merged 18:5x (6fe3dad): one calibration class (GET_CAL / card layout kept, gated slots reserved 0, card header
