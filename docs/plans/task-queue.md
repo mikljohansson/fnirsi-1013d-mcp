@@ -306,6 +306,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3b stopped at the account's Fable limit 19:1x; its fix committed and pushed by the coordinator as 9ba3ddf on fpga-d3.
+  Owner 19:20: continue on Opus. fpga-d3c (Opus explicitly, dispatched 19:20, branch fpga-d3): the register audit, the
+  remaining testbench updates, timing re-rolls, the two-seed run.sh, dist and docs; reuses fpga-d3b's running smoke runs.
 - fpga-d3b 19:0x: tb_seqcontract scenario L found an RTL fault in the full-rate source 646c453: the logger's W (read 0x38)
   loaded only on a stored write; with the 0x05 ready wait now six write clocks (60 ns) instead of six words, no stored write
   falls in the reset window at slow K = 0 rates and W kept the previous record's end (first 0x38 after LOG_START read W 46,
