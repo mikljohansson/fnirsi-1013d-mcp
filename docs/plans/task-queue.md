@@ -6,6 +6,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [ ] **ACQ Filter row: three modes** (owner decision 2026-10-21 16:3x): the UI's Filter choice becomes Off, Average (= boxcar)
+  and Anti-alias (= CIC3 + FIR); every mode stays available over MCP (SET_DECIM unchanged, no FPGA change: boxcar / CIC2 /
+  CIC3 share one CIC chain, the FIR stays). When the host has set another mode (e.g. CIC2, CIC3 without FIR, boxcar + FIR)
+  the box shows that mode's own name; a press then steps through the three simplified modes only (from a host mode to the
+  next of Off / Average / Anti-alias: the mockup round decides which). Process: mockups first (docs/mockups/, the
+  ui-rows.md style) and an adversarial review per docs/ui-guidelines.md, then the firmware item (settings word migration for
+  saved CIC2 / CIC3 values, the warnings that name the Filter, the user guide, the Peak greying unchanged). Not dispatched.
 - **No 0x153E for 0.3.0** (owner decision 2026-10-21 16:15, after the walk-through of the 0x153E features): 0.3.0 ships on
   0x153D. Runt, window and the pulse-width range are dropped from the roadmap (owner: runt "rather special", window = check
   the dip or the spike separately, range "marginal"); both-core triggering stays the only later 0x153E candidate ("if we do
