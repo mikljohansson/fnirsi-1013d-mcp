@@ -272,6 +272,14 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-c4 pushed 7f6eb3a 14:0x (asked to push before its rerun on the final source finishes; the rerun text follows in one
+  more commit), merged 14:1x: dist/al3-0x153C.bin 282,898 B sha256 2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2,
+  padded 1 MiB 07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77, status unbenched, min firmware 0.2.104,
+  bitstreams.py check 10 consistent. TD h4: 6126 LUT (70.9 %), clk_200MHz 0 errors (+0.228 ns), cruft removal -206 LUT.
+  First two-seed run ALL PASS except the tb_fir seed-12345 divergence (a simulator event-ordering race of the div20 alias
+  wire, fixed in bd24bdf, same bytes); the 16-step rerun on bd24bdf is in progress. Flash checklist in fpga/al3/AGENTS.md
+  (probe ef 40 14, read --twice = the 0x153B image 1391978c...3b88, write --confirm-id ef4014, read-back 07393bf5...1f77).
+  The firmware's 0x0F writes do nothing on 0x153C and READ_LIVE was never built: no bench impact, cleanup queued (fw-cruft).
 - fpga-d1 done 13:4x, pushed e1ee9dd (not merged yet: the 0x153C dist must come from fpga-c4's cruft-removed source, so D1
   and D2 land after C4 and D3 integrates them on that source). Logger RTL: 0x69 bit 0 stream (no trigger accepted, two
   synchronised copies), bit 1 clears the lap; 0x6A u13 R = the next word the MCU reads, 0x01 = 1 resets R / unread / counter;
