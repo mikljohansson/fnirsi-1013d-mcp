@@ -2393,6 +2393,180 @@ void pc_glue_init(void)
     pc_usb_log_restart((uint8)pc_restart_info[1], (uint16)(pc_restart_info[1] ? pc_restart_info[2] : pc_restart_info[5]));
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger (fw-d4, FPGA 0x153D, protocol 1.27 row 67; pc_hal.h, fpga_log.h). One log: the FPGA side and the DDR ring in the
+//NOLOAD `.logring` section after .bss (fnirsi_1013d.ld: not in the image, not cleared at boot, nothing reads it before a
+//LOG_START resets the ring). While it runs the main loop is pc_log_loop: a drain step and a MAIN poll per iteration (the
+//poll answers LOG_READ, GET_STATUS, ...; the rest E_STATE 9), the Scope view frozen with its notice slot reading "Logging to
+//the host: 12 s, 6.0 MB" (redrawn every 500 ms). No UI pass runs: the FPGA ring holds 16 ms at the fastest tier, a pass
+//takes 15-40 ms. The person at the scope ends a log only through the host (LOG_STOP, or the host going away: pc_cmds.c).
+#include "fpga_log.h"
+
+static fpga_log pc_log;
+static uint8    pc_log_mem[PC_LOG_RING_BYTES] __attribute__((section(".logring"), aligned(64)));
+static uint32   pc_log_ms0, pc_log_ms1;
+static uint32   pc_log_div_saved;          //0x0D the UI had: written back when the log ends
+static uint8    pc_log_open;               //started and not yet finished (the divider to restore)
+
+//Decimal digits of v at p; returns their count
+static uint32 pc_log_u32(char *p, uint32 v)
+{
+  char   d[10];
+  uint32 n = 0, i;
+
+  do
+  {
+    d[n++] = (char)('0' + v % 10);
+    v /= 10;
+  } while(v);
+
+  for(i=0;i<n;i++)
+    p[i] = d[n - 1 - i];
+
+  return n;
+}
+
+//"12 s, 6.0 MB, 3 gaps" into t (at least 48 bytes)
+static void pc_log_stats(char *t)
+{
+  uint32 s  = ((pc_log.state == FPGA_LOG_RUNNING) ? timer0ticks : pc_log_ms1) - pc_log_ms0;
+  uint32 mb = (uint32)(pc_log.ring.wr / 104858);          //tenths of a MiB
+  char  *p  = t;
+
+  p += pc_log_u32(p, s / 1000);
+  *p++ = ' '; *p++ = 's'; *p++ = ','; *p++ = ' ';
+  p += pc_log_u32(p, mb / 10);
+  *p++ = '.';
+  *p++ = (char)('0' + mb % 10);
+  *p++ = ' '; *p++ = 'M'; *p++ = 'B';
+
+  if(pc_log.gaps)
+  {
+    *p++ = ','; *p++ = ' ';
+    p += pc_log_u32(p, pc_log.gaps);
+    memcpy(p, (pc_log.gaps == 1) ? " gap" : " gaps", 6);
+    p += strlen(p);
+  }
+
+  *p = 0;
+}
+
+//The Scope view's notice slot (pc_glue_scope_warning's place), white on black
+static void pc_log_notice(void)
+{
+  DISPLAYDATA save;
+  char t[80] = "Logging to the host: ";
+
+  pc_log_stats(t + strlen(t));
+  pc_draw_begin(&save);
+  display_set_fg_color(BLACK_COLOR);
+  display_fill_rect(146, 66, 440, 18);
+  display_set_font(&font_2);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
+  pc_draw_end(&save);
+}
+
+//The UI's divider back; the end time
+static void pc_log_finish(void)
+{
+  if(!pc_log_open)
+    return;
+
+  pc_log_open = 0;
+  pc_log_ms1  = timer0ticks;
+  fpga_write_cmd(0x0D);
+  fpga_write_int(pc_log_div_saved);
+}
+
+int pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit)
+{
+  pc_seq_cfg off;
+  int r;
+
+  //A UI conversion in flight and its firmware auto time-out are abandoned (the UI is in STOP: pc_cmds.c)
+  pc_ui_auto = 0;
+
+  pc_log_div_saved = fpga_divider;
+  pc_log_open      = 1;
+  fpga_write_cmd(0x0D);
+  fpga_write_int(divider);
+
+  //The filter / peak registers settled before the reset, the sequencer off
+  pc_dec_apply(dc);
+  memset(&off, 0, sizeof(off));
+  pc_seq_ui_conversion(0, dc, 0);
+  pc_seq_hw_pre_reset(&off);
+
+  r = fpga_log_start(&pc_log, ch_mask, format, limit, pc_log_mem, sizeof(pc_log_mem), PC_READY_POLLS);
+  pc_log_ms0 = pc_log_ms1 = timer0ticks;
+
+  if(r)
+    pc_log_finish();
+
+  return r;
+}
+
+void pc_hal_log_stop(uint8_t state)
+{
+  fpga_log_stop(&pc_log, state);
+  pc_log_finish();
+}
+
+void pc_hal_log_info(pc_hw_log *l)
+{
+  memset(l, 0, sizeof(*l));
+  l->state      = pc_log.state;
+  l->ch_mask    = pc_log.ch_mask;
+  l->format     = pc_log.format;
+  l->flags      = pc_log.flags;
+  l->produced   = pc_log.ring.wr;
+  l->sent       = pc_log.ring.rd;
+  l->gaps       = pc_log.gaps;
+  l->ring_bytes = PC_LOG_RING_BYTES;
+  l->ms         = ((pc_log.state == FPGA_LOG_RUNNING) ? timer0ticks : pc_log_ms1) - pc_log_ms0;
+}
+
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags)
+{
+  return pc_logring_read(&pc_log.ring, dst, max, word, flags);
+}
+
+//The log loop (from pc_glue_poll_main after the MAIN poll that started a log)
+static void pc_log_loop(void)
+{
+  uint32 next;
+  uint8  who;
+  char   t[48];
+
+  if(pc_log.state != FPGA_LOG_RUNNING)
+    return;
+
+  who            = fpga_trace_who;
+  fpga_trace_who = FPGA_WHO_HOST;
+  pc_log_notice();
+  next = timer0ticks + 500;
+
+  while(pc_log.state == FPGA_LOG_RUNNING)
+  {
+    fpga_log_drain(&pc_log);
+    pc_poll(&pc_sess, PC_CTX_MAIN);
+
+    if((int32)(timer0ticks - next) >= 0)
+    {
+      pc_log_notice();
+      next += 500;
+    }
+  }
+
+  //Ended (duration, LOG_STOP, an error): the UI's divider back, the summary as the slot's notice for a while
+  pc_log_finish();
+  fpga_trace_who = who;
+  pc_log_stats(t);
+  acq_view_notice_queue(1, "Log ended: ", t, "");
+}
+//D4 logger end
+
 void pc_glue_poll_main(void)
 {
   if(pc_ready)
@@ -2402,6 +2576,9 @@ void pc_glue_poll_main(void)
     fpga_trace_who = FPGA_WHO_HOST;
     pc_poll(&pc_sess, PC_CTX_MAIN);
     fpga_trace_who = who;
+
+    //D4 logger: a LOG_START in this poll: the main loop is the log loop until the log ends
+    pc_log_loop();
   }
 
   pc_ui_auto_service();

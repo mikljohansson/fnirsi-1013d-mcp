@@ -30,7 +30,7 @@ CMDS = {
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
-    "GET_COUNTER": 0x0213, "SET_TRIGGER2": 0x0219,
+    "GET_COUNTER": 0x0213, "LOG_START": 0x0214, "LOG_READ": 0x0215, "LOG_STOP": 0x0216, "SET_TRIGGER2": 0x0219,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401, "CAL_PROBE": 0x0402,
@@ -121,6 +121,13 @@ REQUESTS = [
     # appended (fw-c7, protocol 1.26, FPGA 0x153C counter)
     ("GET_COUNTER", struct.pack("<BBBBB3x", 0, 0, 0, 0, 0),
      "1.26 (fw-c7): read the hardware counter's latest result (what 0; the other fields are ignored)"),
+    # appended (fw-d4, protocol 1.27, FPGA 0x153D streaming logger)
+    ("LOG_START", struct.pack("<BBHIII", 1, 0, 0, 399, 0, 0),
+     "1.27 (fw-d4): log CH1, format 0 (legacy 8-bit), divider 399 (500 kS/s: the 1 ch 8-bit tier), until LOG_STOP"),
+    ("LOG_READ", struct.pack("<II", 65536, 0),
+     "1.27 (fw-d4): the next chunk of the log, at most 65536 bytes (whole words); returns at once"),
+    ("LOG_STOP", b"",
+     "1.27 (fw-d4): stop the log (the FPGA's tail is read into the DDR ring); the LOG summary"),
 ]
 
 
@@ -746,6 +753,61 @@ def build():
         "1.26 (fw-c7) GET_COUNTER E_BAD_ARG: detail = the byte offset of the field (0 what, 1 gate, 2 source, 4 "
         "hysteresis > a non-zero level), then the text; nothing is configured then",
         [decoded(CMDS["GET_COUNTER"], 84, ep, status=4, flags=FLAG_RESPONSE)])
+
+    # 5h. Protocol 1.27 (fw-d4, section 14 row 67): the FPGA 0x153D streaming logger, byte-exact with test_session.c
+    # test_logger and the mcp's layouts (mcp-d6). LOG_START 16 bytes: u8 channels, u8 format, u16 0, u32 divider, u32
+    # duration_ms, u32 0. LOG (LOG_START / LOG_STOP response) 48 bytes: u8 state, u8 channels, u8 format, u8 flags, u32
+    # divider, u32 duration_ms, u32 sample clocks, u64 bytes produced, u64 bytes sent, u32 gaps, u32 DDR ring bytes, u32 ms,
+    # u32 0. LOG_READ chunk: u32 seq, u32 FPGA word counter of the first word, u32 bytes, u8 flags (bit 0 running, 1 gap,
+    # 2 ended, 3 the gap includes words the full DDR ring refused), u8 format, u16 0, then the bytes
+    p = struct.pack("<BBHIII", 3, 2, 0, 1599, 10000, 0)
+    f = frame(CMDS["LOG_START"], 90, p)
+    add("req_log_start_2ch_16bit_10s", f, [ev_frame(CMDS["LOG_START"], 90, p)],
+        "1.27 (fw-d4): CH1 + CH2, format 2 (filtered u16, SET_DECIM filter 1..3 first), divider 1599 (N 1600: 125 kS/s, "
+        "the 2 ch 16-bit tier), 10 s",
+        [decoded(CMDS["LOG_START"], 90, p)])
+    p = struct.pack("<BBHIII", 1, 3, 0, 799, 0, 0)
+    f = frame(CMDS["LOG_START"], 91, p)
+    add("req_log_start_peak", f, [ev_frame(CMDS["LOG_START"], 91, p)],
+        "1.27 (fw-d4): CH1, format 3 (peak min / max pairs, SET_DECIM filter 4 first), divider 799 (window 800: 250 kS/s)",
+        [decoded(CMDS["LOG_START"], 91, p)])
+    lb = struct.pack("<BBBBIIIQQIIII", 1, 1, 0, 0, 399, 100, 400, 0, 0, 0, 8 << 20, 0, 0)
+    assert len(lb) == 48
+    f = frame(CMDS["LOG_START"], 92, lb, flags=FLAG_RESPONSE)
+    add("resp_log_start_1_27", f, [],
+        "1.27 (fw-d4) LOG_START response (LOG, 48 bytes): state 1 running, CH1, format 0, flags 0, divider 399, 100 ms, "
+        "400 clocks per sample (D + 1), 0 bytes produced / sent, 0 gaps, DDR ring 8 MiB, 0 ms",
+        [decoded(CMDS["LOG_START"], 92, lb, flags=FLAG_RESPONSE)])
+    lb = struct.pack("<BBBBIIIQQIIII", 3, 3, 2, 3, 1599, 0, 1600, 20000000, 19996000, 2, 8 << 20, 40012, 0)
+    f = frame(CMDS["LOG_STOP"], 93, lb, flags=FLAG_RESPONSE)
+    add("resp_log_stop_1_27", f, [],
+        "1.27 (fw-d4) LOG_STOP response: state 3 stopped, CH1 + CH2, format 2, flags 3 (a lap gap and a gap because the "
+        "DDR ring was full), divider 1599, until stopped, 1600 clocks, 20 MB produced, 4000 bytes still unread, 2 gaps, "
+        "8 MiB ring, 40.012 s",
+        [decoded(CMDS["LOG_STOP"], 93, lb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<IIIBBH", 3, 150, 20, 0x03, 0, 0) + bytes(((w * 7 + k) & 0xFF) for w in range(150, 160) for k in range(2))
+    f = frame(CMDS["LOG_READ"], 94, cb, flags=FLAG_RESPONSE)
+    add("resp_log_read_1_27_gap", f, [],
+        "1.27 (fw-d4) LOG_READ response: chunk 3, words 150..159 of a CH1 format 0 log (2 bytes per word: core B then "
+        "core A), 20 bytes, flags 0x03 = running | gap (the counter jumped from 100 to 150: 50 words lost)",
+        [decoded(CMDS["LOG_READ"], 94, cb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<IIIBBH", 7, 4242, 0, 0x04, 1, 0)
+    f = frame(CMDS["LOG_READ"], 95, cb, flags=FLAG_RESPONSE)
+    add("resp_log_read_1_27_ended", f, [],
+        "1.27 (fw-d4) LOG_READ response after the end with nothing left: 0 bytes, flags 0x04 ended, format 1",
+        [decoded(CMDS["LOG_READ"], 95, cb, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 1) + b"rate > 500 kB/s: 500k 1ch 8b, 250k 16b or 2ch, 125k 2ch 16b"
+    f = frame(CMDS["LOG_START"], 96, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_log_start_e_bad_arg_rate", f, [],
+        "1.27 (fw-d4) LOG_START E_BAD_ARG detail 1: the rate is above the contract's tiers (sample rate x bytes per sample "
+        "x channels > 500,000 B/s); details 0 channels, 2 format (or the SET_DECIM filter does not fit it), 4 divider",
+        [decoded(CMDS["LOG_START"], 96, ep, status=4, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 9) + b"logging: LOG_STOP first"
+    f = frame(CMDS["ARM"], 97, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_e_state_logging", f, [],
+        "1.27 (fw-d4) any command outside the F_BUSY / read-only sets and LOG_READ / LOG_STOP while logging: E_STATE "
+        "detail 9",
+        [decoded(CMDS["ARM"], 97, ep, status=8, flags=FLAG_RESPONSE)])
 
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
