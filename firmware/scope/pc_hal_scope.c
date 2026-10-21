@@ -266,7 +266,7 @@ void pc_hal_trigger_read(pc_hw_trigger *t)
 {
   int32 level = (int16)scopesettings.triggerlevel;      //the UI stores the unclamped level
 
-  t->source     = ((scopesettings.triggerchannel == 2) && fpga_trig_marker) ? 3 : scopesettings.triggerchannel;   //D5
+  t->source     = scopesettings.triggerchannel;
   t->edge       = scopesettings.triggeredge;
   t->level      = (level < 0) ? 0 : ((level > 255) ? 255 : (uint8_t)level);
   t->ui_mode    = scopesettings.triggermode;
@@ -325,9 +325,7 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
   if(mask & PC_TRG_SOURCE)
   {
     //Atlan4 bitstreams compare core A only; the stock trigger core is unverified       BENCH: T10
-    //D5 pattern: source 3 (the marker) is the EXT channel with 0x15 = 3; the pin stays the pattern's output
-    fpga_trig_marker             = (uint8)(t->source == 3);
-    scopesettings.triggerchannel = (t->source == 3) ? 2 : t->source;
+    scopesettings.triggerchannel = t->source;
     fpga_set_trigger_channel();
     fpga_set_trigger_level();
 
@@ -416,72 +414,10 @@ void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
   }
 }
 
-//D5 pattern (fw-d5, FPGA 0x153D): pc_hal.h
-void pc_hal_pattern_write(const pc_hw_pattern *p)
+uint8_t pc_hal_gen_status(void)
 {
-  fpga_pat_cfg c;
-  uint32       i;
-  int          drive = (p->mode != 0) && !(p->flags & PC_PAT_F_HIZ);
-
-  memset(&c, 0, sizeof(c));
-  c.mode = p->mode;
-  c.ctl  = (uint8)(p->flags & (PC_PAT_F_IDLE | PC_PAT_F_MARKTRIG | PC_PAT_F_SRC));
-  c.n    = p->n;
-  c.r    = p->r;
-  c.gap  = p->gap;
-
-  for(i=0;i<p->n;i++)
-  {
-    c.step[i].flags = (uint8)(((p->step[i].flags & PC_PAT_S_LEVEL) ? FPGA_PAT_S_LEVEL : 0) |
-                              ((p->step[i].flags & PC_PAT_S_MARK) ? FPGA_PAT_S_MARK : 0));
-    c.step[i].frac  = p->step[i].frac;
-    c.step[i].dur   = p->step[i].dur;
-  }
-
-  //A fresh start (or off) stops what runs first, at the new idle level, so no entry of the old table mixes with the new
-  if(p->start || !p->mode)
-    fpga_pat_ctl((uint8)(c.ctl & FPGA_PAT_CTL_IDLE));
-
-  fpga_pat_drive(drive);
-  fpga_pat_load(&c, p->commit, p->start);
-
-  //The UI's generator switch shows whether the pin is driven (its frequency and duty stay the square's); switching it
-  //off on the screen stops the pattern (fpga_on_off_generator), changing its frequency replaces it with the square
-  {
-    DISPLAYDATA save;
-
-    fpgasettings.gen_enable = (uint8)drive;
-    pc_draw_begin(&save);
-    scope_generator_settings(0);
-    pc_draw_end(&save);
-  }
+  return fpga_pat_status();
 }
-
-void pc_hal_pattern_status(uint8_t st[4])
-{
-  fpga_pat_status(st);
-}
-
-void pc_hal_ptrig_read(pc_hw_ptrig *p)
-{
-  p->source    = fpga_ptrig.source;
-  p->polarity  = fpga_ptrig.polarity;
-  p->level     = fpga_ptrig.level;
-  p->x.type    = fpga_ptrig.x.type;
-  p->x.flags   = fpga_ptrig.x.longer ? PC_TRG_F_LONGER : 0;
-  p->x.n       = fpga_ptrig.x.n;
-  p->x.h       = fpga_ptrig.x.h;
-  p->x.holdoff = 0;
-  p->armed     = fpga_ptrig.armed;
-  p->rearm     = fpga_ptrig.rearm;
-  p->route     = fpga_ptrig.route;
-}
-
-void pc_hal_ptrig_status(uint8_t st[3])
-{
-  fpga_ptrig_status(st);
-}
-//D5 pattern end
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition
@@ -651,8 +587,6 @@ static void pc_ext_generator_off(void)
 
 void pc_glue_ext_selected(void)
 {
-  fpga_trig_marker = 0;           //D5: the menu's EXT is the pin, not the marker
-
   if(pc_ready)
   {
     fpga_set_trigger_channel();
@@ -816,8 +750,8 @@ static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 //Write c to the FPGA and wait for the filter to settle: 0x53 / 0x56 where they differ from what the FPGA holds, 0x54 and
 //the 16-bit level at every arm with K >= 1 (fw 0.2.87, fpga_decim_write: a shift written for another divider cannot
 //survive an arm)
-//The 16-bit trigger level (0x55, and the pattern trigger engine's 0x79) for the 8-bit level on channel chan (0 CH1, 1
-//CH2, 2 EXT) under the decimation c, as the readout converts (D5 pattern: shared by both engines)
+//The 16-bit trigger level (0x55) for the 8-bit level on channel chan (0 CH1, 1 CH2, 2 EXT) under the decimation c, as
+//the readout converts
 static uint16 pc_dec_level16(const pc_decim_cfg *c, uint8 chan, int32 level)
 {
   level = (level < 0) ? 0 : ((level > 255) ? 255 : level);
@@ -868,10 +802,6 @@ static void pc_dec_apply(const pc_decim_cfg *c)
     //the raw code whose mean-core full-class correction (pc_glue_decim_read's) gives the UI level
     fpga_set_decim_level(pc_dec_level16(c, scopesettings.triggerchannel, (int16)scopesettings.triggerlevel));
 
-    //D5 pattern: the pattern trigger engine compares the same 16-bit stream against its own level (0x79)
-    if(fpga_ptrig.armed)
-      fpga_ptrig_level16(pc_dec_level16(c, fpga_ptrig.source, fpga_ptrig.level));
-
     //(K + 2) output periods, (K + 10) N x 5 ns + 1 us with the FIR; timer0 ticks are 1 ms, + 1 for the partial tick
     if(settle)
       timer0_delay((pc_decim_settle_us(c) + 999) / 1000 + 1);
@@ -880,31 +810,6 @@ static void pc_dec_apply(const pc_decim_cfg *c)
   pc_dec_cur     = *c;
   pc_dec_written = 1;
 }
-
-//D5 pattern: after pc_dec_apply (it shares pc_dec_level16 and pc_dec_cur)
-void pc_hal_ptrig_write(const pc_hw_ptrig *p)
-{
-  fpga_ptrig_cfg c;
-
-  memset(&c, 0, sizeof(c));
-  c.source   = p->source;
-  c.polarity = p->polarity;
-  c.level    = p->level;
-  c.x.type   = p->x.type;
-  c.x.longer = (uint8)((p->x.flags & PC_TRG_F_LONGER) != 0);
-  c.x.n      = p->x.n;
-  c.x.h      = p->x.h;
-  c.armed    = p->armed;
-  c.rearm    = p->rearm;
-  c.route    = p->route;
-
-  //0x79 for the decimation the capture runs (the engine sees the same 16-bit stream); pc_dec_apply re-writes it at
-  //every arm while the engine is armed. Before the first arm: the plain 8-bit level in the high byte
-  c.level16 = pc_dec_written ? pc_dec_level16(&pc_dec_cur, p->source, p->level) : (uint16)(p->level << 8);
-
-  fpga_ptrig_write(&c);
-}
-//D5 pattern end
 
 void pc_glue_ui_decim_arm(void)
 {
@@ -1596,7 +1501,6 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = scopesettings.samplerate;
   b[n++] = scopesettings.long_mode;
   b[n++] = scopesettings.triggerchannel;
-  b[n++] = fpga_trig_marker;           //D5: source 3 (the pattern marker)
   b[n++] = scopesettings.triggeredge;
   b[n++] = scopesettings.triggermode;
   b[n++] = scopesettings.alwaystrigger50;
@@ -2512,9 +2416,6 @@ void pc_glue_init(void)
     //fw-c5 (0x153C): the trigger extension at its power-on state (edge, no hold-off) and the hold-off clear request for
     //the first arm: a FEL load leaves the FPGA as the previous firmware left it (fpga_bus.h)
     fpga_trig_write(&fpga_trig, 1);
-    //D5 pattern (0x153D): the pattern trigger engine disarmed at its power-on state (a FEL load can leave it armed);
-    //the generator itself was programmed by fpga_on_off_generator before this
-    fpga_ptrig_write(&fpga_ptrig);
     //C7 counter: 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source (fpga_counter.h); the timing cards take the
     //counter's values from here on (ui_meas.c, the pass in pc_glue_counter_pass)
     fpga_counter_boot();

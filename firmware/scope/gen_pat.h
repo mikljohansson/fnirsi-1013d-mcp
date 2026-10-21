@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// gen_pat.h - the generator as a two-step pattern (FPGA 0x153D, fw-d5, protocol 1.27; docs/plans/fpga-0x153c.md 7.2 and
+// gen_pat.h - the generator as a fractional two-step square (FPGA 0x153D, fw-d5, protocol 1.27; docs/plans/fpga-0x153c.md 7.2 and
 // 7.4): the integer maths from a frequency in mHz and a duty in basis points to the period P16 and the high part H16 in
 // 1/65536 of a 5 ns clock, the split into the two steps (n_h + f_h / 65536 high, n_l + f_l / 65536 low) and back. No FPU,
 // no globals, host-buildable (host_tests/test_fpga_bus.c test_gen_formulas, host_tests/test_session.c).
@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 
-#define GP_CLK_HZ        200000000u                    //the pattern clock (clk_200MHz), 5 ns
+#define GP_CLK_HZ        200000000u                    //the generator clock (clk_200MHz), 5 ns
 #define GP_NUM           (65536ull * 200000000000ull)  //2^16 x 2e11: P16 x f_mHz
 #define GP_STEP_MIN      2u                            //shortest step, clocks (0x6C duration >= 2)
 #define GP_STEP_MAX      0xFFFFFFFFu                   //u32 integer duration

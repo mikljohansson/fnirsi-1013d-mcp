@@ -70,7 +70,7 @@ typedef struct
 {
   uint8_t  state;
   uint8_t  ch;                    //screens 2-3: channel in focus
-  uint8_t  al3;                   //bitstream with the generator (0x50 and the pattern, 0x153D) (else screen 2 is CW_GAIN_NA)
+  uint8_t  al3;                   //bitstream with the generator (0x50 and the square, 0x153D) (else screen 2 is CW_GAIN_NA)
   uint8_t  action;                //CW_ACT_*, taken by cw_take
   uint8_t  action_ch;
   uint8_t  zero_st[2];            //CW_Z_*

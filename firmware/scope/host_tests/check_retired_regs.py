@@ -10,6 +10,9 @@ decode them either: this source check is what keeps them out.
 byte held in the channel settings (`averagecommand`, written later with fpga_write_cmd(settings->...)) until fw-roll
 moved it onto the 0x153D logger stream, so the check also fails on a `...command = 0x..` assignment of a retired code.
 
+0x153D's pattern generator was cut to the fractional square (owner, 2026-10-21; fw-nopat, fpga-d3): the repeat count
+0x6E, the gap 0x6F, the pattern trigger engine's writes 0x76..0x7D and its status read 0x42 are gone with it.
+
 Usage: python3 -I check_retired_regs.py <firmware/scope directory>
 """
 
@@ -25,6 +28,10 @@ RETIRED = {
     0x27: "live ADC pins, CH2",
     0x3C: "touch panel address write",
     0x41: "touch panel address read",
+    0x42: "pattern trigger engine status (cut)",
+    0x6E: "pattern repeat count (cut)",
+    0x6F: "pattern gap (cut)",
+    **{c: "pattern trigger engine (cut)" for c in range(0x76, 0x7E)},
 }
 PATTERN = re.compile(r"\b(?:fpga_write_cmd|fpga_write_u24|seq_w8)\s*\(\s*0x([0-9A-Fa-f]{1,2})\s*\)")
 #: a command byte kept in the channel settings (adc1command, the former averagecommand, ...) and written later

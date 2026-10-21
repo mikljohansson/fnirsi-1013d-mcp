@@ -109,7 +109,6 @@ void pc_variant_init(uint16_t version, pc_variant *v)
                   PC_CAP_PEAK_DETECT |                                                                 //C6 peak detect
                   PC_CAP_COUNTER |                                                                     //C7 counter
                   PC_CAP_LOGGER |                                                                      //D4 logger
-                  PC_CAP_PATTERN_GEN | PC_CAP_PATTERN_TRIGGER |                                        //D5 pattern
                   PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
 
 #if PC_DEBUG
@@ -424,8 +423,7 @@ static uint16_t pc_features(const pc_session *s)
          PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE | PC_FEAT_W_TRIG_TYPES |
          PC_FEAT_W_PEAK |                                                                 //C6 peak detect
          PC_FEAT_W_COUNTER |                                                              //C7 counter
-         PC_FEAT_W_LOGGER |                                                                //D4 logger
-         PC_FEAT_W_PATTERN | PC_FEAT_W_PATTERN_TRIGGER;                                   //D5 pattern
+         PC_FEAT_W_LOGGER;                                                                 //D4 logger
 }
 
 //1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
@@ -657,10 +655,10 @@ static uint32_t pc_trigger_body(pc_session *s, uint8_t *p)
   return PC_TRIGGER_LEN;
 }
 
-//1.27 (fw-d5, FPGA 0x153D): the generator is the pattern generator's two-step square. What is in effect: SET_GEN's or
-//SET_PATTERN's state until the UI's generator settings change, else the UI's (whole Hz / %, through the same P16 / H16
-//formulas as fpga_control.c). The 0x39 status is read when the request runs in the main loop (refresh), else the last one
-//read is reported (GET_GEN inside a menu).
+//1.27 (fw-d5, FPGA 0x153D): the generator is a fractional two-step square. What is in effect: SET_GEN's state until the
+//UI's generator settings change, else the UI's (whole Hz / %, through the same P16 / H16 formulas as fpga_control.c). The
+//0x39 status is read when the request runs in the main loop (refresh), else the last one read is reported (GET_GEN
+//inside a menu).
 static void pc_gen_now(pc_session *s, uint8_t *en, uint64_t *p16, uint64_t *h16)
 {
   uint32_t hz;
@@ -669,10 +667,7 @@ static void pc_gen_now(pc_session *s, uint8_t *en, uint64_t *p16, uint64_t *h16)
   pc_hal_gen_read_ui(en, &hz, &pct);
 
   if(s->gen_valid && ((*en != s->gen_ui_en) || (hz != s->gen_ui_hz) || (pct != s->gen_ui_pct)))
-  {
     s->gen_valid = 0;
-    s->gen_src   = 0;
-  }
 
   if(s->gen_valid)
   {
@@ -692,16 +687,14 @@ static uint32_t pc_gen_body(pc_session *s, uint8_t *p, int refresh)
   pc_gen_now(s, &en, &p16, &h16);
 
   if(refresh)
-    pc_hal_pattern_status(s->pat_st);
+    s->gen_st = pc_hal_gen_status();
 
+  //2..11, 22, 23 reserved (0): the bursts, the marker and the source of the 1.27 drafts' patterns
   memset(p, 0, PC_GEN_LEN);
   p[0] = en;
-  p[1] = s->pat_st[0];
-  pc_put_u16(p + 2, (uint16_t)((s->pat_st[1] << 8) | s->pat_st[2]));
-  p[22] = s->pat_st[3];
-  p[23] = s->gen_src;
+  p[1] = s->gen_st;
 
-  if(!s->gen_src && p16)
+  if(p16)
   {
     pc_put_u64(p + 12, gp_mhz_from_p16(p16));
     pc_put_u16(p + 20, gp_bp_from_h16(p16, h16));
@@ -744,7 +737,7 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   resp[15] = 2;
   pc_put_u32(resp + 16, 200000000u);
   pc_put_u32(resp + 20, s->var.caps);
-  pc_put_u32(resp + 24, GP_CLK_HZ);                                                  //1.27: the pattern clock (was the DDS's 50 MHz)
+  pc_put_u32(resp + 24, GP_CLK_HZ);                                                  //1.27: the generator clock (was the DDS's 50 MHz)
   pc_put_u16(resp + 28, s->var.max_total);
   pc_put_u16(resp + 30, 80);
   resp[32] = 0;                                                                      //read_lag, BENCH: T3
@@ -1231,19 +1224,7 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   //detail = bit number of the offending field (P-8.3)
   if(mask & 0x01)
   {
-    if(req[2] > 3)   return pc_error(s, PC_E_BAD_ARG, 0, "source");
-
-    //D5 pattern: source 3 is the pattern's marker, an edge for the qualifier (SET_TRIGGER2 type 0 first)
-    if(req[2] == 3)
-    {
-      pc_hw_trig_ext x;
-
-      pc_hal_trig_ext_read(&x);
-
-      if(x.type != PC_TRG_T_EDGE)
-        return pc_error(s, PC_E_BAD_ARG, 0, "source 3 (the pattern marker): edge type only");
-    }
-
+    if(req[2] > 2)   return pc_error(s, PC_E_BAD_ARG, 0, "source");
     t.source = req[2];
     hwmask |= PC_TRG_SOURCE;
   }
@@ -1315,15 +1296,27 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   return PC_OK;
 }
 
-//D5 pattern
-//The SET_TRIGGER2 body checks shared by the capture trigger and the pattern trigger engine (detail = the byte offset);
-//max_src: 3 for the capture (the marker, edge type only), 2 for the engine
-static int pc_trig2_check(pc_session *s, const uint8_t *req, uint8_t max_src)
+//----------------------------------------------------------------------------------------------------------------------------------
+// SET_TRIGGER2 (1.26, fw-c5, FPGA 0x153C; docs/protocol.md row 66, docs/plans/fpga-0x153c.md section 3): the trigger
+// definition in one 24-byte request, every field written (no mask): 0 u8 type, 1 u8 polarity, 2 u8 flags, 3 u8 source,
+// 4 u32 N, 8 u32 H (N2 on 0x153E), 12 u16 level (0..255: the 8-bit code, as SET_TRIGGER), 14 u16 level2 (0x153E, 0),
+// 16 u32 hold-off (5 ns units), 20 u32 0. Nothing is converted: N and H are samples of the trigger stream. The edge
+// trigger's registers take source, polarity (0x16) and level as SET_TRIGGER writes them; the extension registers are
+// written at once and the hold-off clear is requested for the next arm (pc_hal_trig_ext_write). Response: the
+// GET_TRIGGER body. SET_TRIGGER stays for the edge type's fields, the geometry and the mode. Runt / window / range /
+// both cores (0x153E) are refused: one bitstream per firmware, no reserved behaviour.
+
+static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint8_t  type = req[0], pol = req[1], flags = req[2], src = req[3];
-  uint32_t n = pc_get_u32(req + 4), h = pc_get_u32(req + 8);
+  uint32_t n = pc_get_u32(req + 4), h = pc_get_u32(req + 8), hold = pc_get_u32(req + 16);
   uint16_t level = pc_get_u16(req + 12), level2 = pc_get_u16(req + 14);
+  pc_hw_trigger  t;
+  pc_hw_trig_ext x;
 
+  (void)len;
+
+  //detail = the byte offset of the field (section 14 row 4)
   if((type == PC_TRG_T_RUNT) || (type == PC_TRG_T_WINDOW))
     return pc_error(s, PC_E_BAD_ARG, 0, "runt / window: FPGA 0x153E");
 
@@ -1342,11 +1335,8 @@ static int pc_trig2_check(pc_session *s, const uint8_t *req, uint8_t max_src)
   if((flags & PC_TRG_F_LONGER) && (type != PC_TRG_T_PULSE))
     return pc_error(s, PC_E_BAD_ARG, 2, "longer: pulse width only");
 
-  if(src > max_src)
-    return pc_error(s, PC_E_BAD_ARG, 3, (max_src == 3) ? "source 0..3" : "source 0..2");
-
-  if((src == 3) && (type != PC_TRG_T_EDGE))
-    return pc_error(s, PC_E_BAD_ARG, 3, "source 3 (the pattern marker): edge type only");
+  if(src > 2)
+    return pc_error(s, PC_E_BAD_ARG, 3, "source 0..2");
 
   switch(type)
   {
@@ -1372,38 +1362,6 @@ static int pc_trig2_check(pc_session *s, const uint8_t *req, uint8_t max_src)
 
   if(level2)
     return pc_error(s, PC_E_BAD_ARG, 14, "level2: FPGA 0x153E");
-
-  return PC_OK;
-}
-//D5 pattern end
-
-//----------------------------------------------------------------------------------------------------------------------------------
-// SET_TRIGGER2 (1.26, fw-c5, FPGA 0x153C; docs/protocol.md row 66, docs/plans/fpga-0x153c.md section 3): the trigger
-// definition in one 24-byte request, every field written (no mask): 0 u8 type, 1 u8 polarity, 2 u8 flags, 3 u8 source,
-// 4 u32 N, 8 u32 H (N2 on 0x153E), 12 u16 level (0..255: the 8-bit code, as SET_TRIGGER), 14 u16 level2 (0x153E, 0),
-// 16 u32 hold-off (5 ns units), 20 u32 0. Nothing is converted: N and H are samples of the trigger stream. The edge
-// trigger's registers take source, polarity (0x16) and level as SET_TRIGGER writes them; the extension registers are
-// written at once and the hold-off clear is requested for the next arm (pc_hal_trig_ext_write). Response: the
-// GET_TRIGGER body. SET_TRIGGER stays for the edge type's fields, the geometry and the mode. Runt / window / range /
-// both cores (0x153E) are refused: one bitstream per firmware, no reserved behaviour.
-
-static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
-{
-  uint8_t  type = req[0], pol = req[1], flags = req[2], src = req[3];
-  uint32_t n = pc_get_u32(req + 4), h = pc_get_u32(req + 8), hold = pc_get_u32(req + 16);
-  uint16_t level = pc_get_u16(req + 12);
-  pc_hw_trigger  t;
-  pc_hw_trig_ext x;
-
-  (void)len;
-
-  //detail = the byte offset of the field (section 14 row 4); D5: one check for both engines, source 3 the marker
-  {
-    int r = pc_trig2_check(s, req, 3);
-
-    if(r != PC_OK)
-      return r;
-  }
 
   //The edge trigger's registers as SET_TRIGGER writes them: 0x15, 0x16 (the polarity), 0x17 through the UI's marker
   pc_hal_trigger_read(&t);
@@ -2542,12 +2500,12 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   if(req[2] > 1)    return pc_error(s, PC_E_BAD_ARG, 1, "freq_mode");
   if(req[3] > 1)    return pc_error(s, PC_E_BAD_ARG, 2, "duty_mode");
 
-  //Start from what is in effect now; the duty of the UI's or a SET_PATTERN state is taken in basis points
+  //Start from what is in effect now; the duty of the UI's state is taken in basis points
   pc_gen_now(s, &en, &p16, &h16);
-  duty_raw = (uint8_t)(s->gen_valid && !s->gen_src && s->gen_duty_raw);
-  duty_bp  = (s->gen_valid && !s->gen_src) ? s->gen_duty_bp : 0;
+  duty_raw = (uint8_t)(s->gen_valid && s->gen_duty_raw);
+  duty_bp  = s->gen_valid ? s->gen_duty_bp : 0;
 
-  if(!(s->gen_valid && !s->gen_src))
+  if(!s->gen_valid)
   {
     uint32_t hz;
     uint8_t  pct, e;
@@ -2614,234 +2572,18 @@ static int h_set_gen(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
   if(st == 1) return pc_error(s, PC_E_BAD_ARG, 1, "period");
   if(st == 2) return pc_error(s, PC_E_BAD_ARG, 2, "both steps 2 .. 2^32 - 1 clocks (duty too close to 0 or 100 %)");
 
-  //Only the pin driver over a host pattern: the pattern keeps running
-  if((mask == 0x01) && s->gen_valid && s->gen_src)
-    pc_hal_gen_write(0, 0, en);
-  else
-  {
-    pc_hal_gen_write(p16, h16, en);
-    s->gen_src      = 0;
-    s->gen_p16      = p16;
-    s->gen_h16      = h16;
-    s->gen_duty_raw = duty_raw;
-    s->gen_duty_bp  = duty_bp;
-  }
-
-  s->gen_valid  = 1;
-  s->gen_enable = en;
+  pc_hal_gen_write(p16, h16, en);
+  s->gen_p16      = p16;
+  s->gen_h16      = h16;
+  s->gen_duty_raw = duty_raw;
+  s->gen_duty_bp  = duty_bp;
+  s->gen_valid    = 1;
+  s->gen_enable   = en;
   pc_hal_gen_read_ui(&s->gen_ui_en, &s->gen_ui_hz, &s->gen_ui_pct);
 
   *rl = pc_gen_body(s, resp, 1);
   return PC_OK;
 }
-
-//----------------------------------------------------------------------------------------------------------------------------------
-//D5 pattern: SET_PATTERN 0x0217 and SET_PATTERN_TRIGGER 0x021A (1.27, fw-d5, FPGA 0x153D; docs/protocol.md row 67,
-//docs/plans/fpga-0x153c.md 7.4, 7.5)
-//
-//SET_PATTERN request 12 + 8 n bytes: 0 u8 mode (0 off, 1 single burst, 2 R bursts, 3 continuous), 1 u8 flags (bit 0 the
-//pin stays hi-Z, bit 2 idle level, bit 3 the marker is a trigger source, bits 7..6 start source 0 MCU / 1 the pattern
-//trigger engine / 2 both), 2 u16 R (0 = 65536), 4 u32 gap in ns (written as round(gap / 5) clocks), 8 u8 n (1..8), 9 u8
-//commit, 10 u8 start, 11 u8 0, then n x { u8 flags (bit 0 level, bit 1 mark), u8 0, u16 fraction, u32 duration clocks
-//>= 2 }. Response PATTERN 24 + 8 n bytes: the header as written (gap = clocks x 5), 12 u8 0x39 byte 0, 13 u8 0x39 byte 3,
-//14 u16 bursts done, 16 u64 the burst length in 1/65536 clock, 24 the steps as written.
-
-#define PC_PAT_HDR   12
-#define PC_PAT_STEP  8
-
-static uint32_t pc_pattern_body(pc_session *s, uint8_t *p)
-{
-  const pc_hw_pattern *c = &s->pat;
-  uint64_t len16 = 0;
-  uint32_t i;
-
-  memset(p, 0, PC_PAT_HDR + 12);
-  p[0] = c->mode;
-  p[1] = c->flags;
-  pc_put_u16(p + 2, c->r);
-  pc_put_u32(p + 4, c->gap * 5u);
-  p[8]  = c->n;
-  p[9]  = c->commit;
-  p[10] = c->start;
-  p[12] = s->pat_st[0];
-  p[13] = s->pat_st[3];
-  pc_put_u16(p + 14, (uint16_t)((s->pat_st[1] << 8) | s->pat_st[2]));
-
-  for(i=0;i<c->n;i++)
-  {
-    uint8_t *q = p + 24 + PC_PAT_STEP * i;
-
-    q[0] = c->step[i].flags;
-    q[1] = 0;
-    pc_put_u16(q + 2, c->step[i].frac);
-    pc_put_u32(q + 4, c->step[i].dur);
-    len16 += ((uint64_t)c->step[i].dur << 16) + c->step[i].frac;
-  }
-
-  pc_put_u64(p + 16, len16);
-  return 24 + PC_PAT_STEP * (uint32_t)c->n;
-}
-
-//The pin is driven by the generator or a pattern (0x50 = 1): the UI's generator switch follows it (pc_hal_pattern_write)
-static int pc_pin_driven(void)
-{
-  uint8_t  en, pct;
-  uint32_t hz;
-
-  pc_hal_gen_read_ui(&en, &hz, &pct);
-  return en != 0;
-}
-
-static int h_set_pattern(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
-{
-  pc_hw_pattern p;
-  uint8_t  n = req[8], src;
-  uint32_t gap_ns = pc_get_u32(req + 4), i;
-  int      drive;
-
-  if(req[0] > 3)                                   return pc_error(s, PC_E_BAD_ARG, 0, "mode 0..3");
-  src = (uint8_t)(req[1] >> 6);
-  if((req[1] & 0x32) || (src == 3))                return pc_error(s, PC_E_BAD_ARG, 1, "flags: bits 0, 2, 3, start source 0..2");
-  if((req[0] == 3) && (src == 1))                  return pc_error(s, PC_E_BAD_ARG, 1, "continuous runs from the write: start source 0 or 2");
-  if((n < 1) || (n > PC_PAT_STEPS))                return pc_error(s, PC_E_BAD_ARG, 8, "steps 1..8");
-  if(len != PC_PAT_HDR + PC_PAT_STEP * (uint32_t)n) return pc_error(s, PC_E_BAD_LEN, 0, "12 + 8 n bytes");
-  if(req[9] > 1)                                   return pc_error(s, PC_E_BAD_ARG, 9, "commit 0..1");
-  if(req[10] > 1)                                  return pc_error(s, PC_E_BAD_ARG, 10, "start 0..1");
-  if(req[10] && ((req[0] == 0) || (src == 1)))     return pc_error(s, PC_E_BAD_ARG, 10, "start: mode 1..3 and an MCU start source");
-  if(req[11])                                      return pc_error(s, PC_E_BAD_ARG, 11, "byte 11");
-
-  memset(&p, 0, sizeof(p));
-  p.mode   = req[0];
-  p.flags  = req[1];
-  p.r      = pc_get_u16(req + 2);
-  p.gap    = (uint32_t)(((uint64_t)gap_ns * 2 + 5) / 10);
-  p.n      = n;
-  p.commit = req[9];
-  p.start  = req[10];
-
-  for(i=0;i<n;i++)
-  {
-    const uint8_t *q = req + PC_PAT_HDR + PC_PAT_STEP * i;
-    uint16_t       o = (uint16_t)(PC_PAT_HDR + PC_PAT_STEP * i);
-
-    if(q[0] & ~(PC_PAT_S_LEVEL | PC_PAT_S_MARK))   return pc_error(s, PC_E_BAD_ARG, o, "step flags: bit 0 level, bit 1 mark");
-    if(q[1])                                       return pc_error(s, PC_E_BAD_ARG, (uint16_t)(o + 1), "step byte 1");
-    if(pc_get_u32(q + 4) < GP_STEP_MIN)            return pc_error(s, PC_E_BAD_ARG, (uint16_t)(o + 4), "duration >= 2 clocks");
-
-    p.step[i].flags = q[0];
-    p.step[i].frac  = pc_get_u16(q + 2);
-    p.step[i].dur   = pc_get_u32(q + 4);
-  }
-
-  //The pin is the EXT input of the capture trigger and of the pattern trigger engine
-  drive = (p.mode != 0) && !(p.flags & PC_PAT_F_HIZ);
-
-  if(drive)
-  {
-    pc_hw_trigger t;
-    pc_hw_ptrig   e;
-
-    pc_hal_trigger_read(&t);
-    pc_hal_ptrig_read(&e);
-
-    if((t.source == 2) || (e.armed && (e.source == 2)))
-      return pc_error(s, PC_E_STATE, 0, "EXT trigger uses the pin");
-  }
-
-  pc_hal_pattern_write(&p);
-  pc_hal_pattern_status(s->pat_st);
-
-  s->pat        = p;
-  s->gen_src    = 1;
-  s->gen_valid  = 1;
-  s->gen_enable = (uint8_t)drive;
-  pc_hal_gen_read_ui(&s->gen_ui_en, &s->gen_ui_hz, &s->gen_ui_pct);
-
-  *rl = pc_pattern_body(s, resp);
-  return PC_OK;
-}
-
-//SET_PATTERN_TRIGGER request 28 bytes: the SET_TRIGGER2 body (hold-off 0: the engine has none), 24 u8 armed, 25 u8 re-arm,
-//26 u16 0. Response 32 bytes: the body in effect, 24 armed, 25 re-arm, 26 u16 0, 28 u8 0x42 byte 0, 29 u8 0, 30 u16 0x42
-//bytes 1..2 (edges still to count)
-static uint32_t pc_ptrig_body(pc_session *s, uint8_t *p)
-{
-  pc_hw_ptrig e;
-
-  pc_hal_ptrig_read(&e);
-  memset(p, 0, 32);
-  p[0] = e.x.type;
-  p[1] = e.polarity;
-  p[2] = e.x.flags;
-  p[3] = e.source;
-  pc_put_u32(p + 4, e.x.n);
-  pc_put_u32(p + 8, e.x.h);
-  pc_put_u16(p + 12, e.level);
-  p[24] = e.armed;
-  p[25] = e.rearm;
-  p[28] = s->ptrig_st[0];
-  pc_put_u16(p + 30, (uint16_t)((s->ptrig_st[1] << 8) | s->ptrig_st[2]));
-  return 32;
-}
-
-static int h_set_pattern_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
-{
-  pc_hw_ptrig e;
-  uint8_t     st[3];
-  int         r;
-
-  (void)len;
-
-  if((r = pc_trig2_check(s, req, 2)) != PC_OK)
-    return r;
-
-  if(pc_get_u32(req + 16)) return pc_error(s, PC_E_BAD_ARG, 16, "hold-off: the pattern trigger engine has none");
-  if(req[24] > 1)          return pc_error(s, PC_E_BAD_ARG, 24, "armed 0..1");
-  if(req[25] > 1)          return pc_error(s, PC_E_BAD_ARG, 25, "rearm 0..1");
-  if(pc_get_u16(req + 26)) return pc_error(s, PC_E_BAD_ARG, 26, "bytes 26..27");
-
-  memset(&e, 0, sizeof(e));
-  e.x.type  = req[0];
-  e.polarity = req[1];
-  e.x.flags = req[2];
-  e.source  = req[3];
-  e.x.n     = pc_get_u32(req + 4);
-  e.x.h     = pc_get_u32(req + 8);
-  e.level   = (uint8_t)pc_get_u16(req + 12);
-  e.armed   = req[24];
-  e.rearm   = req[25];
-
-  //EXT as the engine's source needs the pin as an input
-  if(e.armed && (e.source == 2) && pc_pin_driven())
-    return pc_error(s, PC_E_STATE, 0, "EXT trigger uses the pin");
-
-  //The shared fallback (0x42 byte 0 bit 7 = 0, contract 7.5): one qualifier engine, routed to the pattern. Two different
-  //qualified triggers at once are not possible there
-  pc_hal_ptrig_status(st);
-
-  if(!(st[0] & 0x80) && e.armed)
-  {
-    pc_hw_trig_ext cx;
-    pc_hw_trigger  ct;
-
-    pc_hal_trig_ext_read(&cx);
-    pc_hal_trigger_read(&ct);
-
-    if((e.x.type != PC_TRG_T_EDGE) && (cx.type != PC_TRG_T_EDGE) &&
-       ((cx.type != e.x.type) || (cx.flags != e.x.flags) || (cx.n != e.x.n) || (cx.h != e.x.h) ||
-        (ct.source != e.source) || (ct.edge != e.polarity) || (ct.level != e.level)))
-      return pc_error(s, PC_E_STATE, 8, "shared trigger engine: the capture uses another qualified trigger");
-
-    e.route = 1;
-  }
-
-  pc_hal_ptrig_write(&e);
-  pc_hal_ptrig_status(s->ptrig_st);
-
-  *rl = pc_ptrig_body(s, resp);
-  return PC_OK;
-}
-//D5 pattern end
 
 void pc_cal_body(int ch, uint8_t *resp)
 {
@@ -3748,10 +3490,6 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_LOG_START,    0,                            PC_CAP_LOGGER, h_log_start },          //D4 logger
   { PC_CMD_LOG_READ,     0,                            PC_CAP_LOGGER, h_log_read },           //D4 logger (MAIN: the drain's ring)
   { PC_CMD_LOG_STOP,     F_CONTROL,                    PC_CAP_LOGGER, h_log_stop },           //D4 logger
-  //D5 pattern
-  { PC_CMD_SET_PATTERN,  0,                            PC_CAP_PATTERN_GEN, h_set_pattern },             //1.27 (fw-d5)
-  { PC_CMD_SET_PATTERN_TRIGGER, 0,                     PC_CAP_PATTERN_TRIGGER, h_set_pattern_trigger }, //1.27 (fw-d5)
-  //D5 pattern end
   { PC_CMD_ARM,          0,                            0, h_arm },
   { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
   { PC_CMD_STOP,         F_CONTROL,                    0, h_stop },
@@ -4121,7 +3859,7 @@ static int pc_dispatch(pc_session *s, int ctx)
       s->yields++;
 
     //Zero extended copy of the request (missing trailing fields read as 0)
-    s->ctx = (uint8_t)ctx;                                 //D5: GET_GEN reads 0x39 in the main loop only
+    s->ctx = (uint8_t)ctx;                                 //fw-d5: GET_GEN reads 0x39 in the main loop only
     memset(s->req, 0, sizeof(s->req));
     memcpy(s->req, s->parser.payload, h->len);
 
