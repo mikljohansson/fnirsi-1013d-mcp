@@ -85,7 +85,7 @@ FAST_CMDS = frozenset({P.Cmd.PING, P.Cmd.GET_INFO, P.Cmd.GET_STATUS, P.Cmd.GET_B
 HOST_PARTIAL_TIMEOUT_S = 2.0
 #: responses that can be tens of KiB
 BULK_CMDS = frozenset({P.Cmd.READ_RAW, P.Cmd.READ_TRACE, P.Cmd.READ_SCREEN, P.Cmd.TEST_PATTERN,
-                       P.Cmd.READ_SPECTRUM})
+                       P.Cmd.READ_SPECTRUM, P.Cmd.LOG_READ})
 #: commands whose OK response is a GET_STATUS body (byte 0 = control); used to track REMOTE for timeouts
 _STATUS_BODY_CMDS = frozenset({P.Cmd.GET_STATUS, P.Cmd.SET_REMOTE, P.Cmd.ARM, P.Cmd.FORCE, P.Cmd.STOP,
                                P.Cmd.WAIT})

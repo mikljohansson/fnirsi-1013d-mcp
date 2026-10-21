@@ -27,7 +27,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 
 import numpy as np
 
@@ -210,7 +210,7 @@ class Profile:
 
     @property
     def has_generator(self) -> bool:
-        return bool(self.info.caps & P.Caps.GENERATOR_DDS)
+        return bool(self.info.caps & P.Caps.GENERATOR)
 
     def has(self, cap: P.Caps) -> bool:
         return bool(self.info.caps & cap)
@@ -348,6 +348,22 @@ class SeqError(ScopeError):
     def __init__(self, fit: int, msg: str):
         super().__init__(msg)
         self.fit = fit
+
+
+@dataclass
+class LogChunk:
+    """One LOG_READ chunk as ``Scope.log_chunks`` yields it: ``word`` = the 64-bit word counter of its first word
+    (words written since the start), ``nwords`` ring words of ``data``, ``lost_words`` dropped before it (an FPGA
+    lap or a full DDR ring: ``gap`` / ``overflow`` say which the device saw), ``ended`` on the last bytes."""
+
+    seq: int
+    word: int
+    nwords: int
+    data: bytes
+    lost_words: int = 0
+    gap: bool = False
+    overflow: bool = False
+    ended: bool = False
 
 
 class Scope:
@@ -844,33 +860,202 @@ class Scope:
     # --- generator ---------------------------------------------------------------------------------------
 
     def get_gen(self) -> P.Gen:
+        """GET_GEN: the generator (40 bytes since 1.27: P16 / H16, the pattern status with the pending bit)."""
         return P.Gen.unpack(self._req(P.Cmd.GET_GEN))
 
     def set_gen(self, *, enable: bool | None = None, freq_hz: float | None = None,
-                duty: float | None = None, phase_inc: int | None = None, threshold: int | None = None) -> P.Gen:
-        """duty as a fraction 0..1. ``phase_inc`` / ``threshold``: the raw DDS words (freq_mode / duty_mode 1, section
-        8.6) instead of freq_hz / duty. The firmware writes duty, then frequency, then enable."""
+                duty: float | None = None, p16: int | None = None, h16: int | None = None) -> P.Gen:
+        """SET_GEN. ``freq_hz`` (sent in mHz) / ``duty`` (a fraction 0..1, sent in basis points), or the raw modes of
+        protocol 1.27 (FPGA 0x153D): ``p16`` the period and ``h16`` the high part in 1/65536 of a 5 ns clock
+        (freq_mode / duty_mode 1). The generator is a two-step pattern: the firmware writes both entries and a commit,
+        so a change while it runs is glitch-free and phase-continuous; it is taken at the next step boundary (GEN
+        ``pending`` until then). The average frequency is exact to 2^-16 / P; every edge lies on the 5 ns grid."""
         r = P.SetGenReq()
         if enable is not None:
             r.mask |= P.SetGenReq.M_ENABLE
             r.enable = int(enable)
-        if freq_hz is not None and phase_inc is not None:
-            raise ValueError("give freq_hz or phase_inc, not both")
-        if duty is not None and threshold is not None:
-            raise ValueError("give duty or threshold, not both")
+        if freq_hz is not None and p16 is not None:
+            raise ValueError("give freq_hz or p16, not both")
+        if duty is not None and h16 is not None:
+            raise ValueError("give duty or h16, not both")
         if freq_hz is not None:
             r.mask |= P.SetGenReq.M_FREQ
             r.freq = int(round(freq_hz * 1000))
-        elif phase_inc is not None:
+        elif p16 is not None:
             r.mask |= P.SetGenReq.M_FREQ
-            r.freq_mode, r.freq = 1, int(phase_inc)
+            r.freq_mode, r.freq = 1, int(p16)
         if duty is not None:
             r.mask |= P.SetGenReq.M_DUTY
             r.duty = int(round(duty * 10000))
-        elif threshold is not None:
+        elif h16 is not None:
             r.mask |= P.SetGenReq.M_DUTY
-            r.duty_mode, r.duty = 1, int(threshold)
+            r.duty_mode, r.duty = 1, int(h16)
         return P.Gen.unpack(self._req(P.Cmd.SET_GEN, r.pack()))
+
+    def restore_gen(self, saved: P.Gen) -> str | None:
+        """Give back a generator state read with get_gen: the square (P16 / H16, enable) as it was. A SET_PATTERN
+        pattern cannot be read back (GET_GEN has no table): the pin is then switched off and a note returned."""
+        if saved.source == P.GEN_SOURCE_SQUARE and saved.p16:
+            self.set_gen(enable=bool(saved.enable), p16=saved.p16, h16=saved.h16)
+            return None
+        self.set_gen(enable=False)
+        return ("a scope_pattern pattern drove the pin before; it was replaced and the pin is off now (run "
+                "scope_pattern again to restore it)")
+
+    def wait_gen_taken(self, timeout_s: float = 1.0, sleep: Callable[[float], None] = time.sleep,
+                       clock: Callable[[], float] = time.monotonic) -> tuple[P.Gen, int]:
+        """Poll GET_GEN until the last commit was taken (``pending`` clear): the handshake before the next
+        glitch-free change (contract 7.3; a second commit before the first is taken would overwrite it). Returns
+        the GEN and the number of polls; raises ScopeError after ``timeout_s``."""
+        t_end = clock() + timeout_s
+        polls = 0
+        while True:
+            g = self.get_gen()
+            polls += 1
+            if not g.pending:
+                return g, polls
+            if clock() > t_end:
+                raise ScopeError(f"the generator's change was not taken within {timeout_s:g} s (pending)")
+            sleep(0.0005)
+
+    def sweep_gen(self, freqs: Iterable[float], step_s: float, *, duty: float = 0.5,
+                  sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+                  cancel: Callable[[], bool] | None = None) -> dict[str, Any]:
+        """A host-stepped chirp (contract 7.3 / 7.4): one SET_GEN per frequency, ``step_s`` apart on the host clock.
+        Before each step the previous commit must have been taken: when the step comes sooner than one period of the
+        frequency in effect the GEN is polled until ``pending`` clears (else the pace alone guarantees it). Returns
+        the statistics: steps sent, the achieved step rate, late steps (the USB round trip, about 0.2 ms in REMOTE,
+        limits a host chirp to about 2,000 steps per second) and the polls."""
+        fl = [float(f) for f in freqs]
+        if not fl:
+            raise ValueError("no frequencies")
+        p16s = [P.gen_p16(int(round(f * 1000))) for f in fl]
+        for f, p16 in zip(fl, p16s):
+            why = P.gen_check(p16, P.gen_h16(p16, int(round(duty * 10000))))
+            if why:
+                raise ValueError(f"{f:g} Hz at duty {duty:g}: {why}")
+        polls = late = 0
+        worst_late = 0.0
+        prev_period = 0.0
+        t_last = None
+        t0 = clock()
+        sent = 0
+        for i, f in enumerate(fl):
+            if cancel is not None and cancel():
+                break
+            due = t0 + i * step_s
+            now = clock()
+            if now < due:
+                sleep(due - now)
+            else:
+                lag = now - due
+                if i and lag > 0.5 * step_s:
+                    late += 1
+                    worst_late = max(worst_late, lag)
+            if t_last is not None and clock() - t_last < prev_period:
+                _, n = self.wait_gen_taken(timeout_s=max(1.0, 3 * prev_period), sleep=sleep, clock=clock)
+                polls += n
+            self.set_gen(freq_hz=f, duty=duty)
+            t_last = clock()
+            prev_period = 1.0 / f
+            sent += 1
+        elapsed = clock() - t0
+        return {"steps": sent, "elapsed_s": elapsed, "step_s": step_s,
+                "achieved_steps_per_s": (sent - 1) / elapsed if sent > 1 and elapsed > 0 else None,
+                "late_steps": late, "worst_late_s": worst_late, "pending_polls": polls,
+                "f_first": fl[0], "f_last": fl[sent - 1] if sent else None}
+
+    # --- pattern generator and its trigger engine (protocol 1.27, FPGA 0x153D) ----------------------------
+
+    def set_pattern(self, steps: Iterable[P.PatternStep], *, mode: int | str = P.PAT_CONTINUOUS, repeat: int = 1,
+                    gap_s: float = 0.0, idle_level: int = 0, marker_trigger: bool = False,
+                    start_source: int | str = P.PAT_START_MCU, start: bool = False, commit: bool = True,
+                    hiz: bool = False) -> P.PatternResp:
+        """SET_PATTERN (cap PATTERN_GEN): up to 8 steps (P.PatternStep, ``PatternStep.from_seconds``), ``mode``
+        ('off', 'single', 'repeat' R = ``repeat`` bursts with ``gap_s`` between them, 'continuous'), the idle level,
+        ``marker_trigger`` (the marked steps' starts are the capture's trigger source 3), ``start_source`` ('mcu',
+        'trigger' = the pattern trigger engine, 'both'), ``start`` (a burst now), ``hiz`` (run without driving the pin:
+        the post stays the EXT input). The pin is the calibration post (logic level, about -1.23 / +1.87 V against the
+        probe ground). The generator's square is replaced; SET_GEN programs it again."""
+        st = list(steps)
+        if not 1 <= len(st) <= P.PAT_MAX_STEPS:
+            raise ValueError(f"a pattern has 1..{P.PAT_MAX_STEPS} steps, not {len(st)}")
+        m = P.PAT_MODES.index(mode) if isinstance(mode, str) else int(mode)
+        src = P.PAT_START_NAMES.index(start_source) if isinstance(start_source, str) else int(start_source)
+        flags = (P.PAT_F_IDLE_HIGH if idle_level else 0) | (P.PAT_F_MARKER_TRIGGER if marker_trigger else 0) | \
+            (P.PAT_F_HIZ if hiz else 0) | (src << P.PAT_START_SHIFT)
+        gap_ns = int(round(gap_s * 1e9))
+        if not 0 <= gap_ns <= 0xFFFFFFFF:
+            raise ValueError(f"gap {gap_s:g} s outside 0 .. 4.29 s")
+        if not 1 <= repeat <= 65536:
+            raise ValueError(f"repeat {repeat} outside 1 .. 65536")
+        req = P.SetPatternReq(P.PatternHeader(m, flags, repeat & 0xFFFF, gap_ns, len(st), int(commit), int(start)), st)
+        return P.PatternResp.unpack(self._req(P.Cmd.SET_PATTERN, req.pack()))
+
+    def set_pattern_trigger(self, *, type: int | str = P.TRIG_EDGE, polarity: int | str = 0, longer: bool = False,
+                            source: int | str = 0, n: int = 0, h: int = 0, level: int = 128, armed: bool = True,
+                            rearm: bool = True) -> P.PatternTriggerResp:
+        """SET_PATTERN_TRIGGER (cap PATTERN_TRIGGER): the pattern generator's own trigger engine, with the capture
+        trigger's vocabulary (P.Trigger2 fields; types edge / pulse width / Nth edge / timeout, source CH1 / CH2 /
+        EXT, N / H in samples of the engine's stream, a raw 8-bit level) plus ``armed`` and ``rearm`` (re-arm after
+        each burst; False = one shot). A burst starts on its event when SET_PATTERN's start source is 'trigger' or
+        'both'."""
+        t = P.TRIG_TYPE_NAMES.index(type) if isinstance(type, str) else int(type)
+        if isinstance(polarity, str):
+            names = P.TRIG_POLARITY_NAMES.get(t, ("0", "1"))
+            if polarity not in names:
+                raise ValueError(f"polarity {polarity!r} is not one of {names} for the {P.TRIG_TYPE_NAMES[t]} type")
+            polarity = names.index(polarity)
+        src = P.TRIG_SOURCE_NAMES.index(source) if isinstance(source, str) else int(source)
+        t2 = P.Trigger2(t, int(polarity), P.TRIG2_F_LONGER if longer else 0, src, int(n), int(h), int(level), 0, 0, 0)
+        req = P.PatternTriggerReq(t2, int(armed), int(rearm))
+        return P.PatternTriggerResp.unpack(self._req(P.Cmd.SET_PATTERN_TRIGGER, req.pack()))
+
+    # --- streaming logger (protocol 1.27, FPGA 0x153D) ----------------------------------------------------
+
+    def log_start(self, channels: int, fmt: int, divider: int, duration_s: float | None = None) -> P.LogResp:
+        """LOG_START (cap LOGGER): ``channels`` bit 0 CH1 / bit 1 CH2, ``fmt`` P.LOG_FMT_*, the ``divider`` (the
+        filter K / FIR from the current SET_DECIM), ``duration_s`` None = until log_stop. The rate must be within
+        the tiers (P.log_check)."""
+        why = P.log_check(channels, fmt, divider)
+        if why is not None:
+            raise ValueError(f"log_start: {why[1]}")
+        ms = 0 if duration_s is None else max(1, int(round(duration_s * 1000)))
+        return P.LogResp.unpack(self._req(P.Cmd.LOG_START, P.LogStartReq(channels, fmt, divider, ms).pack()))
+
+    def log_read(self, max_bytes: int = P.LOG_READ_MAX) -> tuple[P.LogChunkHeader, bytes]:
+        """LOG_READ: the next chunk (whole words, oldest first; possibly empty while the log runs)."""
+        return P.parse_log_read(self._req(P.Cmd.LOG_READ, P.LogReadReq(max_bytes).pack()))
+
+    def log_stop(self) -> P.LogResp:
+        """LOG_STOP: ends the log (the DDR ring stays readable until the next LOG_START or ARM)."""
+        return P.LogResp.unpack(self._req(P.Cmd.LOG_STOP))
+
+    def log_chunks(self, channels: int, fmt: int, *, idle_s: float = 0.005,
+                   sleep: Callable[[float], None] = time.sleep,
+                   cancel: Callable[[], bool] | None = None) -> Iterator["LogChunk"]:
+        """Pump LOG_READ and yield every non-empty chunk as a LogChunk (the word counter unwrapped to 64 bits, the
+        words lost before it), until the log has ended and the ring is drained, or ``cancel`` returns True (the
+        caller then sends log_stop and drains with another call). An empty answer waits ``idle_s``."""
+        wb = P.log_word_bytes(channels, fmt)
+        next_word = 0  # the word counter counts from the start: a gap before the first chunk is lost words too
+        while True:
+            if cancel is not None and cancel():
+                return
+            h, data = self.log_read()
+            if h.nbytes:
+                if h.nbytes % wb:
+                    raise ScopeError(f"LOG_READ returned {h.nbytes} bytes, not whole words of {wb}")
+                lost = (h.word - next_word) & 0xFFFFFFFF
+                word = next_word + lost
+                nwords = h.nbytes // wb
+                next_word = word + nwords
+                yield LogChunk(h.seq, word, nwords, data, lost, bool(h.flags & P.LOG_CHUNK_GAP),
+                               bool(h.flags & P.LOG_CHUNK_OVERFLOW), h.ended)
+            if h.ended and not h.nbytes:
+                return
+            if not h.nbytes:
+                sleep(idle_s)
 
     # --- acquisition -------------------------------------------------------------------------------------
 

@@ -17,13 +17,14 @@
 
 #include "types.h"
 
-#define BODE_GEN_HZ           50000000u     //DDS clock: f = 50 MHz / M
+#define BODE_GEN_HZ           200000000u    //pattern clock (FPGA 0x153D, fw-d5): f = 200 MHz / P, P integer clocks of 5 ns
 #define BODE_MAX_POINTS       200           //planned points per sweep (BODE_CTRL accepts 1..200)
 #define BODE_MAX_RECORD       8190          //samples per channel (the 16-bit layout's limit, protocol row 47)
 #define BODE_MIN_RECORD       2048
 #define BODE_MIN_PERIODS      8
 #define BODE_MAX_SPP          512           //samples per period below 24 kHz: 257..512
-#define BODE_LEGACY_M_MAX     33            //50 MHz / M > 1.5 MHz (M <= 33): legacy 200 MSa/s, 8-bit
+#define BODE_LEGACY_P_MAX     133           //200 MHz / P > 1.5 MHz (P <= 133): legacy 200 MSa/s, 8-bit (was M <= 33, P <= 132)
+#define BODE_P_MIN            4             //the shortest square (2 + 2 clocks)
 #define BODE_FMIN_MHZ         1000ull       //1 Hz
 #define BODE_FMAX_MHZ         10000000000ull //10 MHz
 
@@ -41,7 +42,7 @@
 #define BODE_F_INCOHERENT     0x0100    //[incoherent] CH1 energy beside the fundamental
 #define BODE_F_SPLICED        0x0200    //[spliced] CH2 changed range at this point
 #define BODE_F_FIR_OFF        0x0400    //[fir_off]
-#define BODE_F_NO_CAL         0x0800    //[no_cal] thru applied, no thru point with this (M, N)
+#define BODE_F_NO_CAL         0x0800    //[no_cal] thru applied, no thru point with this (P, N)
 #define BODE_F_CAL_RANGE      0x1000    //[cal_range] thru taken on other ranges
 #define BODE_F_CAL_FLAGGED    0x2000    //[cal_flagged] the thru point was itself flagged
 #define BODE_F_RETRIED        0x4000    //measured again (re-centred, settle retry or range change)
@@ -54,32 +55,34 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // Planner (bode-design 3.1-3.2; the host's plan_point / plan_sweep, identical integers)
 
+//fw-d5 (FPGA 0x153D, protocol 1.27): the stimulus is the pattern generator's square of an integer period P in 5 ns clocks
+//(fraction 0, n_h = ceil(P / 2), n_l = floor(P / 2)): f = 200 MHz / P exactly. Every plan of the DDS era maps with P = 4 M
+//(M the period in 50 MHz DDS clocks), and the grid is four times finer.
 typedef struct
 {
-  uint32 m;           //stimulus period in 50 MHz DDS clocks
+  uint32 period;      //stimulus period P in 5 ns clocks (READ_BODE row field 0)
   uint32 n;           //decimation factor of the capture (1 = legacy 200 MSa/s, else 16 x 2^k: CIC3 + FIR at divider n - 1)
-  uint32 phase_inc;   //SET_GEN raw increment: round(2^32 / m), half up
-  uint32 p, q;        //samples per period 4m / n = p / q in lowest terms
+  uint32 p, q;        //samples per period P / n = p / q in lowest terms
   uint16 record;      //samples analysed (j blocks of p): an integer number of periods
   uint16 blocks;      //j
-  uint64 f_mhz;       //the DDS frequency phase_inc x 50e9 / 2^32 in mHz, rounded half to even (the host's round())
-  uint8  hann;        //the 32-bit increment leaves the record more than 1e-3 periods off whole: Hann window (host)
+  uint64 f_mhz;       //200e9 / P in mHz, rounded half to even (the host's round())
+  uint64 step;        //DFT phase step per sample, round(n x 2^34 / P) in 2^-34 turn
+  uint8  hann;        //the record more than 1e-3 periods off whole: Hann window (host rule; 0 with an integer P)
 } bode_plan;
 
-//The plan for one requested frequency in mHz (1 Hz .. 10 MHz): M0 = round(50e9 / f) half to even, as Python's round().
+//The plan for one requested frequency in mHz (1 Hz .. 10 MHz): P0 = round(200e9 / f) half to even, as Python's round().
 //Returns 0, or -1 outside the range.
 int    bode_plan_point(uint64 f_mhz, bode_plan *pp);
 
-//The plan for a given M0 (>= 2): the decimation, the tie of M to N below 24 kHz, the record
-void   bode_plan_m0(uint32 m0, bode_plan *pp);
+//The plan for a given P0 (>= BODE_P_MIN): the decimation, the tie of P to N below 24 kHz, the record
+void   bode_plan_p0(uint32 p0, bode_plan *pp);
 
-//Log-spaced points from lo to hi (either order; measured low to high), points 1..BODE_MAX_POINTS, snapped to integer M,
-//consecutive points with the same M merged (numpy geomspace: the end points exact, the interior points through a 2^-32
-//log2 grid, so an interior M0 differs from the host's only within about 1e-9 of a rounding tie). Returns the number of
+//Log-spaced points from lo to hi (either order; measured low to high), points 1..BODE_MAX_POINTS, snapped to integer P,
+//consecutive points with the same P merged (numpy geomspace: the end points exact, the interior points through a 2^-32
+//log2 grid, so an interior P0 differs from the host's only within about 1e-9 of a rounding tie). Returns the number of
 //plans written to out (<= max), or -1 for a bad argument.
 int    bode_plan_sweep(uint64 start_mhz, uint64 stop_mhz, int points, bode_plan *out, int max);
 
-uint32 bode_phase_inc(uint32 m);
 uint32 bode_rate_hz(const bode_plan *pp);                   //output sample rate, 200 MHz / n
 uint32 bode_divider(const bode_plan *pp);                   //0x0D value: n - 1 (0 for legacy)
 uint32 bode_total(const bode_plan *pp);                     //trigger total: record rounded up to even
@@ -93,8 +96,9 @@ uint64 bode_exp2_round(int64 y_q32);                        //round(2^y), y in Q
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // DFT of a record pair at the plan's frequency (bode-design 1.2): mean removed, a rectangular window over the coherent
-// record (Hann when pp->hann), X = 2 / sum(w) sum w (x - mean) e^(-j 2 pi f n / fs), f = phase_inc x 50 MHz / 2^32. The
-// phasor runs on a 2^-34 turn grid (phase step phase_inc x n per sample, exact), rounded to the 16384-entry Q30 table. Also
+// record (Hann when pp->hann), X = 2 / sum(w) sum w (x - mean) e^(-j 2 pi f n / fs), f = 200 MHz / P. The phasor runs on
+// a 2^-34 turn grid (phase step round(n 2^34 / P) per sample: over a record under 2.5e-7 turn off), rounded to the
+// 16384-entry Q30 table. Also
 // the two record halves (the settle check), CH1 one bin beside the fundamental (the coherence check), each channel's
 // noise (the median of its period differences, robust against a transient as the host's median over FFT bins is) and its
 // sample extremes.

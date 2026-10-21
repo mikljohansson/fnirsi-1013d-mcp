@@ -249,62 +249,55 @@ void fpga_enable_system(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//FPGA 0x153D (fw-d5): the generator is the pattern generator's two-step continuous pattern (gen_pat.h, fpga_bus.h "D5
+//pattern"); the DDS (0x51 / 0x52) is gone. The UI's whole Hz and whole percent go through the contract's P16 / H16
+//formulas; a running square changes at the next step boundary (glitch-free), so the order of the frequency and the duty
+//writes no longer matters. Frequency 0 or duty 0 % holds the pin low, 100 % high (the DDS's behaviour at the extremes).
+static void fpga_gen_program(uint32 freq_hz, uint8 duty_pct)
+{
+  uint64    p16, h16;
+  uint8_t   level;
+  gp_square sq;
+
+  if(gp_ui_square(freq_hz, duty_pct, &p16, &h16, &level))
+    fpga_pat_level(level);
+  else
+  {
+    (void)gp_split(p16, h16, &sq);
+    fpga_pat_square(&sq);
+  }
+}
+
 void fpga_on_off_generator(void)
 {
   if (fpgasettings.gen_enable == 1)
   {
-    fpga_set_generator_freq(fpgasettings.gen_freq);
-    fpga_set_generator_duty(fpgasettings.gen_duty);
-    
-    // Send the command for switch output
-    fpga_write_cmd(0x50);
-
-    // Switch output to on
-    fpga_write_int(1);
+    fpga_gen_program(fpgasettings.gen_freq, fpgasettings.gen_duty);
+    fpga_pat_drive(1);
   }
   else
-  { // To be safe, we will turn off signal generation.
-    fpga_set_generator_freq(100); //100Hz
-    fpga_set_generator_duty(0);   //duty 0%
-    
-    // Send the command for switch output
-    fpga_write_cmd(0x50);
-
-    // Switch output off to tristate
-    fpga_write_int(0);
+  {
+    //Off: the pattern stopped at the low idle level and the pin hi-Z (the EXT trigger input)
+    fpga_pat_drive(0);
+    fpga_pat_level(0);
   }
 }
 
 //------------------------------------------------------------------------------
 
+//While the generator is off nothing is written: fpga_on_off_generator programs the values when it is switched on
 void fpga_set_generator_freq(uint32 freq_hz)
 {
-  //Fout = (phase_inc * Fclk) / 2^32
-  //phase_inc = (Fout * 2^32) / Fclk
-  //phase_inc = (Fout * 4294967296) / 50000000
-
-  uint64 t = (uint64)freq_hz * 4294967296ULL;
-
-  // Send the command for settings frequency
-  fpga_write_cmd(0x51);
-
-  // Set frequency - send divider (32-bit)
-  fpga_write_int((t / 50000000ULL));
-
+  if(fpgasettings.gen_enable == 1)
+    fpga_gen_program(freq_hz, fpgasettings.gen_duty);
 }
 
 //------------------------------------------------------------------------------
 
 void fpga_set_generator_duty(uint8 duty_pct) //50 is 50%
 {
-    // threshold = duty_pct * (2^32 - 1) / 100
-    uint64 d = (uint64)duty_pct * 0xFFFFFFFFULL;
-
-    //Send the command for settings duty cycle
-    fpga_write_cmd(0x52);
-
-    //Set duty cycle
-    fpga_write_int((uint32)(d / 100ULL));
+  if(fpgasettings.gen_enable == 1)
+    fpga_gen_program(fpgasettings.gen_freq, duty_pct);
 }
   
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -414,12 +407,15 @@ void fpga_set_trigger_channel(void)
   //Send the command for selecting the trigger channel to the FPGA
   fpga_write_cmd(0x15);
 
-  //EXT trigger (bitstream 0x1533+): source 2. Only selectable when the bitstream has it (pc_glue_ui_has)
+  //EXT trigger (bitstream 0x1533+): source 2. Only selectable when the bitstream has it (pc_glue_ui_has). D5 pattern
+  //(0x153D): source 3, the pattern's marker, set by the host on top of the EXT channel (fpga_trig_marker)
   if(scopesettings.triggerchannel == 2)
   {
-    fpga_write_byte(0x02);
+    fpga_write_byte(fpga_trig_marker ? 0x03 : 0x02);
     return;
   }
+
+  fpga_trig_marker = 0;
   
   //Write the needed data based on the setting
   if(scopesettings.triggerchannel == 0)
@@ -948,6 +944,9 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   
   //Calculate the signal center
   settings->center = (settings->max + settings->min) / 2;
+
+  //A peak record: Vmax / Vmin / Vpp from its min / max bytes (the center above stays the midpoint's)
+  pc_glue_peak_extremes(settings);
 
   //Calibration v4: an 8-bit full-class record of CH1 / CH2 to the A - B tracker
   acal_live_record(settings, wide);

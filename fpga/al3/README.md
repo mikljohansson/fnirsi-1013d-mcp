@@ -2271,7 +2271,79 @@ The generator's post at 1 kHz and 1 MHz on CH1 and on EXT: frequency within 1e-5
 samples); with the probe off the post, min / max read the noise band around 128 and E = 0 at a level outside it; a time
 base change during a 1 s gate shows the one-edge blip of "Rate changes" unless the firmware restarts the gate.
 
-### 14. Streaming logger; version 0x153D, item D1 (fpga-d1, 2026-10-21)
+### 14. Peak detect; version 0x153C, item C2 (fpga-c2, 2026-10-20)
+
+Contract: `docs/plans/fpga-0x153c.md` sections 2.1 (0x56 bit 1), 2.2 (0x29), 4 and 9.1 (step 15); section 10 item C2.
+Sections 12 (C1, trigger types and hold-off) and 13 (C3, counter) are the other two 0x153C items; C4 integrates, sets the
+version byte and builds. With 0x56 bit 1 = 0 (power-on) the capture is cycle-identical to 0x153B: the equivalence steps of
+`tb/run.sh` prove it (their random 0x56 writes keep bit 1 clear now, see "Tests").
+
+#### Peak detect (0x56 bit 1)
+
+**What it does.** With 0x56 bit 1 set, each 16-bit memory word per channel holds { max (high byte, read 0x21 / 0x23),
+min (low byte, 0x20 / 0x22) } of the raw 8-bit codes of its window instead of a filter output. The window is exactly the
+N = 2P raw samples (both cores; P = floor(D / 2) + 1 from 0x0D) that the K = 1 boxcar sums for the same output word, with
+the boxcar's latency (12 write clocks from `adc*_w` to the memory; `tb_peak.v` measures the boxcar's latency first and
+requires the peak words at the same one). The ADCs run at 200 MSa/s as for every 16-bit capture; the memory geometry, the
+word counts of 0x0B / 0x0C / 0x0E / 0x14, the 0x1F / 0x20..0x23 readout and the sequencer's segments are the 16-bit
+path's. In `decim_chan`: `pmx` / `pmn` are the captured pair's max and min (registered with the prefilter output `f`),
+`pdx` / `pdn` the same one clock later (the integrator's alignment), `rmx` / `rmn` the running max and min of the window,
+restarted on the edge where `dec_pc == 0` (`wstart`), which also hands the finished window to `pkw`; `pk0..pk4` follow the
+comb pipeline (`sv[0..4]`) so the peak word reaches `out` on `sv[5]` like the filter output. Cost: 12 x 8-bit registers
+and 4 compares per channel.
+
+**One-register switch (the change against gen8).** On `gen8-features-wip` peak detect needed K >= 1 in 0x53. Here
+`dec_on = (K != 0) | peak_en`: 0x56 bit 1 by itself selects the 16-bit path, forces the divider to 0 on the static side
+of the rate compare (full-rate ADCs and write clock), runs `decim_chan` as K = 1 (order 0 already behaves as 1 in the
+CIC, and only the peak pipeline's output is stored) and takes the window from 0x0D. 0x53 and 0x54 keep their values for
+the way back: the device's Sample row writes 0x56 and nothing else, and 0x56 = 0 with 0x53 = 0 returns to the legacy
+path at the divided rate. 0x29 byte 0 bit 7 then reads 1 with bits 1..0 = 0 (K as written); byte 1 bit 7 = peak active,
+bit 6 = 0x56 bit 1 as written. The two bits are equal (peak is active whenever written, since `dec_on` carries it); both
+stay for the contract's layout.
+
+**FIR and shift.** `fir_ok` carries `~peak_en`: the FIR is off while peak detect is on (0x29 byte 0 bit 5 = 0 even with
+bit 0 set at an eligible divider), and the shift 0x54 is not applied to the peak words.
+
+**Trigger.** The 16-bit compare takes the window max for a rising detection and the window min for a falling one as the
+high byte of the compared word (`dec_trig_sample = { trigger_edge ? min : max, 0x00 }`), so the firmware writes 0x55 =
+level << 8: rising fires on the first window whose max reaches the level, falling on the first whose min drops below it.
+The trigger position convention is unchanged (`trigger_address` = the word of the trigger sample - 1), and the trigger
+types of C1 work on the same stream.
+
+**Firmware (contract section 4; item C6).** SET_DECIM mode 4 "peak" writes 0x56 bit 1 (0x53 may stay as it is), 0x55 =
+level << 8 at the arm, no shift. Records: READ_RAW layout 3 (per channel `count` min bytes then `count` max bytes),
+GET_CAPTURE_INFO byte 79 bit 1; calibration with the 8-bit per-core model's mean gain (the two bytes are raw codes from
+mixed cores), no gain16 / corr16. Averaging of peak words is refused (SET_SEQ mode 2 with peak on: E_STATE detail 7);
+segments are fine. Settle after a 0x56 write as after any filter write, (K + 10) N x 5 ns + 1 us (K = 0 counts as 1),
+before 0x01. Check 0x29 after the write: byte 0 bit 7 = 1 and bit 5 = 0, byte 1 bits 7..6 = 11.
+
+**Resources and timing** (TD 4.6.8 SP1, `build.sh ~/c2/b1` on branch `fpga-c2` alone, source fb0cf59; a synthesis check,
+not a release build): 5126 LUT / 4694 reg / 5893 LE against 0x153B's 4990 LUT (the +136 LUT and about +290 registers are
+the two peak pipelines, 12 x 8-bit registers and four 8-bit compares per channel, plus the `dec_on` term), 48 EMB9K,
+2 EMB32K, 2 of 3 M18x18, 33 IOB input registers. `sample_write_clock` 0 errors, 9.463 ns (0x153B: 9.231; the peak
+pipeline lives in this domain), `i_mcu_clk` 19.852 ns and `clkc[1]` 2.528 ns with 0 errors, `clkc[0]` 60 errors (the SDC
+artefact). `clk_200MHz`: **2 setup errors, minimum period 5.504 ns, worst slack -0.504 ns**, both on the sequencer's
+post-pass enable (`q_st` / `tab_we` into `pp_i_reg.ce`, 62 % net: one 1.8 ns route on a fanout-1 net), a path peak detect
+does not touch: its one `clk_200MHz`-side change, `dec_on` into the static side of the divider compare, is not among the
+failing paths. The same class of roll hit 0x153B's first build (section 11 "Build": a neutral rewrite re-rolled it). The
+merged 0x153C build (C4) decides; if the roll persists there, register `pp_i_reg`'s enable one clock earlier or re-roll.
+`build/FPGA.bin` sha256 `4c4b0339f7c8183fa840382993ebf2117b8f3a7361dd05ec640041a8fcb4b891` (not pinned, not for flashing).
+
+**Tests.** `tb/run.sh` step 15, `tb_peak.v` (gen8's, rebased onto the 0x153A capture: the monitor logs `adc*_w` at each
+write clock edge, which is what the decimator latches): the K = 1 boxcar reference, then { max, min } for every word at
+N = 2 / 8 / 20 / 200 with K = 1..3 (the FIR enabled at 20 and 200: it stays off), the same at K = 0 with 0x56 bit 1 alone,
+the way back (0x56 = 0 at K = 0: legacy words again, 307 write clock edges for 306 words), the 0x29 read-backs, the
+READ_RAW bytes, the alias demonstration (6 ns spikes on a flat signal at 5 MSa/s: sample skipping caught 15 of 420 spikes
+on seed 12345 and 23 of 485 on 4242, peak detect 202 of 204 and 200 of 201, the missing ones at the record edges) and the
+trigger on the window max (K = 1 + peak, rising at 150) and min (K = 0 + peak, falling at 128). **45 checks, 0 failed on
+seeds 12345 and 4242** (15 s); every word of every peak capture matched its window at latency 12, the boxcar's. Steps
+1-13 are unchanged in result (0x56 bit 1 = 0 in all of them); `tb_long.v` connects the new `decim_chan` inputs.
+
+**Bench checks** (contract 9.2 item 6, with the owner): peak detect at 1 MSa/s on a 100 kHz square and on a narrow DDS
+duty (or the 0x153D pattern generator's 6 ns spikes): every spike visible, the min / max envelope stable over 50 records;
+0x29 reads byte 0 = 0x80 and byte 1 = 0xC0 with 0x53 = 0x54 = 0; a falling trigger at the envelope's low edge triggers
+where the Scope view shows the band's lower edge crossing the marker.
+### 15. Streaming logger; version 0x153D, item D1 (fpga-d1, 2026-10-21)
 
 Contract: `docs/plans/fpga-0x153c.md` sections 2.1 (0x69, 0x6A), 2.2 (0x38), 2.4 (0x0A / 0x14 / 0x18 while streaming), 6
 (the sample ring is the FIFO) and 9.1 (step 17). The pattern generator with its trigger engine (D2) is documented by its

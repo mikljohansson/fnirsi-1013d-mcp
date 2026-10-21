@@ -600,6 +600,58 @@ bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread
   refusal and tier boundary, the 48-byte LOG and a gap chunk byte for byte, the E_STATE 9 gate and what still answers,
   ENDED, the host watchdog and DTR drop), the 1.27 vectors.
 
+### The generator as a pattern, the pattern generator, the chirp (FPGA 0x153D, fw-d5, protocol 1.27 row 67)
+
+Bitstream 0x153D (fpga-d2; contract `docs/plans/fpga-0x153c.md` sections 7.2-7.5) removes Atlan4's DDS (0x51 / 0x52): the
+calibration pin is driven by a **pattern generator** on the 200 MHz clock, and the generator is its two-step continuous
+pattern. The firmware on this branch is still built for 0x153C (`PC_FW_FPGA_VERSION`): the generator only works once
+0x153D is flashed and the version word moves with the integration.
+
+- **The pattern** (`fpga_bus.c` / `fpga_bus.h` block "D5 pattern", `fpga_pat`): up to 8 steps (0x6C: { end, mark, level,
+  index }, u32 duration in 5 ns clocks >= 2, u16 fraction in 1/65536 clock), 0x6D control (mode 0 off at the idle level,
+  1 one burst per start, 2 R bursts (0x6E) with the gap (0x6F) between them, 3 continuous with the gap after each; bit 2
+  idle level, bit 3 the marker is a capture trigger source, bit 4 start, bit 5 commit, bits 7..6 start source MCU /
+  pattern trigger engine / both), 0x50 the pin driver (1 = the pattern's level, 0 = hi-Z, the EXT input). One 16-bit
+  fraction accumulator: a step lasts n + the carry of acc + f, so the mean is exact and every edge lands within one 5 ns
+  clock of its ideal time; it is cleared at a start only (two bursts are identical edge for edge). Entries 0 and 1 are
+  double-buffered: a write goes to a shadow, the commit makes them pending, and the FPGA takes them at a step boundary
+  (it prefetches two steps: a commit during step k is taken at the boundary into k + 1 and applies from step k + 3; a
+  start takes them before step 0). Read 0x39:
+  { running, in gap, pending, step }, bursts done, { marker seen, mode active }.
+- **The generator** (`gen_pat.c`, host-buildable; `fpga_control.c` `fpga_set_generator_freq` / `_duty` /
+  `fpga_on_off_generator`): the contract's integer formulas P16 = (2^16 x 2e11 + f / 2) / f (f in mHz), H16 = (P16 x d +
+  5000) / 10000 (d in basis points), n_h = H16 >> 16, f_h = H16 & 0xFFFF, the low step from P16 - H16. The square is
+  entry 0 (high) and entry 1 (low, end) in mode 3; a change of a running square is 0x6C x 2 + 0x6D commit, **18 strobes,
+  5.4 us**, glitch-free and phase-continuous, so the menu's frequency and duty can be written in any order; a first
+  enable stops the engine (0x6D = 0, and 0x6F = 0 after a pattern with a gap) and starts it with commit + start in one
+  write (0x6D = 0x33). The UI's whole Hz / whole percent go through the same formulas with the high time clamped to
+  2 .. P - 2 clocks; 0 Hz or 0 % hold the pin low and 100 % high (mode 0 with the idle level, the DDS's behaviour at the
+  extremes). While the generator is off nothing is written for a frequency or duty change; off is the pattern stopped
+  low and the pin hi-Z. The 1 kHz is exact: n_h = n_l = 100,000 clocks, no fraction (the wizard's, the boot default).
+  The wizard's gain step holds the post at a static level with `fpga_pat_level` + 0x50 = 1 (`cal_wiz_ui.c`).
+- **Host** (`pc_cmds.c`): SET_GEN keeps 20 bytes with the raw modes P16 (bytes 4..11) and H16 (12..19); GEN is 40 bytes
+  (the 0x39 status, the source byte, P16, H16); GET_GEN reads 0x39 in the main loop, so a host chirp can poll the pending
+  bit. **SET_PATTERN 0x0217** loads a host pattern (steps, mode, flags incl. bit 0 "pin hi-Z", R, gap in ns, commit,
+  start); **SET_PATTERN_TRIGGER 0x021A** configures the pattern's own trigger engine (0x76..0x7D: the SET_TRIGGER2 body
+  through the same byte builder as the capture trigger's registers with the pattern's code table; armed, re-arm; the
+  routed fallback's refusal E_STATE 8); capture trigger source 3 is the marker (SET_TRIGGER / SET_TRIGGER2, the edge type;
+  the UI keeps EXT as its channel and the trigger button reads "PAT"; `fpga_trig_marker`). Byte layouts: `docs/protocol.md`
+  row 67.
+- **The chirp** (contract 7.3): no sweep logic in the FPGA and no device command; a host steps SET_GEN (18 strobes per
+  step on the bus; a USB round trip each, about 2,000 steps per second from the host) and paces on GEN byte 1 bit 5
+  (pending) or by keeping steps at least one period apart: a second commit before the take overwrites the first.
+- **Bode** (`bode_dsp.c`, `bode_sweep.c`, `pc_bode.c`): the stimulus is an integer period P of 5 ns clocks (n_h = ceil(P /
+  2)), f = 200 MHz / P; every plan of the DDS era maps with P = 4 M and the grid is four times finer (legacy up to P 133;
+  at N = 16 an even P above 4095 so a record holds two blocks). The record is exactly coherent (no Hann window), the DFT
+  steps the phase by round(N 2^34 / P). READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
+- **Host tests**: `test_fpga_bus.c` (`fpga_model.c` runs the pattern engine on the 5 ns grid): `test_gen_formulas` (14
+  frequencies x 9 duties: P16 the nearest unit, the split, the back conversions, the worked examples, the limits, the UI
+  and Bode squares), `test_gen_square` (eight squares from 47 Hz to 10 MHz: every edge within one clock, the mean period
+  exact over up to 1500 periods; the write sequences, 18 strobes per change), `test_gen_change` (a change mid-run: only
+  complete old or new steps, the take at the prefetch boundary, the pending bit, a commit lost to a second one),
+  `test_pattern_bursts`, `test_pattern_marker`, `test_ptrig`; `test_session.c` `test_generator` / `test_pattern` /
+  `test_pattern_trigger`; `test_bode.py` / `test_bode_sweep.c` on P; the 1.27 vectors (section 5i of `gen_vectors.py`).
+
 ### Build options
 
 | make variable | default | effect |
@@ -674,7 +726,7 @@ Hooks in the 1.00o5 code (up to 0.2.46 all under `#if PC_PROTOCOL`, since 0.2.47
 
 Maintainer policy: the UI offers only what the running hardware can do, and what the 1013D can never do is removed in
 code, not hidden (maintainer, 2026-10-18). Removed in 0.2.47 (settings sector and waveform file slots stay, written 0):
-the generator's Wave (SQUR / SINE / TRGL), Ampl, Offset and Phase rows (no DAC: the generator is the FPGA's DDS
+the generator's Wave (SQUR / SINE / TRGL), Ampl, Offset and Phase rows (no DAC: the generator is the FPGA's square (the DDS, since 0x153D the pattern)
 square wave on the calibration pin; 1.00o5 never sent them anywhere), the trigger Hold off row (never sent to the
 FPGA), Long memory (1.00o5 forced it off; its main-loop branch was empty) and the channel menus' FFT switch
 (1.00o5 stored `fftenable` and drew nothing). The menus are compact (maintainer: no gaps; generator 3 rows, 169 px:
@@ -2371,8 +2423,9 @@ at code 128 (8 conversions gated, 64 at 200 MSa/s). 0.2.67-0.2.78 measured it as
 side (`acal_zero_split`, CAL_PROBE byte 248) so the step passed on FPGA 0x1538 / 0x1539, whose 200 MSa/s capture garbled
 cores near 0x7F / 0x80; the maintainer removed that workaround (2026-10-19 20:30, fail fast), so CAL_PROBE byte 248 is always
 0. A clip found only at 200 MSa/s while the gated point at the same PWM is quiet and within 8 codes of 128 reports "ADC
-readout fault near code 128: check the FPGA bitstream" (ACAL_E_READOUT, `acal_readout_fault`): such a bitstream fails
-the step instead of being calibrated around the fault.
+readout fault near code 128: power-cycle and retry; report it if it persists" (ACAL_E_READOUT, `acal_readout_fault`;
+"check the FPGA bitstream" until fw-small, when there was a bitstream to pick): such a capture fails the step instead of
+being calibrated around the fault.
 
 **Capture stage training (fw 0.2.79, FPGA 0x153A, protocol 1.24, row 64; `cap_stage.c`, `cap_hw.c`).** On 0x153A each
 channel's zero step starts with the training of its two cores' capture stages (`cal_train`): range 0, the input parked at
@@ -2381,7 +2434,8 @@ code 128 by the gated centre search, a quiet input required (gated within-captur
 (threshold 0x64 = 8 codes; a clean stage reads 0). Per core the clean stage of {3, 4} whose outer neighbour is clean too
 is taken (the power-on one when the clean run is symmetric), else the clean one of {3, 4}, else a clean reserve 2 / 5; a
 B core with no clean stage is tried again with its reference bit (0x63 bit 12 / 13, timed by the chip's A encode). A core
-with no clean stage fails the channel with "ADC readout fault near code 128: check the FPGA bitstream"; a passed
+with no clean stage fails the channel with "ADC readout fault near code 128: power-cycle and retry; report it if it
+persists" (fw-small; "check the FPGA bitstream" before); a passed
 channel's note reads "Capture stages: CH1 A4 B4". Save stores the value with the calibration in sector 708 bytes
 488..503 (u32 'ACAP', u16 version 1, u16 length 16, u16 the 0x63 value, u16 the FPGA version word, u32 CRC-32 of the 12
 bytes before; after the provenance trailer, outside the v3 block, so an older firmware's 708 save clears it); Cancel and

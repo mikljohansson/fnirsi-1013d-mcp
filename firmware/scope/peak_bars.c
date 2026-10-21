@@ -106,3 +106,34 @@ int pb_overload(const uint16_t *pairs, uint32_t n)
 
   return 0;
 }
+
+void pb_extremes(const uint16_t *pairs, uint32_t n, uint32_t gain, int32_t off, int invert, int32_t *lo, int32_t *hi)
+{
+  uint32_t i, mn = 255, mx = 0;
+  int32_t  a, b;
+
+  if(!n)
+  {
+    *lo = 255;
+    *hi = 0;
+    return;
+  }
+
+  //pc_peak_code is monotonic in the raw code (gain >= 0), so the extreme raw bytes give the extreme codes
+  for(i = 0; i < n; i++)
+  {
+    uint32_t l = pairs[i] & 0xFF, h = pairs[i] >> 8;
+
+    if(l < mn)
+      mn = l;
+
+    if(h > mx)
+      mx = h;
+  }
+
+  a = pc_peak_code((uint8_t)mn, gain, off);
+  b = pc_peak_code((uint8_t)mx, gain, off);
+
+  *lo = invert ? 255 - b : a;
+  *hi = invert ? 255 - a : b;
+}

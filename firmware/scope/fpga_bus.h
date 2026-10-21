@@ -21,6 +21,8 @@
 
 #include <stdint.h>
 
+#include "gen_pat.h"
+
 //The built-for bitstream's bus contract: one dummy strobe after 0x1F + a read command before the first byte of start_word
 //(zaklad.v read register; fpga-gen6 simulation; 0x1539 keeps the lag by design, fpga/al3/README.md section 9). A future
 //bitstream that drops the lag changes this constant with PC_FW_FPGA_VERSION.
@@ -55,6 +57,12 @@ typedef struct
 //Geometry (early), 0x01 = 1, the 0x05 ready wait, geometry again, the trigger type registers (fpga_trig_arm), 0x0E,
 //0x01 = 0. 0 = released, -1 = ready never came
 int  fpga_arm_reset(const fpga_arm_cfg *c);
+
+//End a running capture now (fw-small): 0x0E = 0, then 0x1A = 0. The FPGA stops in auto mode only on ~trigger_mode &&
+//time_base_cnt > 0x0E (zaklad.v); 0x1A = 0 alone left an explicit auto_timeout (0x0E = the host's count) running up to
+//twice the deadline. On 0x153B+ the stop latches the newest total words (fpga/al3/README.md section 11, change 1) and a
+//0x0E / 0x1A write before the 0x14 read moves nothing (change 4). The next arm writes 0x0E again (fpga_arm_reset).
+void fpga_force_stop(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26; docs/plans/fpga-0x153c.md sections 2.1, 3, 3.6; the RTL
@@ -99,6 +107,23 @@ void fpga_trig_arm(void);
 void fpga_trig_write(const fpga_trig_ext *t, int clear);
 //Read 0x37 into out[0] and the 3 bytes of 0x34 into out[1..3] (6 strobes)
 void fpga_trig_status(uint8_t out[4]);
+
+//D5 pattern: one byte builder, two engines (contract 7.5). The capture trigger's registers are scattered (0x15, 0x16,
+//0x17, 0x55, 0x5E, 0x5F, 0x60), the pattern trigger engine's are the same layouts in one block (0x76 .. 0x7C); each
+//engine is a table of command codes in that order. fpga_trig_arm is fpga_trig_type_regs with the capture's table.
+typedef struct
+{
+  uint8_t src, pol, lvl8, lvl16, type, n, h;
+} fpga_trig_codes;
+
+extern const fpga_trig_codes fpga_trig_cap_codes;   //{ 0x15, 0x16, 0x17, 0x55, 0x5E, 0x5F, 0x60 }
+extern const fpga_trig_codes fpga_trig_pat_codes;   //{ 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C }
+
+//type | longer << 3, and with a type other than edge N and H (u24 each)
+void fpga_trig_type_regs(const fpga_trig_codes *c, const fpga_trig_ext *t);
+//source, polarity, the 8-bit and the 16-bit level
+void fpga_trig_edge_regs(const fpga_trig_codes *c, uint8_t source, uint8_t polarity, uint8_t level, uint16_t level16);
+//D5 pattern end
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Writes that set the capture state (fw 0.2.72): 0x0D rate, 0x53 / 0x56 filter, 0x01 = 1 sampling reset. Counted
@@ -145,6 +170,104 @@ int  fpga_bus_note_write(uint8_t cmd, uint32_t value);
 //cannot survive an arm. 1 = the filter must settle: a value differs from what the FPGA held, or the divider changed
 //since the previous call.
 int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift);
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D5 pattern: the pattern generator and its trigger engine (FPGA 0x153D, fw-d5, protocol 1.27; docs/plans/fpga-0x153c.md
+// 2.1, 2.2, 7.2, 7.5). The DDS (0x51 / 0x52) is gone: the generator is the two-step continuous pattern (gen_pat.h).
+// Writes: 0x6C (7 bytes) step = { end, mark, level, index[4:0] }, u32 duration in 5 ns clocks (>= 2), u16 fraction in
+// 1/65536 clock; entries 0 and 1 are double-buffered (a write goes to the shadow, 0x6D bit 5 commit makes them pending,
+// the next step boundary or a start takes them), 2..7 take effect at once. 0x6D control = mode[1:0] (0 off: the pin holds
+// the idle level, 1 single burst, 2 R bursts, 3 continuous), bit 2 idle level, bit 3 the marker is a trigger source
+// (0x15 = 3), bit 4 start (self-clearing; clears the fraction accumulator), bit 5 commit (self-clearing), bits 7..6
+// start source (0 MCU, 1 the pattern trigger engine, 2 both). 0x6E u16 R (0 = 65536), 0x6F u32 gap in clocks. 0x50
+// (unchanged) 1 = the pin is driven with the pattern's level, 0 = hi-Z (the EXT input). Reads: 0x39 (4 bytes) = { running,
+// in gap, pending, 0, step[3:0] }, u16 bursts done, { 0 x 6, marker seen since 0x01 = 1, mode active }; 0x42 (3 bytes) =
+// { own engine, event seen, counting, pulse began, EXT, longer, type[1:0] }, u16 edges still to count.
+//
+// The pattern trigger engine: 0x76 .. 0x7C as the capture trigger's 0x15, 0x16, 0x17, 0x55, 0x5E, 0x5F, 0x60 (the same
+// byte builder with the pattern's code table), 0x7D = bit 0 armed (writing 1 restarts its state), bit 1 re-arm after each
+// burst (0 = one shot), bit 2 clear the event flag (self-clearing), bit 3 the shared fallback's routing (7.5).
+
+#define FPGA_PAT_STEPS        8
+
+#define FPGA_PAT_OFF          0
+#define FPGA_PAT_SINGLE       1
+#define FPGA_PAT_REPEAT       2
+#define FPGA_PAT_CONT         3
+
+#define FPGA_PAT_CTL_IDLE     0x04     //0x6D bit 2: idle level
+#define FPGA_PAT_CTL_MARKTRIG 0x08     //0x6D bit 3: the marker is a trigger source
+#define FPGA_PAT_CTL_START    0x10     //0x6D bit 4 (self-clearing)
+#define FPGA_PAT_CTL_COMMIT   0x20     //0x6D bit 5 (self-clearing)
+#define FPGA_PAT_CTL_SRC      0xC0     //0x6D bits 7..6: start source
+#define FPGA_PAT_CTL_KEEP     (FPGA_PAT_CTL_IDLE | FPGA_PAT_CTL_MARKTRIG | FPGA_PAT_CTL_SRC)
+
+#define FPGA_PAT_S_LEVEL      0x01     //step flags (the firmware's; 0x6C byte 0 bit 5)
+#define FPGA_PAT_S_MARK       0x02     //(bit 6)
+#define FPGA_PAT_S_END        0x04     //(bit 7)
+
+#define FPGA_PAT_ST_PENDING   0x20     //0x39 byte 0 bit 5: a commit not yet taken
+
+typedef struct
+{
+  uint8_t  flags;          //FPGA_PAT_S_*
+  uint16_t frac;           //1/65536 clock
+  uint32_t dur;            //clocks, >= 2
+} fpga_pat_step;
+
+typedef struct
+{
+  uint8_t  mode;           //0x6D bits 1..0
+  uint8_t  ctl;            //0x6D bits 2, 3, 7..6 (FPGA_PAT_CTL_KEEP)
+  uint8_t  n;              //steps in use (the last one carries END)
+  uint8_t  square;         //1: the generator's two-step square (fpga_pat_square) runs
+  uint8_t  drive;          //0x50 as last written
+  uint16_t r;              //0x6E
+  uint32_t gap;            //0x6F, clocks
+  fpga_pat_step step[FPGA_PAT_STEPS];
+} fpga_pat_cfg;
+
+extern fpga_pat_cfg fpga_pat;      //what the FPGA holds, the firmware's copy (power-on: all 0, off, hi-Z)
+
+void fpga_pat_step_write(uint8_t index, const fpga_pat_step *st);   //0x6C
+void fpga_pat_ctl(uint8_t v);                                       //0x6D
+void fpga_pat_drive(int on);                                        //0x50
+//The generator's square: entries 0 (high) and 1 (low, END) and 0x6D = continuous + commit, + start when the square was
+//not running already (then 0x6D = 0 first, and 0x6F = 0 when a gap was set). A running square changes glitch-free at
+//the next step boundary: 18 strobes
+void fpga_pat_square(const gp_square *sq);
+//A static level: 0x6D = mode 0 with the idle level (the wizard's gain step, duty 0 / 100 %)
+void fpga_pat_level(uint8_t level);
+//A host pattern (SET_PATTERN): the n steps (END on the last), 0x6E, 0x6F, 0x6D with commit / start as asked
+void fpga_pat_load(const fpga_pat_cfg *c, int commit, int start);
+//0x39: 4 bytes
+void fpga_pat_status(uint8_t out[4]);
+
+typedef struct
+{
+  uint8_t       source;    //0x76: 0 CH1, 1 CH2, 2 EXT
+  uint8_t       polarity;  //0x77
+  uint8_t       level;     //0x78
+  uint16_t      level16;   //0x79 (K >= 1 or peak)
+  fpga_trig_ext x;         //0x7A (type, longer), 0x7B N, 0x7C H; holdoff unused (the engine has none)
+  uint8_t       armed;     //0x7D bit 0
+  uint8_t       rearm;     //0x7D bit 1
+  uint8_t       route;     //0x7D bit 3: the shared fallback (read 0x42 byte 0 bit 7 = 0) routes the engine to the pattern
+} fpga_ptrig_cfg;
+
+extern fpga_ptrig_cfg fpga_ptrig;  //what the FPGA holds (power-on: all 0, disarmed)
+
+//0x7D = 0, 0x76 .. 0x79, 0x7A (and 0x7B / 0x7C for a qualified type), 0x7D = armed | rearm << 1 | clear the event flag
+//| route << 3
+void fpga_ptrig_write(const fpga_ptrig_cfg *p);
+void fpga_ptrig_level16(uint16_t level16);                          //0x79 alone (the decimation changed)
+void fpga_ptrig_status(uint8_t out[3]);                             //0x42
+
+//Capture trigger source 3 PATTERN (0x15 = 3: the marker through the EXT apply path, so every EXT rule of the capture
+//applies). Host only: the UI's trigger channel stays 2 (EXT) and this flag makes fpga_set_trigger_channel write 3; any
+//other source choice clears it
+extern uint8_t fpga_trig_marker;
+//D5 pattern end
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bus primitives: fpga_control.c / fpga_control.h on the scope, fpga_model.c in the host test

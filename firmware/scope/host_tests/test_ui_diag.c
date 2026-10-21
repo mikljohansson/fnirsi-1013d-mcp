@@ -139,7 +139,7 @@ static void healthy(ud_input *in)
   in->sd_sectors    = 15523840;           //7.9 GB
   in->fpga          = 0x153B;
   in->variant       = 2;
-  in->caps          = PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR | PC_CAP_SEQ | PC_CAP_ENC_CHECK |
+  in->caps          = PC_CAP_GENERATOR | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR | PC_CAP_SEQ | PC_CAP_ENC_CHECK |
                       PC_CAP_CAPTURE_STAGES;
   in->battery       = 18;
   in->charging      = 1;

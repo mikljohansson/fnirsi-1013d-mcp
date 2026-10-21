@@ -395,7 +395,7 @@ module tb;
         // new 0x1534/0x1535 commands with K = 0: must not change anything
         wr1(8'h53, {5'd0, rnd[7], 2'b00});
         wr1(8'h54, $random(seed));
-        wr1(8'h56, $random(seed));
+        wr1(8'h56, $random(seed) & 8'hFD);                // bit 1 is peak detect since 0x153C (not reserved)
         wr2(8'h55, $random(seed));
         wr1(8'h15, {6'd0, rnd[9:8]});                     // CH1, CH2, EXT, EXT
         wr1(8'h16, {7'd0, rnd[1]});
