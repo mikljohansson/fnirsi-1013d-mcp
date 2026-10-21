@@ -272,6 +272,14 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3 (Fable, dispatched 14:0x, branch fpga-d3): 0x153D integration per contract item D3: merge fpga-d1 (pushed) and
+  fpga-d2 (when pushed) onto C4's cruft-removed source, version byte 0x3D, contract_0x153D.txt, run.sh (18 steps) ALL PASS
+  both seeds, TD build with every clock closed (re-roll by block order first), dist/al3-0x153D.bin + manifest (unbenched,
+  min firmware 0.2.105 provisional), README section, handoff with the owner's flash checklist (read --twice = the 0x153C
+  padded image once that is flashed). Firmware handoffs (sections 74-75) win on register semantics; mismatches reported.
+- fw-cruft (Opus explicitly, dispatched 14:0x, branch fw-cruft): the firmware / host side of C4's cruft removal: the dead 0x0F
+  writes, READ_LIVE 0x0206 + cap bit 9 retired (never built; folded into protocol row 67), 0x53 bits 4..2 mask, protocol.md
+  lines 263 / 887 / 984 / 992, mcp ReadLiveReq / read_live / simulator, vectors regenerated, queue item line 226 closed.
 - fpga-c4 pushed 7f6eb3a 13:5x (asked to push before its rerun on the final source finishes; the rerun text follows in one
   more commit), merged 14:0x: dist/al3-0x153C.bin 282,898 B sha256 2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2,
   padded 1 MiB 07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77, status unbenched, min firmware 0.2.104,
