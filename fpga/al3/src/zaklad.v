@@ -156,16 +156,24 @@ endmodule
 //The inputs are the captured samples adc*_w (0x153A), registered on the rising write clock edge;
 //pa/pb take them one clock later. 0x1534..0x1539 had neg_a / neg_b (0x53 bits 3 / 4) to capture the
 //pins on the falling edge instead; the bits still read back in 0x29 but select nothing any more.
+//0x153C peak detect (peak = 1): out = { max, min } of the raw samples of the window instead of the
+//filter output. The window is exactly the 2P samples the K = 1 boxcar sums for the same output
+//(wstart marks its boundary), the pipeline depth is the filter's, so the latency to the memory is
+//unchanged. The CIC keeps running underneath; order 0 behaves as 1, so peak detect works at K = 0.
 
 module decim_chan
 (
   input  wire        clk,
   input  wire [7:0]  in_a,        //ADC core A
   input  wire [7:0]  in_b,        //ADC core B
-  input  wire [1:0]  order,       //K, 1..3 (0 behaves as 1; its output is not used)
+  input  wire [1:0]  order,       //K, 1..3 (0 behaves as 1; its output is not used unless peak)
   input  wire        swap,        //0: core B is the earlier sample of a pair, 1: core A
   input  wire [5:0]  shift,
   input  wire [5:0]  sv,          //valid chain s0 .. s5
+  input  wire        peak,        //0x153C: out = { max, min } of the window's raw samples instead of the filter
+  input  wire        wstart,      //0x153C: dec_pc == 0, the window boundary (one edge before sv[0])
+  output wire [7:0]  pair_e,      //0x153C: the captured pair (earlier, later sample) for the counter
+  output wire [7:0]  pair_l,
   output reg  [15:0] out = 0
 );
 localparam W = 48;
@@ -180,6 +188,17 @@ reg [W-1:0] sh = 0;
 
 wire [7:0] xe = swap ? qa : qb;   //earlier sample of the pair
 wire [7:0] xl = swap ? qb : qa;   //later sample of the pair
+
+assign pair_e = xe;
+assign pair_l = xl;
+
+//0x153C peak detect. pmx / pmn are the pair's max and min, registered with f, pdx / pdn the same one clock later (the
+//integrator's alignment); rmx / rmn the running max and min of the window, restarted on the edge where dec_pc == 0
+//(wstart), which also hands the finished window to pkw. That edge is one before the sv[0] edge that latches the CIC's
+//d0, and the window is exactly the pairs the K = 1 boxcar sums for that output (tb_peak.v checks it). pk0..pk4 follow
+//the comb pipeline (sv[0]..sv[4]) so the peak word reaches out on sv[5] like the filter.
+reg [7:0]  pmx = 0, pmn = 0, pdx = 0, pdn = 0, rmx = 0, rmn = 0;
+reg [15:0] pkw = 0, pk0 = 0, pk1 = 0, pk2 = 0, pk3 = 0, pk4 = 0;
 
 wire k2  = (order == 2'd2);
 wire k3  = (order == 2'd3);
@@ -201,6 +220,27 @@ wire [W-1:0] fine = sh >> shift[2:0];
       pe <= xe;
       pl <= xl;
       f  <= {3'b0, xl} + {1'b0, t_xe} + {1'b0, t_pl} + {3'b0, t_pe};
+
+      pmx <= (xe > xl) ? xe : xl;
+      pmn <= (xe < xl) ? xe : xl;
+      pdx <= pmx;
+      pdn <= pmn;
+      if(wstart)
+        begin
+          pkw <= { rmx, rmn };
+          rmx <= pdx;
+          rmn <= pdn;
+        end
+      else
+        begin
+          rmx <= (pdx > rmx) ? pdx : rmx;
+          rmn <= (pdn < rmn) ? pdn : rmn;
+        end
+      if(sv[0]) pk0 <= pkw;
+      if(sv[1]) pk1 <= pk0;
+      if(sv[2]) pk2 <= pk1;
+      if(sv[3]) pk3 <= pk2;
+      if(sv[4]) pk4 <= pk3;
 
       i1 <= i1 + f;
       i2 <= (k23 ? i2 : {W{1'b0}}) + i1;    //K = 1: i2 = i1 one clock later
@@ -231,7 +271,7 @@ wire [W-1:0] fine = sh >> shift[2:0];
         sh <= c3 >> {shift[5:3], 3'b000};
 
       if(sv[5])
-        out <= (|fine[W-1:16]) ? 16'hFFFF : fine[15:0];
+        out <= peak ? pk4 : (|fine[W-1:16]) ? 16'hFFFF : fine[15:0];
     end
 
 endmodule
@@ -770,6 +810,7 @@ module fnirsi_1013D
   reg [15:0] trigger_level16 = 0;          //Command 0x55: trigger level on the 16-bit samples (K >= 1)
 
   reg        fir_en = 0;                   //Command 0x56 bit 0: CIC compensation FIR (0x1535)
+  reg        peak_en = 0;                  //Command 0x56 bit 1: peak detect (0x153C), { max, min } words on the 16-bit path
 
   //Trigger types (0x153C, cherry-picked from gen8-features-wip 9de82ca; docs/plans/fpga-0x153c.md section 3)
   reg [2:0]  trig_type = 0;                //Command 0x5E bits 2..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout, 4..7 act as edge
@@ -812,7 +853,9 @@ module fnirsi_1013D
   wire       cap_rst     = sample_system_reset | seq_rst_c;
   wire       cap_rst200  = sample_system_reset | (swc_rise_q & seq_rst_q);
 
-  wire dec_on = (dec_order != 2'd0);
+  //The 16-bit path: the filter (K >= 1), or peak detect by itself (0x153C: 0x56 bit 1 is a one-register
+  //switch; decim_chan then runs as K = 1 with the window N = 2 (floor(D / 2) + 1) from 0x0D, whatever 0x53 holds)
+  wire dec_on = (dec_order != 2'd0) | peak_en;
 
   wire [15:0] dec_out1;                    //Decimated 16-bit samples (CIC, or FIR when fir_act)
   wire [15:0] dec_out2;
@@ -1234,11 +1277,14 @@ freq_generator_dds_pwm u_freq
   //N / 2, and the FIR decimates its output by 2. dec_t tags the strobes from dec_pc == 0: the
   //CIC sample they make is the newest one of an output pair. dec_wr then comes from the FIR,
   //still once per P write clocks. With fir_act = 0 every 0x1534 register and output is unchanged.
-  wire        fir_ok = fir_en & dec_on & sample_rate_divider[1] & (sample_rate_divider >= 32'd14);
+  //0x153C: the FIR is off while peak detect is on (peak_act): the words are { max, min }, not filter outputs.
+  wire        fir_ok = fir_en & ~peak_en & dec_on & sample_rate_divider[1] & (sample_rate_divider >= 32'd14);
+  wire        peak_act = peak_en & dec_on;   //0x153C: peak detect replaces the filter (CIC and FIR); = peak_en, since dec_on carries it
   reg         fir_act = 0;
   reg [30:0]  fir_hp = 0;
   reg [7:0]   dec_t = 0;
   wire [15:0] cic_out1, cic_out2, fir_out1, fir_out2;
+  wire [7:0]  pair_e1, pair_l1, pair_e2, pair_l2;   //0x153C: the captured pairs (earlier, later) for the counter
   wire        fir_done1, fir_done2;
 
   wire [30:0] dec_ph = sample_rate_divider[31:1];
@@ -1272,6 +1318,10 @@ freq_generator_dds_pwm u_freq
     .swap  (dec_swap),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
+    .peak  (peak_act),
+    .wstart(dec_pc == 0),
+    .pair_e(pair_e1),
+    .pair_l(pair_l1),
     .out   (cic_out1)
   );
 
@@ -1284,6 +1334,10 @@ freq_generator_dds_pwm u_freq
     .swap  (dec_swap),
     .shift (dec_shift),
     .sv    (dec_sv[5:0]),
+    .peak  (peak_act),
+    .wstart(dec_pc == 0),
+    .pair_e(pair_e2),
+    .pair_l(pair_l2),
     .out   (cic_out2)
   );
 
@@ -1312,7 +1366,10 @@ freq_generator_dds_pwm u_freq
   //Trigger on the 16-bit sample that is written on this edge (channel per 0x15): the result
   //of sample >= trigger_level16 goes into the 8-bit trigger_data register as 0xFF or 0x00 and
   //the 8-bit compare runs against 0x80, so the timed trigger path keeps its 0x1533 structure.
-  wire [15:0] dec_trig_sample = trigger_channel ? dec_out2 : dec_out1;
+  //0x153C peak detect: the compare takes the window max for a rising detection, the min for a falling one, as the high
+  //byte (level16 = level << 8 then compares that byte with the level)
+  wire [15:0] dec_trig_word   = trigger_channel ? dec_out2 : dec_out1;
+  wire [15:0] dec_trig_sample = peak_act ? { (trigger_edge ? dec_trig_word[7:0] : dec_trig_word[15:8]), 8'h00 } : dec_trig_word;
   wire        dec_trig_ge     = dec_trig_sample >= trigger_level16;
   wire [7:0]  trigger_level_eff = dec_on ? 8'h80 : trigger_level;
 
@@ -2565,9 +2622,12 @@ assign sampling_enable = ~(
             8'h54:
               dec_shift <= io_mcu_data[5:0];
 
-            //CIC compensation FIR enable (0x1535), bit 0; bits 7..1 reserved
+            //CIC compensation FIR enable (0x1535), bit 0; peak detect (0x153C), bit 1; bits 7..2 reserved
             8'h56:
-              fir_en <= io_mcu_data[0];
+              begin
+                fir_en  <= io_mcu_data[0];
+                peak_en <= io_mcu_data[1];
+              end
 
             //Loading of the two bytes of the 16-bit trigger level high byte first
             8'h55:
@@ -2808,14 +2868,15 @@ assign sampling_enable = ~(
 
             //Reading of the decimation geometry, two bytes
             //byte 0: bit7 = 16-bit samples (K >= 1), bit4/bit3 = 0x53 bits 4/3 as written (no effect since 0x153A),
-            //bit2 = core order swap, bits 1..0 = K; byte 1: shift
+            //bit2 = core order swap, bits 1..0 = K as written (0 with peak detect at K = 0, bit7 then still 1);
+            //byte 1: bit7 = peak detect active, bit6 = 0x56 bit 1 as written (0x153C), bits 5..0 = shift
             8'h29:
               begin
                 case(mcu_state)
                   4'h0:
                     o_mcu_data <= { dec_on, fir_en, fir_act, dec_neg_b, dec_neg_a, dec_swap, dec_order };
                   4'h1:
-                    o_mcu_data <= { 2'b0, dec_shift };
+                    o_mcu_data <= { peak_act, peak_en, dec_shift };
                 endcase
               end
 

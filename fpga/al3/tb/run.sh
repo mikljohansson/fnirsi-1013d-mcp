@@ -42,11 +42,15 @@
 #      against a reference model on the stream the FPGA saw, at the edge type's trigger position; the reserved types
 #      and the 0x34 / 0x37 read-back; the trigger hold-off (0x1B, 0x66) across sequencer restarts and MCU re-arms; the
 #      0x153B stop gate per type. TRIGTYPES_RUNS (default 2) runs per type, polarity and case.
+#  15. tb_peak.v (0x153C C2): peak detect (0x56 bit 1): every 16-bit word { max, min } of exactly the K = 1 boxcar's
+#      window of raw samples (adc*_w), at K = 1..3 with the FIR enabled (it stays off) and at K = 0 (the one-register
+#      switch forces the 16-bit path, the full-rate ADCs and the window from 0x0D; 0x56 = 0 gives the legacy path back),
+#      the 0x29 read-back, READ_RAW bytes, the alias demonstration (6 ns spikes at 5 MSa/s) and the window max / min trigger.
 #  16. tb_counter.v (0x153C C3): the hardware counter (0x61, 0x62, read 0x35 with 16 bytes): gates exactly 2e6 clocks apart,
 #      E / T / W and min / max of every gate against a model of the input stream and of the captured pair, accuracy against
 #      the stimulus on EXT and CH1 (200 MSa/s, 10 MSa/s, K = 1), the source select (0x61 bits 3..2 and the 0x15 follow),
 #      the Schmitt thresholds at their boundaries, the hysteresis against noise, the "new" flag and the snapshot read.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|counter runs one testbench.
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -156,6 +160,11 @@ if [ "$ONLY" = all ] || [ "$ONLY" = trigtypes ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigtypes.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigtypes.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_trigtypes.vvp" +seed=$SEED +runs=${TRIGTYPES_RUNS:-2} +logfile="$WORK/trigtypes.log" | grep -v '^  intent' | tee "$WORK/sim_trigtypes.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigtypes.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = peak ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_peak.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_peak.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_peak.vvp" +seed=$SEED | tee "$WORK/sim_peak.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_peak.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
   iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
