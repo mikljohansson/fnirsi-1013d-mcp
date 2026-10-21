@@ -4,6 +4,10 @@ Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-20 (fpga-gen13, branch `fpga-gen13`):
+- fpga-c2 (2026-10-20 night, branch `fpga-c2`, **not merged, version byte still 0x3B**): item C2 of
+  `docs/plans/fpga-0x153c.md` section 10, peak detect as a one-register switch (0x56 bit 1, 0x29 byte 1), `tb_peak.v` =
+  run.sh step 15, README section 12 "Peak detect". Section "0x153C C2 peak detect, fpga-c2" below. C1 (triggers), C3
+  (counter) run in parallel; C4 merges, sets 0x3C and builds. `src/` on main is unchanged (c173ed5).
 - fpga-gen13 (2026-10-20 evening): 0x153B was **flashed at 19:31** (verified `1391978c...3b88`; rollback = the pre-write
   backup `backups/fpga-flash_pre-0x153B_20261020-1931.bin` = the 0x153A padded image) and the bench of 19:52 read "every
   record spliced". The saved records hold **no signal** (code 128 +- 1 on both channels, probes off the post after the
@@ -353,6 +357,79 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x153C C2 peak detect, fpga-c2 (2026-10-20)
+
+Brief (coordinator): item C2 of `docs/plans/fpga-0x153c.md` section 10: cherry-pick the peak detect of `gen8-features-wip`
+(9de82ca) onto 0x153B and make it the contract's one-register switch (sections 2.1 0x56 bit 1, 2.2 0x29, 4, 9.1 step 15);
+rebase `tb_peak.v` onto `adc*_w` with the K = 0 + peak case; run.sh step 15; `FPGA commands.txt`; README section 12 (peak).
+RTL and testbench only: no flash, no version byte (C4), no dist. Branch `fpga-c2` from main 4b29d01.
+
+**What changed in `src/zaklad.v`** (owned areas: `decim_chan`, the `dec_on` wire, the decimator control block, the 0x56
+decoder entry, the 0x29 read mux):
+- `decim_chan` has gen8's ports `peak`, `wstart` (= `dec_pc == 0`), `pair_e` / `pair_l` (the captured pair for C3's
+  counter; the wires `pair_e1/l1/e2/l2` are declared in the control block) and registers `pmx/pmn` (pair max / min,
+  registered with `f`), `pdx/pdn`, `rmx/rmn` (running window max / min, restarted on `wstart`, which hands the finished
+  window to `pkw`), `pk0..pk4` following `sv[0..4]`; `out <= peak ? pk4 : filter` on `sv[5]`. Window = the K = 1 boxcar's,
+  latency = the boxcar's (tb-measured: 12 write clocks from `adc*_w`, as for the filter). `tb_long.v` ties the new inputs
+  to 0.
+- `dec_on = (dec_order != 0) | peak_en`: the one RTL change against gen8. Everything keyed on `dec_on` follows (divider
+  force on the static side of the rate compare, `swc_adv`, the memory mux, the 16-bit trigger path, `q_fmt16`, `ts_inc`).
+  `decim_chan` at `order` 0 already behaves as K = 1 (`k2 = k3 = k23 = 0`), so `order` is not muxed.
+- `fir_ok` carries `~peak_en`; `peak_act = peak_en & dec_on` (equal to `peak_en` now; kept as the 0x29 byte 1 bit 7 source
+  for the contract's layout).
+- 0x56: `fir_en <= bit 0`, `peak_en <= bit 1`. 0x29 byte 1 = `{ peak_act, peak_en, dec_shift }`; byte 0 unchanged (bit 7
+  = `dec_on`, bits 1..0 = K as written: 0 with peak at K = 0).
+- **Shared lines (fpga-c1 owns them, contract section 10):** `dec_trig_sample` became gen8's two lines (plus a comment):
+  `wire [15:0] dec_trig_word = trigger_channel ? dec_out2 : dec_out1;` and `wire [15:0] dec_trig_sample = peak_act ?
+  { (trigger_edge ? dec_trig_word[7:0] : dec_trig_word[15:8]), 8'h00 } : dec_trig_word;`. Reason: the peak trigger compares
+  the window max (rising) / min (falling) as the high byte against 0x55 = level << 8; without it a falling peak trigger fires
+  on the max. Made on this branch so step 15's trigger case passes; fpga-c1 confirmed (22:50) that its branch leaves those
+  lines exactly as 0x153B, so this branch's version merges without a conflict (C1 adds only separate `mcu_state` list lines
+  and case entries after 0x64 / 0x36). Nothing else of C2 touches the capture logic, the EXT block or `trigger_previous`.
+
+**Deviations from the contract.** None in semantics. Wording: 2.2 says 0x29 byte 1 bit 7 = "0x56 bit 1 and K >= 1" (gen8);
+with 2.1 / 4's `dec_on` the condition is met whenever bit 1 is written, so bits 7 and 6 read equal (documented in
+`FPGA commands.txt` and README section 12).
+
+**Testbenches.** The equivalence testbenches wrote random values into 0x56 bits 7..1 ("reserved, ignored"); bit 1 is a
+register now, so `tb_decim.v` (`$random & 0xFD`), `tb_fir.v` (random `{rnd[20:15], 0, rnd[12]}`; the directed 0x29 checks
+write 0xFD / 0xFC instead of 0xFF / 0xFE) and `tb_seg.v` keep it clear. The random streams are unchanged; the first run
+without the masks failed tb_decim's K = 0 phases on both seeds (the write clock at full rate, `{ dec_out2, dec_out1 }` in the
+memory: peak detect doing its job on a random write). `tb_firstrec`, `tb_timeout`, `tb_seqcontract`, `tb_trigpos` write
+`{7'd0, fir}` as the firmware does. `tb_peak.v` (step 15, 15 s): the monitor logs `adc*_w` at each write clock edge (what
+`decim_chan` latches), the version check accepts 0x153B+, `wedge[]` is reset per capture, NL = 50000; cases: boxcar
+reference, { max, min } at N 2 / 8 / 20 / 200 with K 1..3 (FIR enabled at 20 / 200, stays off), the same at K = 0 with
+0x56 = 2 (and 0x56 = 3 at 200), 0x29 read-backs, READ_RAW bytes, the way back (0x56 = 0: legacy words, 307 edges for 306
+words), the alias demonstration at K = 0 + peak, the rising-max (K 1) and falling-min (K 0) triggers. **45 checks, 0 failed
+on seeds 12345 and 4242**; the K = 0 + peak records match their windows at latency 12 like the K >= 1 ones.
+Full `tb/run.sh` (14 steps now; the header still says "Thirteen", for C4), seeds 12345 and 4242, `REF_SRC_DIR=~/g11/refs`,
+two runs in parallel: RESULTS_PLACEHOLDER
+
+**Build** (TD 4.6.8 SP1, `build.sh ~/c2/b1`, source fb0cf59, a synthesis check of this branch alone): 5126 LUT / 4694 reg /
+5893 LE (0x153B: 4990 LUT; +136 LUT, about +290 reg = the two peak pipelines), 48 EMB9K, 2 EMB32K, 2 M18x18.
+`sample_write_clock` 9.463 ns 0 errors (0x153B 9.231), `i_mcu_clk` 19.852, `clkc[1]` 2.528, 0 errors; `clkc[0]` 60 (SDC
+artefact). **`clk_200MHz` 2 setup errors, 5.504 ns, worst slack -0.504 ns** on the sequencer's `q_st` / `tab_we` ->
+`pp_i_reg.ce` enable (one 1.8 ns route, 62 % net): the placement lottery, not a C2 path (C2's only `clk_200MHz`-side change
+is `dec_on` into the static side of the divider compare, absent from the failing paths; 0x153B's b1 rolled 2 errors on a
+sequencer path the same way). Not pinned, not for flashing: C4's merged build decides; if the roll persists, register
+`pp_i_reg`'s enable a clock earlier or re-roll with a neutral change. `build/FPGA.bin` sha256 `4c4b0339...b891`.
+
+**For C4 (integration).** Version byte and `contract_0x153C.txt`; `run.sh` header step count and the Usage line (my step 15
+block sits after step 13's; C1's 14 and C3's 16 will touch the same header lines); README section 12 heading is written once
+for all three items (C1 / C3 add their subsections under it); `FPGA commands.txt` line 3 still says 0x06 returns 0x3A (stale
+since 0x153B); tb_peak needs no change for 0x3C (it checks 0x153B+). **For C6 (firmware peak detect).** 0x56 bit 1 alone;
+0x55 = level << 8 at the arm; READ_RAW layout 3; no averaging; settle after the 0x56 write as after a filter write
+((K + 10) N x 5 ns + 1 us, K = 0 as 1); 0x29 check after the write: byte 0 bit 7 = 1 and bit 5 = 0, byte 1 bits 7..6 = 11;
+the rate / depth code of the K >= 1 path applies unchanged.
+
+**Commands.** Quick: iverilog `sim_models.v zaklad.v tb_peak.v`, `vvp +seed=N` (15 s; scratch `peak_quick.sh` pattern).
+Full: a launcher script run with `wsl -d <distro> -- bash <script>` doing `setsid nohup env REF_SRC_DIR=~/g11/refs
+SIM_WORK=~/c2/sim-<seed> bash <repo>/fpga/al3/tb/run.sh <seed> > ~/c2/logs/run2-<seed>.log 2>&1 &` (the g11 reference
+files hash-checked against `git show <rev>:fpga/al3/src/zaklad.v`). `pkill -f 'tb/run.sh'` from `bash -c` kills its own
+shell first (the pattern matches it): kill run.sh by PID and the vvp children separately, and check `ps` for orphans
+before re-launching into the same `SIM_WORK`. Build: `bash <repo>/fpga/al3/build.sh ~/c2/b1`; a PowerShell `wsl -- bash
+-c "..."` with parentheses or `|` fails to parse: put report greps in a script file.
 
 ## 0x153B 'spliced' on the unit: the records were flat, fpga-gen13 (2026-10-20)
 
