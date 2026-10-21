@@ -6,6 +6,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [ ] **UI tweaks from the 0x153C bench** (owner 2026-10-21 18:38): the trigger menu's - and + buttons with twice the font
+  size; the ACQ menu's Sample Rate and Time per Division grids with five columns instead of four (the four boxes of the middle
+  row looked odd against them). Bundled with the Filter row item below into fw-acqui (no mockup round).
 - **ADCs always at full rate** (owner decision 2026-10-21 17:59: "we have no deadline ... Let's do the proper thing"):
   bench 17:53 found the 0x153C counter wrong with Filter Off at divided rates (Atlan's sample-skipping path gates the ADC
   encodes with the divider; the counter assumes full-rate samples). In 0x153D the encodes always run at 200 MS/s and the

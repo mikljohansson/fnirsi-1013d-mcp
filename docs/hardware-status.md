@@ -1516,3 +1516,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   normal mode, pretrigger 4000 samples): n = 1 triggers on the first rising edge after the idle low (pretrigger flat at
   91..92 codes); n = 3 triggers on the third (rises at -3386, -1998 and +2 samples: the first at the generator's random start
   phase, the next two one period apart).
+- 2026-10-21 18:2x-18:38 (owner, on screen, fw 0.2.104 on 0x153C): the trigger menu's Type row looks good (owner: the
+  - and + buttons' font could be twice the size). The ACQ menu with its Sample box looks a bit odd with four buttons in the
+  middle row (owner: give the Sample Rate and Time per Division grids five columns instead of four). Cards with Filter Off:
+  Freq jumps between 1 and 3 kHz (the counter fault found at 17:53), duty varies by less than 0.5 %; with boxcar Freq is
+  steady at 1.000 kHz and duty reads 50.01 %. The 18:00 COM10 loss was the owner switching the scope off (no fault).
