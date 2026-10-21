@@ -6,6 +6,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **ADCs always at full rate** (owner decision 2026-10-21 17:59: "we have no deadline ... Let's do the proper thing"):
+  bench 17:53 found the 0x153C counter wrong with Filter Off at divided rates (Atlan's sample-skipping path gates the ADC
+  encodes with the divider; the counter assumes full-rate samples). In 0x153D the encodes always run at 200 MS/s and the
+  K = 0 path stores every (D + 1)-th sample pair; the counter is always valid, the ADCs stay inside the AD9288's 1 MSPS
+  minimum, the GATED calibration class and its class probe go (firmware), the FPGA drops the gated-encode logic (fpga-d3
+  measures it). 0x153D's current runs are superseded; 0.3.0 waits for it (no deadline, owner).
 - [ ] **ACQ Filter row: three modes** (owner decisions 2026-10-21 16:29-16:38): the UI's Filter choice becomes Off, Hi-Res
   (= boxcar) and Anti-alias (= CIC3 + FIR); "Average" stays the ACQ record mean only. Names mimic other scopes (owner 16:31):
   Tektronix Hi Res, Keysight High Resolution, Rigol High Res. Every mode stays available over MCP (SET_DECIM unchanged, no
