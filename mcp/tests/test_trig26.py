@@ -31,14 +31,14 @@ def payload(name: str) -> bytes:
 
 
 def test_constants_and_caps():
-    assert P.PROTO_MINOR == 26 and P.FW_FPGA_VERSION == 0x153C
+    assert P.PROTO_MINOR >= 26 and P.FW_FPGA_VERSION >= 0x153C  # 1.27 (0x153D) builds on 1.26
     assert P.Cmd.SET_TRIGGER2 == 0x0219 and P.Cmd.GET_COUNTER == 0x0213
     assert (P.Caps.HOLDOFF, P.Caps.TRIG_TYPES, P.Caps.PEAK_DETECT, P.Caps.COUNTER) == (4, 1 << 20, 1 << 21, 1 << 22)
     assert (P.Features.TRIG_TYPES, P.Features.PEAK, P.Features.COUNTER) == (0x100, 0x200, 0x400)
     assert P.CMD_CAP[P.Cmd.SET_TRIGGER2] == P.Caps.TRIG_TYPES and P.CMD_CAP[P.Cmd.GET_COUNTER] == P.Caps.COUNTER
     assert P.REQUEST_SIZES[P.Cmd.SET_TRIGGER2] == 24 and P.REQUEST_SIZES[P.Cmd.GET_COUNTER] == 8
     assert P.Trigger2.size() == 24 and P.StatusResp.size() == 52 and P.CounterResp.size() == 24
-    assert P.FPGA_MISMATCH_TEXT.endswith("0x153C")
+    assert P.FPGA_MISMATCH_TEXT.endswith(f"0x{P.FW_FPGA_VERSION:04X}")
 
 
 def test_set_trigger2_matches_the_firmware_vectors():
@@ -201,7 +201,7 @@ def test_set_trigger2_round_trip_and_refusals(sim_factory):
         assert len(st.pack()) == 52 and st.trigger_status()["type"] == "edge"
         for req, detail in ((P.Trigger2(4, 0, 0, 0, 0, 0, 128), 0), (P.Trigger2(6, 0, 0, 0, 0, 0, 128), 0),
                             (P.Trigger2(0, 2, 0, 0, 0, 0, 128), 1), (P.Trigger2(1, 0, 2, 0, 5, 0, 128), 2),
-                            (P.Trigger2(0, 0, 1, 0, 0, 0, 128), 2), (P.Trigger2(0, 0, 0, 3, 0, 0, 128), 3),
+                            (P.Trigger2(0, 0, 1, 0, 0, 0, 128), 2), (P.Trigger2(0, 0, 0, 4, 0, 0, 128), 3),
                             (P.Trigger2(1, 0, 0, 0, 0, 0, 128), 4), (P.Trigger2(2, 0, 0, 0, 70000, 0, 128), 4),
                             (P.Trigger2(0, 0, 0, 0, 1, 0, 128), 4), (P.Trigger2(1, 0, 0, 0, 5, 7, 128), 8),
                             (P.Trigger2(2, 0, 0, 0, 1, 1 << 24, 128), 8), (P.Trigger2(0, 0, 0, 0, 0, 0, 256), 12),
@@ -435,7 +435,7 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
     async def main():
         async with client_for(srv, tmp_path) as c:
             info = await c.call("scope_info")
-            assert info["fw_fpga_version"] == "0x153C" and info["fpga_mismatch"] is False and info["caveats"] == []
+            assert info["fw_fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}" and info["fpga_mismatch"] is False and info["caveats"] == []
             prof = await c.call("scope_profile")
             assert prof["live"]["trigger_types"] and prof["live"]["counter"] and prof["live"]["peak_detect"]
             assert "counter" in prof["static"] and "peak_detect" in prof["static"]
@@ -520,10 +520,10 @@ def test_tools_on_a_mismatch_and_without_the_caps(sim_factory, tmp_path):
     async def main():
         async with client_for(bad, tmp_path / "a") as c:
             info = await c.call("scope_info")
-            assert info["fpga_mismatch"] and "needs 0x153C" in info["caveats"][0]
+            assert info["fpga_mismatch"] and f"needs 0x{P.FW_FPGA_VERSION:04X}" in info["caveats"][0]
             prof = await c.call("scope_profile")
-            assert "needs 0x153C" in prof["caveats"][0]
-            assert "needs 0x153C" in await c.fails("scope_capture", channels=["CH1"])
+            assert f"needs 0x{P.FW_FPGA_VERSION:04X}" in prof["caveats"][0]
+            assert f"needs 0x{P.FW_FPGA_VERSION:04X}" in await c.fails("scope_capture", channels=["CH1"])
         async with client_for(old, tmp_path / "b") as c:
             assert "TRIG_TYPES" in await c.fails("scope_set_trigger", type="pulse_width", width="1us")
             assert "COUNTER" in await c.fails("scope_counter")
@@ -534,4 +534,4 @@ def test_tools_on_a_mismatch_and_without_the_caps(sim_factory, tmp_path):
 
 def test_sim_config_defaults():
     cfg = SimConfig()
-    assert cfg.fpga_version == 0x153C and cfg.variant == "al3"
+    assert cfg.fpga_version == P.FW_FPGA_VERSION and cfg.variant == "al3"

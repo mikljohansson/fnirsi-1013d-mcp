@@ -45,7 +45,7 @@ def test_spec_example_frames(hexstr, frame):
     (P.ChannelConfig, 24), (P.SetChannelReq, 12), (P.Timebase, 16), (P.SetTimebaseReq, 8), (P.Trigger, 28),
     (P.SetTriggerReq, 24), (P.ReadRawReq, 16), (P.ReadRawHeader, 16), (P.ReadTraceReq, 12),
     (P.ReadTraceHeader, 32), (P.TraceChannelMeta, 16), (P.ReadLiveReq, 4), (P.AcquireAvgReq, 20),
-    (P.AcquireAvgHeader, 16), (P.Gen, 24), (P.SetGenReq, 20), (P.CalResp, 364), (P.HealthResp, 128), (P.SdIdent, 48), (P.SaveReportResp, 56), (P.ReadScreenReq, 4),
+    (P.AcquireAvgHeader, 16), (P.Gen, 40), (P.SetGenReq, 20), (P.CalResp, 364), (P.HealthResp, 128), (P.SdIdent, 48), (P.SaveReportResp, 56), (P.ReadScreenReq, 4),
     (P.ReadScreenHeader, 8), (P.SetAcqStateReq, 4), (P.CaptureInfoHeader, 36), (P.CaptureChannelInfo, 16)])
 def test_struct_sizes_match_spec(cls, size):
     assert cls.size() == size
@@ -121,9 +121,17 @@ def test_debug_ops_roundtrip():
 
 
 def test_generator_conversions():
-    inc = P.gen_phase_inc(10_000_000)  # 10 kHz
-    assert abs(P.gen_freq_mhz(inc) - 10_000_000) <= 12  # 11.64 mHz steps
-    assert P.gen_duty_bp(P.gen_threshold(3000)) == 3000
+    """Protocol 1.27 (contract 7.4): the square as P16 / H16 in 1/65536 of a 5 ns clock, integer formulas."""
+    p16 = P.gen_p16(1_000_000)  # 1 kHz: exactly 200,000 clocks, no fraction
+    assert p16 == 200_000 << 16 and P.gen_steps(p16, P.gen_h16(p16, 5000)) == (100_000, 0, 100_000, 0)
+    p16 = P.gen_p16(999_500)  # 999.5 Hz: a fractional period, the frequency comes back exact to the mHz
+    assert p16 & 0xFFFF and P.gen_freq_mhz(p16) == 999_500
+    assert abs(P.GEN_CLOCK_HZ * 65536 / p16 / 999.5 - 1) < 2 ** -17 / (p16 / 65536)
+    assert P.gen_duty_bp(P.gen_h16(p16, 3000), p16) == 3000
+    assert P.gen_check(P.gen_p16(25_000_000_000), P.gen_h16(P.gen_p16(25_000_000_000), 5000)) is None
+    assert "25 MHz" in P.gen_check(P.gen_p16(26_000_000_000), 0)
+    assert "step" in P.gen_check(P.gen_p16(20_000_000_000), P.gen_h16(P.gen_p16(20_000_000_000), 1000))
+    assert P.gen_period_p16(7) == (7 << 16, 4 << 16)
 
 
 def test_scaling_example_from_spec():

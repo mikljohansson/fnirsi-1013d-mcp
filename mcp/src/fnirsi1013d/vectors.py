@@ -151,7 +151,7 @@ def build_host_vectors_1_26() -> list[dict[str, Any]]:
     caps 20-22 and HOLDOFF for 0x153C, the mismatch refusal text of this generation."""
     R = P.FLAG_RESPONSE
     C = P.Caps
-    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR_DDS | C.HOLDOFF | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL |
+    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR | C.HOLDOFF | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL |
                C.READ_LAG_UNVERIFIED | C.SHARED_MODE | C.SD_SECTORS | C.DECIM | C.FIR | C.SEQ | C.ENC_CHECK |
                C.CAPTURE_STAGES | C.TRIG_TYPES | C.PEAK_DETECT | C.COUNTER)  # 0x7FEC4F
     v = []
@@ -242,7 +242,7 @@ def build_host_vectors_1_25() -> list[dict[str, Any]]:
     the refusal every non-basic command gets on a mismatch."""
     R = P.FLAG_RESPONSE
     C = P.Caps  # the firmware's fixed word (pc_variant_init; READ_LAG_UNVERIFIED still set, INTERLEAVE_UNVERIFIED clear)
-    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR_DDS | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL | C.READ_LAG_UNVERIFIED |
+    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL | C.READ_LAG_UNVERIFIED |
                C.SHARED_MODE | C.SD_SECTORS | C.DECIM | C.FIR | C.SEQ | C.ENC_CHECK | C.CAPTURE_STAGES)  # 0xFEC4B
     v = []
     info = P.InfoResp(fpga_version=0x153B, fpga_variant=2, ring_words=8192, caps=caps, gen_clock_hz=50_000_000,

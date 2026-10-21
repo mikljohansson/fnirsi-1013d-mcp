@@ -118,7 +118,7 @@ async def test_tiers_limit_registration(sim, tmp_path):
 
 async def test_info_profile_status_config_cal(client):
     info = await client.call("scope_info")
-    assert info["fpga_variant"] == "al3" and info["fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}" and "GENERATOR_DDS" in info["caps"]
+    assert info["fpga_variant"] == "al3" and info["fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}" and "GENERATOR" in info["caps"]
     prof = await client.call("scope_profile")
     assert "200 MS/s" in prof["static"]["max_sample_rate"] and prof["live"]["max_total_samples"] == 16382
     assert any("T3" in u for u in prof["unverified"])

@@ -149,8 +149,10 @@ STATIC_PROFILE: dict[str, str] = {
     "full_scale": "about 256 codes = ~8.8 divisions; e.g. ~0.88 V at 100 mV/div [U]",
     "coupling": "DC or AC (relay)",
     "input": "1 MOhm; assume 40 V peak maximum at 1x and use a 10x probe for anything higher [U]",
-    "generator": "square wave only on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz (caps "
-                 "GENERATOR_DDS). No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
+    "generator": "square wave (or an 8-step pulse pattern, scope_pattern) on the calibration pin: the two-step "
+                 "pattern on the 5 ns clock, the average frequency exact to 2^-16 of the period, every edge within 5 ns "
+                 "of its ideal time, <= 25 MHz (caps GENERATOR, PATTERN_GEN on 0x153D). No DAC, no arbitrary "
+                 "waveform. At the probe it is a ~3.1 Vpp square wave whose "
                  "DC level is the USB ground, 1.24 V below the probe ground (reads -1.24 / +1.9 V): a timing reference, not "
                  "a voltage reference",
     "throughput": "~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for "
@@ -166,6 +168,11 @@ STANDING_CAVEATS = [
 
 #: T8 square-wave check (backups/t8sq_CH1.json): bench DC reads right, the calibration output does not swing 0..3.3 V
 #: fpga-gen2, fpga/al3/README.md "Changes" 2 (commit 28126aa): probe ground = VRF1 = +1.24 V over USB ground
+GEN_NOTE = ("the generator is a two-step pattern on the 200 MHz clock (FPGA 0x153D): every edge lies on the 5 ns "
+            "grid, within one clock of its ideal time; the period carries a 1/65536-clock fraction, so the "
+            "average frequency is exact to 2^-16 / P (7.6e-11 at 1 kHz, 7.6e-7 at 10 MHz) and a change while it runs "
+            "is glitch-free and phase-continuous; a single period can be 5 ns longer than the next (the fraction's "
+            "dither)")
 CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference, not a voltage reference: a ~3.1 Vpp "
                    "square wave referenced to the scope's USB/digital ground, while the probe ground (BNC shells) "
                    "sits on VRF1, about +1.24 V above it (fpga/al3/README.md), so against the probe ground it reads "
@@ -904,10 +911,13 @@ def _trigger_summary(s: Scope) -> dict[str, Any]:
 
 def _gen_summary(s: Scope) -> dict[str, Any]:
     if not s.profile().has_generator:
-        return {"available": False, "note": "no programmable generator in this firmware's caps (GENERATOR_DDS)"}
+        return {"available": False, "note": "no programmable generator in this firmware's caps (GENERATOR)"}
     g = s.get_gen()
-    return {"available": True, "enabled": bool(g.enable), "frequency": _r6(g.frequency_hz),
-            "duty_percent": _r6(g.duty * 100)}
+    out: dict[str, Any] = {"available": True, "enabled": bool(g.enable), "source": g.source_name}
+    if g.source == P.GEN_SOURCE_SQUARE:
+        out.update(frequency=_r6(g.frequency_hz), duty_percent=_r6(g.duty * 100))
+    out.update(running=g.running, pending=g.pending)
+    return out
 
 
 def _capture_caveats(cap: Capture, freq: dict[str, float | None]) -> list[str]:
@@ -3720,21 +3730,28 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         duty_percent: Annotated[float | None, Field(ge=0, le=100, description="<= FNIRSI_MCP_GEN_MAX_DUTY")] = None,
         confirm_token: Annotated[str | None, Field(description="token from the confirmation response")] = None,
     ) -> dict[str, Any]:
-        """Drive the calibration pin with a 3.3 V logic square wave (DDS, 11.64 mHz steps). The first call without
-        confirm_token returns a token and a summary of the physical effect; repeat the identical call with the
-        token within 120 s. Disabling needs no token. Returns the actual frequency, duty and enable state.
+        """Drive the calibration pin with a 3.3 V logic square wave. The first call without confirm_token returns a
+        token and a summary of the physical effect; repeat the identical call with the token within 120 s. Disabling
+        needs no token. Returns the actual frequency, duty and enable state.
+
+        Underneath (FPGA 0x153D, protocol 1.27) the square is a two-step pattern on the 200 MHz clock: high n_h + f_h /
+        65536 clocks, low n_l + f_l / 65536 clocks with one fraction accumulator, so the average frequency is exact to
+        2^-16 of the period (7.6e-11 at 1 kHz) and every edge lies within 5 ns of its ideal time; frequencies with an
+        integer period (200 MHz / P) have no dither at all. A change while it runs is glitch-free and
+        phase-continuous (taken at the next step boundary). scope_pattern drives other pulse patterns on the same pin,
+        scope_sweep chirps this square.
 
         The calibration output is a frequency/duty/timing reference, not a voltage reference: a ~3.1 Vpp square wave
         referenced to the USB ground; the probe ground is VRF1, +1.24 V above it, so it reads about -1.24 / +1.9 V.
-        Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source and not a power driver: buffer
+        Square wave only, 3.3 V logic, edges on the 5 ns grid. Not a sine source and not a power driver: buffer
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
-        switches real coil current. Needs caps GENERATOR_DDS (every supported firmware has it)."""
+        switches real coil current. Needs caps GENERATOR (every supported firmware has it)."""
         args = {"enabled": enabled, "frequency": frequency, "duty_percent": duty_percent}
 
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             if not s.profile().has_generator:
-                raise ToolError("scope_generator: no programmable generator in this firmware's caps (GENERATOR_DDS)")
+                raise ToolError("scope_generator: no programmable generator in this firmware's caps (GENERATOR)")
             f = parse_quantity(frequency, "Hz") if frequency is not None else None
             if f is not None:
                 if not 0 < f <= min(cfg.gen_max_hz, 25e6):
@@ -3760,10 +3777,18 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     return req
             notes = sess.ensure_control()
             g = s.set_gen(enable=enabled, freq_hz=f, duty=None if duty_percent is None else duty_percent / 100)
-            return {"ok": True, "applied": {"enabled": bool(g.enable), "frequency": _r6(g.frequency_hz),
-                                            "duty_percent": _r6(g.duty * 100), "phase_inc": g.phase_inc},
-                    "caveats": notes + [CAL_OUTPUT_NOTE, "Square wave only, 3.3 V logic, about 20 ns edge jitter. Not a sine source "
-                                        "and not a power driver: buffer it before driving a MOSFET gate."]}
+            applied: dict[str, Any] = {"enabled": bool(g.enable), "source": g.source_name}
+            if g.source == P.GEN_SOURCE_SQUARE and g.p16:
+                n_h, f_h, n_l, f_l = g.steps()
+                applied.update(frequency=_r6(g.frequency_hz), frequency_exact_hz=g.frequency_hz,
+                               duty_percent=_r6(g.duty * 100), period_clocks=g.p16 / 65536,
+                               high_clocks=n_h + f_h / 65536, low_clocks=n_l + f_l / 65536, p16=g.p16, h16=g.h16)
+            cav = notes + [CAL_OUTPUT_NOTE, GEN_NOTE, "Square wave only, 3.3 V logic. Not a sine source and not a power "
+                                                      "driver: buffer it before driving a MOSFET gate."]
+            if g.source == P.GEN_SOURCE_PATTERN:
+                cav.append("a scope_pattern pattern drives the pin: enabling / disabling switched the pin driver and "
+                           "kept the pattern; give a frequency or duty to go back to the square")
+            return {"ok": True, "applied": applied, "caveats": cav}
         return await run("scope_generator", 3, args, go)
 
     @register(3, title="Loopback self-test", destructive=True, open_world=True)
@@ -3835,9 +3860,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         output, DUT ground on the probe ground clips (wiring A; bench 2026-10-19: the same H as the USB-ground wiring
         within 0.4 dB). Wiring B (DUT ground on the USB shell, clips open) puts the DUT 1.24 V below the probe
         reference: use ch2_coupling='ac' there, or CH2 saturates on 0.1 and 0.2 V/div. Per point the generator
-        runs at a clean-edge frequency 50 MHz / M, both channels are captured through the 16-bit CIC3 + FIR filter
-        at a rate that makes the record a whole number of periods (legacy 200 MSa/s above 1.5 MHz), and a single-bin
-        DFT at the exact DDS frequency gives magnitude (dB) and phase (deg); the square's harmonics drop out.
+        runs a strictly periodic square of an integer period P of 5 ns clocks (f = 200 MHz / P exactly, a grid 0.5 %
+        fine at 1 MHz; protocol 1.27), both channels are captured through the 16-bit CIC3 + FIR filter at a rate that
+        makes the record a whole number of periods (legacy 200 MSa/s above 1.5 MHz), and a single-bin DFT at that
+        frequency gives magnitude (dB) and phase (deg); the square's harmonics drop out.
 
         Returns the plan, a table (f_requested, f_actual, mag_db, phase_deg, V1 / V2 rms, ranges, sample rate,
         filter, SNR, flags per point), markers (-3 dB points, peak and Q for a resonance, phase crossings), files
@@ -4089,7 +4115,9 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
         total = 8000 if prof.programmable else 3000  # >= 4 periods of 10 kHz at 20 MS/s
         pre = total // 2
         s.set_trigger(source=0, edge=0, level=mid, mode=1, pretrigger_samples=pre, total_samples=total)
-        for f_hz, duty, rates in ((10e3, 0.5, (2e6, 20e6)), (1e6, 0.25, (50e6, 200e6))):
+        # T4 needs edges between the two cores of a word: the generator's edges lie on the ADC's 5 ns grid since
+        # 0x153D, so an even period (1 MHz = 200 clocks) puts every edge at the same core; P = 201 clocks alternates
+        for f_hz, duty, rates in ((10e3, 0.5, (2e6, 20e6)), (T4_HZ, 0.25, (50e6, 200e6))):
             s.set_gen(enable=True, freq_hz=f_hz, duty=duty)
             for fs in rates:
                 n = max(0, int(P.BASE_CLOCK_HZ // fs) - 1)
@@ -4113,7 +4141,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
                 vpp = hi - lo
                 check(f"swing at {fmt_si(fs, 'S/s')}", 2.6 <= vpp <= 3.7, vpp=vpp, low=lo, high=hi,
                       expected="~3.1..3.3 Vpp (DC level not checked: the output is not ground-referenced)")
-                if f_hz == 1e6 and fs == 200e6:
+                if f_hz == T4_HZ and fs == 200e6:
                     _t4_t5(s, cap, check)
         # T7: FORCE in normal mode with no signal
         s.set_gen(enable=False)
@@ -4130,7 +4158,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
             check("T7 FORCE", False, reason="FORCE_TRIGGER capability not set; run the bench test manually")
     finally:
         try:
-            s.set_gen(enable=bool(saved_gen.enable), freq_hz=saved_gen.frequency_hz, duty=saved_gen.duty)
+            s.restore_gen(saved_gen)
         except (DeviceError, TransportError):
             pass
         s.set_channel(0, enable=bool(saved_ch.enable), range_index=saved_ch.range, coupling=saved_ch.coupling,
@@ -4144,6 +4172,10 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
     return {"ok": True, "passed": passed, "n_checks": len(checks), "n_failed": sum(not c["pass"] for c in checks),
             "checks": checks, "caveats": notes + [CAL_OUTPUT_NOTE, "Requires the calibration pin connected to CH1 with the probe at 1x; "
                                                   "failures without that connection are expected."]}
+
+
+#: the self-test's fast square: an odd period of 201 clocks of 5 ns (995.02 kHz)
+T4_HZ = P.BASE_CLOCK_HZ / 201
 
 
 def _t4_t5(s: Scope, cap: Capture, check: Callable[..., None]) -> None:
