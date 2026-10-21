@@ -605,10 +605,9 @@ static void q16(pc_text *t, uint32_t v)
 
 static void sec_cal_channel(pc_text *t, const uint8_t *c)
 {
-  static const char *cls[2] = { "full", "gated" };
   const uint8_t *b = c + 112, *pv = c + 292;
   uint8_t f = c[73];
-  uint32_t m, k, r;
+  uint32_t k, r;
 
   pc_text_str(t, "  CH");
   pc_text_udec(t, c[0] + 1u);
@@ -628,7 +627,6 @@ static void sec_cal_channel(pc_text *t, const uint8_t *c)
       pc_text_str(t, " (carried over from an earlier calibration)");
   }
 
-  pc_text_str(t, (f & 4) ? "; current clock class gated" : "; current clock class full rate");
   pc_text_nl(t);
 
   pc_text_str(t, "    correction now: core A ");
@@ -673,34 +671,32 @@ static void sec_cal_channel(pc_text *t, const uint8_t *c)
     }
     pc_text_nl(t);
 
-    for(m=0;m<ACAL_CLASSES;m++)
-      for(k=0;k<2;k++)
+    //Slot 0 of the block (slot 1, the gated class up to fw 0.2.104, is reserved)
+    for(k=0;k<2;k++)
+    {
+      pc_text_str(t, k ? "    core B" : "    core A");
+      pc_text_str(t, ": zero codes");
+      for(r=0;r<ACAL_RANGES;r++)
       {
-        pc_text_str(t, "    ");
-        pc_text_str(t, cls[m]);
-        pc_text_str(t, k ? " core B" : " core A");
-        pc_text_str(t, ": zero codes");
-        for(r=0;r<ACAL_RANGES;r++)
-        {
-          pc_text_str(t, " ");
-          pc_text_fix(t, (int16_t)g16(b + 12 + 2 * (12 * m + 6 * k + r)), 16, 2);
-        }
-        pc_text_str(t, "; slope codes/count");
-        for(r=0;r<ACAL_RANGES;r++)
-        {
-          pc_text_str(t, " ");
-          pc_text_fix(t, (int16_t)g16(b + 60 + 2 * (12 * m + 6 * k + r)), 65536, 4);
-        }
-        pc_text_str(t, "; noise RMS codes");
-        for(r=0;r<ACAL_RANGES;r++)
-        {
-          pc_text_str(t, " ");
-          pc_text_fix(t, b[108 + 12 * m + 6 * k + r], 16, 2);
-        }
-        pc_text_str(t, "; gain ");
-        pc_text_fix(t, (int32_t)g16(b + 132 + 2 * (2 * m + k)), 32768, 5);
-        pc_text_nl(t);
+        pc_text_str(t, " ");
+        pc_text_fix(t, (int16_t)g16(b + 12 + 2 * (6 * k + r)), 16, 2);
       }
+      pc_text_str(t, "; slope codes/count");
+      for(r=0;r<ACAL_RANGES;r++)
+      {
+        pc_text_str(t, " ");
+        pc_text_fix(t, (int16_t)g16(b + 60 + 2 * (6 * k + r)), 65536, 4);
+      }
+      pc_text_str(t, "; noise RMS codes");
+      for(r=0;r<ACAL_RANGES;r++)
+      {
+        pc_text_str(t, " ");
+        pc_text_fix(t, b[108 + 6 * k + r], 16, 2);
+      }
+      pc_text_str(t, "; gain ");
+      pc_text_fix(t, (int32_t)g16(b + 132 + 2 * k), 32768, 5);
+      pc_text_nl(t);
+    }
 
     pc_text_str(t, "    gains measured on range ");
     if(b[140] == ACAL_GAIN_NONE)

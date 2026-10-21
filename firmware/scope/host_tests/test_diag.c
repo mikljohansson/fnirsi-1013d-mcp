@@ -192,9 +192,9 @@ static void test_prov(void)
   memset(a, 0, sizeof(a));
   memcpy(b, a, sizeof(a));
   T_EQ(acal_prov_what(a, b), 0);
-  b[0].zero[1][0][3] = 5;
+  b[0].zero[0][3] = 5;
   T_EQ(acal_prov_what(a, b), ACAL_PROV_CH1_ZERO);
-  b[1].gain[0][1] = 33000;
+  b[1].gain[1] = 33000;
   T_EQ(acal_prov_what(a, b), ACAL_PROV_CH1_ZERO | ACAL_PROV_CH2_GAIN);
   b[1].pwm[0] = 900;
   b[0].gain_lever = 1400;

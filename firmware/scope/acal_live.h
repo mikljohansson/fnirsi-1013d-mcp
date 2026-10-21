@@ -19,10 +19,10 @@ void acal_live_reset(void);
 //fpga_channel_correction: v4 onto the channel's correction (CH1 / CH2 only; others untouched)
 void acal_live_apply(PCHANNELSETTINGS s, acal_corr *c);
 
-//fpga_prepare_correction: remember what this readout applies (class, tracker d / e), for acal_live_record
+//fpga_prepare_correction: remember what this readout applies (v3 at divider 0, tracker d / e), for acal_live_record
 void acal_live_prepared(PCHANNELSETTINGS s, const acal_corr *c);
 
-//End of fpga_read_sample_data: the trace buffer just read is offered to the tracker (CH1 / CH2, 8-bit full class only;
+//End of fpga_read_sample_data: the trace buffer just read is offered to the tracker (CH1 / CH2, 8-bit at divider 0 only;
 //wide = the readout came from the 16-bit filter path)
 void acal_live_record(PCHANNELSETTINGS s, uint32 wide);
 

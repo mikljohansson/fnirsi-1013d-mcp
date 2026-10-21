@@ -2,29 +2,34 @@
 // adc_cal.h - per-core ADC calibration ("calibration data v3", firmware/README.md section 6, protocol row 51).
 //
 // Each channel is digitised by two interleaved ADC cores, A (FPGA 0x20 / 0x22, odd trace positions) and B (0x21 / 0x23,
-// even positions). Model per core k, hardware range r and clock class c:
+// even positions). Model per core k and hardware range r:
 //
-//     raw_k = z_k + V x g_k[c],   z_k = zero[c][k][r] + slope[c][k][r] x dcoffset   (zero 1/16 code, slope Q16 per count)
+//     raw_k = z_k + V x g_k,   z_k = zero[k][r] + slope[k][r] x dcoffset   (zero 1/16 code, slope Q16 per count)
 //
-// Clock class: in legacy mode (K = 0) the FPGA gates the ADC encode clock with the sample-rate divider, and the zero
-// and the gain move with it (bench 2026-10-18, CH1: core B's zero 3.6 codes lower as soon as the clock is gated; gains
-// A/B 1.033 at full rate, 1.004 gated, full-rate class 1.1 % lower). ACAL_FULL = divider 0 and every 0x1534 filtered
-// capture (ADCs at full rate), ACAL_GATED = legacy divider >= 1.
+// One clock class (fw 0.2.105, FPGA 0x153D): the ADC encodes run at 200 MSa/s at every rate, filter or not, so every
+// capture has the full-rate zeros and gains. Up to fw 0.2.104 the legacy K = 0 path gated the encodes with the divider
+// and the zeros and gains moved with it (bench 2026-10-18, CH1: core B's zero 3.6 codes lower gated; gains A/B 1.033
+// full, 1.004 gated, full-rate 1.1 % lower), so the model had a second, gated class (docs/articles/calibration.md).
 //
-// Every readout turns the model into a gain G_k = g_ref / g_k[c] (g_ref = mean gain of both cores in the gated class,
-// what the 1.00o5 voltage calibration is fitted on) and an offset per core so that
+// Every readout turns the model into a gain G_k = g_ref / g_k and an offset per core so that
 //
 //     code = clamp((raw x gain_k + off_k + u) >> 16),   u = 16-bit dither,   mean = T + G_k (raw - z_k)
 //
 // puts 0 V of both cores at T = 128 - dcoffset x 100 / dc_shift_value (the code the 1.00o5 measurements and the screen
-// marker take as 0 V) and gives both cores and both classes the same codes per volt. In the 16-bit filter path every
-// output weighs both cores equally (even N), so one gain (gain16, full class) and one constant (corr16) correct it.
+// marker take as 0 V) and gives both cores the same codes per volt. In the 16-bit filter path every output weighs both
+// cores equally (even N), so one gain (gain16) and one constant (corr16) correct it. g_ref is the scale of the volts
+// calibration (input_calibration): fw 0.2.45-0.2.104 took the mean gated gain of both cores, so the stored gains of
+// those blocks carry the full-rate class onto it; a gain step since 0.2.105 keeps the mean corrected span of the gains
+// in use (acal_gain_store), so the volts calibration stays fitted.
 //
 // The gains are measured once per channel (not per range: the mismatch is inside the ADC, an assumption the bench
 // checks) at the calibration post with the generator holding its two static levels (acal_gain_store).
 //
 // The block lives in sector 708 bytes 128..431 (ACAL_SECTOR_OFFSET), outside Atlan's checksummed bytes 16..119, so an
-// older firmware still boots with the card (its own save of 708 clears the block). The block is bound to the
+// older firmware still boots with the card (its own save of 708 clears the block). The layout keeps the two class slots
+// of fw 0.2.45-0.2.104: slot 0 holds the calibration, slot 1 (the gated class then) is written 0 and ignored on load.
+// The header's classes field is written 1, so a firmware before 0.2.105 rejects the block (1.00o5 compensations)
+// rather than read zero gated values; blocks with 2 (older firmware) load with their slot 0. The block is bound to the
 // dc_calibration_offset values it was measured at: when sector 709's values differ (an older firmware re-ran the base
 // calibration, RESET, defaults) it is ignored and the 1.00o5 compensations apply. v2 blocks (fw 0.2.43-0.2.44) are not
 // read.
@@ -38,14 +43,18 @@
 #include <stdint.h>
 
 #define ACAL_RANGES          6            //hardware ranges (relay 0..5); range 6 (software zoom) uses range 5
-#define ACAL_CLASSES         2            //clock classes in this version
-#define ACAL_FULL            0            //ADCs at full rate: legacy divider 0, every filtered capture
-#define ACAL_GATED           1            //legacy divider >= 1 (encode clock gated by the FPGA)
+#define ACAL_SLOTS           2            //class slots of the block layout: 0 the calibration, 1 reserved (written 0)
+#define ACAL_BLOCK_CLASSES   1            //header classes field written since fw 0.2.105; 2 (fw 0.2.45-0.2.104) is read too
+
+//Measurement rates of the zero step's points (acal_point.rate, acal_fail.rate; CAL_PROBE's point / failure byte, the
+//values of the class byte up to fw 0.2.104)
+#define ACAL_RATE_FULL       0            //200 MSa/s: the zero and slope points the calibration is made of
+#define ACAL_RATE_SEARCH     1            //2 MSa/s: the coarse and slope points of the centre search
 
 #define ACAL_SECTOR_OFFSET   128          //byte offset of the block in sector 708
 #define ACAL_MAGIC           0x4C414341u  //"ACAL" little-endian
 #define ACAL_VERSION         3            //"calibration data v3" (Atlan's fields alone are v1; v2 had no gains)
-#define ACAL_HDR_BYTES       12           //magic, version, length, classes, 3 reserved
+#define ACAL_HDR_BYTES       12           //magic, version, length, classes, reserved
 #define ACAL_CH_BYTES        144          //per channel: pwm 12, zero 48, slope 48, noise 24, gain 8, gain meta 4
 #define ACAL_BLOCK_BYTES     (ACAL_HDR_BYTES + 2 * ACAL_CH_BYTES + 4)   //304: header, two channels, CRC-32
 
@@ -59,13 +68,14 @@
 typedef struct
 {
   uint16_t pwm[ACAL_RANGES];                        //dc_calibration_offset[r] the zeros were measured at (binding)
-  int16_t  zero[ACAL_CLASSES][2][ACAL_RANGES];      //[class][core][range] raw mean code at pwm[r], 1/16 code
-  int16_t  slope[ACAL_CLASSES][2][ACAL_RANGES];     //[class][core][range] codes per PWM count, Q16 (negative)
-  uint8_t  noise[ACAL_CLASSES][2][ACAL_RANGES];     //[class][core][range] RMS about the mean, 1/16 code
-  uint16_t gain[ACAL_CLASSES][2];                   //[class][core] G = g_ref / g_k, Q15
+  int16_t  zero[2][ACAL_RANGES];                    //[core][range] raw mean code at pwm[r], 1/16 code
+  int16_t  slope[2][ACAL_RANGES];                   //[core][range] codes per PWM count, Q16 (negative)
+  uint8_t  noise[2][ACAL_RANGES];                   //[core][range] RMS about the mean, 1/16 code
+  uint16_t gain[2];                                 //[core] G = g_ref / g_k, Q15
   uint8_t  gain_range;                              //hardware range the gains were measured on, ACAL_GAIN_NONE
   uint8_t  gain_flags;                              //ACAL_GAIN_KEPT
-  uint16_t gain_lever;                              //gated span between the post levels, mean of both cores, 1/16 code
+  uint16_t gain_lever;                              //span between the post levels, mean of both cores, 1/16 code
+                                                    //(200 MSa/s since fw 0.2.105, the gated span before)
 } acal_channel;
 
 //Sector block: the two channels <-> ACAL_BLOCK_BYTES bytes (little-endian, CRC-32/ISO-HDLC = zlib.crc32 over all but the
@@ -112,8 +122,8 @@ uint8_t  acal_prov_what(const acal_channel old[2], const acal_channel cur[2]);
 //1 when c was measured at exactly these PWM centres (cal_offset[0..5])
 int      acal_bound(const acal_channel *c, const uint16_t *cal_offset);
 
-//Gain of core k in class cls as applied, Q16 (65536 when the gains were never measured)
-uint32_t acal_gain16(const acal_channel *c, uint32_t cls, uint32_t k);
+//Gain of core k as applied, Q16 (65536 when the gains were never measured)
+uint32_t acal_gain16(const acal_channel *c, uint32_t k);
 
 //Correction for one readout
 typedef struct
@@ -123,27 +133,26 @@ typedef struct
   uint8_t  frac_a;                        //... and sixteenths (0..15; 0 with v1)
   uint8_t  frac_b;
   uint8_t  version;                       //3: calibration data v3 in use, 1: 1.00o5 compensations
-  uint8_t  cls;                           //clock class of the 8-bit correction (ACAL_FULL / ACAL_GATED)
   uint32_t gain_a;                        //8-bit loop: code = (raw x gain + off + u) >> 16, Q16
   uint32_t gain_b;
   int32_t  off_a;                         //Q16 codes
   int32_t  off_b;
   int32_t  clip_lo;                       //rail rule: the larger of the two cores' codes for raw 0
   int32_t  clip_hi;                       //the smaller of the two cores' codes for raw 255
-  uint32_t gain16;                        //16-bit path: full-class gain of the mean of both cores, Q16
+  uint32_t gain16;                        //16-bit path: gain of the mean of both cores, Q16
   int32_t  shift;                         //dcoffset x 100 / dc_shift_value (C division), added for the measurements
   int32_t  zero_q8;                       //trace code of 0 V x 256 (mean of both corrected cores)
-  int32_t  corr16;                        //16-bit path (ADCs at full rate): added to every converted sample, 1/16 code
+  int32_t  corr16;                        //16-bit path: added to every converted sample, 1/16 code
 } acal_corr;
 
 //Dither for the 8-bit loop: xorshift32 step (three register instructions on ARM, no constants to load; state never 0).
 //Its top 16 bits are uniform, so (raw x gain + off + (state >> 16)) >> 16 has the mean (raw x gain + off) / 65536
 #define ACAL_DITHER_STEP(x)  do { (x) ^= (x) << 13; (x) ^= (x) >> 17; (x) ^= (x) << 5; } while(0)
 
-//c = 0 (or not bound to cal_offset): 1.00o5 behaviour with atlan_a / atlan_b (adc1/adc2compensation). divider: the 0x0D
-//value of the capture (legacy clock class)
-void     acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
-                         int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out);
+//c = 0 (or not bound to cal_offset): 1.00o5 behaviour with atlan_a / atlan_b (adc1/adc2compensation). The same for
+//every rate and path (one clock class since fw 0.2.105)
+void     acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, int16_t dcoffset,
+                         int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out);
 
 //Rail-rule limits from gain_a/b and off_a/b: clip_lo = the larger of the two cores' codes for raw 0, clip_hi = the
 //smaller of their codes for raw 255 (acal_correction, and acal_track_apply after it moves the gains and offsets)
@@ -156,8 +165,8 @@ uint32_t acal_scale(uint32_t scale_q24, uint32_t gain16);
 //(for the 1.00o5 fields, which have no fraction)
 void     acal_round_pair(int32_t da16, int32_t db16, int16_t *comp_a, int16_t *comp_b);
 
-//The 1.00o5 fields from a v3 measurement: compensations for T = 128 at dcoffset 0 from the gated zeros averaged over
-//the ranges (the UI's time bases are gated except 200 MSa/s)
+//The 1.00o5 fields from a v3 measurement: compensations for T = 128 at dcoffset 0 from the zeros averaged over the
+//ranges
 void     acal_atlan_comps(const acal_channel *c, int16_t *comp_a, int16_t *comp_b);
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -189,24 +198,26 @@ int32_t  acal_centre_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int3
 //The same interpolation without the checks (slope points, already checked by acal_range_store); pwm_lo when flat
 int32_t  acal_interp_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi);
 
-//One range: per class and core the means (1/16 code) at pwm_lo / pwm_hi and the zero point pwm
+//One range: per core the means (1/16 code) at pwm_lo / pwm_hi and the zero point pwm, at 200 MSa/s; the centre
+//search's slope points at 2 MSa/s (search16_lo / hi: the refined centre and the training band, not stored)
 typedef struct
 {
   int32_t  pwm_lo, pwm_hi, pwm;
-  int32_t  mean16_lo[ACAL_CLASSES][2], mean16_hi[ACAL_CLASSES][2];
-  int32_t  zero16[ACAL_CLASSES][2];
-  int32_t  drift16[ACAL_CLASSES][2];      //second half minus first half of the zero-point conversions
-  uint32_t noise16[ACAL_CLASSES][2];      //acal_rms16 of the zero-point conversions (the checked value)
-  uint32_t within16[ACAL_CLASSES][2];     //acal_rms16_within of the same conversions (reported only)
+  int32_t  search16_lo[2], search16_hi[2];
+  int32_t  mean16_lo[2], mean16_hi[2];
+  int32_t  zero16[2];
+  int32_t  drift16[2];                    //second half minus first half of the zero-point conversions
+  uint32_t noise16[2];                    //acal_rms16 of the zero-point conversions (the checked value)
+  uint32_t within16[2];                   //acal_rms16_within of the same conversions (reported only)
   uint32_t clipped;                       //clipped samples over all points
 } acal_range_meas;
 
-//Where a range check failed (fw 0.2.60, the wizard's result line): class and core of the failing value and the value.
-//Noise: noise16, with within16; drift: drift16; slope: Q16 (or the A - B difference); zero: zero16 - 2048; spread: A - B;
-//class: full - gated (1/16 code). Clip: all zero
+//Where a range check failed (fw 0.2.60, the wizard's result line): rate and core of the failing value and the value.
+//Noise: noise16, with within16; drift: drift16; slope: Q16 (or the A - B difference); zero: zero16 - 2048; spread: A - B.
+//Clip: all zero. rate: ACAL_RATE_FULL for every acal_range_check value, the point's rate otherwise
 typedef struct
 {
-  uint8_t  cls, core;
+  uint8_t  rate, core;
   int32_t  value;
   uint32_t within16;
   //fw 0.2.67 (acal_fail_point): the measurement point the failure line reports, its PWM and raw per-core numbers.
@@ -222,12 +233,12 @@ typedef struct
 int      acal_range_check(const acal_range_meas *m, acal_fail *f);
 
 //The zero step's measurement points of one range, in the order the wizard takes them (fw 0.2.67: the failure line and
-//CAL_PROBE report them). Coarse points 2 gated conversions, gated slope points 4, gated zero 8, full-rate points 64
-#define ACAL_PT_COARSE_HI    0            //PWM 500 (high code), gated
-#define ACAL_PT_COARSE_LO    1            //PWM 1200 (low code), gated
-#define ACAL_PT_G_LO         2            //centre - 150, gated
-#define ACAL_PT_G_HI         3            //centre + 150, gated
-#define ACAL_PT_G_ZERO       4            //the refined centre, gated
+//CAL_PROBE report them). Coarse points 2 conversions and search slope points 4 at 2 MSa/s, full-rate points 64
+#define ACAL_PT_COARSE_HI    0            //PWM 500 (high code), 2 MSa/s
+#define ACAL_PT_COARSE_LO    1            //PWM 1200 (low code), 2 MSa/s
+#define ACAL_PT_S_LO         2            //centre - 150, 2 MSa/s
+#define ACAL_PT_S_HI         3            //centre + 150, 2 MSa/s
+                                          //4: the gated zero (fw 0.2.67-0.2.104); never measured since 0.2.105
 #define ACAL_PT_F_ZERO       5            //the refined centre, 200 MSa/s
 #define ACAL_PT_F_HI         6            //centre + 150, 200 MSa/s
 #define ACAL_PT_F_LO         7            //centre - 150, 200 MSa/s
@@ -237,7 +248,7 @@ int      acal_range_check(const acal_range_meas *m, acal_fail *f);
 typedef struct
 {
   uint16_t pwm;
-  uint8_t  cls;                           //ACAL_FULL / ACAL_GATED
+  uint8_t  rate;                          //ACAL_RATE_FULL / ACAL_RATE_SEARCH
   uint8_t  convs;                         //conversions taken; 0 = not measured
   int32_t  mean16[2];                     //per core, 1/16 code
   uint16_t rms16[2];                      //about the mean of all the conversions, 1/16 code
@@ -247,17 +258,12 @@ typedef struct
 } acal_point;
 
 //A point from its accumulators [half][core] (the halves merged)
-void     acal_point_set(acal_point *p, int32_t pwm, uint32_t cls, uint32_t convs, const acal_acc acc[2][2]);
+void     acal_point_set(acal_point *p, int32_t pwm, uint32_t rate, uint32_t convs, const acal_acc acc[2][2]);
 
-//Fills f's point fields for a failed range (rc, f's class from acal_range_check): ACAL_E_CLIP the first point after the
-//coarse ones with a clipped sample, ACAL_E_RESPONSE the coarse high point, otherwise the zero point of f's class
-//(ACAL_E_TIMING: the full-rate zero point). ACAL_PT_NONE when that point was not measured
+//Fills f's point fields for a failed range (rc): ACAL_E_CLIP the first point after the coarse ones with a clipped
+//sample, ACAL_E_RESPONSE the coarse high point, otherwise (ACAL_E_TIMING too) the full-rate zero point. ACAL_PT_NONE
+//when that point was not measured
 void     acal_fail_point(const acal_point pt[ACAL_POINTS], int rc, acal_fail *f);
-
-//A failed range check with ACAL_E_CLIP that is the readout fault rather than the input: every full-rate point with a
-//clipped sample has a gated twin at the same PWM (F_ZERO / G_ZERO, F_HI / G_HI, F_LO / G_LO) without one whose mean of
-//both cores is within ACAL_READOUT_NEAR16 of 128. Returns 1 for the fault (the caller reports ACAL_E_READOUT)
-int      acal_readout_fault(const acal_point pt[ACAL_POINTS]);
 
 //CAL_PROBE response (protocol 1.21 provisional, docs/protocol.md section 14 row 61): ACAL_PROBE_BYTES; bytes 248..249 the
 //zero split d of fw 0.2.67-0.2.78 (0 since 0.2.79: the zero is measured at the centre again), 250..251 reserved
@@ -279,25 +285,28 @@ int      acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r);
 
 #define ACAL_GAIN_PROBE_RANGE  2          //first look at the two levels (x1 probe: about 88 codes apart)
 
-//The range to measure on, from the gated span (1/16 code, mean of both cores) at ACAL_GAIN_PROBE_RANGE: the most
+//The range to measure on, from the span (1/16 code, mean of both cores) at ACAL_GAIN_PROBE_RANGE: the most
 //sensitive one whose predicted span is at most ACAL_GAIN_MAX_SPAN16 (nominal 1 : 2 : 5 : 10 : 25 : 50 per range)
 uint8_t  acal_gain_range(int32_t span16_probe);
 
 //Offset the levels' midpoint has at range r (1/16 code from 0 V), predicted from mid16_probe (same unit, probe range)
 int32_t  acal_gain_mid_at(int32_t mid16_probe, uint8_t r);
 
-//PWM for range r that moves the codes by -off16 from c's centre pwm[r] (gated slopes of both cores), so the two levels
+//PWM for range r that moves the codes by -off16 from c's centre pwm[r] (slopes of both cores), so the two levels
 //sit symmetric about the 0 V code; clamped to ACAL_PWM_MIN..ACAL_PWM_MAX
 int32_t  acal_gain_pwm(const acal_channel *c, uint8_t r, int32_t off16);
 
-//The measurement: means per class, level (0 low, 1 high, 2 low again) and core, 1/16 code
+//The measurement at 200 MSa/s: means per level (0 low, 1 high, 2 low again) and core, 1/16 code
 typedef struct
 {
-  int32_t  mean16[ACAL_CLASSES][3][2];
+  int32_t  mean16[3][2];
   uint32_t clipped;
 } acal_gain_meas;
 
-//Checks m (taken on range r) and stores the gains in c: ACAL_OK or the first ACAL_E_GAIN_* (c unchanged then)
+//Checks m (taken on range r) and stores the gains in c: ACAL_OK or the first ACAL_E_GAIN_* (c unchanged then).
+//G'_k = (G_A span_A + G_B span_B) / 2 / span_k with c's gains in use G (1 when never measured): the cores against each
+//other, the mean corrected span (the codes per volt) kept, so the volts calibration (input_calibration, fitted on that
+//scale) stays right
 int      acal_gain_store(const acal_gain_meas *m, uint8_t r, acal_channel *c);
 
 //Gains for a new zero calibration: those of old (flag ACAL_GAIN_KEPT) when it has measured ones, else unity
@@ -309,28 +318,22 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_MIN_RESPONSE    (100 * 16)   //coarse points: 700 PWM counts must move the mean by >= 100 codes (~185)
 #define ACAL_PWM_MIN         200
 #define ACAL_PWM_MAX         1800
-//Noise RMS per core at the zero point with the inputs open, per class: the zero step's pass criterion and the Diagnostics
-//limit (ui_diag.c), one pair of constants (owner 2026-10-20 18:13, fw 0.2.100). Bench, the owner's unit, stored worst
-//range per core: full rate CH1 B 1.19, CH2 A 2.75 codes (5 V/div; the high-impedance ranges 5 V, 1 V, 200 mV the
-//worst; a low-impedance source gives 0.5..0.6); gated CH1 A 0.50, B 0.06, CH2 A 0.25, B 0.38. Gated was 3 codes too
-//up to fw 0.2.99
-#define ACAL_MAX_NOISE16_FULL  (3 * 16)
-#define ACAL_MAX_NOISE16_GATED (1 * 16)
-#define ACAL_MAX_NOISE16(cls)  (((cls) == ACAL_GATED) ? ACAL_MAX_NOISE16_GATED : ACAL_MAX_NOISE16_FULL)
-#define ACAL_MAX_ZERO_DEV16  (16 * 16)    //|zero - 128| per core and class at the centre PWM
-#define ACAL_MAX_SPREAD16    (20 * 16)    //|zero A - zero B| per class (1.00o5 FAIL 2 limit)
-#define ACAL_MAX_CLASS16     (12 * 16)    //|zero full - zero gated| per core (bench: 3.6)
+//Noise RMS per core with the inputs open: the zero step's pass criterion (its zero points and the training's quiet-input
+//check) and the Diagnostics limit (ui_diag.c), one constant (owner 2026-10-20 18:13, fw 0.2.100). Bench, the owner's
+//unit, stored worst range per core at full rate: CH1 B 1.19, CH2 A 2.75 codes (5 V/div; the high-impedance ranges 5 V,
+//1 V, 200 mV the worst; a low-impedance source gives 0.5..0.6). fw 0.2.100-0.2.104 also had a 1-code limit for the
+//gated class (CH1 A 0.50, B 0.06, CH2 A 0.25, B 0.38), gone with that class
+#define ACAL_MAX_NOISE16     (3 * 16)
+#define ACAL_MAX_ZERO_DEV16  (16 * 16)    //|zero - 128| per core at the centre PWM
+#define ACAL_MAX_SPREAD16    (20 * 16)    //|zero A - zero B| (1.00o5 FAIL 2 limit)
 #define ACAL_SLOPE_MIN_Q16   (-21627)     //-0.33 codes per count (nominal -0.26)
 #define ACAL_SLOPE_MAX_Q16   (-13107)     //-0.20
-#define ACAL_MAX_DSLOPE_Q16  1311         //|slope A - slope B| <= 0.02 codes per count, per class
+#define ACAL_MAX_DSLOPE_Q16  1311         //|slope A - slope B| <= 0.02 codes per count
 #define ACAL_MAX_DRIFT16     8            //zero point settled: halves agree within 0.5 code
-#define ACAL_READOUT_NEAR16  (8 * 16)     //acal_readout_fault: a gated mean within 8 codes of 128
 #define ACAL_GAIN_MAX_SPAN16 (120 * 16)   //range choice: the levels at most 120 codes apart (+-60 about 128)
-#define ACAL_GAIN_MIN_LEVER16 (40 * 16)   //gated span below 40 codes: no probe on the post (or x10 at range 5 too small)
+#define ACAL_GAIN_MIN_LEVER16 (40 * 16)   //span below 40 codes: no probe on the post (or x10 at range 5 too small)
 #define ACAL_GAIN_MAX_DRIFT16 8           //the two low-level measurements agree within 0.5 code
-#define ACAL_GAIN_MAX_SPLIT  2621         //|G_A - G_B| <= 0.08 per class (bench: 0.033 full, 0.004 gated)
-#define ACAL_GAIN_CLASS_MIN  29491        //(G_A + G_B) full / gated, Q15: 0.9 ..
-#define ACAL_GAIN_CLASS_MAX  36045        //.. 1.1 (bench: 1.011)
+#define ACAL_GAIN_MAX_SPLIT  2621         //|G_A - G_B| <= 0.08 (bench: 0.033 at full rate)
 
 #define ACAL_OK              0
 #define ACAL_E_MAGIC         1            //no block (sector written by an older firmware or blank)
@@ -343,16 +346,16 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_E_SPREAD        8
 #define ACAL_E_SLOPE         9
 #define ACAL_E_DRIFT         10
-#define ACAL_E_CLASS         11           //full-rate and gated zeros implausibly far apart
+                                          //11: retired (full-rate and gated zeros apart, fw 0.2.45-0.2.104)
 #define ACAL_E_GAIN_CLIP     12           //a post level reached code 0 or 255
 #define ACAL_E_GAIN_DRIFT    13           //the low level moved between its two measurements
 #define ACAL_E_GAIN_LEVER    14           //the two levels too close: no probe on the post
 #define ACAL_E_GAIN_SPLIT    15           //core gains differ by more than ACAL_GAIN_MAX_SPLIT
-#define ACAL_E_GAIN_CLASS    16           //full-rate / gated gain outside 0.9..1.1
+                                          //16: retired (full-rate / gated gain outside 0.9..1.1, fw 0.2.45-0.2.104)
                                           //17: reserved (the stock FPGA's "no generator", gone with fw-one)
 #define ACAL_E_TIMING        18           //full-rate capture still garbled after the retries (enc_heal.h)
-#define ACAL_E_READOUT       19           //fw 0.2.67: samples at 0 / 255 only at full rate with the level near code 128
-                                          //(acal_readout_fault); fw 0.2.79: also a 0x153A core with no clean
-                                          //capture stage (cap_stage.h)
+#define ACAL_E_READOUT       19           //a core with no clean capture stage (cap_stage.h; fw 0.2.79). fw 0.2.67-0.2.104
+                                          //also: samples at 0 / 255 only at full rate with the gated twin point near
+                                          //code 128, a rule that needed the gated class
 
 #endif /* ADC_CAL_H */

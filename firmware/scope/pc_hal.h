@@ -51,7 +51,6 @@ typedef struct
   uint32_t adc_a_rawavg;
   uint32_t adc_b_rawavg;
   uint8_t  cal2_loaded;         //sector 708 calibration data v3 block valid (in use only while bound to cal_offset)
-  uint32_t divider;             //0x0D value last written (clock class of the correction)
   acal_channel cal2;            //the channel's v3 data (zeros when not loaded)
   acal_track   trk;             //1.14: calibration v4 A - B tracker of the channel (snapshot, acal_live.c)
 } pc_hw_channel;

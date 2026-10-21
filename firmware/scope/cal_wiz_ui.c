@@ -38,8 +38,10 @@
 #define CAL_PWM_HIGHCODE    500     //coarse points: low PWM gives a high code
 #define CAL_PWM_LOWCODE    1200
 #define CAL_FINE_STEP       150     //slope points: centre +- 150 counts (+- 40 codes)
-#define CAL_RATE_GATED        6     //2 MSa/s
-#define CAL_RATE_FULL         0     //200 MSa/s
+#define CAL_RATE_SEARCH       6     //2 MSa/s: the centre search and the gain step's level check (a record spans many
+                                    //offset-PWM ripple periods, so 2..4 conversions do; same encodes as 200 MSa/s on
+                                    //FPGA 0x153D, the gated class of fw 0.2.104 and before is gone)
+#define CAL_RATE_FULL         0     //200 MSa/s: the zeros, slopes and gains the calibration stores
 
 //FPGA commands per channel: relay, offset PWM, core A, core B, coupling
 static const uint8 cal_cmds[2][5] = { { 0x33, 0x32, 0x20, 0x21, 0x34 }, { 0x36, 0x35, 0x22, 0x23, 0x37 } };
@@ -110,9 +112,9 @@ static void cal_result(acal_acc acc[2][2], int32_t *mean16, int32_t *drift16, ui
   }
 }
 
-//The gated part of one range up to the centre: two coarse points, the centre between them, the slope points 150 counts
-//either side of it and the centre refined on them (m->pwm, m->pwm_lo / hi, m->mean16_lo / hi of the gated class).
-//ACAL_E_RESPONSE when the coarse points do not move; *centre the coarse centre (-1 then)
+//The centre search of one range at 2 MSa/s: two coarse points, the centre between them, the slope points 150 counts
+//either side of it and the centre refined on them (m->pwm, m->pwm_lo / hi, m->search16_lo / hi). ACAL_E_RESPONSE when
+//the coarse points do not move; *centre the coarse centre (-1 then)
 static int cal_centre(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], int32_t *centre, acal_fail *fail)
 {
   acal_acc acc[2][2];
@@ -125,16 +127,16 @@ static int cal_centre(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], 
   fail->point = ACAL_PT_NONE;
   *centre = -1;
 
-  cal_set_rate(CAL_RATE_GATED);
+  cal_set_rate(CAL_RATE_SEARCH);
 
   //Coarse centre from two far points (clipping there only biases the estimate)
   cal_measure(r, CAL_PWM_HIGHCODE, 30, 2, acc);
   cal_result(acc, mean, 0, 0, 0, &unused);
-  acal_point_set(&pt[ACAL_PT_COARSE_HI], CAL_PWM_HIGHCODE, ACAL_GATED, 2, acc);
+  acal_point_set(&pt[ACAL_PT_COARSE_HI], CAL_PWM_HIGHCODE, ACAL_RATE_SEARCH, 2, acc);
   hi = (mean[0] + mean[1]) / 2;
   cal_measure(r, CAL_PWM_LOWCODE, 30, 2, acc);
   cal_result(acc, mean, 0, 0, 0, &unused);
-  acal_point_set(&pt[ACAL_PT_COARSE_LO], CAL_PWM_LOWCODE, ACAL_GATED, 2, acc);
+  acal_point_set(&pt[ACAL_PT_COARSE_LO], CAL_PWM_LOWCODE, ACAL_RATE_SEARCH, 2, acc);
   lo = (mean[0] + mean[1]) / 2;
 
   p = acal_centre_pwm(CAL_PWM_HIGHCODE, hi, CAL_PWM_LOWCODE, lo);
@@ -147,28 +149,29 @@ static int cal_centre(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], 
 
   *centre = p;
 
-  //Slope of each core, gated
+  //Slope points either side of the centre
   m->pwm_lo = p - CAL_FINE_STEP;
   m->pwm_hi = p + CAL_FINE_STEP;
   cal_measure(r, m->pwm_lo, 60, 4, acc);
-  cal_result(acc, m->mean16_lo[ACAL_GATED], 0, 0, 0, &m->clipped);
-  acal_point_set(&pt[ACAL_PT_G_LO], m->pwm_lo, ACAL_GATED, 4, acc);
+  cal_result(acc, m->search16_lo, 0, 0, 0, &m->clipped);
+  acal_point_set(&pt[ACAL_PT_S_LO], m->pwm_lo, ACAL_RATE_SEARCH, 4, acc);
   cal_measure(r, m->pwm_hi, 60, 4, acc);
-  cal_result(acc, m->mean16_hi[ACAL_GATED], 0, 0, 0, &m->clipped);
-  acal_point_set(&pt[ACAL_PT_G_HI], m->pwm_hi, ACAL_GATED, 4, acc);
+  cal_result(acc, m->search16_hi, 0, 0, 0, &m->clipped);
+  acal_point_set(&pt[ACAL_PT_S_HI], m->pwm_hi, ACAL_RATE_SEARCH, 4, acc);
 
   //Centre refined on the slope points
-  m->pwm = acal_interp_pwm(m->pwm_lo, (m->mean16_lo[ACAL_GATED][0] + m->mean16_lo[ACAL_GATED][1]) / 2, m->pwm_hi,
-                           (m->mean16_hi[ACAL_GATED][0] + m->mean16_hi[ACAL_GATED][1]) / 2);
+  m->pwm = acal_interp_pwm(m->pwm_lo, (m->search16_lo[0] + m->search16_lo[1]) / 2, m->pwm_hi,
+                           (m->search16_hi[0] + m->search16_hi[1]) / 2);
   return ACAL_OK;
 }
 
 //One range of the zero step (inputs open or shorted), relay already set: the PWM centre where the mean of both cores
-//reads 128 (cal_centre), the offset slope of each core from two PWM points 150 counts either side and its zero at that
-//centre, each with the ADC clock gated (2 MSa/s, every legacy time base but 200 MSa/s) and at full rate (200 MSa/s, every
-//filtered capture). Every point goes into pt (acal_point, ACAL_PT_*), *centre is the coarse centre (-1 when it failed).
-//Returns ACAL_E_RESPONSE, ACAL_E_TIMING, ACAL_E_READOUT or acal_range_check's result with *fail (point fields included).
-//Shared by the wizard and CAL_PROBE (fw 0.2.67), so the host sees exactly the wizard's measurement.
+//reads 128 (cal_centre, 2 MSa/s), then at 200 MSa/s each core's zero at that centre and its offset slope from two PWM
+//points 150 counts either side. One clock class since fw 0.2.105 (FPGA 0x153D runs the ADCs at full rate at every rate):
+//the gated zero point of fw 0.2.104 and before (ACAL_PT 4) is not measured. Every point goes into pt (acal_point,
+//ACAL_PT_*), *centre is the coarse centre (-1 when it failed). Returns ACAL_E_RESPONSE, ACAL_E_TIMING or
+//acal_range_check's result with *fail (point fields included). Shared by the wizard and CAL_PROBE (fw 0.2.67), so the
+//host sees exactly the wizard's measurement.
 //
 //fw 0.2.79 (owner 2026-10-19 20:30, fail fast): the zero is measured at the centre again, where the level straddles
 //0x7F / 0x80 and the most bits flip. 0.2.67-0.2.78 measured it as the mean of two points 12 codes either side to pass on
@@ -184,30 +187,22 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   if(rc != ACAL_OK)
     return rc;
 
-  //The zeros at the refined centre, gated
-  cal_measure(r, m->pwm, 60, 8, acc);
-  cal_result(acc, m->zero16[ACAL_GATED], m->drift16[ACAL_GATED], m->noise16[ACAL_GATED], m->within16[ACAL_GATED],
-             &m->clipped);
-  acal_point_set(&pt[ACAL_PT_G_ZERO], m->pwm, ACAL_GATED, 8, acc);
-
-  //Full rate: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
-  //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code). The full-rate
-  //slope points too: the cores' gains differ per class, and so may their offset slopes
+  //200 MSa/s: a 1000-sample readout spans 5 us of the 40 us offset-PWM ripple period, so each conversion sees one
+  //ripple phase; 64 conversions (about 70 ms) average it out (bench 0.2.43: 8 left 0.2-0.4 code)
   cal_set_rate(CAL_RATE_FULL);
 
   //Every full-rate conversion is checked and re-armed when garbled (fpga_done_conversion, enc_heal.h); one that stayed
   //garbled after the re-arms fails the range
   fpga_enc_garbled = 0;
-  cal_measure(r, m->pwm, 30, 64, acc);
-  cal_result(acc, m->zero16[ACAL_FULL], m->drift16[ACAL_FULL], m->noise16[ACAL_FULL], m->within16[ACAL_FULL],
-             &m->clipped);
-  acal_point_set(&pt[ACAL_PT_F_ZERO], m->pwm, ACAL_FULL, 64, acc);
+  cal_measure(r, m->pwm, 60, 64, acc);
+  cal_result(acc, m->zero16, m->drift16, m->noise16, m->within16, &m->clipped);
+  acal_point_set(&pt[ACAL_PT_F_ZERO], m->pwm, ACAL_RATE_FULL, 64, acc);
   cal_measure(r, m->pwm_hi, 60, 64, acc);
-  cal_result(acc, m->mean16_hi[ACAL_FULL], 0, 0, 0, &m->clipped);
-  acal_point_set(&pt[ACAL_PT_F_HI], m->pwm_hi, ACAL_FULL, 64, acc);
+  cal_result(acc, m->mean16_hi, 0, 0, 0, &m->clipped);
+  acal_point_set(&pt[ACAL_PT_F_HI], m->pwm_hi, ACAL_RATE_FULL, 64, acc);
   cal_measure(r, m->pwm_lo, 60, 64, acc);
-  cal_result(acc, m->mean16_lo[ACAL_FULL], 0, 0, 0, &m->clipped);
-  acal_point_set(&pt[ACAL_PT_F_LO], m->pwm_lo, ACAL_FULL, 64, acc);
+  cal_result(acc, m->mean16_lo, 0, 0, 0, &m->clipped);
+  acal_point_set(&pt[ACAL_PT_F_LO], m->pwm_lo, ACAL_RATE_FULL, 64, acc);
 
   if(fpga_enc_garbled)
   {
@@ -216,11 +211,6 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
   }
 
   rc = acal_range_check(m, fail);
-
-  //Samples at the rails only at full rate while the level is near 128: the readout fault, not the input
-  if((rc == ACAL_E_CLIP) && acal_readout_fault(pt))
-    rc = ACAL_E_READOUT;
-
   acal_fail_point(pt, rc, fail);
   return rc;
 }
@@ -241,7 +231,7 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint16_t cnt[4])
   return 0;
 }
 
-//fw 0.2.81: the training band's offset PWM per point (cs_band_pwm from the gated slope points of cal_centre)
+//fw 0.2.81: the training band's offset PWM per point (cs_band_pwm from the 2 MSa/s slope points of cal_centre)
 #define CAL_BAND_SETTLE_MS  60      //per point: 4 codes (about 15 PWM counts) from the last, as cal_measure's steps
 
 static int32_t cal_band_pwm[CS_BAND_POINTS];
@@ -260,7 +250,7 @@ static int cal_cap_park(void *ctx, uint32_t p)
 }
 
 //fw 0.2.79: FPGA 0x153A capture stage training of channel ch's two cores, the first thing of its zero step: range 0, the
-//gated centre search, a quiet input checked (a signal would count at every stage), then cs_train_run. fw 0.2.81: over
+//centre search, a quiet input checked (a signal would count at every stage), then cs_train_run. fw 0.2.81: over
 //the band of codes 120..140 around the centre (cs_band_pwm, CS_BAND_REPS captures per stage and point), since a stage at
 //the edge of the AD9288 data transition garbles only at some codes and in some captures (bench 2026-10-20, CH1 A4).
 //ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage: fail fast)
@@ -283,21 +273,23 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
   if(rc != ACAL_OK)
     return rc;
 
-  for(i=ACAL_PT_G_LO;i<=ACAL_PT_G_HI;i++)
+  //The noise inside the 2 MSa/s slope points' conversions (fw 0.2.105: the zero step's one limit; 1 code up to 0.2.104,
+  //the gated class's)
+  for(i=ACAL_PT_S_LO;i<=ACAL_PT_S_HI;i++)
     for(k=0;k<2;k++)
-      if(pt[i].within16[k] > ACAL_MAX_NOISE16_GATED)
+      if(pt[i].within16[k] > ACAL_MAX_NOISE16)
       {
-        fail->cls      = ACAL_GATED;
+        fail->rate     = ACAL_RATE_SEARCH;
         fail->core     = (uint8_t)k;
         fail->value    = (int32_t)pt[i].within16[k];
         fail->within16 = pt[i].within16[k];
         return ACAL_E_NOISE;
       }
 
-  //The band's PWM points from the gated slope points (both cores' mean); every one inside the PWM range, else the
-  //offset control cannot reach the band (fail fast as a centre that does not respond)
-  mlo = (m.mean16_lo[ACAL_GATED][0] + m.mean16_lo[ACAL_GATED][1]) / 2;
-  mhi = (m.mean16_hi[ACAL_GATED][0] + m.mean16_hi[ACAL_GATED][1]) / 2;
+  //The band's PWM points from the slope points (both cores' mean); every one inside the PWM range, else the offset
+  //control cannot reach the band (fail fast as a centre that does not respond)
+  mlo = (m.search16_lo[0] + m.search16_lo[1]) / 2;
+  mhi = (m.search16_hi[0] + m.search16_hi[1]) / 2;
 
   for(i=0;i<CS_BAND_POINTS;i++)
   {
@@ -325,13 +317,13 @@ static uint8      cal_last_garbled[2];
 static uint8      cal_cap_st[2], cal_cap_bad[2];   //fw 0.2.79: the channel's capture stage training (CW_C_*)
 
 //Zero step of one channel: every range (cal_range) and the store. *match16: the worst |drift A - drift B| of the zero
-//points over ranges and classes (summary); *fail and *fail_r: where a failed range failed (the result line and its note)
+//points over the ranges (summary); *fail and *fail_r: where a failed range failed (the result line and its note)
 static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail *fail, uint32_t *fail_r)
 {
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
   int32_t         d, centre;
-  uint32_t        r, cl;
+  uint32_t        r;
   int             rc;
 
   *match16 = 0;
@@ -384,14 +376,11 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     if((rc == ACAL_E_RESPONSE) || (rc == ACAL_E_TIMING))
       return rc;
 
-    for(cl=0;cl<ACAL_CLASSES;cl++)
-    {
-      d = m.drift16[cl][ACAL_CORE_A] - m.drift16[cl][ACAL_CORE_B];
-      d = (d < 0) ? -d : d;
+    d = m.drift16[ACAL_CORE_A] - m.drift16[ACAL_CORE_B];
+    d = (d < 0) ? -d : d;
 
-      if((uint32_t)d > *match16)
-        *match16 = (uint32_t)d;
-    }
+    if((uint32_t)d > *match16)
+      *match16 = (uint32_t)d;
 
     if(rc == ACAL_OK)
       rc = acal_range_store(&m, c, (uint8)r);
@@ -416,8 +405,8 @@ static void cal_scratch_channel(uint32 ch)
 }
 
 //Gain step (calibration data v3, adc_cal.h): the probe tip on the calibration post, the generator holds its output low
-//(about -1.24 V against probe ground) or high (about +1.87 V). Both cores and both clock classes see the same node, so
-//the spans between the two levels give every relative gain; no level needs to be known. The gains are measured on one
+//(about -1.24 V against probe ground) or high (about +1.87 V). Both cores see the same node, so the spans between the
+//two levels give their relative gain; no level needs to be known. The gains are measured on one
 //range and used on all (assumption: the mismatch is inside the ADC; firmware/README.md section 6.3 has the bench check).
 //
 //Generator as a static level (FPGA 0x153D, fw-d5): the square stopped (mode 0) at the idle level, the pin driven. The
@@ -443,7 +432,7 @@ static int cal_gain_level(uint32 r, int32 pwm, uint32 rate, uint32 settle_ms, ui
   return !fpga_enc_garbled;
 }
 
-//Level check: both levels at range 2 (gated, 2 conversions each). Returns the span (1/16 code, mean of both cores; it
+//Level check: both levels at range 2 (2 MSa/s, 2 conversions each). Returns the span (1/16 code, mean of both cores; it
 //picks the measurement range, cw_level_ok decides whether a probe is on the post); *mid16 = the levels' midpoint from
 //the 0 V code
 static int32_t cal_gain_check(const acal_channel *c, int32_t *mid16)
@@ -455,16 +444,16 @@ static int32_t cal_gain_check(const acal_channel *c, int32_t *mid16)
   calibrationsettings.samplevoltperdiv = r;
   fpga_set_channel_voltperdiv(&calibrationsettings);
   timer0_delay(60);
-  cal_gain_level(r, c->pwm[r], CAL_RATE_GATED, 60, 2, 0, lo, &unused);
-  cal_gain_level(r, c->pwm[r], CAL_RATE_GATED, 30, 2, 1, hi, &unused);
+  cal_gain_level(r, c->pwm[r], CAL_RATE_SEARCH, 60, 2, 0, lo, &unused);
+  cal_gain_level(r, c->pwm[r], CAL_RATE_SEARCH, 30, 2, 1, hi, &unused);
 
-  *mid16 = (hi[0] + hi[1] + lo[0] + lo[1]) / 4 - (c->zero[ACAL_GATED][0][r] + c->zero[ACAL_GATED][1][r]) / 2;
+  *mid16 = (hi[0] + hi[1] + lo[0] + lo[1]) / 4 - (c->zero[0][r] + c->zero[1][r]) / 2;
   return (hi[0] + hi[1] - lo[0] - lo[1]) / 2;
 }
 
 //The measurement after a passed level check: the range from the span, the PWM that puts the levels symmetric about the
-//0 V code (even-order INL cancels in the span); low, high, low again (linear drift cancels in the spans), each gated (8)
-//and at full rate (64: PWM ripple). c changes only when the checks pass
+//0 V code (even-order INL cancels in the span); low, high, low again (linear drift cancels in the spans), each at
+//200 MSa/s (64 conversions: PWM ripple). c changes only when the checks pass
 static int cal_gain_measure(acal_channel *c, int32_t span16, int32_t mid16)
 {
   acal_gain_meas m;
@@ -485,9 +474,7 @@ static int cal_gain_measure(acal_channel *c, int32_t span16, int32_t mid16)
     if(wiz_poll_cancel())
       return CW_RC_CANCELLED;
 
-    cal_gain_level(r, pwm, CAL_RATE_GATED, l ? 30 : 100, 8, l == 1, m.mean16[ACAL_GATED][l], &m.clipped);
-
-    if(!cal_gain_level(r, pwm, CAL_RATE_FULL, 30, 64, l == 1, m.mean16[ACAL_FULL][l], &m.clipped))
+    if(!cal_gain_level(r, pwm, CAL_RATE_FULL, l ? 30 : 100, 64, l == 1, m.mean16[l], &m.clipped))
       return ACAL_E_TIMING;
   }
 

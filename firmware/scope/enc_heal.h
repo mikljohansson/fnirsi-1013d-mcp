@@ -28,7 +28,7 @@
 #define EH_CHECK_PAIRS  250         //data check: words per channel read from the record start (1000 bus bytes)
 
 //Check modes (pc_hw_enc.mode)
-#define EH_MODE_NONE    0           //(never the bitstream's mode since fw-one; a gated rate is simply not checked)
+#define EH_MODE_NONE    0           //(never the bitstream's mode since fw-one; a divider >= 1 is not checked)
 #define EH_MODE_DATA    1           //residual of the record
 #define EH_MODE_FLAG    2           //FPGA read 0x33
 

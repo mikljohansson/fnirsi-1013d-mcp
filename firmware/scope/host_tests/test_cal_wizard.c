@@ -232,9 +232,9 @@ static void test_zero_fail_detail(void)
 {
   cal_wiz   w;
   int       rc[2] = { ACAL_E_NOISE, ACAL_E_DRIFT };
-  acal_fail f0 = { ACAL_GATED, ACAL_CORE_B, 52, 17, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
-  acal_fail f1 = { ACAL_FULL, ACAL_CORE_A, -13, 18, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
-  acal_fail fw = { ACAL_FULL, ACAL_CORE_B, 1600, 1600, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+  acal_fail f0 = { ACAL_RATE_SEARCH, ACAL_CORE_B, 52, 17, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+  acal_fail f1 = { ACAL_RATE_FULL, ACAL_CORE_A, -13, 18, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+  acal_fail fw = { ACAL_RATE_FULL, ACAL_CORE_B, 1600, 1600, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
   char      t[96];
 
   cw_init(&w);
@@ -246,9 +246,10 @@ static void test_zero_fail_detail(void)
   cw_zero_line(&w, 0, t);
   T_STR(t, "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
-  //fw 0.2.100: the note names the limit of the rate (the Diagnostics limit) and what helps
+  //fw 0.2.100: the note names the limit (the Diagnostics limit, one since fw 0.2.105: the training's quiet-input
+  //check at 2 MSa/s has the zero step's 3 codes) and what helps
   cw_zero_note(&w, 0, t);
-  T_STR(t, "Noise RMS, inputs open, limit 1.0 code: move chargers and the USB cable away.");
+  T_STR(t, "Noise RMS, inputs open, limit 3.0 code: move chargers and the USB cable away.");
   T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
   cw_zero_line(&w, 1, t);
   T_STR(t, "CH2: zero still moving, range 1 at 200 MSa/s: core A 0.8 code");
@@ -312,12 +313,12 @@ static void test_zero_fail_note(void)
   char      t[128];
 
   memset(&f0, 0, sizeof(f0));
-  f0.cls = ACAL_FULL; f0.core = ACAL_CORE_B; f0.value = 115; f0.within16 = 115;
+  f0.rate = ACAL_RATE_FULL; f0.core = ACAL_CORE_B; f0.value = 115; f0.within16 = 115;
   f0.point = ACAL_PT_F_ZERO; f0.pwm = 812;
   f0.mean16[0] = 2082; f0.mean16[1] = 2014;
   f0.lo[0] = 126; f0.hi[0] = 135; f0.lo[1] = 101; f0.hi[1] = 152;
   memset(&f1, 0, sizeof(f1));
-  f1.cls = ACAL_GATED; f1.core = ACAL_CORE_B; f1.point = ACAL_PT_G_LO; f1.pwm = 1062;
+  f1.rate = ACAL_RATE_SEARCH; f1.core = ACAL_CORE_B; f1.point = ACAL_PT_S_LO; f1.pwm = 1062;
   f1.mean16[0] = 2693; f1.mean16[1] = 2400; f1.lo[0] = 160; f1.hi[0] = 176; f1.lo[1] = 0; f1.hi[1] = 255;
   f1.clipped[1] = 12;
 
@@ -341,7 +342,7 @@ static void test_zero_fail_note(void)
 
   //The widest: the highest slope point (ACAL_PWM_MAX + 150), both cores clipped in every sample of a full-rate point
   f1.pwm = ACAL_PWM_MAX + 150; f1.mean16[0] = f1.mean16[1] = 255 * 16; f1.lo[0] = 0; f1.hi[0] = 255;
-  f1.clipped[0] = f1.clipped[1] = 32000; f1.cls = ACAL_FULL;
+  f1.clipped[0] = f1.clipped[1] = 32000; f1.rate = ACAL_RATE_FULL;
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   cw_zero_detail(&w, 1, 5, &f1);
@@ -560,18 +561,16 @@ static void test_texts(void)
   cw_fmt_tenths(t, 1005);
   T_STR(t, "100.5");
 
-  //Gain: full class |G_A / G_B - 1| in tenths of a percent; never measured: 0
+  //Gain: |G_A / G_B - 1| in tenths of a percent; never measured: 0
   memset(&c, 0, sizeof(c));
   c.gain_range = ACAL_GAIN_NONE;
-  c.gain[ACAL_FULL][0] = 33000;
-  c.gain[ACAL_FULL][1] = 32570;
+  c.gain[0] = 33000;
+  c.gain[1] = 32570;
   T_EQ(cw_gain_tenths(&c), 0);
   c.gain_range = 2;
   T_EQ(cw_gain_tenths(&c), 13);
-  c.gain[ACAL_FULL][0] = 32768 + 1081;                      //the bench's 1.033 ratio: 3.3 %
-  c.gain[ACAL_FULL][1] = 32768;
-  T_EQ(cw_gain_tenths(&c), 33);
-  c.gain[ACAL_GATED][0] = 40000;                            //the gated class does not count
+  c.gain[0] = 32768 + 1081;                                 //the bench's 1.033 ratio: 3.3 %
+  c.gain[1] = 32768;
   T_EQ(cw_gain_tenths(&c), 33);
 
   //Level check: x1 and x10 probes pass, an open input does not
@@ -611,8 +610,8 @@ static void test_texts(void)
   w.match16[0] = 0;
   w.match16[1] = 7;
   w.gain_st[0] = CW_G_PASS;
-  c.gain[ACAL_FULL][0] = 33000;
-  c.gain[ACAL_FULL][1] = 32570;
+  c.gain[0] = 33000;
+  c.gain[1] = 32570;
   cw_done_line(&w, 0, &c, t);
   T_STR(t, "CH1 calibrated: cores matched to 0.1 code, gain mismatch 1.3 %");
   cw_done_line(&w, 1, &c, t);
@@ -624,7 +623,7 @@ static void test_texts(void)
   //Every failure has words (no "OK" or the short report form)
   for(rc=ACAL_E_RESPONSE;rc<=ACAL_E_READOUT;rc++)
   {
-    if(rc == 17)                        //reserved (adc_cal.h)
+    if((rc == 11) || (rc == 16) || (rc == 17))    //retired / reserved (adc_cal.h)
       continue;
     T_TRUE(strlen(cw_reason_text(rc)) > 8);
     T_TRUE(strcmp(cw_reason_text(rc), "measurement failed"));

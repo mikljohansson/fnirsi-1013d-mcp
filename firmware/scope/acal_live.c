@@ -1,24 +1,26 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // acal_live.c - calibration v4 on the scope (acal_live.h, docs/plans/interleave-tracking.md, protocol row 53)
 //
-// A - B tracker: fpga_channel_correction folds the tracked d / e into every CH1 / CH2 correction (acal_v4_apply: a no-op
-// unless v3 is bound and the class is full); fpga_prepare_correction remembers what a readout applied; at the end of
-// fpga_read_sample_data an 8-bit full-class record is offered to acal_track_record. 16-bit readouts, the gated class and
-// the calibration's scratch channel (calibrationsettings) never feed it nor get it. The class probe (fw 0.2.50-0.2.104:
-// the full-rate class's common mode against the gated class) went with the gated class in fw 0.2.105 (FPGA 0x153D runs
-// the ADCs at full rate at every rate, firmware/AGENTS.md section 83).
+// A - B tracker: fpga_channel_correction folds the tracked d / e into every CH1 / CH2 correction (acal_track_apply: a
+// no-op unless v3 is bound); fpga_prepare_correction remembers what a readout applied; at the end of
+// fpga_read_sample_data an 8-bit record at divider 0 is offered to acal_track_record (the evenly interleaved trace the
+// tracker's neighbour interpolation needs, acal_track.h). 16-bit readouts and the calibration's scratch channel
+// (calibrationsettings) never feed it nor get it. The class probe (fw 0.2.50-0.2.104: the full-rate class's common mode
+// against the gated class) went with the gated class in fw 0.2.105 (FPGA 0x153D runs the ADCs at full rate at every
+// rate, firmware/AGENTS.md section 83).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 
 #include "types.h"
 #include "variables.h"
+#include "fpga_control.h"
 #include "timer.h"
 #include "acal_live.h"
 
 acal_track acal_trk[2];
 
 //What the last readout of a channel applied (acal_live_prepared)
-static uint8  live_armed[2];            //v3 bound and full class: the record may feed the tracker
+static uint8  live_armed[2];            //v3 bound and divider 0: the record may feed the tracker
 static int32  live_d[2];
 static int32  live_e[2];
 
@@ -69,7 +71,7 @@ void acal_live_prepared(PCHANNELSETTINGS s, const acal_corr *c)
   if(ch < 0)
     return;
 
-  live_armed[ch] = (c->version == 3) && (c->cls == ACAL_FULL);
+  live_armed[ch] = (c->version == 3) && (fpga_divider == 0);
   live_d[ch]     = acal_trk[ch].d_q8;
   live_e[ch]     = acal_trk[ch].e_q24;
 }

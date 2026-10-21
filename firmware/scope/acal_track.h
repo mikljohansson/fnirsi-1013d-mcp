@@ -7,7 +7,10 @@
 // (+ for core A, - for core B) estimates delta(x) = A(x) - B(x) at x_n = (s_n + i_n) / 2 - 128. The record's sums are
 // moved back to the open-loop domain (y + applied d + applied e x) and added to moments with forgetting 1/256 per
 // accepted record; a 3-term least-squares fit delta(x) = d + e x + q x^2 (orthogonal polynomials, integer only) gives
-// the estimate. d and e are applied symmetrically in the full-rate class (acal_track_apply); q is estimated only.
+// the estimate. d and e are applied symmetrically to every 8-bit readout (acal_track_apply; the ADCs run at full rate at
+// every rate since FPGA 0x153D, fw 0.2.105; before, only divider 0 had the full-rate class); q is estimated only. The
+// records come from divider 0 only (acal_live.c): there the trace is evenly interleaved, 5 ns per sample, which the
+// neighbour interpolation assumes; at D > 0 a stored pair's two samples are 5 ns apart but the pairs (D + 1) x 10 ns.
 //
 // Units of the moments: x4 = 2 s_n + s_{n-1} + s_{n+1} - 512 is x in quarter codes (exact; |x4| <= 496 for usable
 // pairs), y256 is y in 1/256 code after the open-loop shift (|y256| <= 16256: clamp 16 codes plus |applied d| <= 32
@@ -64,7 +67,7 @@ int  acal_track_record(acal_track *t, const uint8_t *buf, uint32_t count, int in
 //(e and q only when identifiable, else held), spread16 and the flags GAIN / BOW. t->m[0] must be > 0
 void acal_track_solve(acal_track *t);
 
-//Folds the tracked d and e into a readout correction, only when c->version == 3 and c->cls == ACAL_FULL, symmetric
+//Folds the tracked d and e into a readout correction, only when c->version == 3, symmetric
 //about the mean of the cores (x = code - 128): A' = A - (d + e x) / 2, B' = B + (d + e x) / 2. gain_a/b, off_a/b and
 //clip_lo/hi change; corr16, gain16, zero_q8, comp/frac stay (the mean of the cores is unchanged)
 void acal_track_apply(const acal_track *t, acal_corr *c);

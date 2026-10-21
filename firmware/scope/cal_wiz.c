@@ -169,7 +169,7 @@ void cw_zero_detail(cal_wiz *w, uint32_t ch, uint32_t range, const acal_fail *f)
 
   w->zero_det[ch]      = 1;
   w->zero_r[ch]        = (uint8_t)range;
-  w->zero_cls[ch]      = f->cls;
+  w->zero_rate[ch]     = f->rate;
   w->zero_core[ch]     = f->core;
   w->zero_val[ch]      = f->value;
   w->zero_within16[ch] = f->within16;
@@ -220,7 +220,7 @@ uint32_t cw_match_tenths(uint32_t match16)
 
 uint32_t cw_gain_tenths(const acal_channel *c)
 {
-  uint32_t a = c->gain[ACAL_FULL][ACAL_CORE_A], b = c->gain[ACAL_FULL][ACAL_CORE_B];
+  uint32_t a = c->gain[ACAL_CORE_A], b = c->gain[ACAL_CORE_B];
 
   if((c->gain_range == ACAL_GAIN_NONE) || (b == 0))
     return 0;
@@ -321,12 +321,10 @@ const char *cw_reason_text(int rc)
     case ACAL_E_SPREAD:     return "the two ADC cores differ too much";
     case ACAL_E_SLOPE:      return "the offset control is out of range";
     case ACAL_E_DRIFT:      return "the zero level is still moving: let the scope warm up";
-    case ACAL_E_CLASS:      return "the zero level moves with the sample rate";
     case ACAL_E_GAIN_CLIP:  return "the post signal clips: set the probe to 1X";
     case ACAL_E_GAIN_DRIFT: return "the post signal moved: hold the tip still";
     case ACAL_E_GAIN_LEVER: return "no signal: tip on the post?";
     case ACAL_E_GAIN_SPLIT: return "the two ADC cores differ too much";
-    case ACAL_E_GAIN_CLASS: return "the gain differs between sample rates";
     case ACAL_E_TIMING:     return "ADC capture timing: the 200 MSa/s data stays garbled";
     case ACAL_E_READOUT:    return "ADC readout fault near code 128: power-cycle and retry; report it if it persists";
     case CW_RC_CANCELLED:   return "cancelled";
@@ -367,7 +365,7 @@ char *cw_zero_line(const cal_wiz *w, uint32_t ch, char *p)
 
         p = cw_str(p, (w->zero_rc[ch] == ACAL_E_NOISE) ? ": too much noise, range " : ": zero still moving, range ");
         p = cw_uint(p, w->zero_r[ch] + 1u);
-        p = cw_str(p, (w->zero_cls[ch] == ACAL_FULL) ? " at 200 MSa/s: core " : " at 2 MSa/s: core ");
+        p = cw_str(p, (w->zero_rate[ch] == ACAL_RATE_FULL) ? " at 200 MSa/s: core " : " at 2 MSa/s: core ");
         p = cw_str(p, w->zero_core[ch] ? "B " : "A ");
         p = cw_fmt_tenths(p, cw_tenths16((uint32_t)((v < 0) ? -v : v)));
 
@@ -393,7 +391,6 @@ static const char *cw_point_name(uint32_t pt)
   {
     case ACAL_PT_COARSE_HI:
     case ACAL_PT_COARSE_LO: return "coarse point";
-    case ACAL_PT_G_ZERO:
     case ACAL_PT_F_ZERO:    return "zero point";
     default:                return "slope point";
   }
@@ -462,12 +459,12 @@ char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p)
   if((ch > 1) || (w->zero_st[ch] != CW_Z_FAIL) || !w->zero_det[ch])
     return p;
 
-  //fw 0.2.100 (owner 2026-10-20 18:13): the stored noise over its limit names the limit of its rate (the one Diagnostics
-  //shows, adc_cal.h ACAL_MAX_NOISE16_*) and what helps
+  //fw 0.2.100 (owner 2026-10-20 18:13): the stored noise over its limit names the limit (the one Diagnostics shows,
+  //adc_cal.h ACAL_MAX_NOISE16) and what helps
   if((w->zero_rc[ch] == ACAL_E_NOISE) && (f->point >= ACAL_POINTS))
   {
     p = cw_str(p, "Noise RMS, inputs open, limit ");
-    p = cw_fmt_tenths(p, cw_tenths16(ACAL_MAX_NOISE16(f->cls)));
+    p = cw_fmt_tenths(p, cw_tenths16(ACAL_MAX_NOISE16));
     return cw_str(p, " code: move chargers and the USB cable away.");
   }
 
@@ -476,7 +473,7 @@ char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p)
 
   p = cw_str(p, "Range ");
   p = cw_uint(p, w->zero_r[ch] + 1u);
-  p = cw_str(p, (f->cls == ACAL_FULL) ? ", 200 MSa/s, " : ", 2 MSa/s, ");
+  p = cw_str(p, (f->rate == ACAL_RATE_FULL) ? ", 200 MSa/s, " : ", 2 MSa/s, ");
   p = cw_str(p, cw_point_name(f->point));
   p = cw_str(p, ", PWM ");
   p = cw_uint(p, f->pwm);

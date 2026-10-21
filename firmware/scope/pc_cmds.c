@@ -496,8 +496,8 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 //tracking folded in exactly as the readout does it (acal_track_apply; protocol row 54)
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
-  acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
-                  c->adc_a_comp, c->adc_b_comp, k);
+  acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->dcoffset, c->dc_shift_value, c->adc_a_comp,
+                  c->adc_b_comp, k);
   acal_track_apply(&c->trk, k);
 }
 
@@ -2624,7 +2624,8 @@ void pc_cal_body(int ch, uint8_t *resp)
   bound = c.cal2_loaded && acal_bound(&c.cal2, c.cal_offset);
   memset(resp + 72, 0, PC_CAL_RESP_LEN - 72);
   resp[72] = k.version;
-  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | (bound ? 2 : 0) | ((k.cls == ACAL_GATED) ? 4 : 0) |
+  //bit 2: the gated class in use (fw 0.2.45-0.2.104), reserved since one class (0.2.105)
+  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | (bound ? 2 : 0) |
                        ((c.cal2_loaded && (c.cal2.gain_range != ACAL_GAIN_NONE)) ? 8 : 0) |
                        ((c.cal2_loaded && (c.cal2.gain_flags & ACAL_GAIN_KEPT)) ? 16 : 0));
   pc_put_u16(resp + 74, (uint16_t)k.comp_a);
@@ -2640,6 +2641,7 @@ void pc_cal_body(int ch, uint8_t *resp)
   pc_put_u32(resp + 104, (uint32_t)k.off_b);
   pc_put_u32(resp + 108, k.gain16);
 
+  //The stored block (slot 1 reserved: zeros)
   if(c.cal2_loaded)
     acal_pack_channel(&c.cal2, resp + 112);
 
@@ -2652,7 +2654,8 @@ void pc_cal_body(int ch, uint8_t *resp)
 
     pc_hal_decim_current(&dc, &written);
 
-    if((k.version == 3) && (k.cls == ACAL_FULL) && (!written || !dc.k))
+    //Applied to the next readout: v3 and the 8-bit path (any divider since one class, fw 0.2.105)
+    if((k.version == 3) && (!written || !dc.k))
       f |= 0x10;
 
     resp[256] = f;

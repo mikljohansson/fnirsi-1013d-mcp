@@ -276,7 +276,7 @@ void acal_track_apply(const acal_track *t, acal_corr *c)
   int64_t e = t->e_q24;
   int64_t k;
 
-  if((c->version != 3) || (c->cls != ACAL_FULL) || ((t->d_q8 == 0) && (e == 0)))
+  if((c->version != 3) || ((t->d_q8 == 0) && (e == 0)))
     return;
 
   //A' = A - (d + e x) / 2 with x = code - 128: gain_a (1 - e/2), off_a (1 - e/2) - 65536 (d - 128 e) / 2; B the

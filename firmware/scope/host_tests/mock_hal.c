@@ -795,7 +795,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   memset(&f, 0, sizeof(f));
   f.point = ACAL_PT_NONE;
   pt[ACAL_PT_F_ZERO].pwm       = 812;
-  pt[ACAL_PT_F_ZERO].cls       = ACAL_FULL;
+  pt[ACAL_PT_F_ZERO].rate      = ACAL_RATE_FULL;
   pt[ACAL_PT_F_ZERO].convs     = 64;
   pt[ACAL_PT_F_ZERO].mean16[0] = 130 * 16;
   pt[ACAL_PT_F_ZERO].mean16[1] = 126 * 16;

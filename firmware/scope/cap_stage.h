@@ -14,7 +14,7 @@
 //
 // Training (the calibration wizard's zero step; fw 0.2.81 band training): the quiet input is parked by the offset PWM at
 // CS_BAND_POINTS codes across the band where the most bits flip (120, 124, .. 140; cs_band_pwm from the zero step's
-// gated slope points), and at every point every trained core is captured at stage s = 2, 3, 4, 5 in turn, CS_BAND_REPS
+// 2 MSa/s slope points), and at every point every trained core is captured at stage s = 2, 3, 4, 5 in turn, CS_BAND_REPS
 // 200 MSa/s captures of CS_TRAIN_WORDS words each; the 0x36 counts are summed per core and stage over all points and
 // captures. A stage is clean when its sum is 0: a stage inside the AD9288 data transition counts at once, one at its edge
 // garbles only at some codes and in some captures (bench 2026-10-20: CH1 A4 at codes 127..135 only), which 0.2.79's one
@@ -68,7 +68,7 @@ uint16_t cs_ref_bit(uint32_t core);
 uint8_t  cs_pick(uint8_t clean, uint8_t po);
 
 //Training band: the code of point i (CS_BAND_FIRST + i CS_BAND_STEP) and the offset PWM that parks the input there,
-//interpolated from two gated points (pwm_lo reads mean16_lo, pwm_hi reads mean16_hi, 1/16 code; a lower PWM reads a
+//interpolated from two 2 MSa/s slope points (pwm_lo reads mean16_lo, pwm_hi reads mean16_hi, 1/16 code; a lower PWM reads a
 //higher code). -1 when the points do not respond (mean16_lo <= mean16_hi or pwm_hi <= pwm_lo)
 uint32_t cs_band_code(uint32_t i);
 int32_t  cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code);

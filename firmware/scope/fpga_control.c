@@ -711,29 +711,10 @@ void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
       cal = &adc_cal[1];
   }
 
-  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, fpga_divider, settings->dcoffset,
+  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, settings->dcoffset,
                   settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
 
-  //Calibration v4 (CH1 / CH2, v3 bound): the full-class common mode and the tracked A - B split (acal_live.c)
-  acal_live_apply(settings, c);
-}
-
-//C6 peak detect: the record's two raw bytes come from the full-rate ADC stream (dec_on runs the encodes at 200 MSa/s as
-//the filter does), so the per-core correction of the full class applies, not the gated class the divider would select
-void fpga_channel_correction_full(PCHANNELSETTINGS settings, acal_corr *c)
-{
-  const acal_channel *cal = 0;
-
-  if(adc_cal_loaded)
-  {
-    if(settings == &scopesettings.channel1)
-      cal = &adc_cal[0];
-    else if(settings == &scopesettings.channel2)
-      cal = &adc_cal[1];
-  }
-
-  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, 0, settings->dcoffset,
-                  settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
+  //Calibration v4 (CH1 / CH2, v3 bound): the tracked A - B split (acal_live.c)
   acal_live_apply(settings, c);
 }
 
@@ -770,7 +751,7 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   settings->minDC     = 0x7FFFFFFF;
   settings->maxDC     = 0;
   
-  //Zero correction for this readout (per core, for the capture's clock class)
+  //Zero correction for this readout (per core)
   fpga_prepare_correction(settings);
 
   //Decimation filter on: read the 16-bit samples now; both passes below then take them from memory (odd, even). The
@@ -892,7 +873,7 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //A peak record: Vmax / Vmin / Vpp from its min / max bytes (the center above stays the midpoint's)
   pc_glue_peak_extremes(settings);
 
-  //Calibration v4: an 8-bit full-class record of CH1 / CH2 to the A - B tracker
+  //Calibration v4: an 8-bit record of CH1 / CH2 to the A - B tracker
   acal_live_record(settings, wide);
   
   //===================================

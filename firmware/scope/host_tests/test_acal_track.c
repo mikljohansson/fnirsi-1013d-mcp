@@ -72,7 +72,7 @@ static int      sq_level;                 //the post square: level of the next r
 
 static void store_channel(const model *md)
 {
-  uint32_t r, k, cls;
+  uint32_t r, k;
 
   memset(&chan, 0, sizeof(chan));
 
@@ -80,26 +80,24 @@ static void store_channel(const model *md)
   {
     chan.pwm[r] = pwm[r];
 
-    for(cls=0;cls<ACAL_CLASSES;cls++)
-      for(k=0;k<2;k++)
-      {
-        chan.zero[cls][k][r]  = (int16_t)lround((128.0 + md->off[k]) * 16.0);
-        chan.slope[cls][k][r] = -17000;
-        chan.noise[cls][k][r] = 16;
-      }
+    for(k=0;k<2;k++)
+    {
+      chan.zero[k][r]  = (int16_t)lround((128.0 + md->off[k]) * 16.0);
+      chan.slope[k][r] = -17000;
+      chan.noise[k][r] = 16;
+    }
   }
 
-  for(cls=0;cls<ACAL_CLASSES;cls++)
-    for(k=0;k<2;k++)
-      chan.gain[cls][k] = (uint16_t)lround(32768.0 / md->gain[k]);
+  for(k=0;k<2;k++)
+    chan.gain[k] = (uint16_t)lround(32768.0 / md->gain[k]);
 
   chan.gain_range = 2;
 }
 
-//The v3 correction of a full-rate readout (range 2, dcoffset 0, divider 0) with the tracker folded in
+//The v3 correction of a readout (range 2, dcoffset 0) with the tracker folded in
 static void correction(const acal_track *t, acal_corr *c)
 {
-  acal_correction(&chan, pwm, 2, 0, 0, 385, 0, 0, c);
+  acal_correction(&chan, pwm, 2, 0, 385, 0, 0, c);
 
   if(t)
     acal_track_apply(t, c);
@@ -827,13 +825,8 @@ static void test_apply(void)
     T_MEM(&k, &c, sizeof(c));
   }
 
-  //Gated class and version 1: untouched
-  acal_correction(&chan, pwm, 2, 99, 0, 385, 0, 0, &c0);
-  c = c0;
-  acal_track_apply(&t, &c);
-  T_MEM(&c, &c0, sizeof(c));
-
-  acal_correction(0, pwm, 2, 0, 0, 385, -2, 3, &c0);
+  //Version 1: untouched (every v3 readout gets it since one clock class, fw 0.2.105)
+  acal_correction(0, pwm, 2, 0, 385, -2, 3, &c0);
   c = c0;
   acal_track_apply(&t, &c);
   T_MEM(&c, &c0, sizeof(c));

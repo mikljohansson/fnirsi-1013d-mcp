@@ -75,10 +75,10 @@ typedef struct
   uint8_t  gain_st[2];            //CW_G_*
   int16_t  zero_rc[2];            //ACAL_* of the last zero step
   int16_t  gain_rc[2];            //ACAL_* of the last gain measurement
-  uint16_t match16[2];            //zero step: worst |drift A - drift B| over ranges and classes, 1/16 code
+  uint16_t match16[2];            //zero step: worst |drift A - drift B| over the ranges, 1/16 code
   uint8_t  zero_det[2];           //cw_zero_detail given for this run
-  uint8_t  zero_r[2];             //zero step failure: the range (0..5), class and core of the failing value,
-  uint8_t  zero_cls[2];           //the value (acal_fail) and the RMS inside the conversions (cw_zero_detail)
+  uint8_t  zero_r[2];             //zero step failure: the range (0..5), rate (ACAL_RATE_*) and core of the failing
+  uint8_t  zero_rate[2];          //value, the value (acal_fail) and the RMS inside the conversions (cw_zero_detail)
   uint8_t  zero_core[2];
   int32_t  zero_val[2];
   uint32_t zero_within16[2];
@@ -109,7 +109,7 @@ void cw_zero_detail(cal_wiz *w, uint32_t ch, uint32_t range, const acal_fail *f)
 //fw 0.2.79: the capture stage training of channel ch in this zero step (CW_C_*, the 0x63 value, the cores without a clean
 //stage), given before cw_zero_detail; a passed channel's note then names its stages ("Capture stages: CH1 A4 B4")
 void cw_cap_result(cal_wiz *w, uint32_t ch, int st, uint16_t v, uint8_t bad);
-void cw_level_result(cal_wiz *w, int32_t span16);    //gated span at ACAL_GAIN_PROBE_RANGE, 1/16 code
+void cw_level_result(cal_wiz *w, int32_t span16);    //span at ACAL_GAIN_PROBE_RANGE (2 MSa/s), 1/16 code
 void cw_gain_result(cal_wiz *w, int rc);
 
 //Level check: 1 when the span (probe range) predicts at least ACAL_GAIN_MIN_LEVER16 on the range the measurement
@@ -118,7 +118,7 @@ int  cw_level_ok(int32_t span16);
 
 //Numbers of the texts, tenths
 uint32_t cw_match_tenths(uint32_t match16);          //code, at least 1 (0.1)
-uint32_t cw_gain_tenths(const acal_channel *c);      //percent: full-class |G_A / G_B - 1| (before the correction)
+uint32_t cw_gain_tenths(const acal_channel *c);      //percent: |G_A / G_B - 1| (before the correction)
 
 //Texts (no libc): each writes a NUL-terminated string at p and returns a pointer to the NUL. Lines are laid out for the
 //16 px font in the wizard's 600 px text column (the longest is under 480 px).
