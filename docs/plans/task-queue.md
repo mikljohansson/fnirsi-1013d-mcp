@@ -276,6 +276,8 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- Coordinator 09:1x: the fw-d5 and mcp-d6 briefs wrongly named a SET_SWEEP 0x0218; the contract has none (the chirp is the
+  host stepping SET_GEN through the double buffer). fw-d5 caught it; both agents told to follow the contract.
 - fw-d4 / fw-d5 / mcp-d6 (Opus, dispatched 09:03-09:05, branches of the same names): 0x153D firmware and host from the
   contract in parallel with the RTL: D4 LOG_START / LOG_READ / LOG_STOP with the DDR ring, acq_state 5, the contract
   rates; D5 the generator as a two-step fractional pattern behind SET_GEN (P16 / H16), SET_PATTERN / SET_PATTERN_TRIGGER /
