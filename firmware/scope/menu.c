@@ -5053,7 +5053,7 @@ void scope_open_acquisition_menu(void)
 
   //A two black line between the settings
   display_set_fg_color(BLACK_COLOR);
-  display_draw_horz_line(ACQ_MENU_YPOS +  155, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 84);
+  display_draw_horz_line(ACQ_MENU_YPOS +  155, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + UI_ACQ_GRID_RIGHT);
   
   //display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(ACQ_MENU_YPOS +  211, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);//-84
@@ -5070,8 +5070,9 @@ void scope_open_acquisition_menu(void)
   extern uint32 a,b,c,d,e,f;
 
   //Display the texts
-  display_text(ACQ_MENU_XPOS + 111, ACQ_MENU_YPOS +   8, "Sample Rate");
-  display_text(ACQ_MENU_XPOS +  97, ACQ_MENU_YPOS + 216, "Time per Division");//166
+  //fw-acqui: the grids' headings centred over the five columns
+  display_text(ACQ_MENU_XPOS + (8 + UI_ACQ_GRID_RIGHT - ui_text_width(&font_3, "Sample Rate")) / 2, ACQ_MENU_YPOS + 8, "Sample Rate");
+  display_text(ACQ_MENU_XPOS + (8 + UI_ACQ_GRID_RIGHT - ui_text_width(&font_3, "Time per Division")) / 2, ACQ_MENU_YPOS + UI_ACQ_TB_HEAD_Y, "Time per Division");
   
   display_text(ACQ_MENU_XPOS + UI_ACQ_MEM_HEAD_X, ACQ_MENU_YPOS +   8, "Memory");
   //display_text(ACQ_MENU_XPOS + 324, ACQ_MENU_YPOS +   20, "deep"); //tab +6 
@@ -5083,9 +5084,7 @@ void scope_open_acquisition_menu(void)
   display_set_fg_color(LIGHTGREY_COLOR);
   
   //Clear the boxes for the not selected items (ACQ, Average, Long memory)
-  display_fill_rounded_rect(ACQ_MENU_XPOS +   8, ACQ_MENU_YPOS + 163, 90, 40, 3);
-  //display_fill_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40);
-  //display_fill_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40);
+  display_fill_rounded_rect(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0), ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H, 3);
   
   
   //Select the font for the texts
@@ -5128,143 +5127,59 @@ void scope_open_acquisition_menu(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw-acqui (owner 2026-10-21): one cell of the five-column Sample Rate / Time per Division grids (ui_ctrl.h UI_ACQ_GRID_*),
+//the text centred on its measured width (1.00o5's per-text x offsets went with the four columns)
+static void acq_grid_cell(uint32 y0, uint32 i, const char *text, uint32 fill, uint32 fg)
+{
+  uint32 x = ACQ_MENU_XPOS + UI_ACQ_GRID_X(i), y = ACQ_MENU_YPOS + y0 + UI_ACQ_GRID_DY(i);
+
+  display_set_fg_color(fill);
+  display_fill_rounded_rect(x, y, UI_ACQ_GRID_W, UI_ACQ_GRID_H, 2);
+  display_set_fg_color(fg);
+  display_text(x + (UI_ACQ_GRID_W - ui_text_width(&font_2, text)) / 2, y + UI_ACQ_GRID_TEXT_DY, (int8 *)text);
+}
+
 void scope_acquisition_speed_select(void)
 {
-  uint32 i,x,y;
+  uint32 i, fg;
 
-  //Select the font for the texts
+  //The rates take a tap when running or in single mode, not in roll (1.00o5's rule): grey text otherwise
+  if(((scopesettings.runstate) && (!scopesettings.long_mode)) || (scopesettings.triggermode == 1))
+    fg = WHITE_COLOR;
+  else
+    fg = LIGHTGREY1_COLOR;
+
   display_set_font(&font_2);
 
-  //Set dark grey color for the boxes behind the not selected texts
-  display_set_fg_color(MIDLEGREY_COLOR);
-
-  //Clear the boxes for the not selected items
-  for(i=0;i<((sizeof(acquisition_speed_texts) / sizeof(int8 *))-11);i++)//11 //9
+  //The chosen rate green with black text, on the short time bases only (in roll the rate is off the grid)
+  for(i = 0; i < UI_ACQ_RATE_N; i++)
   {
-    if(i != scopesettings.samplerate)
-    {
-      x = ((i & 3) * 72) + 10;
-      y = ((i >> 2) * 23) + 33;
-
-      display_fill_rounded_rect(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, 68, 20, 2);
-    }
-  }
-
-  //Set green color for the box behind the selected text
-  display_set_fg_color(GREEN_COLOR);
-
-  //Get the position of the selected item
-  x = ((scopesettings.samplerate & 3) * 72) + 10;
-  y = ((scopesettings.samplerate >> 2) * 23) + 33;
-
-  //Highlight the selected item if short time mode
-  if(scopesettings.timeperdiv>8) display_fill_rounded_rect(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, 68, 20, 2);
-
-  for(i=0;i<((sizeof(acquisition_speed_texts) / sizeof(int8 *))-11);i++)
-  {
-    if(i != scopesettings.samplerate)
-    {
-      //Check if in stop mode
-      if(((scopesettings.runstate)&&(!scopesettings.long_mode))||(scopesettings.triggermode == 1))
-      {
-        //When running available not selected texts shown in white
-        display_set_fg_color(WHITE_COLOR);
-        
-      }
-      else
-      {
-        //When stopped select option is disabled so texts shown in light grey
-        display_set_fg_color(LIGHTGREY1_COLOR);     //
-      }
-    }
+    if((i == scopesettings.samplerate) && (scopesettings.timeperdiv > 8))
+      acq_grid_cell(UI_ACQ_RATE_Y, i, (const char *)acquisition_speed_texts[i], GREEN_COLOR, BLACK_COLOR);
     else
-    {
-      //Selected texts in black
-      display_set_fg_color(BLACK_COLOR);
-    }
-
-    //Calculate the position of this text
-    x = ((i & 3) * 72) + acquisition_speed_text_x_offsets[i];
-    y = ((i >> 2) * 23) + 36;
-
-    //Display the text from the table
-    display_text(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, (int8 *)acquisition_speed_texts[i]);
+      acq_grid_cell(UI_ACQ_RATE_Y, i, (const char *)acquisition_speed_texts[i], MIDLEGREY_COLOR, fg);
   }
-
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
 void scope_acquisition_timeperdiv_select(void)
 {
-  uint32 c,i,x,y;
-  #define ymp   241 //191   //position y for timeperdiv text and item
+  uint32 c, i;
 
-  //Select the font for the texts
   display_set_font(&font_2);
 
-  //Set dark grey color for the boxes behind the not selected texts
-  display_set_fg_color(MIDLEGREY_COLOR);
-
-  //Clear the boxes for the not selected items
-  for(i=0;i<((sizeof(time_div_texts) / sizeof(int8 *))-11);i++)
+  //The short time bases from the slowest (200 ms/div, time_div_texts 11) to the fastest (5 ns/div, 34): cell i is
+  //time/div 34 - i. The chosen one green with black text; the others white where the record can show them (fw 0.2.64:
+  //derived from the record, acq_view.c), grey where not (a grey one cannot be chosen)
+  for(i = 0; i < UI_ACQ_TB_N; i++)
   {
-    //Settings displayed from smallest to highest value
     c = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;
 
-    if(c != scopesettings.timeperdiv)
-    {
-      x = ((i & 3) * 72) + 10;
-      y = ((i >> 2) * 23) + ymp;//191
-
-      display_fill_rounded_rect(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, 68, 20, 2);
-    }
-  }
-
-  //Set green color for the box behind the selected text
-  display_set_fg_color(GREEN_COLOR);
-
-  //Get the position of the selected item
-  c = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - scopesettings.timeperdiv;
-  x = ((c & 3) * 72) + 10;
-  y = ((c >> 2) * 23) + ymp;//191
-
-  //Highlight the selected item if short time mode
-  if(scopesettings.timeperdiv>8) display_fill_rounded_rect(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, 68, 20, 2);
-
-  for(i=0;i<((sizeof(time_div_texts) / sizeof(int8 *))-11);i++)
-  {
-    //Settings displayed from smallest to highest value
-      c = ((sizeof(time_div_texts) / sizeof(int8 *)) -1) - i;
-
-    //Check if the current text is the selected on
-    if(c != scopesettings.timeperdiv)
-    {
-      //When not check if the current on is a viable candidate for full screen trace display (fw 0.2.64: derived from the
-      //record, acq_view.c; a grey one cannot be chosen)
-      if(acq_view_tb_ok(c))
-      {
-        //Available but viable not selected texts in white
-        display_set_fg_color(WHITE_COLOR);
-      }
-      else
-      {
-        //Not viable: unavailable, grey
-        display_set_fg_color(0x00686868);
-      }
-    }
+    if((c == scopesettings.timeperdiv) && (scopesettings.timeperdiv > 8))
+      acq_grid_cell(UI_ACQ_TB_Y, i, (const char *)time_div_texts[c], GREEN_COLOR, BLACK_COLOR);
     else
-    {
-      //Selected texts in black
-      display_set_fg_color(BLACK_COLOR);
-    }
-
-    //Calculate the position of this text
-    x = ((i & 3) * 72) + time_div_text_x_offsets[c];
-    y = ((i >> 2) * 23) + ymp + 3;//194
-
-    //Display the text from the table
-    display_text(ACQ_MENU_XPOS + x, ACQ_MENU_YPOS + y, (int8 *)time_div_texts[c]);
+      acq_grid_cell(UI_ACQ_TB_Y, i, (const char *)time_div_texts[c], MIDLEGREY_COLOR, acq_view_tb_ok(c) ? WHITE_COLOR : 0x00686868);
   }
 }
 
@@ -5276,8 +5191,8 @@ void scope_acquisition_ACQ_mode_select(void)
     display_set_fg_color(LIGHTGREY_COLOR);
   
     //Clear the boxes for the not selected items (ACQ)
-    display_fill_rounded_rect(ACQ_MENU_XPOS +   8, ACQ_MENU_YPOS + 163, 90, 40, 3);
-                
+    display_fill_rounded_rect(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0), ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H, 3);
+
     //Display Long/Short Mode text
     if (scopesettings.long_mode)
         {
@@ -5468,8 +5383,14 @@ static void trig_row(uint32 ry, const char *label, const char *value, int keys, 
   display_fill_rounded_rect(rx + 4, ry + 4, 30, 36, 2);
   display_fill_rounded_rect(rx + rw - 34, ry + 4, 30, 36, 2);
   display_set_fg_color(fg);
-  trig_text_c(rx + 19, ty, "-");
-  trig_text_c(rx + rw - 19, ty, "+");
+
+  //fw-acqui (owner 2026-10-21): the key glyphs in the 24 px font, about twice the 16 px ones (+ 11 x 11 instead of 6 x 5,
+  //- 6 x 3 instead of 3 x 1), each bar on the key's middle row (ry + 22): font_5 has the + bar on its rows 10..12 and
+  //the - on rows 12..14
+  display_set_font(&font_5);
+  display_text(rx + 19 - ui_text_width(&font_5, "-") / 2, ry + 9, (int8 *)"-");
+  display_text(rx + rw - 19 - ui_text_width(&font_5, "+") / 2, ry + 11, (int8 *)"+");
+  display_set_font(&font_3);
   display_text(rx + 40, ty, (int8 *)label);
   display_set_fg_color(vc);
 

@@ -744,7 +744,9 @@ bytes reserved, u32 `value`. Response: TIMEBASE.
   rate and, when the index does not fit the current record length (SET_TRIGGER total), the nearest index that does;
   the response's `timeperdiv_index` is the applied one. SET_TRIGGER pretrigger / total refit the UI time/div the same
   way. The acquisition Filter (GET_DECIM / SET_DECIM filter and FIR bits) is kept per display mode: Scope and Spectrum
-  each have their own (defaults CIC2 and CIC2+FIR); the commands read and write the mode on screen.
+  each have their own (defaults CIC2 and CIC2+FIR; since fw-acqui boxcar and CIC3+FIR, the box's Hi-Res and
+  Anti-alias); the commands read and write the mode on screen. Every SET_DECIM mode stays settable; the screen's box
+  offers Off, Hi-Res (boxcar) and Anti-alias (CIC3+FIR) and shows any other mode the host set by its own name.
 - Since fw 0.2.76 (wire format unchanged): the screen's tap zoom and ACQ time/div boxes pick the rate from a ladder
   (the fastest rate whose record covers the trace area with at least ten samples per division; docs/ui-guidelines.md
   section 2). Mode 0 does not: it already picks a rate for every index, the table above (100 samples per division

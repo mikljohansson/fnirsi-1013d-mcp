@@ -1142,16 +1142,6 @@ static void pc_dec_follow_mode(void)
   scopesettings.display_data_done = 1;
 }
 
-static const char *pc_dec_names[8] = { "off", "boxcar", "CIC2", "CIC3", "off", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
-
-//Index into pc_dec_names: "+FIR" with the filter on
-static uint32 pc_dec_name_index(void)
-{
-  uint32 k = pc_dec_setting & 3;
-
-  return ((pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
-}
-
 //ui-sample (docs/plans/ui-rows.md section 3): the ACQ menu's row as data (ui_ctrl.h ui_acq_row_build)
 static void pc_acq_row(ui_acq_row *r)
 {
@@ -1162,7 +1152,7 @@ static void pc_acq_row(ui_acq_row *r)
   in.filter_on    = (pc_dec_setting & 3) != 0;
   in.peak         = pc_dec_peak;
   in.spectrum     = spectrum_mode() != SPECTRUM_MODE_SCOPE;
-  in.filter_value = pc_dec_names[pc_dec_name_index()];
+  in.filter_value = ui_filter_name(pc_dec_setting);
   ui_acq_row_build(&in, r);
 }
 
@@ -1312,8 +1302,6 @@ static void pc_dec_fit_memory(void)
   scopesettings.nofsamples      = total / 2;
 }
 
-//A tap steps off, boxcar, CIC2, CIC3; on 0x1535+ each filter also with the FIR: off, boxcar, boxcar+FIR, CIC2,
-//CIC2+FIR, CIC3, CIC3+FIR
 //The DEFAULT button and a settings sector that failed to load (scope_reset_config_data)
 void pc_glue_settings_defaults(void)
 {
@@ -1343,21 +1331,13 @@ void pc_glue_settings_defaults(void)
     pc_dec_fit_memory();
 }
 
+//A tap steps Off, Hi-Res, Anti-alias; a mode the host set (CIC2, CIC3, boxcar+FIR, CIC2+FIR) goes to Off (fw-acqui,
+//ui_ctrl.h ui_filter_next)
 void pc_glue_decim_tap(void)
 {
-  uint32 k = pc_dec_setting & 3, fir = (pc_dec_setting & PC_DECIM_SET_FIR) != 0;
+  pc_dec_setting = ui_filter_next(pc_dec_setting);
 
-  if(k && !fir)
-    fir = 1;
-  else
-  {
-    k   = (k + 1) & 3;
-    fir = 0;
-  }
-
-  pc_dec_setting = (uint8)(k | (fir ? PC_DECIM_SET_FIR : 0));
-
-  if(k)
+  if(pc_dec_setting & 3)
     pc_dec_fit_memory();
 
   //fw 0.2.84: the Memory column again on every change (acq_view_mem_chips): Off brings back the depths a filter hid
@@ -1858,12 +1838,13 @@ void pc_glue_roll_label(void)
     return;
 
   display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
-  display_fill_rounded_rect(ACQ_MENU_XPOS + 8, ACQ_MENU_YPOS + 163, 90, 40, 3);
+  display_fill_rounded_rect(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0), ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H, 3);
   display_set_font(&font_2);
   display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
-  //fw 0.2.40 (owner): the label only, the colour shows the state, as the Average box ("Average" / "mode")
-  display_text(ACQ_MENU_XPOS + 41, ACQ_MENU_YPOS + 168, "Roll");
-  display_text(ACQ_MENU_XPOS + 38, ACQ_MENU_YPOS + 182, "mode");
+  //fw 0.2.40 (owner): the label only, the colour shows the state, as the Average box ("Average" / "mode"); fw-acqui:
+  //centred as the row's other boxes (pc_acq_box)
+  display_text(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0) + (UI_ACQ_BOX_W - ui_text_width(&font_2, "Roll")) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE1_Y, "Roll");
+  display_text(ACQ_MENU_XPOS + UI_ACQ_BOX_X(0) + (UI_ACQ_BOX_W - ui_text_width(&font_2, "mode")) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE2_Y, "mode");
   displaydata.fg_color = fg;
   displaydata.font     = font;
 }
@@ -2296,13 +2277,15 @@ static void pc_ui_fix_settings(void)
 
     if((settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & 0xFFDC) == 0xD500)
     {
-      pc_dec_set_mode[0] = old;
-      pc_dec_set_mode[1] = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & (PC_DECIM_SET_FIR | 3));
+      //fw-acqui (owner 2026-10-21): the 0.2.64..0.2.105 defaults (Scope CIC2, Spectrum CIC2+FIR) become the new ones
+      //(Hi-Res, Anti-alias); any other saved mode loads as it is (ui_ctrl.h ui_filter_migrate)
+      pc_dec_set_mode[0] = ui_filter_migrate(old, 0);
+      pc_dec_set_mode[1] = ui_filter_migrate((uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & (PC_DECIM_SET_FIR | 3)), 1);
     }
     else if(old != PC_DECIM_DEFAULT_OLD)
     {
-      pc_dec_set_mode[0] = old;
-      pc_dec_set_mode[1] = old;
+      pc_dec_set_mode[0] = ui_filter_migrate(old, 0);
+      pc_dec_set_mode[1] = ui_filter_migrate(old, 1);
     }
   }
 

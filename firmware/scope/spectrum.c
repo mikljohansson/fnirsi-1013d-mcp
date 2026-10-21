@@ -923,7 +923,7 @@ void spectrum_note_roll_off(void)
 //saying the consequence and the action (README "Spectrum view" lists them)
 static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
 {
-  char   t[160], *p = t;
+  char   t[320], *p = t;                    //fw-acqui: room for every line at once (about 290 chars)
   int    ch;
 
   *p = 0;
@@ -938,7 +938,7 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
       p = fmt_str(p, ch ? "CH2 overrange: increase V/div   " : "CH1 overrange: increase V/div   ");
 
   if(!k && (fs_mhz < 200000000000ull))
-    p = fmt_str(p, "Aliasing possible: set Acquisition > Filter   ");
+    p = fmt_str(p, "Aliasing possible: set Acquisition > Filter Anti-alias   ");
 
   if(!scopesettings.runstate && ((spec.view != VIEW_SPECTRUM) || (!spec.have[0] && !spec.have[1])))
     p = fmt_str(p, "Stopped: press RUN to fill the view   ");

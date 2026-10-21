@@ -28,8 +28,8 @@ back first, so keep that backup.
   capture, spectrum or sweep, with a window you drag.
 - **Averaging of successive captures** (ACQ > Average): the FPGA sums them at the fast rates, the MCU for filtered and
   slow captures.
-- **Clean traces at every sweep speed**: Acquisition > Filter picks boxcar, CIC2 or CIC3, with or without
-  the compensation FIR, and the FPGA filters the 200 MS/s stream before it slows it down, where the stock and Atlan
+- **Clean traces at every sweep speed**: Acquisition > Filter picks Hi-Res (boxcar) or Anti-alias (CIC3 with the
+  compensation FIR; the host can also set boxcar, CIC2 or CIC3 with or without the FIR), and the FPGA filters the 200 MS/s stream before it slows it down, where the stock and Atlan
   firmware skip samples and show ghost signals that are not there.
 - **Spectrum analyser**: FFT of 1024 to 4096 points, Hann, flat-top or rectangular window, averaging and max hold,
   waterfall and density views, THD, tap to zoom, drag to pan, AUTO SET.

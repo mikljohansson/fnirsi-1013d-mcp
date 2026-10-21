@@ -1071,13 +1071,10 @@ extern const uint8 sample_rate_time_per_div[18];//18
 //extern const int8 *L_time_div_texts[9];
 
 //extern const int8 *time_div_texts[24];
-//extern const int8 time_div_text_x_offsets[24];
 
 extern const int8 *time_div_texts[35];//33
-extern const int8 time_div_text_x_offsets[35];//33
 
 extern const int8 *acquisition_speed_texts[29];//18
-extern const int8 acquisition_speed_text_x_offsets[29];//18
 
 extern const int8 *memory_deep_texts[5];
 extern const int8 memory_deep_texts_x_offsets[5];

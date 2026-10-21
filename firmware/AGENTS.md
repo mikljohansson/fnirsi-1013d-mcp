@@ -6404,3 +6404,53 @@ logic).
    exactly (Freq card and the host's counter result); also right after changing the time base (the rate-change rule).
 4. A card calibrated by 0.2.104 or older, before step 1: it loads (Diagnostics: calibrated, no "run Calibrate"), volts
    on a known DC level match the 0.2.104 reading at 200 MSa/s within 0.2 %.
+
+## 84. fw-acqui: trigger keys, five-column ACQ grids, Filter Off / Hi-Res / Anti-alias (fw 0.2.105, protocol unchanged)
+
+Branch `fw-acqui` from main 408d3e2. Brief: the owner's UI tweaks from the 0x153C bench (2026-10-21 18:38) and the queue
+item "ACQ Filter row: three modes" (owner 16:29-16:38), no mockup round. Commits: 06a7d24 (trigger keys), 43e513a (ACQ
+grids), e5ad32d (Filter three modes), 178af30 (defaults), 311e3c2 (docs, CHANGELOG), 36f8a53 (migration of the old
+defaults, owner decision relayed by the coordinator), then this section. `PC_FW_VERSION` stays 0.2.105. **Nothing
+benched**; no host renderer of menu.c exists (docs/mockups/gen_ux is Python mockups), so the screens below are for the
+coordinator's unit screenshots.
+
+**What was built**
+- **Trigger keys** (menu.c `trig_row`): the - / + glyphs in font_5 (24 px, the nearest guideline size to twice 16 px;
+  font_7's 32 px is not a guideline font). font_5's + is 11 x 11 px with a 3 px stroke, - 6 x 3, against font_3's 6 x 5
+  and 3 x 1: about twice. Each bar is on the key's middle row (y + 9 for -, y + 11 for +; the glyphs' bars sit on font
+  rows 12..14 and 10..12). Keys stay 30 x 36, hit areas the row's halves (110 x 44, statemachine.c), unchanged.
+- **ACQ grids** (ui_ctrl.h `UI_ACQ_GRID_*`, `ui_acq_grid_at`; menu.c `acq_grid_cell`; statemachine.c hits): five
+  columns, cells 74 x 25 on a 78 x 28 pitch from x + 8; rates (18) in rows of 5/5/5/3 from y + 33 (last ends y + 142,
+  rule y + 155), time/divs (24) in 5/5/5/5/4 from y + 241 (last ends y + 378, menu 386). The row's boxes widen 90 -> 92
+  (`UI_ACQ_BOX_W`) so row, grids and the rule at y + 155 all span x + 8 .. 394; the Memory column (rule x + 402) is
+  untouched. Texts centred on measured widths (widest 61 px, font_2), so 1.00o5's `*_text_x_offsets` tables are gone;
+  the headings and the Roll box (pc_glue_roll_label) are centred too. Hit area = drawn cell; gaps take nothing (as before).
+- **Filter** (ui_ctrl.c `ui_filter_name`, `ui_filter_next`, `ui_filter_migrate`; pc_hal_scope.c `pc_glue_decim_tap`,
+  `pc_acq_row`, `pc_ui_fix_settings`): names "Off" (K 0, FIR bit ignored), "Hi-Res" (boxcar), "Anti-alias" (CIC3+FIR),
+  host modes by name ("CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR"). **Press rule**: Off -> Hi-Res -> Anti-alias -> Off;
+  from any host mode -> Off (the cycle's start: never jumps to a mode the user did not see coming). Defaults
+  (pc_decim.h): Scope Hi-Res (no FIR overshoot, the 10-19 reason for CIC2), Spectrum Anti-alias. **Saved words**: the
+  old per-mode defaults (207 = CIC2, 212 = CIC2+FIR) load as the new defaults (owner); every other value as it is, shown
+  by name; the 0.2.30..0.2.63 single-word path goes through the same rule. SET_DECIM / GET_DECIM, the MCP names and the
+  vectors are unchanged. Spectrum warning: "Aliasing possible: set Acquisition > Filter Anti-alias" (buffer 160 -> 320
+  chars: all warnings at once could pass 160). No Diagnostics text names the filter.
+- Tests: test_ui `test_acq_grid` (geometry, fit, hits, no overlap with the row), `test_acq_filter` (names, presses from
+  every mode incl. the Peak bit, the cycle, defaults, migration), `test_acq_row` with the new names and 92 px boxes;
+  test_peak_bars names CIC2 itself. `make -s test` green; GCC 10 build without new warnings in the touched files.
+
+**Bench (coordinator, FEL load; screenshots in the handoff)**
+1. Trigger menu, Pulse: Width row's - and + clearly larger, centred in their keys; Nth: N and Idle rows the same; taps
+   on either half step as before.
+2. ACQ menu (Scope, running): Sample Rate 5/5/5/3, Time per Division 5/5/5/5/4, both grids flush with the Roll .. Sample
+   row (x 258 .. 644 on screen) and the rule; headings centred; Memory column unchanged. Tap a rate / time/div in each
+   column and row incl. 500Sa/s and 5ns/div (grey one: nothing); Stop: rates grey.
+3. Filter: Off -> Hi-Res -> Anti-alias -> Off (green while on; 9000+ chips hidden while on). Sample Peak: Filter grey
+   with its value ("Hi-Res"), the note as before. Spectrum: own Filter (default Anti-alias), warning with Filter Off
+   below 200 MSa/s reads "... Filter Anti-alias".
+4. Host: `scope_set_decimation filter=cic2` -> box "CIC2"; tap -> "Off"; `cic2+fir` -> "CIC2+FIR"; `boxcar` -> "Hi-Res";
+   `cic3+fir` -> "Anti-alias". GET_DECIM matches each.
+5. A unit whose sector holds the old defaults (the owner's): after the FEL load Scope shows "Hi-Res", Spectrum
+   "Anti-alias"; Restore default settings: the same. Save with a host mode (e.g. CIC3), power cycle: "CIC3".
+
+**Open**
+- The Frequency response's own Sweep rows keep 16 px - / + keys (not asked); align them if the owner likes the trigger's.

@@ -2277,9 +2277,145 @@ static const ui_acq_row *acq(int roll, int average, int filter_on, int peak, int
   return &r;
 }
 
+//fw-acqui (owner 2026-10-21): the Sample Rate and Time per Division grids in five columns. The texts as variables.c has
+//them (the rates 0..17, the time/divs 34 down to 11, the order the grid shows them)
+static void test_acq_grid(void)
+{
+  static const char *rates[UI_ACQ_RATE_N] = { "200MSa/s", "100MSa/s", "50MSa/s", "20MSa/s", "10MSa/s", "5MSa/s", "2MSa/s",
+    "1MSa/s", "500KSa/s", "200KSa/s", "100KSa/s", "50KSa/s", "20KSa/s", "10KSa/s", "5KSa/s", "2KSa/s", "1KSa/s", "500Sa/s" };
+  static const char *tbs[UI_ACQ_TB_N] = { "200ms/div", "100ms/div", "50ms/div", "20ms/div", "10ms/div", "5ms/div",
+    "2ms/div", "1ms/div", "500us/div", "200us/div", "100us/div", "50us/div", "20us/div", "10us/div", "5us/div", "2us/div",
+    "1us/div", "500ns/div", "200ns/div", "100ns/div", "50ns/div", "20ns/div", "10ns/div", "5ns/div" };
+  uint32 i, widest = 0;
+
+  //Five columns spanning x + 8 .. 394, as the row of four boxes does, left of the Memory column's rule
+  T_EQ(UI_ACQ_GRID_X(0), UI_ACQ_BOX_X(0));
+  T_EQ(UI_ACQ_GRID_X(4) + UI_ACQ_GRID_W, UI_ACQ_GRID_RIGHT);
+  T_EQ(UI_ACQ_BOX_X(UI_ACQ_SAMPLE) + UI_ACQ_BOX_W, UI_ACQ_GRID_RIGHT);
+  T_TRUE(UI_ACQ_GRID_RIGHT + 8 <= UI_ACQ_COL_X);
+  T_EQ(UI_ACQ_GRID_X(5), UI_ACQ_GRID_X(0));
+  T_EQ(UI_ACQ_GRID_DY(5), 28);
+
+  //Rates: four rows (5, 5, 5, 3) under the heading (16 px at y + 8) and above the rule at y + 155; time/divs: five rows
+  //(5 x 4 + 4) under their heading at y + 216 (16 px) and inside the 386 px menu (its edge at y + 385)
+  T_EQ((UI_ACQ_RATE_N - 1) / UI_ACQ_GRID_COLS, 3);
+  T_TRUE(UI_ACQ_RATE_Y >= 8 + 16 + 4);
+  T_TRUE(UI_ACQ_RATE_Y + UI_ACQ_GRID_DY(UI_ACQ_RATE_N - 1) + UI_ACQ_GRID_H + 8 <= 155);
+  T_EQ((UI_ACQ_TB_N - 1) / UI_ACQ_GRID_COLS, 4);
+  T_TRUE(UI_ACQ_TB_Y >= UI_ACQ_TB_HEAD_Y + 16 + 4);
+  T_EQ(UI_ACQ_TB_Y + UI_ACQ_GRID_DY(UI_ACQ_TB_N - 1) + UI_ACQ_GRID_H, 378);
+  T_TRUE(UI_ACQ_TB_Y > UI_ACQ_ROW_HIT_BOTTOM);
+  T_EQ(UI_ACQ_GRID_TEXT_DY * 2 + 13, UI_ACQ_GRID_H);
+
+  //Every text in its cell with at least 4 px each side (13 px font)
+  for(i = 0; i < UI_ACQ_RATE_N; i++)
+  {
+    T_TRUE(ui_text_width(&font_2, rates[i]) + 8 <= UI_ACQ_GRID_W);
+    if(ui_text_width(&font_2, rates[i]) > widest)
+      widest = ui_text_width(&font_2, rates[i]);
+  }
+  for(i = 0; i < UI_ACQ_TB_N; i++)
+  {
+    T_TRUE(ui_text_width(&font_2, tbs[i]) + 8 <= UI_ACQ_GRID_W);
+    if(ui_text_width(&font_2, tbs[i]) > widest)
+      widest = ui_text_width(&font_2, tbs[i]);
+  }
+  printf("ACQ grid: 5 columns of %u x %u px, widest text %u px\n", UI_ACQ_GRID_W, UI_ACQ_GRID_H, widest);
+
+  //Hits: the drawn cells, row by row; the gaps (4 px across, 3 px down) and outside take none
+  T_EQ(ui_acq_grid_at(8, 33, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 0);
+  T_EQ(ui_acq_grid_at(81, 57, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 0);
+  T_EQ(ui_acq_grid_at(82, 40, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);
+  T_EQ(ui_acq_grid_at(86, 40, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 1);
+  T_EQ(ui_acq_grid_at(393, 40, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 4);
+  T_EQ(ui_acq_grid_at(394, 40, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);
+  T_EQ(ui_acq_grid_at(40, 58, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);
+  T_EQ(ui_acq_grid_at(40, 61, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 5);
+  T_EQ(ui_acq_grid_at(100, 117, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 16);
+  T_EQ(ui_acq_grid_at(170, 117, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), 17);
+  T_EQ(ui_acq_grid_at(250, 117, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);         //no 19th rate
+  T_EQ(ui_acq_grid_at(40, 32, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);
+  T_EQ(ui_acq_grid_at(40, 241, UI_ACQ_TB_Y, UI_ACQ_TB_N), 0);
+  T_EQ(ui_acq_grid_at(250, 353, UI_ACQ_TB_Y, UI_ACQ_TB_N), 23);
+  T_EQ(ui_acq_grid_at(330, 353, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);             //no 25th time/div
+  T_EQ(ui_acq_grid_at(250, 378, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);
+  T_EQ(ui_acq_grid_at(40, 180, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);
+  T_EQ(ui_acq_grid_at(420, 40, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);           //the Memory column
+
+  //No cell overlaps a box of the row between the grids
+  for(i = 0; i < UI_ACQ_RATE_N; i++)
+    T_EQ(ui_acq_box_at(UI_ACQ_GRID_X(i), UI_ACQ_RATE_Y + UI_ACQ_GRID_DY(i) + UI_ACQ_GRID_H - 1), -1);
+  for(i = 0; i < UI_ACQ_TB_N; i++)
+    T_EQ(ui_acq_box_at(UI_ACQ_GRID_X(i), UI_ACQ_TB_Y + UI_ACQ_GRID_DY(i)), -1);
+}
+
+//fw-acqui (owner 2026-10-21): the Filter box's three modes, the host's other modes by name, the press sequence
+static void test_acq_filter(void)
+{
+  static const struct { uint8 set; const char *name; uint8 next; } t[] =
+  {
+    { PC_DECIM_OFF,                               "Off",        UI_FILTER_HIRES },
+    { PC_DECIM_BOXCAR,                            "Hi-Res",     UI_FILTER_ANTIALIAS },
+    { PC_DECIM_CIC3 | PC_DECIM_SET_FIR,           "Anti-alias", UI_FILTER_OFF },
+    { PC_DECIM_OFF | PC_DECIM_SET_FIR,            "Off",        UI_FILTER_HIRES },      //SET_DECIM 0 with flags bit 3
+    { PC_DECIM_BOXCAR | PC_DECIM_SET_FIR,         "boxcar+FIR", UI_FILTER_OFF },        //host modes: a press goes to Off
+    { PC_DECIM_CIC2,                              "CIC2",       UI_FILTER_OFF },
+    { PC_DECIM_CIC3,                              "CIC3",       UI_FILTER_OFF },
+    { PC_DECIM_CIC2 | PC_DECIM_SET_FIR,           "CIC2+FIR",   UI_FILTER_OFF },
+  };
+  uint32 i;
+  uint8  s;
+
+  T_EQ(UI_FILTER_OFF, 0);
+  T_EQ(UI_FILTER_HIRES, PC_DECIM_BOXCAR);
+  T_EQ(UI_FILTER_ANTIALIAS, PC_DECIM_CIC3 | PC_DECIM_SET_FIR);
+
+  for(i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+  {
+    T_STR(ui_filter_name(t[i].set), t[i].name);
+    T_EQ(ui_filter_next(t[i].set), t[i].next);
+    T_TRUE(ui_text_width(&font_2, ui_filter_name(t[i].set)) <= UI_ACQ_BOX_W - 8);
+    //The Peak bit (the Sample row's, kept beside the Filter in the UI byte) neither names nor steps the Filter
+    T_STR(ui_filter_name(t[i].set | PC_DECIM_SET_PEAK), t[i].name);
+    T_EQ(ui_filter_next(t[i].set | PC_DECIM_SET_PEAK), t[i].next);
+  }
+
+  //From every setting (the three and each host mode) at most three presses reach Off, and from there the cycle Off,
+  //Hi-Res, Anti-alias
+  for(i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+  {
+    uint32 n = 1;
+
+    for(s = ui_filter_next(t[i].set); (s != UI_FILTER_OFF) && (n < 3); n++)
+      s = ui_filter_next(s);
+    T_EQ(s, UI_FILTER_OFF);
+    T_EQ((s = ui_filter_next(s)), UI_FILTER_HIRES);
+    T_EQ((s = ui_filter_next(s)), UI_FILTER_ANTIALIAS);
+    T_EQ((s = ui_filter_next(s)), UI_FILTER_OFF);
+  }
+
+  //The defaults are among the three (a fresh scope's box never shows a host mode)
+  T_EQ(PC_DECIM_DEFAULT_SCOPE, UI_FILTER_HIRES);
+  T_EQ(PC_DECIM_DEFAULT_SPEC, UI_FILTER_ANTIALIAS);
+
+  //Saved words: the old per-mode defaults move to the new ones; every other mode (and the old default of the other
+  //mode) loads as it is
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2, 0), UI_FILTER_HIRES);
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2 | PC_DECIM_SET_FIR, 1), UI_FILTER_ANTIALIAS);
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2 | PC_DECIM_SET_FIR, 0), PC_DECIM_CIC2 | PC_DECIM_SET_FIR);
+  T_EQ(ui_filter_migrate(PC_DECIM_CIC2, 1), PC_DECIM_CIC2);
+  for(i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+  {
+    if(t[i].set != PC_DECIM_CIC2)
+      T_EQ(ui_filter_migrate(t[i].set, 0), t[i].set);
+    if(t[i].set != (PC_DECIM_CIC2 | PC_DECIM_SET_FIR))
+      T_EQ(ui_filter_migrate(t[i].set, 1), t[i].set);
+  }
+}
+
 static void test_acq_row(void)
 {
-  static const char *fv[] = { "off", "boxcar", "CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
+  static const char *fv[] = { "Off", "Hi-Res", "Anti-alias", "CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR" };
   const ui_acq_row *r;
   uint8 g, v, p;
   int i;
@@ -2303,48 +2439,49 @@ static void test_acq_row(void)
 
   //Hit areas: each box's drawn area down to the rule at y 211; between the boxes and above them nothing
   T_EQ(ui_acq_box_at(8, 163), UI_ACQ_ROLL);
-  T_EQ(ui_acq_box_at(97, 210), UI_ACQ_ROLL);
-  T_EQ(ui_acq_box_at(98, 180), -1);
+  T_EQ(ui_acq_box_at(99, 210), UI_ACQ_ROLL);
+  T_EQ(ui_acq_box_at(100, 180), -1);
+  T_EQ(ui_acq_box_at(105, 180), -1);
   T_EQ(ui_acq_box_at(106, 180), UI_ACQ_AVERAGE);
   T_EQ(ui_acq_box_at(250, 180), UI_ACQ_FILTER);
   T_EQ(ui_acq_box_at(302, 163), UI_ACQ_SAMPLE);
-  T_EQ(ui_acq_box_at(391, 203), UI_ACQ_SAMPLE);
-  T_EQ(ui_acq_box_at(392, 180), -1);
+  T_EQ(ui_acq_box_at(393, 203), UI_ACQ_SAMPLE);
+  T_EQ(ui_acq_box_at(394, 180), -1);
   T_EQ(ui_acq_box_at(350, 162), -1);
   T_EQ(ui_acq_box_at(350, 211), -1);
 
-  //Normal (AcqMenuSample): Filter off, Sample "Normal" grey-box white text, no note
-  r = acq(0, 0, 0, 0, 0, "off");
+  //Normal (AcqMenuSample): Filter Off, Sample "Normal" grey-box white text, no note
+  r = acq(0, 0, 0, 0, 0, ui_filter_name(UI_FILTER_OFF));
   T_STR(r->line1[UI_ACQ_ROLL], "Roll");       T_STR(r->line2[UI_ACQ_ROLL], "mode");
   T_STR(r->line1[UI_ACQ_AVERAGE], "Average"); T_STR(r->line2[UI_ACQ_AVERAGE], "mode");
-  T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "off");
+  T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "Off");
   T_STR(r->line1[UI_ACQ_SAMPLE], "Sample");   T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");
   for(i = 0; i < UI_ACQ_BOXES; i++)
     T_EQ(r->state[i], UI_ACQ_BOX_OFF);
   for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
     T_TRUE(r->note[i] == 0);
 
-  //Average on, Filter CIC2: green boxes
-  r = acq(0, 1, 1, 0, 0, "CIC2");
+  //Average on, Filter Hi-Res: green boxes
+  r = acq(0, 1, 1, 0, 0, "Hi-Res");
   T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
   T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
   T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_OFF);
 
   //Peak (AcqMenuPeak): Sample green "Peak"; Filter and Average grey with their values kept; the four-line note
-  r = acq(0, 1, 1, 1, 0, "CIC2+FIR");
+  r = acq(0, 1, 1, 1, 0, "Anti-alias");
   T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_ON);
   T_STR(r->line2[UI_ACQ_SAMPLE], "Peak");
   T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
-  T_STR(r->line2[UI_ACQ_FILTER], "CIC2+FIR");
+  T_STR(r->line2[UI_ACQ_FILTER], "Anti-alias");
   T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_GREY);
   T_EQ(r->state[UI_ACQ_ROLL], UI_ACQ_BOX_OFF);
   T_STR(r->note[0], "Peak:");
   T_STR(r->note[1], "Filter and");
   T_STR(r->note[2], "Average");
   T_STR(r->note[3], "not applied");
-  r = acq(0, 0, 0, 1, 0, "off");
+  r = acq(0, 0, 0, 1, 0, "Off");
   T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
-  T_STR(r->line2[UI_ACQ_FILTER], "off");
+  T_STR(r->line2[UI_ACQ_FILTER], "Off");
 
   //Back to Normal: both boxes as they were, the note gone
   r = acq(0, 1, 1, 0, 0, "CIC2+FIR");
@@ -2376,7 +2513,7 @@ static void test_acq_row(void)
   T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 1, 0, 0, 1, 0, 0 }), 0);
   T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 0, 0, 0, 1, 0, 0 }), 1);
 
-  //Fit: every box text in its 90 px box (13 px font, 4 px in), every note line in the column (and the roll note's one
+  //Fit: every box text in its 92 px box (13 px font, 4 px in), every note line in the column (and the roll note's one
   //line would not: why it is two)
   for(j = 0; j < sizeof(fv) / sizeof(fv[0]); j++)
   {
@@ -2428,6 +2565,8 @@ static void test_acq_row(void)
 
 int main(void)
 {
+  test_acq_grid();
+  test_acq_filter();
   test_acq_row();
   test_sig4();
   test_cards();

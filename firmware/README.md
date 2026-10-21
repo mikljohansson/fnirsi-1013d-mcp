@@ -814,8 +814,11 @@ read 0x29. Latency 120 ns pin to memory for every K and N, the sample centred K 
 divider D, so the odd dividers of `sample_rate_settings` give the same rates as before; the FPGA stores
 min(65535, y >> S), y = filter output with gain N^K. On 0x1532/0x1533 none of this is written (caps bit 15 DECIM).
 
-Filter per mode (fw 0.2.64, maintainer): the Scope view defaults to CIC2 without the FIR (the FIR's 6-9 % step overshoot
-pulses on a square wave), the Spectrum view to CIC2+FIR. Each mode keeps its own setting (`pc_dec_set_mode[2]`,
+Filter per mode (fw 0.2.64, maintainer): the Scope view defaults to a filter without the FIR (the FIR's 6-9 % step
+overshoot pulses on a square wave), the Spectrum view to one with it: CIC2 and CIC2+FIR until fw 0.2.105, Hi-Res
+(boxcar) and Anti-alias (CIC3+FIR) since fw-acqui, so a fresh box shows one of its three modes; a saved word holding
+the old default of its mode (Scope CIC2, Spectrum CIC2+FIR) loads as the new default (`ui_filter_migrate`, owner
+2026-10-21), any other saved mode as it is. Each mode keeps its own setting (`pc_dec_set_mode[2]`,
 `PC_DECIM_DEFAULT_SCOPE` / `_SPEC` in pc_decim.h): settings word 207 the Scope's, word 212 (0xD500 marker) the
 Spectrum's. The Filter box, the arm and SET_DECIM / GET_DECIM act on the mode on screen. A 0.2.30..0.2.63 sector with
 the old single default (CIC2+FIR) loads as the new defaults; any other saved choice is kept for both modes.
@@ -846,10 +849,13 @@ the old single default (CIC2+FIR) loads as the new defaults; any other saved cho
   words, so the edge stays at sample `settriggerpoint`; GET_CAPTURE_INFO byte 70 reports the shift.
 - 0x53 bits 4..2 (the core-order swap and the falling-edge capture of the A / B cores) are gone in 0x153C: the firmware
   writes K alone; SET_DECIM flags bits 0..2 are accepted and dropped (bits 1 / 2 since fw-one, bit 0 since fw-cruft).
-- UI: acquisition menu "Filter" box (off / boxcar / CIC2 / CIC3, a tap steps through them, green while on) in the
-  slot of 1.00o5's Long memory box, only on 0x1534+. Saved in settings word 207 (0xDE00 | K); sectors without
+- UI: acquisition menu "Filter" box in the slot of 1.00o5's Long memory box, green while on. Since fw-acqui (owner
+  2026-10-21) it offers three modes, a tap stepping Off -> Hi-Res (boxcar) -> Anti-alias (CIC3+FIR) -> Off
+  (`ui_filter_name` / `ui_filter_next`, ui_ctrl.c); a mode the host set over SET_DECIM (CIC2, CIC3, boxcar+FIR,
+  CIC2+FIR) shows by its own name and a tap goes to Off. Until then a tap stepped off, boxcar, boxcar+FIR, CIC2,
+  CIC2+FIR, CIC3, CIC3+FIR. Saved in settings word 207 (0xDE00 | K | FIR); sectors without
   a valid word (new settings, written before 0.2.30) and the DEFAULT button give the defaults (pc_decim.h; CIC2
-  since fw 0.2.44, CIC2+FIR since 0.2.48 where the FPGA has the FIR; until 0.2.43 off; since 0.2.64 per mode, below). A saved word is kept as it is. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
+  since fw 0.2.44, CIC2+FIR since 0.2.48 where the FPGA has the FIR; until 0.2.43 off; since 0.2.64 per mode, above). A saved word is kept as it is. Turning it on with 9000+ samples sets the memory depth to 6000 (trigger point kept at 25 / 50 / 75 %).
   The box shows the setting; GET_DECIM tells the effective K (e.g. legacy at 200 MSa/s).
 - Protocol 1.9 (docs/protocol.md section 14 row 47): GET_DECIM 0x020C, SET_DECIM 0x020D (shared control: it is the
   UI setting; SET_TRIGGER total > 8190 is refused while it is on), READ_TRACE flag bit 2 (u16 samples),

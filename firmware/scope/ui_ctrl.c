@@ -197,6 +197,37 @@ uint8 ui_acq_decim_set(uint8 filter_set, int peak, int spectrum)
   return (uint8)((filter_set & (PC_DECIM_SET_FIR | 3)) | ((peak && !spectrum) ? PC_DECIM_SET_PEAK : 0));
 }
 
+const char *ui_filter_name(uint8 filter_set)
+{
+  static const char *const names[8] = { "Off", "Hi-Res", "CIC2", "CIC3", "Off", "boxcar+FIR", "CIC2+FIR", "Anti-alias" };
+
+  return names[(filter_set & 3) | ((filter_set & PC_DECIM_SET_FIR) ? 4 : 0)];
+}
+
+uint8 ui_filter_next(uint8 filter_set)
+{
+  filter_set &= PC_DECIM_SET_FIR | 3;
+
+  if(!(filter_set & 3))
+    return UI_FILTER_HIRES;
+
+  if(filter_set == UI_FILTER_HIRES)
+    return UI_FILTER_ANTIALIAS;
+
+  return UI_FILTER_OFF;
+}
+
+uint8 ui_filter_migrate(uint8 filter_set, int spectrum)
+{
+  if(!spectrum && (filter_set == PC_DECIM_CIC2))
+    return PC_DECIM_DEFAULT_SCOPE;
+
+  if(spectrum && (filter_set == (PC_DECIM_CIC2 | PC_DECIM_SET_FIR)))
+    return PC_DECIM_DEFAULT_SPEC;
+
+  return filter_set;
+}
+
 int ui_acq_box_at(uint32 x, uint32 y)
 {
   uint32 i;
@@ -206,6 +237,18 @@ int ui_acq_box_at(uint32 x, uint32 y)
 
   for(i = 0; i < UI_ACQ_BOXES; i++)
     if((x >= UI_ACQ_BOX_X(i)) && (x < UI_ACQ_BOX_X(i) + UI_ACQ_BOX_W))
+      return (int)i;
+
+  return -1;
+}
+
+int ui_acq_grid_at(uint32 x, uint32 y, uint32 y0, uint32 n)
+{
+  uint32 i;
+
+  for(i = 0; i < n; i++)
+    if((x >= UI_ACQ_GRID_X(i)) && (x < UI_ACQ_GRID_X(i) + UI_ACQ_GRID_W) &&
+       (y >= y0 + UI_ACQ_GRID_DY(i)) && (y < y0 + UI_ACQ_GRID_DY(i) + UI_ACQ_GRID_H))
       return (int)i;
 
   return -1;

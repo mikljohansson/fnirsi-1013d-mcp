@@ -9,6 +9,7 @@
 #define UI_CTRL_H
 
 #include "types.h"
+#include "pc_decim.h"
 
 //Right bar buttons: 51 x 50 at x 739 (1.00o5's slots)
 #define UI_BAR_X              739
@@ -116,18 +117,34 @@ extern const char *const ui_run_chip[3];                          //by view: "ST
 extern const char *const ui_run_action[2];                        //[0] stopped: "RUN", [1] running / waiting: "STOP"
 
 //ACQ menu (ui-sample, docs/plans/ui-rows.md section 3): 478 px wide (x 250 .. 728, clear of the right bar). The row under
-//the sample rates holds four 90 x 40 boxes at y + 163 on a 98 px pitch, Roll, Average, Filter and Sample, each a label
+//the sample rates holds four 92 x 40 boxes at y + 163 on a 98 px pitch, Roll, Average, Filter and Sample, each a label
 //line at y + 168 and a value line at y + 182; the Memory column is right of its rule at x + 402 (1.00o5's x + 304 moved by
 //one box pitch): the "Memory" header, the depth chips (54 x 25 at x + 413, y + 33 + 36 i), under the rule at y 211 the
 //pass time and, from y + 254, the note that says why boxes are grey (four 18 px lines, 13 px font). Menu coordinates.
+//fw-acqui (owner 2026-10-21): the Sample Rate and Time per Division grids in five columns, 74 x 25 cells on a 78 x 28
+//pitch from x + 8, so the grids and the row of four boxes span the same x + 8 .. 394 (the rule at y + 155 ends there
+//too); the rates (18) in four rows from y + 33, the time/divs (24) in five rows from y + 241 (the last ends at y + 378 in
+//the 386 px menu). Each cell's text centred in the 13 px font.
 #define UI_ACQ_W              478
 #define UI_ACQ_COL_X          402
 #define UI_ACQ_MEM_HEAD_X     415
 #define UI_ACQ_CHIP_X         413
 #define UI_ACQ_BOX_Y          163
-#define UI_ACQ_BOX_W          90
+#define UI_ACQ_BOX_W          92
 #define UI_ACQ_BOX_H          40
 #define UI_ACQ_BOX_X(i)       (8 + 98 * (i))
+#define UI_ACQ_GRID_COLS      5
+#define UI_ACQ_GRID_W         74
+#define UI_ACQ_GRID_H         25
+#define UI_ACQ_GRID_X(i)      (8 + 78 * ((i) % UI_ACQ_GRID_COLS))
+#define UI_ACQ_GRID_DY(i)     (28 * ((i) / UI_ACQ_GRID_COLS))
+#define UI_ACQ_GRID_TEXT_DY   6
+#define UI_ACQ_GRID_RIGHT     394     //UI_ACQ_GRID_X(4) + UI_ACQ_GRID_W = UI_ACQ_BOX_X(3) + UI_ACQ_BOX_W
+#define UI_ACQ_RATE_Y         33
+#define UI_ACQ_RATE_N         18
+#define UI_ACQ_TB_HEAD_Y      216
+#define UI_ACQ_TB_Y           241
+#define UI_ACQ_TB_N           24
 #define UI_ACQ_BOX_LINE1_Y    168
 #define UI_ACQ_BOX_LINE2_Y    182
 #define UI_ACQ_ROW_HIT_BOTTOM 210     //the boxes' hit area runs down to the rule at y 211
@@ -181,8 +198,33 @@ void ui_acq_row_build(const ui_acq_in *in, ui_acq_row *r);
 //pc_decim_config arms peak detect (SET_DECIM filter 4's path) and the Filter comes back with Normal
 uint8 ui_acq_decim_set(uint8 filter_set, int peak, int spectrum);
 
+//The Filter box's three modes (fw-acqui, owner 2026-10-21; Tektronix / Rigol "Hi Res", Keysight "High Resolution"):
+//Off, Hi-Res = the boxcar (the mean of the N samples per output, no overshoot) and Anti-alias = CIC3 + FIR (flat passband
+//to fs / 4, the most alias rejection; CIC2 + FIR where CIC3 is not exact, GET_DECIM's why). Setting bytes as pc_decim.h
+//(bits 1:0 K, PC_DECIM_SET_FIR); every SET_DECIM mode stays the host's
+#define UI_FILTER_OFF         PC_DECIM_OFF
+#define UI_FILTER_HIRES       PC_DECIM_BOXCAR
+#define UI_FILTER_ANTIALIAS   (PC_DECIM_CIC3 | PC_DECIM_SET_FIR)
+
+//The box's value line for a setting: "Off" (K 0, the FIR bit ignored), "Hi-Res", "Anti-alias", and any other mode the
+//host set (or an older firmware saved) by its own name: "boxcar+FIR", "CIC2", "CIC3", "CIC2+FIR"
+const char *ui_filter_name(uint8 filter_set);
+
+//A press on the box: Off -> Hi-Res -> Anti-alias -> Off; from a host mode to Off (the start of the cycle: the press
+//leaves a mode the box cannot offer for the one every scope has, and the next presses step as always)
+uint8 ui_filter_next(uint8 filter_set);
+
+//A saved per-mode Filter word on load (owner 2026-10-21): the defaults of fw 0.2.64..0.2.105 (Scope CIC2, Spectrum
+//CIC2+FIR) become the new ones (Hi-Res, Anti-alias), so an existing unit's box shows one of its three modes too; any
+//other saved mode loads as it is (and shows by name). spectrum: the Spectrum's word 212, else the Scope's word 207
+uint8 ui_filter_migrate(uint8 filter_set, int spectrum);
+
 //The box under a touch at menu coordinates x, y: UI_ACQ_ROLL .. UI_ACQ_SAMPLE, or -1 (the drawn box, down to the rule)
 int  ui_acq_box_at(uint32 x, uint32 y);
+
+//The grid cell under a touch at menu coordinates x, y in the grid of n cells from y0 (UI_ACQ_RATE_Y / UI_ACQ_TB_Y): its
+//index (row by row, five per row), or -1 between the cells or outside (the hit area is the drawn cell)
+int  ui_acq_grid_at(uint32 x, uint32 y, uint32 y0, uint32 n);
 
 //Settings word 211 (fw 0.2.56, marker 0xC700): bit 0 Grid, bits 1-2 the Spectrum's Display variant, bit 3 Sample Peak
 //(ui-sample). Restore: 0 and nothing written when the marker (mask 0xFFF0) does not match

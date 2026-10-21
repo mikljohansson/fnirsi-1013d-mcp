@@ -164,6 +164,22 @@ sections 74 to 79.
   capture (fpga-d3), so a garbled capture at a divided rate or with a filter is re-armed like a 200 MSa/s one (UI and
   host ARM); the data check stays at divider 0.
 
+**UI tweaks from the 0x153C bench (fw-acqui).**
+
+- **Trigger menu: larger - and + keys**: the Width / N / Idle keys draw their glyphs in the 24 px font, about twice the
+  16 px ones (owner, 2026-10-21); the keys and their hit areas are unchanged. (06a7d24)
+- **ACQ menu: five-column grids**: Sample Rate and Time per Division in five columns of 74 x 25 px cells (were four of
+  68 x 20), so the grids and the row of Roll / Average / Filter / Sample boxes span the same width; texts centred. The
+  menu keeps its size. (43e513a)
+- **ACQ Filter: Off, Hi-Res, Anti-alias** (owner decisions 2026-10-21): a tap steps Off -> Hi-Res (boxcar) ->
+  Anti-alias (CIC3 + FIR) -> Off. A mode the host set over SET_DECIM (CIC2, CIC3, boxcar+FIR, CIC2+FIR), or a saved
+  setting from an older firmware, shows by its own name; a tap goes to Off. SET_DECIM and the MCP filter names are
+  unchanged. The Spectrum's warning reads "Aliasing possible: set Acquisition > Filter Anti-alias". (e5ad32d)
+- **Filter defaults** (owner, 2026-10-21): Scope Hi-Res (was CIC2), Spectrum Anti-alias (was CIC2+FIR), for new settings
+  and the DEFAULT button. (178af30) Saved settings that still hold the old defaults (Scope word 207 CIC2, Spectrum word
+  212 CIC2+FIR) move to the new defaults on load, so an existing unit's box shows one of the three modes too; any other
+  saved mode loads as it is and shows by name (`ui_filter_migrate`).
+
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):
