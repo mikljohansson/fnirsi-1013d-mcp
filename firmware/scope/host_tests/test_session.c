@@ -4268,6 +4268,13 @@ static void test_logger(void)
   T_EQ(pc_get_u32(r.p + 16), 0); T_EQ(pc_get_u32(r.p + 24), 0); T_EQ(pc_get_u32(r.p + 32), 0);
   T_EQ(pc_get_u32(r.p + 36), PC_LOG_RING_BYTES); T_EQ(pc_get_u32(r.p + 44), 0);
   T_EQ(mock_log.limit, 25000); T_EQ(mock_log.divider, 399); T_EQ(mock_log.dc.k, 0);
+  {
+    uint8_t want[48];                                                 //vector resp_log_start_1_27
+
+    T_EQ(unhex("010100008f01000064000000900100000000000000000000000000000000000000000000000080000000000000000000",
+               want, 48), 48);
+    T_MEM(r.p, want, 48);
+  }
   T_EQ(mock.ui_run, 0);
   r = status();
   T_EQ(r.p[1], PC_ACQ_LOGGING);
@@ -4311,6 +4318,12 @@ static void test_logger(void)
   mock_log_feed(5, 5, PC_LOG_CF_HOST);
   r = log_read(65536);
   T_EQ(pc_get_u32(r.p + 4), 150); T_EQ(pc_get_u32(r.p + 8), 20); T_EQ(r.p[12], PC_LOG_CF_RUNNING | PC_LOG_CF_GAP);
+  {
+    uint8_t want[36];                                                 //vector resp_log_read_1_27_gap
+
+    T_EQ(unhex("030000009600000014000000030000001a1b212228292f3036373d3e44454b4c5253595a", want, 36), 36);
+    T_EQ(r.len, 36); T_MEM(r.p, want, 36);
+  }
   r = log_read(65536);
   T_EQ(pc_get_u32(r.p + 4), 165); T_EQ(pc_get_u32(r.p + 8), 10);
   T_EQ(r.p[12], PC_LOG_CF_RUNNING | PC_LOG_CF_GAP | PC_LOG_CF_HOST);
