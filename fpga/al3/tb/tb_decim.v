@@ -161,7 +161,15 @@ module tb;
     begin
       mem_diff = 0;
       for (mi = 0; mi < 8192; mi = mi + 1)
-        if (dut.samples.mem[mi] !== refd.samples.mem[mi]) mem_diff = mem_diff + 1;
+        if (dut.samples.mem[mi] !== refd.samples.mem[mi]) begin
+          mem_diff = mem_diff + 1;
+          // fpga-d2: the first differing words with both values and the capture's geometry, for the 0x153D decim question
+          if (eq_mismatch < 30 && mem_diff <= 4)
+            $display("  word %0d: dut %h ref %h (wa %0d/%0d, w_last %0d, ta %0d/%0d, trig %b/%b, swe %b/%b, pre %0d tot %0d)", mi,
+                     dut.samples.mem[mi], refd.samples.mem[mi], dut.sample_write_address, refd.sample_write_address, dut.w_last,
+                     dut.trigger_address, refd.trigger_address, dut.sampling_triggered, refd.sampling_triggered,
+                     dut.sample_write_enable, refd.sample_write_enable, pre_r, tot_r);
+        end
       eq_samples = eq_samples + 1;
       if (mem_diff != 0) begin
         eq_mismatch = eq_mismatch + 1;
