@@ -6,7 +6,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- [ ] **ACQ Filter row: three modes** (owner decision 2026-10-21 16:3x): the UI's Filter choice becomes Off, Average (= boxcar)
+- [ ] **ACQ Filter row: three modes** (owner decision 2026-10-21 16:29): the UI's Filter choice becomes Off, Average (= boxcar)
   and Anti-alias (= CIC3 + FIR); every mode stays available over MCP (SET_DECIM unchanged, no FPGA change: boxcar / CIC2 /
   CIC3 share one CIC chain, the FIR stays). When the host has set another mode (e.g. CIC2, CIC3 without FIR, boxcar + FIR)
   the box shows that mode's own name; a press then steps through the three simplified modes only (from a host mode to the
