@@ -505,6 +505,7 @@ module tb;
         wr1(8'h56, {rnd[20:15], 1'b0, rnd[12]});            // bits 7..2 random (reserved, ignored); bit 1 = peak detect (0x153C), off
         pre_r = 13'd20 + (rnd[24:16] % 13'd200);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
+        $display("phase 1 iteration %0d t=%0t: K %0d fir %0d D %0d shift %0d src %0d edge %0d mode %0d pre %0d tot %0d", it, $time, kr, rnd[12], dv, shr, rnd[9:8], rnd[1], rnd[2], pre_r, tot_r);
         wr2(8'h0B, {3'd0, pre_r});
         wr2(8'h0C, {3'd0, tot_r});
         wr4(8'h0E, (kr == 0) ? 32'd2000 + ($random(seed) & 32'h3FFF) : {19'd0, tot_r} + ($random(seed) & 32'h00FF));

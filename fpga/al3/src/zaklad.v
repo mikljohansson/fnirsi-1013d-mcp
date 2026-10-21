@@ -1260,9 +1260,11 @@ freq_generator_dds_pwm u_freq
   //(divider forced to 0 on the static side of the compare, off the timed counter path).
   //0x153C (div20): the compare, the decimator's P count and the FIR eligibility take the divider's low 20 bits; bits
   //31..20 of 0x0D are ignored (the firmware's largest divider is 199,999 and it rejects values above 0xFFFFF). The
-  //compare chain is 12 bits shorter: it was the clk_200MHz lottery path of 0x1532 and later.
-  wire [19:0] div20 = sample_rate_divider[19:0];
-  wire [19:0] sample_rate_divider_eff = dec_on ? 20'd0 : div20;
+  //compare chain is 12 bits shorter: it was the clk_200MHz lottery path of 0x1532 and later. The slices are taken
+  //from the register directly, as the one-level assignments of 0x1534..0x153B were: an alias wire in between changed
+  //how iverilog orders an 0x0D write that lands on the same simulation instant as a write clock edge against the
+  //decimator's reload (tb_fir seed 12345, iteration 8), which the lockstep equivalence steps see as a mismatch.
+  wire [19:0] sample_rate_divider_eff = dec_on ? 20'd0 : sample_rate_divider[19:0];
 
   assign sample_clock_enable = sample_rate_divider_eff < (sample_rate_counter);
 
@@ -1288,7 +1290,7 @@ freq_generator_dds_pwm u_freq
   //CIC sample they make is the newest one of an output pair. dec_wr then comes from the FIR,
   //still once per P write clocks. With fir_act = 0 every 0x1534 register and output is unchanged.
   //0x153C: the FIR is off while peak detect is on (peak_act): the words are { max, min }, not filter outputs.
-  wire        fir_ok = fir_en & ~peak_en & dec_on & div20[1] & (div20 >= 20'd14);
+  wire        fir_ok = fir_en & ~peak_en & dec_on & sample_rate_divider[1] & (sample_rate_divider[19:0] >= 20'd14);
   wire        peak_act = peak_en & dec_on;   //0x153C: peak detect replaces the filter (CIC and FIR); = peak_en, since dec_on carries it
   reg         fir_act = 0;
   reg [18:0]  fir_hp = 0;
@@ -1297,7 +1299,7 @@ freq_generator_dds_pwm u_freq
   wire [7:0]  pair_e1, pair_l1, pair_e2, pair_l2;   //0x153C: the captured pairs (earlier, later) for the counter
   wire        fir_done1, fir_done2;
 
-  wire [18:0] dec_ph = div20[19:1];
+  wire [18:0] dec_ph = sample_rate_divider[19:1];
   wire dec_wr  = fir_act ? fir_done1 : dec_sv[6];
   assign swc_adv = ~dec_on | dec_wr;
 
