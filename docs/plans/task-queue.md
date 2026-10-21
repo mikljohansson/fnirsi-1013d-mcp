@@ -266,6 +266,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-ci (Opus explicitly, dispatched 11:3x, branch mcp-ci): the Windows CI mcp job has failed on both pushes since mcp-d6
+  (runs 39569591451, 39576242367; Linux and the local Windows run green): test_bode_sim / test_bode_device compare a GET_GEN
+  snapshot that includes the live 0x39 pattern status byte (128 before, 129 / 161 after), and test_d27's logger overflow test
+  (32 KiB ring, log_stall_s 0.3) finds no lost chunk on the slow runner. Fix the tests (compare configuration, make the stall
+  deterministic), keep the contract assertions. Owner reported the failure 11:2x.
 - fw-small done 11:1x, merged 11:1x as the merge of 85b9315: fpga_force_stop (0x0E = 0 then 0x1A = 0, test_force_deadline fails
   33 checks without it), Vmax / Vmin / Vpp from the peak bytes with Sample = Peak (pc_glue_peak_extremes, pb_extremes test),
   the readout-fault text no longer points at the bitstream (calibration.md row back). Host tests green, check_vectors OK, gcc10
