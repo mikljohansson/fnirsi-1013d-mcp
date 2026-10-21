@@ -572,7 +572,6 @@ const char *const bu_warn[BU_W_COUNT] =
   "No corner from 100 Hz to 10 MHz",
   "Auto set cancelled: settings kept",
   "Nothing to save: run a sweep first",
-  "Frequency response needs FPGA 0x1534 or later",
   "Leave the waveform viewer first",
   "Sweep table not saved: check the SD card",
   "ADC readout fault: see Diagnostics",

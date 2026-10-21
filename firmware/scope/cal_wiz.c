@@ -7,7 +7,7 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void cw_init(cal_wiz *w, int al3)
+void cw_init(cal_wiz *w)
 {
   uint8_t *p = (uint8_t *)w;
   uint32_t i;
@@ -16,7 +16,6 @@ void cw_init(cal_wiz *w, int al3)
     p[i] = 0;
 
   w->state = CW_ZERO;
-  w->al3   = al3 ? 1 : 0;
 }
 
 int cw_screen(const cal_wiz *w)
@@ -28,7 +27,6 @@ int cw_screen(const cal_wiz *w)
     case CW_GAIN:
     case CW_GAIN_LEVEL_RUN:
     case CW_GAIN_MEAS_RUN:  return 2 + w->ch;
-    case CW_GAIN_NA:        return 2;
     case CW_DONE:           return 4;
     default:                return 0;
   }
@@ -48,9 +46,6 @@ int cw_action_button(const cal_wiz *w)
 
     case CW_GAIN:
       return (w->gain_st[w->ch] == CW_G_PASS) ? CW_EV_CONTINUE : CW_EV_CALIBRATE;
-
-    case CW_GAIN_NA:
-      return CW_EV_CONTINUE;
 
     case CW_DONE:
       return CW_EV_SAVE;
@@ -115,7 +110,7 @@ int cw_event(cal_wiz *w, int ev)
       {
         //Continue: the working copy from the new zeros, then the gain screens
         w->ch = 0;
-        cw_act(w, w->al3 ? CW_GAIN : CW_GAIN_NA, CW_ACT_PREPARE, 0);
+        cw_act(w, CW_GAIN, CW_ACT_PREPARE, 0);
       }
       break;
 
@@ -129,10 +124,6 @@ int cw_event(cal_wiz *w, int ev)
       }
       else
         cw_act(w, CW_DONE, CW_ACT_NONE, 0);
-      break;
-
-    case CW_GAIN_NA:
-      cw_act(w, CW_DONE, CW_ACT_NONE, 0);
       break;
 
     case CW_DONE:
@@ -305,14 +296,9 @@ const char *cw_instruction(const cal_wiz *w, int line)
                                  "Set it to 1X on the handle. Tap Calibrate." };
   static const char *ch2[2]  = { "Plug the CH2 probe in and connect it to the calibration post.",
                                  "Set it to 1X on the handle. Tap Calibrate." };
-  static const char *na[2]   = { "Gain calibration needs the open FPGA bitstream.",
-                                 "Continue keeps the gains and saves the zero level." };
 
   if((line < 0) || (line > 1))
     return "";
-
-  if(w->state == CW_GAIN_NA)
-    return na[line];
 
   switch(cw_screen(w))
   {

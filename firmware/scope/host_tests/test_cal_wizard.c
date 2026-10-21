@@ -121,7 +121,7 @@ static void test_happy_path(void)
   cal_wiz w;
 
   log_reset();
-  cw_init(&w, 1);
+  cw_init(&w);
 
   //Screen 1: Cancel and Calibrate
   T_EQ(cw_screen(&w), 1);
@@ -199,7 +199,7 @@ static void test_zero_fail_retry(void)
   char    t[96];
 
   log_reset();
-  cw_init(&w, 1);
+  cw_init(&w);
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   cw_zero_result(&w, rc, match_ok);
@@ -237,7 +237,7 @@ static void test_zero_fail_detail(void)
   acal_fail fw = { ACAL_FULL, ACAL_CORE_B, 1600, 1600, ACAL_PT_NONE, 0, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
   char      t[96];
 
-  cw_init(&w, 1);
+  cw_init(&w);
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   cw_zero_detail(&w, 0, 5, &f0);
@@ -321,7 +321,7 @@ static void test_zero_fail_note(void)
   f1.mean16[0] = 2693; f1.mean16[1] = 2400; f1.lo[0] = 160; f1.hi[0] = 176; f1.lo[1] = 0; f1.hi[1] = 255;
   f1.clipped[1] = 12;
 
-  cw_init(&w, 1);
+  cw_init(&w);
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   cw_zero_detail(&w, 0, 0, &f0);
@@ -393,7 +393,7 @@ static void test_zero_fail_note(void)
 
   //fw 0.2.81: the band training's result on the owner's unit (CH1 A4 garbles at codes 127..135): 0x08E3
   rc[0] = rc[1] = ACAL_OK;
-  cw_init(&w, 1);
+  cw_init(&w);
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   cw_cap_result(&w, 0, CW_C_DONE, 0x08E3, 0);
@@ -411,7 +411,7 @@ static void test_gain_nosignal_and_fail(void)
   char    t[96];
 
   log_reset();
-  cw_init(&w, 1);
+  cw_init(&w);
   zero_pass(&w);
 
   //No probe on the post: "No signal on CH1: tip on the post?", Calibrate stays, no measurement ran
@@ -454,31 +454,10 @@ static void test_gain_nosignal_and_fail(void)
   T_EQ(logged(CW_ACT_GAIN_MEASURE), 2);
 }
 
-static void test_gain_unavailable(void)
-{
-  cal_wiz w;
-
-  //Stock bitstream: one screen says the gain step is not possible, Continue goes to Done, Save still commits the zeros
-  log_reset();
-  cw_init(&w, 0);
-  zero_pass(&w);
-  T_EQ(w.state, CW_GAIN_NA);
-  T_EQ(cw_screen(&w), 2);
-  T_STR(cw_instruction(&w, 0), "Gain calibration needs the open FPGA bitstream.");
-  check_buttons(&w, B(CW_EV_CANCEL) | B(CW_EV_CONTINUE));
-  ev(&w, CW_EV_CONTINUE);
-  T_EQ(take(&w), CW_ACT_NONE);
-  T_EQ(cw_screen(&w), 4);
-  ev(&w, CW_EV_SAVE);
-  T_EQ(take(&w), CW_ACT_COMMIT);
-  T_EQ(logged(CW_ACT_GAIN_LEVEL), 0);
-  T_EQ(logged(CW_ACT_GAIN_MEASURE), 0);
-}
-
 //Drives a fresh wizard to stop k of a full run (0 screen 1 ... 9 Done); returns 0 past the end
 static int drive(cal_wiz *w, int k)
 {
-  cw_init(w, 1);
+  cw_init(w);
 
   if(k-- == 0) return 1;                  //screen 1
   ev(w, CW_EV_CALIBRATE);
@@ -613,7 +592,7 @@ static void test_texts(void)
   T_STR(t, "CH2: measuring range 6 of 6");
 
   //The owner's instructions (plan 6a), one per screen, pre-broken
-  cw_init(&w, 1);
+  cw_init(&w);
   T_STR(cw_instruction(&w, 0), "Disconnect everything from the device: both probes, anything on the");
   T_STR(cw_instruction(&w, 1), "calibration post, and the USB cable. Tap Calibrate.");
   T_TRUE(ui_text_width(&font_3, cw_instruction(&w, 0)) <= LINE_W);         //fw 0.2.60: a wire on the post failed it
@@ -628,7 +607,7 @@ static void test_texts(void)
   T_STR(cw_instruction(&w, 0), "");
 
   //Done lines: gain measured, kept or never measured
-  cw_init(&w, 1);
+  cw_init(&w);
   w.match16[0] = 0;
   w.match16[1] = 7;
   w.gain_st[0] = CW_G_PASS;
@@ -654,7 +633,7 @@ static void test_texts(void)
   {
     uint32_t big[2] = { 70000, 5 };
 
-    cw_init(&w, 1);
+    cw_init(&w);
     ev(&w, CW_EV_CALIBRATE);
     take(&w);
     cw_zero_result(&w, rc_ok, big);
@@ -670,7 +649,6 @@ int main(void)
   test_zero_fail_detail();
   test_zero_fail_note();
   test_gain_nosignal_and_fail();
-  test_gain_unavailable();
   test_cancel_everywhere();
   test_stray_results();
   test_texts();
