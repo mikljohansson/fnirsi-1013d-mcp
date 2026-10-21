@@ -303,6 +303,16 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3 18:0x, full-rate encodes: RTL about -60 lines (the write clock toggles every falling clk_200MHz edge at every rate;
+  the divider counter, sample_clock_enable, sce_q and the encode prediction collapse to the toggle; a 20-bit skip counter
+  stores one pair per D + 1 edges for K = 0; sequencer timestamps +2 per write clock; 0x05 ready wait 60 ns at slow rates);
+  0x36 / 0x33 now cover the full-rate stream at every D and K (answered for fw-fullrate, which extends the after-capture
+  encode check's flag part to every capture). Testbenches: the K = 0, D > 0 lockstep phases move to a model check (stored
+  word = every (D + 1)-th captured pair), rate models in tb_adccap / encphase / counter / trigpos adjusted, a new
+  contract_0x153D.txt; several hours plus the 4-5 h two-seed run. The superseded runs on ecdc6f0 stopped.
+- fw-fullrate (Opus explicitly, dispatched 17:59, branch fw-fullrate): one calibration class, the class probe removed, the
+  FPGA model at full-rate encodes, the counter always valid, the MCP's class handling, docs; GET_CAL layout kept with the
+  GATED fields reserved if clean.
 - fw-left and fw-diag merged 17:4x (99d38c8): fw-left removed the always-true capability tests (bode has_fir, pc_dec_has,
   the GEN_DDS / EXT_TRIGGER / DECIM menu features, SET_DECIM's peak caps test), ACAL_E_GAIN_NONE (17 reserved), FORCE on a
   sequencer run answers E_STATE 0; open: pc_decim_config's capability levels with the mcp. fw-diag: the mismatch notice
