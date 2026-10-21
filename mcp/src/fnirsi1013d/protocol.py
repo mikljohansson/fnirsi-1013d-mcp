@@ -104,7 +104,6 @@ class Cmd(enum.IntEnum):
     WAIT = 0x0203
     READ_RAW = 0x0204
     READ_TRACE = 0x0205
-    READ_LIVE = 0x0206
     ACQUIRE_AVG = 0x0207
     SET_ACQ_STATE = 0x0208  # protocol 1.3, SHARED_MODE
     GET_CAPTURE_INFO = 0x0209  # protocol 1.3, SHARED_MODE
@@ -234,7 +233,7 @@ class Caps(enum.IntFlag):
     SCREENSHOT = 1 << 6
     DEVICE_AVERAGE = 1 << 7
     DEBUG_RAW = 1 << 8
-    LIVE_READ = 1 << 9
+    # bit 9 reserved: was LIVE_READ (READ_LIVE, never built), retired in protocol 1.27
     ENTER_FEL = 1 << 10
     READ_LAG_UNVERIFIED = 1 << 11
     INTERLEAVE_UNVERIFIED = 1 << 12
@@ -307,10 +306,14 @@ def caps_names(caps: int) -> list[str]:
     return [c.name for c in Caps if caps & c and c.name]
 
 
+#: Retired command codes (section 8.1 "(reserved)" rows): the firmware answers them E_UNSUPPORTED, not E_UNKNOWN_CMD.
+#: 0x0206 was READ_LIVE (live ADC bytes, never built), retired in protocol 1.27 with the FPGA's reads 0x24..0x27.
+RETIRED_CMDS: frozenset[int] = frozenset({0x0206})
+
+
 #: Capability bit each command needs (section 8.1, column Cap).
 CMD_CAP: dict[Cmd, Caps] = {
     Cmd.FORCE: Caps.FORCE_TRIGGER,
-    Cmd.READ_LIVE: Caps.LIVE_READ,
     Cmd.ACQUIRE_AVG: Caps.DEVICE_AVERAGE,
     Cmd.SET_GEN: Caps.GENERATOR,
     Cmd.READ_SCREEN: Caps.SCREENSHOT,
@@ -3024,13 +3027,6 @@ def pack_fft_bench(b: FftBench) -> bytes:
 
 
 @dataclass
-class ReadLiveReq(Payload):
-    FIELDS = [("core", "B"), ("_r", "x"), ("count", "H")]
-    core: int = 0
-    count: int = 1
-
-
-@dataclass
 class AcquireAvgReq(Payload):
     FIELDS = [("n", "H"), ("ch_mask", "B"), ("flags", "B"), ("per_capture_timeout_ms", "I"), ("start", "I"),
               ("count", "I"), ("reserved", "I")]
@@ -4661,7 +4657,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.TEST_PATTERN: TestPatternReq.size(), Cmd.GET_CHANNEL: 1, Cmd.SET_CHANNEL: SetChannelReq.size(),
     Cmd.GET_TIMEBASE: 0, Cmd.SET_TIMEBASE: SetTimebaseReq.size(), Cmd.GET_TRIGGER: 0,
     Cmd.SET_TRIGGER: SetTriggerReq.size(), Cmd.ARM: 4, Cmd.FORCE: 0, Cmd.STOP: 0, Cmd.WAIT: 4,
-    Cmd.READ_RAW: ReadRawReq.size(), Cmd.READ_TRACE: ReadTraceReq.size(), Cmd.READ_LIVE: ReadLiveReq.size(),
+    Cmd.READ_RAW: ReadRawReq.size(), Cmd.READ_TRACE: ReadTraceReq.size(),
     Cmd.ACQUIRE_AVG: AcquireAvgReq.size(), Cmd.GET_GEN: 0, Cmd.SET_GEN: SetGenReq.size(), Cmd.GET_CAL: 1,
     Cmd.READ_SCREEN: ReadScreenReq.size(), Cmd.ENTER_FEL: 4, Cmd.SET_ACQ_STATE: SetAcqStateReq.size(),
     Cmd.GET_CAPTURE_INFO: 0, Cmd.GET_EVENT_LOG: 0, Cmd.SD_INFO: 4, Cmd.SD_READ_SECTORS: 8, Cmd.SD_STAGE: 8, Cmd.SD_WRITE_SECTORS: 16,

@@ -1196,8 +1196,8 @@ class Device:
         if self.cfg.caps_override is not None:
             return self.cfg.caps_override
         # The firmware's fixed word for FPGA_VERSION (pc_variant_init) plus what only the simulator implements
-        # (ACQUIRE_AVG, READ_LIVE, DEBUG_FPGA, FORCE; the averaging model is 8-bit, ACQUIRE_AVG refuses decimated records)
-        c = P.Caps.SCREENSHOT | P.Caps.DEVICE_AVERAGE | P.Caps.DEBUG_RAW | P.Caps.LIVE_READ | P.Caps.ENTER_FEL
+        # (ACQUIRE_AVG, DEBUG_FPGA, FORCE; the averaging model is 8-bit, ACQUIRE_AVG refuses decimated records)
+        c = P.Caps.SCREENSHOT | P.Caps.DEVICE_AVERAGE | P.Caps.DEBUG_RAW | P.Caps.ENTER_FEL
         c |= P.Caps.READ_LAG_UNVERIFIED | P.Caps.FORCE_TRIGGER
         c |= P.Caps.PROG_TRIGGER_POS | P.Caps.GENERATOR | P.Caps.EXT_TRIGGER | P.Caps.DECIM | P.Caps.FIR
         c |= P.Caps.SEQ | P.Caps.ENC_CHECK
@@ -2716,6 +2716,8 @@ class Device:
             if self.last_resp and self.last_resp[0] == req.seq and self.last_resp[1] == req.cmd:
                 self.link["duplicates"] += 1
                 return P.decode_frame(self.last_resp[2])
+            if req.cmd in P.RETIRED_CMDS:  # 1.27: READ_LIVE's code answers as the firmware's NULL handler does
+                return self._done(req, self._err(req, P.Status.E_UNSUPPORTED, 0, "capability"))
             try:
                 cmd = P.Cmd(req.cmd)
             except ValueError:
@@ -3602,16 +3604,6 @@ class Device:
             if (trig.edge == 0 and p < lvl <= c) or (trig.edge == 1 and p >= lvl > c):
                 return i
         return -1
-
-    def _cmd_read_live(self, req: P.Frame) -> P.Frame:
-        r = P.ReadLiveReq.unpack(req.payload)
-        if r.core > 3:
-            raise _DevErr(P.Status.E_BAD_ARG, 0, f"core {r.core}")
-        if not 1 <= r.count <= 4096:
-            raise _DevErr(P.Status.E_BAD_ARG, 2, f"count {r.count}")
-        t = self.now() - self.t_boot + np.arange(r.count) * 0.3e-6
-        codes = self._codes(r.core // 2, t, "AB"[r.core % 2], self.settings)
-        return self._ok(req, codes.tobytes())
 
     def _cmd_acquire_avg(self, req: P.Frame) -> P.Frame | None:
         r = P.AcquireAvgReq.unpack(req.payload)

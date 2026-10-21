@@ -67,6 +67,11 @@ def test_unknown_command_and_short_requests(transport):
     with pytest.raises(DeviceError) as e:
         transport.request(0x0777)
     assert e.value.status == P.Status.E_UNKNOWN_CMD
+    # 1.27: 0x0206 (READ_LIVE, never built) is retired: E_UNSUPPORTED as the firmware answers it, caps bit 9 unnamed
+    with pytest.raises(DeviceError) as e:
+        transport.request(0x0206, b"\0" * 4)
+    assert e.value.status == P.Status.E_UNSUPPORTED
+    assert 0x0206 not in {int(c) for c in P.Cmd} and not P.caps_names(1 << 9)
     # protocol 5 / 14.3: a shorter payload reads missing trailing fields as zero
     cfg = P.ChannelConfig.unpack(transport.request(P.Cmd.GET_CHANNEL, b"").payload)
     assert cfg.channel == 0

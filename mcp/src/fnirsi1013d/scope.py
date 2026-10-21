@@ -1260,8 +1260,6 @@ class Scope:
             raise ValueError("fft_bench: reps must be 1-16")
         return P.parse_fft_bench(self._req(P.Cmd.FFT_BENCH, bytes([reps]), timeout=5.0))
 
-    def read_live(self, core: int, count: int = 64) -> np.ndarray:
-        return np.frombuffer(self._req(P.Cmd.READ_LIVE, P.ReadLiveReq(core, count).pack()), np.uint8)
 
     def read_screen(self) -> np.ndarray:
         """Full framebuffer as (480, 800) uint16 RGB565 [U format, T9]."""
