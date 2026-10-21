@@ -778,6 +778,25 @@ void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
   acal_live_apply(settings, c);
 }
 
+//C6 peak detect: the record's two raw bytes come from the full-rate ADC stream (dec_on runs the encodes at 200 MSa/s as
+//the filter does), so the per-core correction of the full class applies, not the gated class the divider would select
+void fpga_channel_correction_full(PCHANNELSETTINGS settings, acal_corr *c)
+{
+  const acal_channel *cal = 0;
+
+  if(adc_cal_loaded)
+  {
+    if(settings == &scopesettings.channel1)
+      cal = &adc_cal[0];
+    else if(settings == &scopesettings.channel2)
+      cal = &adc_cal[1];
+  }
+
+  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, 0, settings->dcoffset,
+                  settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
+  acal_live_apply(settings, c);
+}
+
 void fpga_prepare_correction(PCHANNELSETTINGS settings)
 {
   acal_corr c;

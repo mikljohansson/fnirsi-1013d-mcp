@@ -157,7 +157,9 @@ int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
   if(!ui)
     return 0;
 
-  if(!scopesettings.average_mode || scopesettings.waveviewmode || scopesettings.long_mode ||
+  //C6 peak detect: an averaging run would mix the max and min bytes of the words (docs/plans/fpga-0x153c.md section 4):
+  //Average is not applied while Sample is Peak (GET_STATUS 46 = 0; the ACQ menu greys the box, docs/plans/ui-rows.md 3.2)
+  if(!scopesettings.average_mode || scopesettings.waveviewmode || scopesettings.long_mode || c->peak ||
      ((scopesettings.triggermode != 0) && (scopesettings.triggermode != 2)))
   {
     ui_state = 0;
@@ -165,7 +167,7 @@ int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
     return 0;
   }
 
-  ui_wide  = (uint8)(c->k != 0);
+  ui_wide  = (uint8)pc_decim_wide(c);
   ui_total = pc_glue_decim_words(fpgasettings.totalsamples);
   ui_pre   = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);
   ui_auto  = (uint8)(scopesettings.triggermode == 0);

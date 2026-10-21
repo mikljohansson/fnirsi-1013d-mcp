@@ -302,7 +302,7 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
     //As pc_hal_scope.c: written (and settled) before the reset
     mock.decim_cur     = *dc;
     mock.decim_written = 1;
-    mock.decim_rb      = (uint16_t)((pc_decim_status(dc) << 8) | dc->shift);
+    mock.decim_rb      = (uint16_t)((pc_decim_status(dc) << 8) | pc_decim_shift_byte(dc));
     mock.decim_arms++;
   }
 
@@ -430,6 +430,30 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
 
     mock.trace16_n[ch] = 0;
 
+    //C6 peak record (as pc_glue_decim_read): { max, min } per word, the trace = the corrected midpoint with the mean-core
+    //correction (the mock has 1.00o5 compensations only: gain 65536, off = (comp A + comp B) / 2 codes), the pairs in
+    //trace16; overload when either byte is at a rail
+    if(mock.decim_cur.peak)
+    {
+      uint32_t gain = 65536;
+      int32_t  off  = (mock.ch[ch].adc_a_comp + mock.ch[ch].adc_b_comp) * 32768;
+      uint8_t  ov   = 0;
+
+      for(k=0;k<total_samples;k++)
+      {
+        uint32_t a  = (start_word + k) % mock.ring_words;
+        uint8_t  mn = mock.ring[2 * ch][a], mx = mock.ring[2 * ch + 1][a];
+
+        mock.trace16[ch][k] = (uint16_t)(mn | (mx << 8));
+        mock.trace[ch][k]   = (uint8_t)pc_peak_mid(mn, mx, gain, off);
+        ov |= pc_peak_overload(mn, mx);
+      }
+
+      mock.trace16_n[ch]   = total_samples;
+      mock.ch[ch].overload = ov;
+      continue;
+    }
+
     //16-bit layout (as pc_glue_decim_read): one sample per word, low byte core A, high byte core B
     if(mock.decim_cur.k)
     {
@@ -472,7 +496,7 @@ void pc_hal_trace_ui_info(uint32_t *sample_count, uint32_t *pretrigger, int32_t 
 uint32_t pc_hal_trace_capacity(void) { return sizeof(mock.trace[0]); }
 
 uint8_t  pc_hal_decim_setting(void)        { return mock.decim_setting; }
-void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & 0x3F; mock.fpga_ops++; }
+void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & PC_DECIM_SET_MASK; mock.fpga_ops++; }
 uint16_t pc_hal_decim_readback(void)       { mock.fpga_ops++; return mock.decim_rb; }
 
 void pc_hal_decim_current(pc_decim_cfg *c, int *written)

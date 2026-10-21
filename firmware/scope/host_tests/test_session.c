@@ -2893,7 +2893,7 @@ static void test_decim_math(void)
   pc_decim_config(2, 0x18, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x02); T_EQ(pc_decim_status(&c), 0x82);
   pc_decim_config(0, 0x1C, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x04); T_EQ(pc_decim_status(&c), 0x04);
   pc_decim_config(2, 0x1C, 19, 3000, 0, &c);  T_EQ(pc_decim_mode(&c), 0);
-  pc_decim_config(2, 0xE3, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x02);
+  pc_decim_config(2, 0xA3, 19, 3000, 1, &c);  T_EQ(pc_decim_mode(&c), 0x02);     //bit 6 is PC_DECIM_SET_PEAK since C6
 
   //Off, no filter in the bitstream, too long for the 16-bit layout
   pc_decim_config(0, 0, 19, 3000, 1, &c);    T_EQ(c.k, 0); T_EQ(c.why, PC_DECIM_WHY_OFF); T_EQ(pc_decim_status(&c), 0);
@@ -2918,8 +2918,8 @@ static void test_decim_protocol(void)
   T_EQ(r.p[0], 0); T_EQ(r.p[2], 0); T_EQ(r.p[24], 0xFF); T_EQ(pc_get_u16(r.p + 28), 8190); T_EQ(r.p[30], PC_DECIM_WHY_OFF);
   T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(pc_get_u32(r.p + 20), 10000000);
 
-  //Bad arguments; the filter cannot go on while the total is over 8190
-  memset(p, 0, 4); p[0] = 4;
+  //Bad arguments (4 is peak detect since C6); the filter cannot go on while the total is over 8190
+  memset(p, 0, 4); p[0] = 5;
   r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG);
   memset(p, 0, 4); p[1] = 0x10;
   r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG);
@@ -3256,12 +3256,12 @@ static void test_seq_segments(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 26);
   r = status();
-  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x1FF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
+  T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x3FF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
   mock.ui_avg_state = 2; mock.ui_avg_log2n = 6;
   r = status();
   T_EQ(r.p[46], 2); T_EQ(r.p[47], 6);
   r = req(PC_CMD_GET_DECIM, 0, 0);
-  T_EQ(pc_get_u16(r.p + 32), 0x1FF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
+  T_EQ(pc_get_u16(r.p + 32), 0x3FF); T_EQ(r.p[34], 2); T_EQ(r.p[35], 6);
 
   //Default: off; the geometry the next arm writes (legacy: 1500 / 3000 samples = 750 / 1500 words)
   r = req(PC_CMD_GET_SEQ, 0, 0);
@@ -3490,7 +3490,7 @@ static void test_capture_stages(void)
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_CAPTURE_STAGES, PC_CAP_CAPTURE_STAGES);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x1FF);
+  T_EQ(pc_get_u16(r.p + 44), 0x3FF);
   r = req(PC_CMD_GET_HEALTH, 0, 0);
   T_EQ(r.len, PC_HEALTH_LEN); T_EQ(r.p[0], 3);
   T_EQ(pc_get_u16(r.p + 104), CS_PO); T_EQ(r.p[106], PC_CAPF_HAS); T_EQ(pc_get_u32(r.p + 116), 0);
@@ -3535,7 +3535,7 @@ static void test_enc_check(void)
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_ENC_CHECK, PC_CAP_ENC_CHECK);
   T_EQ(r.p[35], 0);                                             //interleave order: B first
   r = req(PC_CMD_GET_STATUS, 0, 0);
-  T_EQ(pc_get_u16(r.p + 44), 0x1FF);
+  T_EQ(pc_get_u16(r.p + 44), 0x3FF);
 
   //fw 0.2.72, core order: verified (caps bit 12 clear) only when the bitstream reported convention 1 at boot
   r = req(PC_CMD_GET_INFO, 0, 0);
@@ -3829,6 +3829,220 @@ static void test_bode(void)
   mock_bode_rows = 0;
 }
 
+//C6 peak detect (0x153C, protocol 1.26, docs/plans/fpga-0x153c.md section 4): the configuration and the mean-core maths
+static void test_peak_math(void)
+{
+  pc_decim_cfg c;
+  uint32_t g;
+  int32_t  o;
+  int      v;
+
+  //K 1 to 0x53, no filter maths, the window N, the FIR request dropped; the filter's divider / total rules
+  pc_decim_config(2, PC_DECIM_SET_PEAK | PC_DECIM_SET_FIR, 19, 3000, PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES, &c);
+  T_EQ(c.peak, 1); T_EQ(c.k, 1); T_EQ(c.n, 20); T_EQ(c.gain, 1); T_EQ(c.shift, 0); T_EQ(c.scale_q24, 0);
+  T_EQ(c.fir_en, 0); T_EQ(c.fir, 0); T_EQ(c.why, PC_DECIM_WHY_NONE); T_TRUE(pc_decim_wide(&c));
+  T_EQ(pc_decim_status(&c), 0x81); T_EQ(pc_decim_shift_byte(&c), 0xC0); T_EQ(pc_decim_cmd56(&c), 0x02);
+  T_EQ(pc_decim_mode(&c), 0x01);
+  T_EQ(pc_decim_rate(&c, 19), 10000000);
+  T_EQ(pc_decim_ext_shift(&c), 2);                //the K = 1 boxcar's latency: (240 + 19 x 5 + 80 + 100) / 200
+  T_EQ(pc_decim_ext_shift_at(&c, 19), 2);
+  T_EQ(pc_decim_settle_us(&c), 3);                //(11 x 20 + 199) / 200 + 1
+  pc_decim_config(0, PC_DECIM_SET_PEAK, 199, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 1); T_EQ(c.k, 1); T_EQ(c.n, 200); T_EQ(pc_decim_rate(&c, 199), 1000000);
+  T_EQ(pc_decim_ext_shift(&c), 1); T_EQ(pc_decim_settle_us(&c), 12);
+  pc_decim_config(2, PC_DECIM_SET_PEAK, 0, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 0); T_EQ(c.k, 0); T_EQ(c.why, PC_DECIM_WHY_FULLRATE); T_EQ(pc_decim_status(&c), 0);
+  T_EQ(pc_decim_shift_byte(&c), 0); T_EQ(pc_decim_cmd56(&c), 0); T_FALSE(pc_decim_wide(&c));
+  pc_decim_config(2, PC_DECIM_SET_PEAK, 19, 8192, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 0); T_EQ(c.why, PC_DECIM_WHY_TOTAL);
+  pc_decim_config(2, PC_DECIM_SET_PEAK, 19, 8190, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 1);
+  pc_decim_config(2, PC_DECIM_SET_PEAK, 19, 3000, PC_DECIM_HAS_NONE, &c);
+  T_EQ(c.peak, 0); T_EQ(c.why, PC_DECIM_WHY_NOCAP);
+  pc_decim_config(0, PC_DECIM_SET_PEAK | PC_DECIM_SWAP, 19, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(pc_decim_mode(&c), 0x05); T_EQ(pc_decim_status(&c), 0x85);
+  //The FIR's own flag without peak is unchanged
+  pc_decim_config(2, PC_DECIM_SET_FIR, 199, 3000, PC_DECIM_HAS_FIR, &c);
+  T_EQ(c.peak, 0); T_EQ(c.fir, 1); T_EQ(pc_decim_cmd56(&c), 0x01); T_EQ(pc_decim_shift_byte(&c), c.shift);
+
+  //The mean-core correction: gains 1.02 / 0.98 (Q16 66846 / 64225), offsets -3.5 / +1.5 codes
+  g = pc_peak_gain(66846, 64225);                          T_EQ(g, 65536);
+  o = pc_peak_off(-3 * 65536 - 32768, 65536 + 32768);      T_EQ(o, -65536);
+  T_EQ(pc_peak_code(128, g, o), 127); T_EQ(pc_peak_code(0, g, o), 0); T_EQ(pc_peak_code(255, g, o), 254);
+  T_EQ(pc_peak_code(200, 70000, 0), 214);                  //213.6
+  T_EQ(pc_peak_code(250, 70000, 0), 255);                  //clamped
+  T_EQ(pc_peak_mid(100, 140, 65536, 0), 120); T_EQ(pc_peak_mid(100, 141, 65536, 0), 121);   //120.5 rounds up
+  T_EQ(pc_peak_mid(100, 140, g, o), 119);
+  T_EQ(pc_peak_mid(0, 255, 65536, 0), 128); T_EQ(pc_peak_mid(255, 255, 70000, 0), 255);
+
+  //The trigger inverse round-trips every code within one raw step
+  for(v=0;v<256;v++)
+  {
+    uint8_t raw  = pc_peak_level((uint8_t)v, 70000, -200000);
+    int32_t back = pc_peak_code(raw, 70000, -200000);
+
+    T_TRUE(((back - v <= 1) && (v - back <= 1)) || (raw == 0) || (raw == 255));
+  }
+  T_EQ(pc_peak_level(128, 65536, 0), 128); T_EQ(pc_peak_level(0, 65536, 65536), 0);
+  T_EQ(pc_peak_level(255, 60000, 0), 255); T_EQ(pc_peak_level(100, 0, 0), 0);
+
+  //Overload: either byte at a rail (ADoverload's layout)
+  T_EQ(pc_peak_overload(0, 100), 0x01); T_EQ(pc_peak_overload(10, 255), 0xFE); T_EQ(pc_peak_overload(0, 255), 0xFF);
+  T_EQ(pc_peak_overload(1, 254), 0);
+}
+
+//C6 peak detect on the wire: SET_DECIM filter 4, GET_DECIM, the refusals (FIR, averaging E_STATE 7, the total), a host
+//capture (geometry, GET_CAPTURE_INFO 68 / 69 / 79, READ_RAW layout 3 and the layout 2 refusal, READ_TRACE midpoint and
+//WIDE pairs, the overload rule), the way back and the legacy fallback at 200 MSa/s
+static void test_peak_protocol(void)
+{
+  resp_t r;
+  uint8_t p[24];
+  uint32_t k, seq, start;
+
+  setup(PC_FW_FPGA_VERSION);
+  r = req(PC_CMD_GET_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_PEAK_DETECT, PC_CAP_PEAK_DETECT);
+  r = status();
+  T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_PEAK, PC_FEAT_W_PEAK);
+  set_trigger(0x30, 0, 0, 0, 0, 1000, 2000, 0, 0, &r);                  //2000 words: an averaging run would fit
+  T_EQ(r.h.status, 0);
+
+  //The Filter CIC2, then Sample Peak: the filter is kept behind it, the next record is peak words; settings_seq moves
+  memset(p, 0, 4); p[0] = 2;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, 0);
+  r = status(); seq = pc_get_u32(r.p + 32);
+  memset(p, 0, 4); p[0] = 4;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 36); T_EQ(mock.decim_setting, 0x42);
+  T_EQ(r.p[0], 4); T_EQ(r.p[1], 0); T_EQ(r.p[2], 0x81); T_EQ(r.p[3], 0xC0); T_EQ(pc_get_u32(r.p + 4), 20);
+  T_EQ(pc_get_u64(r.p + 8), 1); T_EQ(pc_get_u32(r.p + 16), 19); T_EQ(pc_get_u32(r.p + 20), 10000000);
+  T_EQ(r.p[24], 0xFF); T_EQ(r.p[30], PC_DECIM_WHY_NONE); T_EQ(r.p[31], 0);
+  T_EQ(pc_get_u16(r.p + 32) & PC_FEAT_W_PEAK, PC_FEAT_W_PEAK);
+  r = status(); T_TRUE(pc_get_u32(r.p + 32) != seq);
+  r = req(PC_CMD_GET_TRIGGER, 0, 0);
+  T_EQ(pc_get_u16(r.p + 20), 1000); T_EQ(pc_get_u16(r.p + 22), 2000);                 //words = samples
+
+  //Refusals: the FIR with peak (nothing changes), filter 5, averaging with peak (E_STATE 7; segments fit), a longer total
+  memset(p, 0, 4); p[0] = 4; p[1] = 0x08;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1); T_EQ(mock.decim_setting, 0x42);
+  memset(p, 0, 4); p[0] = 5;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  memset(p, 0, 16); p[0] = 2; pc_put_u16(p + 4, 1); pc_put_u16(p + 6, 4);
+  r = req(PC_CMD_SET_SEQ, p, 16);   T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 7);
+  memset(p, 0, 16); p[0] = 1; p[2] = 12; pc_put_u16(p + 4, 2);
+  r = req(PC_CMD_SET_SEQ, p, 16);   T_EQ(r.h.status, 0); T_EQ(r.p[16], 0); T_EQ(r.p[17], 1);
+  memset(p, 0, 16);
+  r = req(PC_CMD_SET_SEQ, p, 16);   T_EQ(r.h.status, 0);
+  set_trigger(0x20, 0, 0, 0, 0, 0, 9000, 0, 0, &r);
+  T_EQ(r.h.status, PC_E_BAD_ARG);
+
+  //An averaging setting made before Sample Peak no longer fits: GET_SEQ 16 = 9, ARM E_STATE 3
+  memset(p, 0, 4); p[0] = 2;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, 0); T_EQ(r.p[0], 2); T_EQ(mock.decim_setting, 2);
+  memset(p, 0, 16); p[0] = 2; pc_put_u16(p + 4, 1); pc_put_u16(p + 6, 4);
+  r = req(PC_CMD_SET_SEQ, p, 16);   T_EQ(r.h.status, 0);
+  memset(p, 0, 4); p[0] = 4;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_SEQ, 0, 0);    T_EQ(r.p[16], PC_SEQ_FIT_PEAK);
+  r = req(PC_CMD_ARM, 0, 0);        T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 3);
+  memset(p, 0, 16);
+  r = req(PC_CMD_SET_SEQ, p, 16);   T_EQ(r.h.status, 0);
+
+  //Host ARM: 16-bit geometry (words = samples), the configuration to the HAL. Two rail bytes planted in the ring before
+  //the readout at DONE: the overload rule flags CH1
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.arm_pre, 1000); T_EQ(mock.arm_total, 2000); T_EQ(mock.decim_cur.peak, 1); T_EQ(mock.decim_cur.k, 1);
+  start = (100 + 8192 - 1000) % 8192;
+  mock.ring[0][(start + 5) % 8192] = 0;
+  mock.ring[1][(start + 9) % 8192] = 255;
+  r = wait_done(100);
+  T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(mock.trace16_n[0], 2000);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.len, PC_CAPTURE_INFO_LEN); T_EQ(r.p[68], 0x81); T_EQ(r.p[69], 0xC0); T_EQ(pc_get_u16(r.p + 70), 0);
+  T_EQ(pc_get_u32(r.p + 72), 20); T_EQ(r.p[76], 0); T_EQ(r.p[79], 0x03); T_EQ(r.p[9] & 0x0C, 0x04);
+  T_EQ(pc_get_u16(r.p + 12), start); T_EQ(pc_get_u32(r.p + 28), 1000); T_EQ(pc_get_u32(r.p + 32), 2000);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.p[24], 0x81); T_EQ(r.p[25], 0xC0); T_EQ(r.p[26], 0x81); T_EQ(r.p[27], 0xC0);
+  r = status();
+  T_EQ(r.p[2] & 0xC0, 0x40);                                                            //CH1 overload of the readout
+
+  //READ_RAW layout 3: CH1 minima then maxima; layout 2 refused for a peak record; both cores needed; all four lanes
+  memset(p, 0, 16); p[0] = 0x03; p[1] = 1; p[2] = 3; pc_put_u32(p + 8, 4);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 8); T_EQ(r.p[13], 3); T_EQ(pc_get_u16(r.p + 4), start);
+  for(k=0;k<4;k++)
+  {
+    T_EQ(r.p[16 + k], mock.ring[0][(start + k) % 8192]);
+    T_EQ(r.p[20 + k], mock.ring[1][(start + k) % 8192]);
+  }
+  p[2] = 2;
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  p[2] = 3; p[0] = 0x01;
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  p[0] = 0x0F; pc_put_u32(p + 8, 2);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 8);
+  T_EQ(r.p[16], mock.ring[0][start]); T_EQ(r.p[18], mock.ring[1][start]);
+  T_EQ(r.p[20], mock.ring[2][start]); T_EQ(r.p[22], mock.ring[3][start]);
+  p[2] = 0; pc_put_u32(p + 8, 4);
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 16);
+
+  //READ_TRACE: the corrected midpoint (the mock's 1.00o5 compensations 2 / -1: gain 1, offset + 0.5 code), header 30 /
+  //31 the mode and shift bytes, the meta overload bits; WIDE gives the pairs (min low, max high)
+  memset(p, 0, 12); p[0] = 0x01; pc_put_u32(p + 4, 0); pc_put_u32(p + 8, 100);
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 16 + 100); T_EQ(r.p[30], 0x81); T_EQ(r.p[31], 0xC0);
+  T_EQ(r.p[48 + 3], pc_peak_mid(mock.ring[0][start + 3], mock.ring[1][start + 3], 65536, 32768));
+  T_EQ(r.p[48 + 5], pc_peak_mid(0, mock.ring[1][start + 5], 65536, 32768));
+  T_EQ(r.p[48 + 9], pc_peak_mid(mock.ring[0][start + 9], 255, 65536, 32768));
+  T_EQ(r.p[32 + 3] & 0x06, 0x06);
+  p[1] = 0x04;
+  r = req(PC_CMD_READ_TRACE, p, 12);
+  T_EQ(r.h.status, 0); T_EQ(r.len, 32 + 16 + 200);
+  T_EQ(pc_get_u16(r.p + 48 + 2 * 9), mock.ring[0][start + 9] | (255 << 8));
+  T_EQ(pc_get_u16(r.p + 48 + 2 * 5), mock.ring[1][start + 5] << 8);
+
+  //Sample Normal again: the kept filter (CIC2) is the next record; until then layout 3 still reads the peak record
+  memset(p, 0, 4); p[0] = 2;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(r.p[0], 2); T_EQ(r.p[2], 0x82); T_EQ(r.p[3], 1); T_EQ(mock.decim_setting, 2);
+  memset(p, 0, 16); p[0] = 0x03; p[1] = 1; p[2] = 3; pc_put_u32(p + 8, 4);
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_cur.peak, 0); T_EQ(mock.decim_cur.k, 2);
+  r = wait_done(100);
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 2);
+  p[2] = 2;
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[68], 0x82); T_EQ(r.p[69], 1); T_EQ(r.p[79], 0x01);
+
+  //Peak at 200 MSa/s: the setting stays Peak, the record is legacy (why 2), byte 79 = 0
+  memset(p, 0, 4); p[0] = 4;
+  r = req(PC_CMD_SET_DECIM, p, 4);  T_EQ(r.h.status, 0);
+  memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, 0);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_GET_DECIM, 0, 0);
+  T_EQ(r.p[0], 4); T_EQ(r.p[2], 0); T_EQ(r.p[3], 0); T_EQ(r.p[30], PC_DECIM_WHY_FULLRATE);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_cur.peak, 0); T_EQ(mock.decim_cur.k, 0); T_EQ(mock.arm_total, 1000);
+  r = wait_done(100);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[68], 0); T_EQ(r.p[69], 0); T_EQ(r.p[79], 0);
+  memset(p, 0, 16); p[0] = 0x03; p[1] = 1; p[2] = 3; pc_put_u32(p + 8, 4);
+  r = req(PC_CMD_READ_RAW, p, 16);  T_EQ(r.h.status, PC_E_BAD_ARG);
+  memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, 19);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+
+  //Off
+  memset(p, 0, 4);
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.decim_setting, 0); T_EQ(r.p[0], 0);
+}
+
 int main(void)
 {
   test_diag_wire();
@@ -3875,6 +4089,8 @@ int main(void)
   test_enc_check();
   test_capture_stages();
   test_decim_held_divider();
+  test_peak_math();
+  test_peak_protocol();
   test_bode();
   mock_clear_resps();
   return t_report("test_session");

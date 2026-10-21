@@ -88,6 +88,9 @@ uint16 fpga_prepare_for_transfer(void);
 
 void   fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint);
 void   fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c);  //zero correction for the current settings
+//C6 peak records: the same in the full clock class whatever the divider (the ADCs run at 200 MSa/s under peak detect),
+//with the v4 tracking folded in; pc_peak_gain / pc_peak_off take the mean of its two cores
+void   fpga_channel_correction_full(PCHANNELSETTINGS settings, acal_corr *c);
 void   fpga_prepare_correction(PCHANNELSETTINGS settings);                //the same, into the readout fields
 
 //fw 0.2.61: who writes the FPGA now (event type 22 trace, fpga_control.c)

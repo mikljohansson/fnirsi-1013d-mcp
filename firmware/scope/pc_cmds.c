@@ -128,6 +128,7 @@ void pc_variant_init(uint16_t version, pc_variant *v)
                   PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR_DDS | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR |
                   PC_CAP_SEQ | PC_CAP_ENC_CHECK | PC_CAP_CAPTURE_STAGES |
                   PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES |                                                 //1.26: 0x153C
+                  PC_CAP_PEAK_DETECT |                                                                 //C6 peak detect
                   PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
 
 #if PC_DEBUG
@@ -228,7 +229,8 @@ static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
   uint8_t set = pc_hal_decim_setting();
 
   (void)s;
-  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR), pc_hal_divider_now(), total, pc_decim_has(), c);
+  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK), pc_hal_divider_now(), total,
+                  pc_decim_has(), c);
 }
 
 //What pc_decim_config gets on the built-for bitstream: the CIC filter with the compensation FIR and the capture stages
@@ -299,7 +301,7 @@ static void pc_capture_latch(pc_session *s, pc_capture *c, uint8_t origin, uint3
     memset(&d, 0, sizeof(d));
     pc_hal_decim_current(&d, &written);
     c->decim       = pc_decim_status(&d);
-    c->decim_shift = d.shift;
+    c->decim_shift = pc_decim_shift_byte(&d);          //C6: 0xC0 | S for a peak record
     c->decim_n     = d.n;
     c->ext_shift   = pc_ext_shift(c->source, &d, c->divider, pretrigger);
   }
@@ -438,7 +440,8 @@ static uint16_t pc_features(const pc_session *s)
 {
   (void)s;
   return PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR | PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE |
-         PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE | PC_FEAT_W_TRIG_TYPES;
+         PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE | PC_FEAT_W_TRIG_TYPES |
+         PC_FEAT_W_PEAK;                                                                  //C6 peak detect
 }
 
 //1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
@@ -1278,7 +1281,7 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
     if(t.pretrigger + 2 > t.total)                     return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger > total - 2");
 
     //1.9: the 16-bit layout holds one sample per word
-    if((pc_hal_decim_setting() & 3) && (t.total > PC_DECIM_MAX_TOTAL))
+    if((pc_hal_decim_setting() & (3 | PC_DECIM_SET_PEAK)) && (t.total > PC_DECIM_MAX_TOTAL))   //C6: peak is 16-bit too
       return pc_error(s, PC_E_BAD_ARG, 5, "total > 8190 with the filter on");
   }
 
@@ -1443,7 +1446,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   {
     pc_arm_geometry(s, &t, &dc, &pre_w, &tot_w, &ext);
 
-    if(pc_seq_fit(&s->seq, pre_w, tot_w, dc.k != 0) != PC_SEQ_FIT_OK)
+    if(pc_seq_fit_rec(&s->seq, pre_w, tot_w, dc.k != 0, dc.peak) != PC_SEQ_FIT_OK)
       return pc_error(s, PC_E_STATE, 3, "SET_SEQ setting does not fit the trigger geometry (GET_SEQ byte 16)");
   }
 
@@ -1638,7 +1641,9 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   resp[76] = c->seq_mode;
   resp[77] = c->seq_flags;
   resp[78] = c->seq_m;
-  resp[79] = c->seq_fmt16;
+  //1.26 (C6): bit 0 16-bit records (runs since 1.17, single captures too since 1.26), bit 1 a peak-detect record
+  resp[79] = (uint8_t)((((c->decim & PC_DECIM_WIDE) || c->seq_fmt16) ? 0x01 : 0) |
+                       ((c->decim_shift & PC_DECIM_PEAK_ACT) ? 0x02 : 0));
   pc_put_u32(resp + 80, c->seq_done);
   pc_put_u16(resp + 84, c->seq_untrig);
   pc_put_u16(resp + 86, c->seq_count);
@@ -1719,6 +1724,22 @@ static int pc_seq_held(pc_session *s, uint8_t mode)
   return s->capture_id && s->ring_valid && (s->cap.origin == PC_ORIGIN_HOST) && (s->cap.seq_mode == mode);
 }
 
+//C6: the record READ_RAW reads is a peak record (its shift byte's peak bit): the capture in flight while armed (ALLOW_NOT_DONE),
+//else the latest capture; no capture yet = legacy
+static int pc_raw_peak(const pc_session *s)
+{
+  const pc_capture *c;
+
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+    c = &s->cap_next;
+  else if(s->capture_id)
+    c = &s->cap;
+  else
+    return 0;
+
+  return (c->decim_shift & PC_DECIM_PEAK_ACT) != 0;
+}
+
 static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   uint8_t  mask   = req[0];
@@ -1737,9 +1758,14 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
   if((mask == 0) || (mask & 0xF0)) return pc_error(s, PC_E_BAD_ARG, 0, "core_mask");
   if(mode > 3)                     return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
-  if(layout > 2)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
+  if(layout > 3)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
   if(flags & ~0x01)                return pc_error(s, PC_E_BAD_ARG, 3, "flags");
   if((count == 0) || (count > ring)) return pc_error(s, PC_E_BAD_ARG, 8, "count 1..ring_words");
+
+  //C6 peak records (1.26): layout 3 = per channel the minima then the maxima; a 16-bit layout 2 of a peak record would
+  //hand a 1.24 host { max, min } pairs as filter samples, and layout 3 of any other record has no pairs to split
+  if((layout == 3) && !pc_raw_peak(s)) return pc_error(s, PC_E_BAD_ARG, 2, "layout 3 needs a peak-detect record");
+  if((layout == 2) && pc_raw_peak(s))  return pc_error(s, PC_E_BAD_ARG, 2, "peak-detect record: layout 3");
 
   //1.17 addr_mode 3: segment-relative, address = segment << 16 | word offset from that segment's record start
   if(mode == 3)
@@ -1860,6 +1886,20 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
       {
         pc_raw_core(s, (uint8_t)(2 * i),     start, count, d,     2, slot_base, slot_len);
         pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + 1, 2, slot_base, slot_len);
+        d += 2 * count;
+      }
+    }
+  }
+  else if(layout == 3)
+  {
+    //1.26 (C6): peak pairs, per selected channel `count` u8 minima (the core A slot, 0x20/0x22) then `count` u8 maxima
+    //(the core B slot, 0x21/0x23); both cores of a channel required (as layout 1 / 2)
+    for(i=0;i<2;i++)
+    {
+      if(mask & (3 << (2 * i)))
+      {
+        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d,         1, slot_base, slot_len);
+        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + count, 1, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -2072,17 +2112,24 @@ static uint32_t pc_decim_body(pc_session *s, uint8_t *p)
   pc_hal_decim_current(&cur, &written);
 
   memset(p, 0, 36);
-  p[0] = set & 3;                                       //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
+  //C6: filter 4 = Sample Peak (the Filter's K / FIR are kept behind it and not applied, so the FIR flag reads 0)
+  if(set & PC_DECIM_SET_PEAK)
+  {
+    p[0] = 4;
+    set &= (uint8_t)~PC_DECIM_SET_FIR;
+  }
+  else
+    p[0] = set & 3;                                     //UI Filter: 0 off, 1 boxcar, 2 CIC2, 3 CIC3
   p[1] = (uint8_t)((set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR)) >> 2);   //flags: bit 0 core-order swap, bits 1 / 2 always 0 (fw-one),
                                                         //falling-edge A / B, bit 3 FIR (1.11)
-  p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout)
-  p[3] = next.shift;
+  p[2] = pc_decim_status(&next);                        //what the next arm writes (0x29 byte 0 layout; peak: 0x81)
+  p[3] = pc_decim_shift_byte(&next);                    //S; C6: bits 7 / 6 peak active / written (0xC0 for a peak record)
   pc_put_u32(p + 4, next.n);
   pc_put_u64(p + 8, next.gain);
   pc_put_u32(p + 16, pc_hal_divider_now());            //fw 0.2.87: the divider the FPGA holds
   pc_put_u32(p + 20, pc_decim_rate(&next, pc_hal_divider_now()));
   p[24] = written ? pc_decim_status(&cur) : 0xFF;       //written at the last arm (0xFF: not yet)
-  p[25] = cur.shift;
+  p[25] = pc_decim_shift_byte(&cur);
   p[26] = (uint8_t)(rb >> 8);                           //FPGA 0x29 now
   p[27] = (uint8_t)rb;
   pc_put_u16(p + 28, PC_DECIM_MAX_TOTAL);
@@ -2099,24 +2146,37 @@ static int h_get_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   return PC_OK;
 }
 
-//SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3), u8 flags (bit 0 core-order swap, bit 1 / bit 2 capture the
-//A / B cores on the falling write-clock edge, bit 3 CIC compensation FIR, 1.11, FPGA 0x1535+ only), u16 0. Sets the UI's
-//Filter setting (shared control); the next arm (UI or host) writes it.
+//SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3; C6: 4 peak detect), u8 flags (bit 0 core-order swap, bit 1 /
+//bit 2 capture the A / B cores on the falling write-clock edge, bit 3 CIC compensation FIR, 1.11, FPGA 0x1535+ only), u16
+//0. Sets the UI's Filter setting (shared control); the next arm (UI or host) writes it. Filter 4 (the ACQ Sample row,
+//cap PEAK_DETECT) sets Sample Peak and keeps the Filter's K / FIR for the way back; the FIR flag is refused with it (the
+//FIR is off while peak detect runs); filter 0..3 sets Sample Normal with that filter.
 static int h_set_decim(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   pc_hw_trigger t;
+  uint8_t       set;
 
   (void)len;
 
-  if(req[0] > 3)     return pc_error(s, PC_E_BAD_ARG, 0, "filter 0..3");
+  if(req[0] > 4)     return pc_error(s, PC_E_BAD_ARG, 0, "filter 0..3, 4 peak");
   if(req[1] & ~0x0F) return pc_error(s, PC_E_BAD_ARG, 1, "flags");
+
+  //C6 peak detect
+  if(req[0] == 4)
+  {
+    if(!(s->var.caps & PC_CAP_PEAK_DETECT)) return pc_error(s, PC_E_UNSUPPORTED, 0, "peak detect");
+    if(req[1] & 0x08)                       return pc_error(s, PC_E_BAD_ARG, 1, "FIR with peak detect");
+    set = (uint8_t)((pc_hal_decim_setting() & (PC_DECIM_SET_FIR | 3)) | ((req[1] & 0x07) << 2) | PC_DECIM_SET_PEAK);
+  }
+  else
+    set = (uint8_t)(req[0] | ((req[1] & 0x0F) << 2));
 
   pc_hal_trigger_read(&t);
 
   if(req[0] && (t.total > PC_DECIM_MAX_TOTAL))
     return pc_error(s, PC_E_BAD_ARG, 0, "total > 8190: SET_TRIGGER total first");
 
-  pc_hal_decim_set((uint8_t)(req[0] | ((req[1] & 0x0F) << 2)));
+  pc_hal_decim_set(set);
   pc_settings_track(s);
 
   *rl = pc_decim_body(s, resp);
@@ -2147,7 +2207,7 @@ static uint32_t pc_seq_body(pc_session *s, uint8_t *p)
   pc_put_u16(p + 6, (uint16_t)(s->seq.n & 0xFFFF));             //0 = 65536
   pc_put_u32(p + 8, s->seq.holdoff_ns);
   pc_put_u32(p + 12, pc_seq_holdoff_units(s->seq.holdoff_ns));   //5 ns units written to 0x5C
-  p[16] = pc_seq_fit(&s->seq, pre_w, tot_w, dc.k != 0);          //0 = the next ARM can run it
+  p[16] = pc_seq_fit_rec(&s->seq, pre_w, tot_w, dc.k != 0, dc.peak);   //0 = the next ARM can run it (9: peak record, C6)
   p[17] = (uint8_t)(dc.k != 0);                                  //next ARM records in the 16-bit layout
   pc_put_u16(p + 18, pre_w);
   pc_put_u16(p + 20, tot_w);
@@ -2207,9 +2267,11 @@ static int h_set_seq(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *r
 
   pc_arm_geometry(s, &t, &dc, &pre_w, &tot_w, &ext);
 
-  switch(pc_seq_fit(&c, pre_w, tot_w, dc.k != 0))
+  switch(pc_seq_fit_rec(&c, pre_w, tot_w, dc.k != 0, dc.peak))
   {
     case PC_SEQ_FIT_OK:    break;
+    //C6: averaging of peak records would sum max and min bytes (docs/plans/fpga-0x153c.md section 4)
+    case PC_SEQ_FIT_PEAK:  return pc_error(s, PC_E_STATE, 7, "peak detect: averaging refused (SET_DECIM filter first)");
     case PC_SEQ_FIT_MODE:  return pc_error(s, PC_E_BAD_ARG, 0, "mode 0..2");
     case PC_SEQ_FIT_FLAGS: return pc_error(s, PC_E_BAD_ARG, 1, "flags");
     case PC_SEQ_FIT_M:     return pc_error(s, PC_E_BAD_ARG, 2, "m 5..12");
