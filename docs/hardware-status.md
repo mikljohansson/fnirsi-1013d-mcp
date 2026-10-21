@@ -1492,7 +1492,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-21 17:38: power-cycled after the flash: `#VER` fw=0.2.102 proto=1.24 fpga=0x153c (the card's firmware boots on the
   new bitstream). FEL-load of fw 0.2.104 (7c640ab5..): `#VER` fw=0.2.104 proto=1.26 fpga=0x153c, GET_INFO fpga_flags 0, no
   notice; the Scope view runs (CH1 the 1 kHz square through the RC ladder, 500 kSa/s, 200 us/div, Auto, CH1 rising).
-- 2026-10-21 17:39-18:0x: **0x153C checks** (fw 0.2.104; wizard rerun by the owner with the inputs open after the flash,
+- 2026-10-21 17:39-17:53: **0x153C checks** (fw 0.2.104; wizard rerun by the owner with the inputs open after the flash,
   17:4x; CH1 first on the RC ladder node, then on the generator post from 17:50, CH2 on the ladder). Scratchpad scripts
   c_checks*.py over COM10 (host control, restored to 500 kSa/s / Auto / 1 kHz afterwards).
   - Pulse width (10 kHz 20 % = 20 us high, divider 99, normal mode, CH1 post): longer than 15 us triggers, longer than 25 us
