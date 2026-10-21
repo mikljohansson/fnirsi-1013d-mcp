@@ -23,9 +23,15 @@
 //   PK (0x153C C2, fw-c6) peak detect: 0x53 = 1, 0x56 = 2, 0x54 = 0, 0x55 = 128 << 8 at N = 20, CH1 rising; the 0x29
 //      read-back and READ_RAW layout 3 (min bytes through 0x20, max bytes through 0x21)
 //   K  (0x153C C3, fw-c7) the counter: 0x62 / 0x61 (gate 10 ms on the trigger source), a 100 kHz square, the 0x35 snapshot
+//   L  (0x153D D1, fw-d4 fpga_log.c) the streaming logger: LOG_START CH1 format 0 at D = 399 (the 500 kS/s tier), two
+//      drain steps (the lanes with fpga_read_lane, the second 0x38, 0x6A), LOG_STOP with the tail; the 0x38 snapshots
+//      against the memory, W = count mod 8192, no lap, the write stopped and 0x14 = W after the stop
 // 0x153C: the boot writes fpga_trig_write(edge, hold-off 0, clear) and the counter's 0x62 / 0x61 (gate 100 ms) after the
 // version read, and ARM 7 carries the trigger type registers (0x5E always; 0x5F, 0x60 for a qualified type) as
 // fpga_trig_arm does, before 0x0E. The firmware still writes 0x0F in every arm (a no-op since 0x153C).
+// 0x153D: the generator is the pattern (fw-d5): "generator off" at the setup is fpga_pat_drive(0) (0x50 with four data
+// bytes, as 1.00o5 writes it) and fpga_pat_level(0) (0x6D = 0); the boot adds fpga_ptrig_write(zeros) (0x7D = 0, 0x76 ..
+// 0x7A, 0x7D = 04: the pattern trigger engine disarmed) between the trigger write and the counter's.
 // Checks against independent expectations: status bytes, table entries (valid, triggered, offset = 0x14 mod 2^m
 // for the last segment, the step at record index pre + 1 in every slot), averaged lanes equal to N x the
 // single-record value, raw lanes equal to the sums, the stop.
@@ -197,6 +203,109 @@ module tb;
     begin
       wr_cmd(8'h35);
       for (i = 0; i < 16; i = i + 1) begin rd_byte; cnt[i] = rd_d; end
+    end
+  endtask
+
+  // 0x153D (fw-d5, fpga_bus.c fpga_ptrig_write): 0x7D = 0, the edge registers 0x76 .. 0x79, the type registers 0x7A (0x7B,
+  // 0x7C for a qualified type), 0x7D = armed | rearm << 1 | 0x04 (clear the event flag) | route << 3
+  task fw_ptrig_write(input [7:0] src, input [7:0] pol, input [7:0] lvl, input [15:0] lvl16, input [7:0] typ,
+                      input [23:0] n, input [23:0] h, input armed, input rearm);
+    begin
+      wr1(8'h7D, 8'h00);
+      wr1(8'h76, src); wr1(8'h77, pol); wr1(8'h78, lvl); wr2(8'h79, lvl16);
+      wr1(8'h7A, typ);
+      if (typ[2:0] != 3'd0) begin
+        wr_cmd(8'h7B); wr_byte(n[23:16]); wr_byte(n[15:8]); wr_byte(n[7:0]);
+        wr_cmd(8'h7C); wr_byte(h[23:16]); wr_byte(h[15:8]); wr_byte(h[7:0]);
+      end
+      wr1(8'h7D, {5'd0, 1'b1, rearm, armed});
+    end
+  endtask
+
+  // 0x153D (fw-d4, fpga_log.c): fw_log_snapshot = fpga_log_snapshot (0x38, 8 bytes); fw_log_start = pc_hal_log_start (0x0D,
+  // pc_dec_apply's filter writes) + fpga_log_start (0x69 = 1, 0x57 = 0, 0x1A = 0, fpga_arm_reset with pre = total = 0 and
+  // 0x0E = 0, the snapshot, 0x6A = base, 0x69 = 3); fw_log_chunk = fpga_log_chunk (n = count - consumed words, at most 2048,
+  // each lane with fpga_read_lane = 0x1F, the lane command, the dummy strobe, n strobes; the second snapshot; 0x6A = R + n
+  // when the ring did not lap); fpga_log_stop = 0x69 = 0 then snapshot + chunk until a chunk reads nothing
+  reg [7:0]  lg [0:7];
+  reg [31:0] lg_cnt;
+  reg [12:0] lg_w;
+  reg [15:0] lg_un;
+  integer    lg_base, lg_cons, lg_n, lg_lane, nlanes;
+  reg [7:0]  lanes [0:3];
+  reg [7:0]  lgd [0:8191];                               // lane l, word j of the last chunk at lgd[l * 2048 + j]
+  task fw_log_snapshot;
+    begin
+      wr_cmd(8'h38);
+      for (i = 0; i < 8; i = i + 1) begin rd_byte; lg[i] = rd_d; end
+      lg_w = {lg[0][4:0], lg[1]}; lg_cnt = {lg[2], lg[3], lg[4], lg[5]}; lg_un = {lg[6], lg[7]};
+    end
+  endtask
+  task fw_log_start(input [31:0] divider, input [1:0] k);
+    begin
+      note("LOG_START 1: 0x0D, the filter (0x53, 0x56), then fpga_log_start: 0x69 = 01, 0x57 = 00, 0x1A = 00");
+      wr4(8'h0D, divider);
+      wr1(8'h53, {6'd0, k});
+      wr1(8'h56, 8'h00);
+      wr1(8'h69, 8'h01);
+      wr1(8'h57, 8'h00);
+      wr1(8'h1A, 8'h00);
+      note("LOG_START 2: fpga_arm_reset with 0x0B = 0x0C = 0: 0x01 = 01, poll 0x05, 0x0B, 0x0C, 0x5E, 0x0E = 0, 0x01 = 00");
+      wr2(8'h0B, 16'd0);
+      wr2(8'h0C, 16'd0);
+      wr1(8'h01, 8'h01);
+      wr_cmd(8'h05);
+      note("poll 0x05: R lines until bit 0 = 1");
+      polls = 0; quiet = 1; rd_byte;
+      while (rd_d[0] !== 1'b1 && polls < 100000) begin rd_byte; polls = polls + 1; end
+      quiet = 0;
+      $fdisplay(tf, "R %h", rd_d);
+      wr2(8'h0B, 16'd0);
+      wr2(8'h0C, 16'd0);
+      fw_trig_arm;
+      wr4(8'h0E, 32'd0);
+      wr1(8'h01, 8'h00);
+      note("LOG_START 3: 0x38 (8 bytes), 0x6A = base = W - count, 0x69 = 03 (stream on, clear a stale lap)");
+      fw_log_snapshot;
+      lg_base = (lg_w - lg_cnt[12:0]) & 8191;
+      lg_cons = 0;
+      wr2(8'h6A, lg_base);
+      wr1(8'h69, 8'h03);
+    end
+  endtask
+  task fw_log_chunk;
+    begin
+      lg_n = lg_cnt - lg_cons;
+      if (lg_n > 2048) lg_n = 2048;
+      if (lg_n > 0) begin
+        note("drain: per lane 0x1F = R, the lane command, the dummy strobe, n strobes; then 0x38 and 0x6A = R + n (no lap)");
+        for (lg_lane = 0; lg_lane < nlanes; lg_lane = lg_lane + 1) begin
+          pass(lanes[lg_lane], (lg_base + lg_cons) & 8191, lg_n);
+          for (j = 0; j < lg_n; j = j + 1) lgd[lg_lane * 2048 + j] = pb[j];
+        end
+        fw_log_snapshot;
+        if (lg[0][6] || (lg_cnt - lg_cons) > 8176) begin
+          check(0, "L: the ring lapped during a chunk (not expected at this rate)");
+          lg_n = 0;
+        end else begin
+          lg_cons = lg_cons + lg_n;
+          wr2(8'h6A, (lg_base + lg_cons) & 8191);
+        end
+      end
+    end
+  endtask
+  // the lanes of the last chunk against the memory words it came from (lane 0 = core B [15:8] / 16-bit high byte, lane 1 =
+  // core A [7:0] / low byte for CH1), and how many LO -> HI transitions core A holds
+  integer lg_tr;
+  task lg_check_chunk(input integer cons0);
+    begin
+      okc = 1; lg_tr = 0;
+      for (j = 0; j < lg_n; j = j + 1) begin
+        if (lgd[j] !== dut.samples.mem[(lg_base + cons0 + j) & 8191][15:8]) okc = 0;
+        if (lgd[2048 + j] !== dut.samples.mem[(lg_base + cons0 + j) & 8191][7:0]) okc = 0;
+        if (lgd[2048 + j] != LO && lgd[2048 + j] != HI) okc = 0;
+        if (j > 0 && lgd[2048 + j - 1] == LO && lgd[2048 + j] == HI) lg_tr = lg_tr + 1;
+      end
     end
   endtask
 
@@ -374,15 +483,17 @@ module tb;
     if (!$value$plusargs("transcript=%s", tname)) tname = "contract.txt";
     tf = $fopen(tname, "w");
     #300;
-    note("setup: generator off, divider, trigger CH1 rising, level 128");
-    wr1(8'h50, 8'h00);
+    note("setup: generator off (0x153D: fpga_pat_drive(0) = 0x50 with four data bytes, fpga_pat_level(0) = 0x6D = 0), divider, trigger CH1 rising, level 128");
+    wr4(8'h50, 32'd0);
+    wr1(8'h6D, 8'h00);
     wr4(8'h0D, 32'd9);
     wr1(8'h15, 8'h00);
     wr1(8'h16, 8'h00);
     wr1(8'h17, 8'd128);
     wr_cmd(8'h06); rd_byte; rd_byte;
-    note("boot (0x153C, fw-c5 / fw-c7): fpga_trig_write(edge, hold-off 0, clear), counter 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source");
+    note("boot (0x153C / 0x153D, fw-c5 / fw-d5 / fw-c7): fpga_trig_write(edge, hold-off 0, clear), fpga_ptrig_write(zeros: the engine disarmed), counter 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source");
     fw_trig_write(8'h00, 24'd0, 24'd0, 32'd0, 1'b1);
+    fw_ptrig_write(8'h00, 8'h00, 8'h00, 16'h0000, 8'h00, 24'd0, 24'd0, 1'b0, 1'b0);
     fw_counter_config(8'd128, 8'd6, 2'd2, 2'd0);
     #2000;
 
@@ -581,6 +692,54 @@ module tb;
     check(ke > 0 && kw * 2 >= kt - 2 * ke && kw * 2 <= kt + 2 * ke, "K: duty 50 % within one sample per period");
     check(cnt[14] == LO && cnt[15] == HI, "K: min / max = the square's codes");
     wr1(8'h61, 8'h00);
+
+    //-------------------------------------------------------------------------------
+    // L: streaming logger (0x153D D1, fw-d4): LOG_START CH1 format 0 (legacy: lanes 0x21 = core B, 0x20 = core A) at
+    // D = 399 (a word every 4 us = 500 kS/s per channel, the contract's tier 1), a 20 us / 20 us square (5 words per half),
+    // a drain step after 250 us and another after 150 us more, then LOG_STOP with the tail
+    $fdisplay(tf, "#");
+    note("=== L: streaming logger, LOG_START CH1 format 0 (lanes 0x21, 0x20), D = 399, 0x1A = 0, 0x0E = 0; a 20 us square; two drains; LOG_STOP");
+    sig = 0;
+    nlanes = 2; lanes[0] = 8'h21; lanes[1] = 8'h20;
+    fw_log_start(32'd399, 2'd0);
+    check(lg[0][7] == 1'b1 && lg[0][6] == 1'b0, "L: 0x38 after the arm: streaming, no lap");
+    check(lg_w == lg_cnt[12:0] && lg_un == 0, "L: W = count mod 8192 and nothing unread before 0x6A");
+    fork
+      steps(10, 0, 20000, 20000);
+      begin
+        #250000;
+        fw_log_snapshot;
+        check(lg_cnt >= 60 && lg_cnt <= 64 && lg_w == lg_cnt[12:0] && lg_un == lg_cnt[15:0],
+              "L: 250 us later 60 .. 64 words written (4 us each), W = count, unread = count");
+        check(dut.sample_write_enable === 1'b1 && dut.sampling_triggered === 1'b0,
+              "L: the write runs and no trigger is taken while streaming (0x0A and 0x18 read 0)");
+        fw_log_chunk;
+        lg_check_chunk(0);
+        check(lg_n >= 60 && okc && lg_tr >= 5, "L: chunk 1 = the memory words, core A LO / HI with the square's 5 rising steps");
+        check(lg_un == lg_cnt[15:0] - lg_cons[15:0] + lg_n[15:0], "L: the second snapshot (before 0x6A) reads unread = count - consumed");
+        #150000;
+        fw_log_snapshot;
+        fw_log_chunk;
+        lg_check_chunk(lg_cons - lg_n);
+        check(lg_n >= 35 && okc && lg_tr >= 3, "L: chunk 2 contiguous with chunk 1 (the memory words from R)");
+      end
+    join
+    note("LOG_STOP: 0x69 = 00, then the tail: 0x38 and a chunk, repeated until a chunk reads nothing");
+    wr1(8'h69, 8'h00);
+    tries = 0;
+    while (tries < 8) begin
+      fw_log_snapshot;
+      fw_log_chunk;
+      tries = (lg_n == 0) ? 8 : tries + 1;
+    end
+    check(lg[0][7] == 1'b0 && lg[0][6] == 1'b0, "L: 0x38 after LOG_STOP: stream 0, no lap");
+    check(dut.sample_write_enable === 1'b0 && lg_un == 0 && lg_cons == lg_cnt,
+          "L: the write stopped (auto mode, 0x0E = 0), the tail drained: consumed = count, unread 0");
+    check(dut.trigger_address[12:0] == lg_w && lg_w == lg_cnt[12:0], "L: 0x14 = W = count mod 8192 after the stop");
+    check(lg_cnt >= 100 && lg_cnt <= 118, "L: 400 us of square plus the bus time at 4 us per word: 100 .. 118 words in all");
+    note("log ended: the UI's 0x0D restored (pc_log_finish), normal mode again");
+    wr4(8'h0D, 32'd9);
+    wr1(8'h1A, 8'h01);
 
     $fclose(tf);
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");
