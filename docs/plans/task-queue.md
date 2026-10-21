@@ -276,6 +276,15 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-c4 (Fable, dispatched 09:55, branch fpga-c4): 0x153C integration: the C0 cruft removal (section 13 list, 0x1B kept,
+  div20), version byte 0x3C, the timing re-roll on the merged source (known misses on q_pass / pp_i), contract_0x153C.txt,
+  run.sh 16 steps on two seeds, dist entry as a candidate (min_firmware 0.2.104), BITSTREAMS.md row, AGENTS.md status
+  with the owner's flash checklist.
+- fpga-c2 (Fable, dispatched 22:21, cut off and resumed, done 09:5x, merged 09:53 as 50cbc71): peak detect as the one-
+  register switch (dec_on includes peak_en; decim_chan at order 0 already behaves as K = 1); the shared dec_trig_sample
+  lines take the window max / min as the trigger byte; the reserved-bit writes in tb_decim / tb_fir / tb_seg keep bit 1
+  clear; tb_peak 45; full run.sh 16 steps ALL PASS both seeds on the merged source; TD +136 LUT alone with a -0.504 ns
+  miss on the sequencer's pp_i enable (lottery). WSL note: detached runs die when no wsl.exe stays attached.
 - fw-d5 (Opus, dispatched 09:03, reported 09:4x, merge handed back 09:50): the generator as a fractional two-step pattern
   behind SET_GEN (P16 / H16 raw modes; GEN response 40 B with the 0x39 status), SET_PATTERN 0x0217 (12 + 8n B, start at
   offset 10, pin hi-Z flag), SET_PATTERN_TRIGGER 0x021A (28 B, response 32 B), trigger source 3 = the marker (button
