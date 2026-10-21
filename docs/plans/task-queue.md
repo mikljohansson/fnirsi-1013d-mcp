@@ -306,6 +306,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3c interim (on 20:56): the register audit found nothing beyond the logger's W (fixed in 9ba3ddf): every register
+  loaded only on a stored write is reset explicitly or first read after one (ts_cap loaded by every record's first word);
+  tb_skip phase 6 checks 0x14 / 0x0A / 0x18 / 0x38 / 0x34 at D = 199999 before the first word and fails with the fix
+  reverted. Timing roll k4 (50b4abe, block order only): clk_200MHz 4.955 ns, 0 errors on every clock; 6385 LUT / 5887 reg /
+  7420 LE (85.9 %); capture margins >= 1.48 ns; reproducible raw 0e2cdbce...150e, padded 04e3328b...d0e7. tb_ext_trigger /
+  tb_decim end with random K = 0 captures at D = 1..9 against a model. Full two-seed run.sh running (4-5 h); push after.
 - fpga-d3b stopped at the account's Fable limit 19:1x; its fix committed and pushed by the coordinator as 9ba3ddf on fpga-d3.
   Owner 19:20: continue on Opus. fpga-d3c (Opus explicitly, dispatched 19:20, branch fpga-d3): the register audit, the
   remaining testbench updates, timing re-rolls, the two-seed run.sh, dist and docs; reuses fpga-d3b's running smoke runs.
