@@ -276,6 +276,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- Coordinator 15:1x: the account's session limit cut off fw-roll, fpga-d2, fpga-d3 and fpga-c4 at about 15:10 (the WSL runs
+  survived). The owner switched accounts and the coordinator to Opus: Fable only for the most difficult FPGA development
+  (D3 integration, later E1 / E2). fpga-d2, fpga-d3 and fw-roll resumed; fpga-c4's remaining step (the run text after the
+  rerun on bd24bdf) is done by the coordinator from ~/c4/logs/full2-*.log.
 - fpga-d2 status 15:06 (on request): both full runs alive in step 16 of 18, push expected about 16:10; build b6 of its merged
   pre-C4 source 7351 LUT / 6416 reg / 8321 LE (96 % of the LEs), clk_200MHz 22 errors at 6.49 ns (divider compare, accumulator
   RAM; pattern paths clean); two tb_decim K = 0 equivalence mismatches on both seeds under investigation, documented rather
