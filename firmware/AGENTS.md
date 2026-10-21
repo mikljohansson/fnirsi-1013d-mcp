@@ -4,12 +4,13 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-d4 (2026-10-21): fw 0.2.104 + D4 (version provisional), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built-for word still 0x153C; section 74.**
-**Branch fw-d5 (2026-10-21): fw 0.2.104 + D5 (version provisional), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M; still built for 0x153C until D3; section 75.**
-**Branch fw-cruft (2026-10-21): main 703e9c9, what 0x153C dropped (version not bumped, protocol 1.27 row 67): no 0x0F writes, READ_LIVE / caps bit 9 retired, 0x53 = K alone (SET_DECIM flags bits 0..2 dropped); open: the roll mode still reads the removed 0x24 / 0x26 (section 77).**
-**Branch fw-roll (2026-10-21): main 2611de2, roll mode on the 0x153D logger stream (version not bumped, protocol unchanged): the long time bases draw corrected column means of both channels from fpga_log (roll.c, roll_view.c, pc_glue_roll_*), the 1.00o5 roll trigger kept on the columns, every arm releases the stream, host ARM / LOG_START take precedence over a rolling UI, averagecommand / fpga_average_trace_data(_long) gone, check_retired_regs covers 0x24..0x27; section 78.**
-**Branch fw-nopat (2026-10-21): main 4fd9f2f, the pattern feature cut (owner 15:55; version not bumped, protocol 1.27 row 67): SET_PATTERN / SET_PATTERN_TRIGGER, trigger source 3, the engine and 0x6E / 0x6F / 0x76-0x7D / read 0x42 gone, caps 24 / 27 and features 12 / 13 reserved, the square on fpga-d3's RTL (commit taken at once), fpga_pat_* renamed fpga_gen_*; section 79.**
-**Branch fw-small (2026-10-21): main 803d215 + three small fixes (version not bumped), protocol unchanged: the forced stop writes 0x0E = 0 before 0x1A = 0 (`fpga_force_stop`), Vmax / Vmin / Vpp / Vp from the peak bytes with Sample = Peak (`pb_extremes`), the "ADC readout fault near code 128" message without the bitstream advice; section 76.**
+**Branch fw-105 (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): the merged fw-d4 / fw-d5 / fw-nopat / fw-roll / fw-small / fw-cruft numbered and built for FPGA 0x153D (`PC_FW_FPGA_VERSION`), the dead checks for a bitstream without the 0x153D features removed (LOG_START E_FPGA detail 1, `fpga_log_start` -2, roll's "needs 0x153D" stop, the wizard's CW_GAIN_NA, the Frequency response's caps test); section 80 has the owner's bench list.**
+**Branch fw-d4 (2026-10-21): fw 0.2.105 (was 0.2.104 + D4), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built for 0x153D since fw 0.2.105; section 74.**
+**Branch fw-d5 (2026-10-21): fw 0.2.105 (was 0.2.104 + D5), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M (the patterns cut by fw-nopat); fw 0.2.105 for 0x153D; section 75.**
+**Branch fw-cruft (2026-10-21): main 703e9c9, what 0x153C dropped (fw 0.2.105, protocol 1.27 row 67): no 0x0F writes, READ_LIVE / caps bit 9 retired, 0x53 = K alone (SET_DECIM flags bits 0..2 dropped); the roll mode's 0x24 / 0x26 reads it found are fw-roll's (section 77).**
+**Branch fw-roll (2026-10-21): main 2611de2, roll mode on the 0x153D logger stream (fw 0.2.105, protocol unchanged): the long time bases draw corrected column means of both channels from fpga_log (roll.c, roll_view.c, pc_glue_roll_*), the 1.00o5 roll trigger kept on the columns, every arm releases the stream, host ARM / LOG_START take precedence over a rolling UI, averagecommand / fpga_average_trace_data(_long) gone, check_retired_regs covers 0x24..0x27; section 78.**
+**Branch fw-nopat (2026-10-21): main 4fd9f2f, the pattern feature cut (owner 15:55; fw 0.2.105, protocol 1.27 row 67): SET_PATTERN / SET_PATTERN_TRIGGER, trigger source 3, the engine and 0x6E / 0x6F / 0x76-0x7D / read 0x42 gone, caps 24 / 27 and features 12 / 13 reserved, the square on fpga-d3's RTL (commit taken at once), fpga_pat_* renamed fpga_gen_*; section 79.**
+**Branch fw-small (2026-10-21): main 803d215 + three small fixes (fw 0.2.105), protocol unchanged: the forced stop writes 0x0E = 0 before 0x1A = 0 (`fpga_force_stop`), Vmax / Vmin / Vpp / Vp from the peak bytes with Sample = Peak (`pb_extremes`), the "ADC readout fault near code 128" message without the bitstream advice; section 76.**
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (fw 0.2.104), protocol 1.26 (row 66 "Peak detect"): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (fw 0.2.104), protocol 1.26 (row 66 addition): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
 **Branch ui-sample (2026-10-21): fw 0.2.103 + C6 + ui-sample (fw 0.2.104), protocol 1.26 unchanged: the ACQ menu's Sample row (478 px menu, Normal / Peak, the greyed Filter / Average with the Memory column's note, word 211 bit 3), peak records drawn as bars per column (`peak_bars.c`), phosphor bars, Trace style "Bars"; section 73.**
@@ -300,6 +301,7 @@ are pinned the same way; their history is in `git log -- firmware` and docs/hard
 | 0.2.50 | e871c50 | 1b55efc2 | calibration wizard (one modal three-step flow, 48e5737) and calibration v4: A - B interleave tracker applied in the full class, full-class common-mode class probe, GET_CAL 288 bytes, diagnostics lines (protocol 1.14, row 53; fw-cal3, section 28) | built, host-tested; bench lists README 6.4 and 6.5 |
 | 0.2.52 | c8f874b | e0968392 | diagnostics readers (fw-readers, section 30): GET_HEALTH 0x000A (USB state, CP15, power-on count, operating minutes, settings save state, stored restart record), unit life record in settings words 224..255 with one sector-709 write per boot, image identity record + SD_INFO IDENT (112 bytes), calibration provenance in sector 708 432..487 + GET_CAL 356 bytes, SAVE_REPORT 0x0504 (protocol 1.16, row 55) | built, host-tested (test_diag 462 checks); bench list in section 30 |
 | 0.2.65 | 37714c3 | 1de13bd1 | Measurements v2 (fw-meas, section 41; provisional number): MEASURES list per mode (Scope twelve per channel, Spectrum Peak / Level / THD / Noise per channel + RBW / Span / Center / Time in words 221..223), chosen display order (defaults Freq, Vpp, Vavg), one card row with "+N more", MEASURES menu with title and 44 px rows, card source hook for an FPGA counter | built, host-tested (test_ui 1,420,237 checks); bench list in section 41 |
+| 0.2.105 | e3f3baf | 3f4eb195 | built for FPGA 0x153D (fw-105, section 80): the streaming logger (fw-d4), the generator as a fractional square (fw-d5, patterns cut by fw-nopat), roll mode on the logger stream (fw-roll), the 0x0E force, the peak cards, the readout message (fw-small), the 0x153C cruft (fw-cruft), the checks for a bitstream without them removed; protocol 1.27 row 67 | built, host-tested; bench list section 80 |
 
 All of 0.2.12-0.2.20 contain the tick fallback, except the -nofb builds; 0.2.11 and 0.2.21+ do not. Full 0.2.19 sha256:
 9b94c9a8881db847b148eeed9d6011ddd84eaf94fb28d0a78b46817d43ad7fc4. The A/B pair differs from it only in the embedded
@@ -5674,7 +5676,7 @@ bars on a Normal record (a stale `pc_dec_raw_peak`), Average running with Peak.
   trace (the brief); a peak record's min / max per channel are in `pc_dec_raw` for a later card source. Done by fw-small (section 76).
 - The pass-time line's colour and the note's are literal 0xA0A0A0 in pc_hal_scope.c (no palette name for it).
 
-## 74. fw-d4: streaming logger (fw 0.2.104 + D4, version provisional, protocol 1.27, row 67 provisional)
+## 74. fw-d4: streaming logger (fw 0.2.105, protocol 1.27, row 67)
 
 Branch `fw-d4` (worktree) from main 55e5f6b (fw 0.2.104, protocol 1.26). Brief: item **D4** of `docs/plans/fpga-0x153c.md`
 section 10 (firmware logger) against the contract's sections 2.1, 2.2 and 6, written in parallel with fpga-d1 (the RTL) and
@@ -5782,7 +5784,7 @@ returning after a log (the loop's exit), the UI's time base wrong after a log (t
   gap (the counter jump x word clocks x 5 ns of missing time).
 - The device could show the log on the screen (a strip of the last chunk) later; out of scope (MCP-only feature).
 
-## 75. fw-d5: generator as a pattern, pattern generator and its trigger (fw 0.2.104 + D5, version provisional, protocol 1.27, row 67)
+## 75. fw-d5: generator as a pattern, pattern generator and its trigger (fw 0.2.105, protocol 1.27, row 67; patterns cut in 79)
 
 Branch `fw-d5` (worktree) from main 55e5f6b (fw 0.2.104, protocol 1.26). Brief: item **D5** of `docs/plans/fpga-0x153c.md`
 section 10 (sections 2.1 / 2.2 / 2.3, 7.2-7.5, 9.3) against fpga-d2's 0x153D RTL semantics (agreed by message, listed
@@ -5885,7 +5887,7 @@ there), the square restarting (a phase jump) on every frequency change.
 - No UI for patterns (host only, as decided); the generator menu shows the square's frequency while a host pattern drives
   the pin.
 
-## 76. fw-small: the 0x0E force, Vmax / Vmin / Vpp from the peak bytes, the readout fault message (version not bumped, protocol unchanged)
+## 76. fw-small: the 0x0E force, Vmax / Vmin / Vpp from the peak bytes, the readout fault message (fw 0.2.105, protocol unchanged)
 
 Branch `fw-small` from main 803d215. Commits 53551d4 (force), 7c3ced0 (peak cards), cee3268 (message), then the docs.
 Nothing benched; `PC_FW_VERSION` / `PC_FW_FPGA_VERSION` untouched (the coordinator numbers at the merge). No wire change.
@@ -5960,7 +5962,7 @@ OK, `make -s gcc10` without new warnings in the touched files.
   left to the coordinator.
 - ui-sample section 73's first "Open" bullet is done here.
 
-## 77. fw-cruft: what the 0x153C bitstream dropped, out of the firmware and the host (version not bumped, protocol 1.27 row 67)
+## 77. fw-cruft: what the 0x153C bitstream dropped, out of the firmware and the host (fw 0.2.105, protocol 1.27 row 67)
 
 Branch `fw-cruft` from main 703e9c9. Commits 43e2b0a (0x0F), b10bc96 (READ_LIVE, firmware + protocol + vectors), 1777a67
 (READ_LIVE, mcp), 19618eb (0x53 swap, firmware + protocol), eea44e1 (0x53 swap, mcp), then the docs. Nothing benched;
@@ -6019,7 +6021,7 @@ the channel settings. Left untouched here on the coordinator's instruction (`ave
 as they were); `check_retired_regs.py` does not list 0x24..0x27 for that reason (add them when the roll path changes).
 `scope_get_long_timebase_data1` (test.c 583) is a dead older copy with the same reads.
 
-## 78. fw-roll: roll mode on the 0x153D logger stream (version not bumped, protocol unchanged)
+## 78. fw-roll: roll mode on the 0x153D logger stream (fw 0.2.105, protocol unchanged)
 
 Branch `fw-roll` from main 2611de2. Commits 8e1458d (roll.c + test_roll), 827506f (roll_view.c, the stream glue, the
 removals), 532f8af (host precedence), 7ca8d78 (check_retired_regs), then the docs. **Nothing benched, nothing flashed**;
@@ -6131,7 +6133,7 @@ after roll (the stream not released: 0x69 still 1).
 - The trigger compares column means, so a pulse much shorter than a column (2 ms at 100 ms/div) may not trigger, as with
   1.00o5's averages.
 
-## 79. fw-nopat: the pattern feature cut, the square kept (version not bumped, protocol 1.27 row 67)
+## 79. fw-nopat: the pattern feature cut, the square kept (fw 0.2.105, protocol 1.27 row 67)
 
 Branch `fw-nopat` from main 4fd9f2f. Owner decision 2026-10-21 15:55 (docs/plans/task-queue.md "Pattern feature cut"):
 0x153D did not fit, so the pattern generator (8 steps, repeat, gap, the marker and its capture source, the pattern
@@ -6195,3 +6197,43 @@ a frequency change.
 **Open**
 - fpga-d3 confirms the start latency (8..9 clocks) from tb_square; the model assumes 8.
 - fpga/al3/README.md (fpga-d3's) still describes the 0x153D pattern generator in places; the RTL agent updates it.
+
+## 80. fw-105: fw 0.2.105, built for FPGA 0x153D (protocol 1.27, row 67)
+
+Branch `fw-105` from main 09a4693. Commits 387ef1e (the constants: `PC_FW_VERSION` 0.2.105, `PC_FW_FPGA_VERSION` 0x153D
+and its text; the host tests' words, the mismatch cases on 0x153C / 0x153E, test_fpga_bus's built-for resets on the 0x153D
+model), 5c0ea67 (the logger / roll refusal), fb3a28a (the wizard / Frequency response branches), 74eff0e (CHANGELOG fold,
+protocol row 67 and 5.1, README, guide), e3f3baf (mcp docs: the simulator's default 0x153D; `FW_FPGA_VERSION` was already
+0x153D). gcc10 image at e3f3baf: 811,008 bytes, sha256 prefix 3f4eb195 (the commit is part of the image, so later commits
+give other hashes; the coordinator pins the image at the merge). **Nothing benched, nothing flashed.**
+
+**Removed (one bitstream: every feature check is a mismatch check)**: `fpga_log_start`'s -2 (0x38 bit 7 clear after the
+arm), LOG_START's E_FPGA detail 1 "the FPGA does not stream (needs 0x153D)", roll_view's "Roll mode needs FPGA bitstream
+0x153D" (pc_glue_roll_start answers 0 / -1 / -3); the wizard's CW_GAIN_NA screen and `cw_init`'s `al3` argument (every
+caller passed 1); `bode_view_available`'s caps test with BU_W_NEEDS_FPGA (the later BU_W_* renumbered). Kept: the stream
+bit checked at every drain step (a stream that stops is a fault: LOG state 4, roll "FPGA stream stopped"); test_log checks
+it on the 0x153C model. No caps or features bit was conditional (fw-one fixed them; fw-nopat reserved 24 / 27, 12 / 13).
+
+**Bench (owner's batch; flash 0x153D from `fpga/al3/dist` per fpga/al3/AGENTS.md with the backup first, then FEL 0.2.105)**
+1. Boot: no mismatch notice; the first-run / Scope view as on 0.2.104. `#VER`: `fw=0.2.105,proto=1.27,fpga=0x153d`;
+   GET_INFO 76 = 0x153D, 78 = 0; Diagnostics Status "FPGA AL3A10 bitstream 0x153d: ...".
+2. Logger from the MCP: `scope_log` CH1 format 0 at 500 kS/s for 10 s on the 1 kHz post (section 74 steps 2-7: no gap,
+   the square continuous across chunks, the "Logging to the host" line, "Log ended", the Scope view back in STOP).
+3. Roll mode at 1 s/div, both channels on the post (or a 1 Hz signal), Auto then Normal: section 78 steps 1-2; a host
+   `scope_capture` and `scope_log` while rolling (step 3).
+4. Generator menu: the square at 1 kHz, then 7.3 MHz; the counter cards on CH1 read 1.000000 kHz and 7.3 MHz (the
+   fractional square's mean; GET_GEN P16 / H16 and byte 22 = 1); a frequency change on a running square shows no short
+   or long pulse (phosphor).
+5. A Frequency response sweep (100 Hz .. 1 MHz on an RC): READ_BODE rows carry P, the -3 dB as before; the main menu row
+   is live (grey only in the waveform viewer).
+6. The Type row (Pulse / Nth on the 1 kHz square) and the Sample row (Peak bars, Vmax from the peaks) as on 0.2.104;
+   the calibration wizard's four steps ("Step M of 4").
+7. The soak: 30 min with the MCP server polling (GET_STATUS / GET_HEALTH), a log and captures in between; no restart.
+Regression signs: the mismatch notice on 0x153D (the constant), LOG state 4 at once (the stream bit), roll stopping with
+"FPGA stream stopped" at once.
+
+**Open**
+- `pc_bode.c` `bh_live.has_fir` still reads caps FIR (always set); `ACAL_E_GAIN_NONE` (17) and its two texts are never
+  returned (the wizard's screen is gone). Both are older one-bitstream leftovers, not 0x153D checks; left for a cruft pass.
+- `docs/guide/install.md` / `agent-runbook.md` / `first-run.md` name 0x153B as the release's bitstream (the last release
+  text); they move with the 0.3.0 release notes, not here.
