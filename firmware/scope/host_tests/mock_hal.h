@@ -40,6 +40,10 @@ typedef struct
   uint32_t trig_ext_writes;
   uint8_t  trig_st[4];
   uint32_t trig_status_reads;
+  //C7 counter (fw-c7): what pc_hal_counter_read answers (a test fills the result), the last configuration asked for
+  pc_hw_counter cnt;
+  uint8_t  cnt_cfg[4];            //gate, source, level, hysteresis of the last pc_hal_counter_config
+  uint32_t cnt_configs;
   uint32_t read_calls;
   uint32_t max_read_start;        //largest start address passed to read_core (must be < ring)
   uint32_t debug_cmds[16];

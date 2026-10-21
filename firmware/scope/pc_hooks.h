@@ -57,6 +57,8 @@ int  pc_glue_host_busy(void);         //fw 0.2.68: a host acquisition in progres
 void pc_glue_host_stop(void);         //fw 0.2.68: the RUN/STOP button's STOP during a host acquisition: abort it
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
+void pc_glue_counter_pass(void);      //C7 counter: main loop after the capture readout: the 0x35 read (fpga_counter.h)
+#define PC_COUNTER_PASS()       pc_glue_counter_pass()
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
 int  pc_glue_fpga_mismatch(void);     //fw-one: the FPGA runs another bitstream than PC_FW_FPGA_VERSION (the notice screen)
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it

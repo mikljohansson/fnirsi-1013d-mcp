@@ -341,9 +341,12 @@ int main(void)
         //Go through the trace data and display the trace data
         scope_acquire_trace_data();
     }
-    
+
+    //C7 counter (fw-c7): one 0x35 read per pass after the capture readout; the cards show it from the next pass
+    PC_COUNTER_PASS();
+
     //--------------------------------------------------------------------------
-    
+
     PC_PASS_MARK(1);
 
     //Check developer mode and show DEV_mode on the screen

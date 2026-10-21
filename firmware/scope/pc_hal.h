@@ -131,6 +131,27 @@ void     pc_hal_trig_ext_read(pc_hw_trig_ext *t);                               
 void     pc_hal_trig_ext_write(const pc_hw_trig_ext *t);                               //[FPGA] 0x5E / 0x5F / 0x60 / 0x1B, 0x66 = 1
 void     pc_hal_trig_status(uint8_t out[4]);                                           //[FPGA] 0x37, then the 3 bytes of 0x34
 
+//C7 counter (fw-c7, FPGA 0x153C, protocol 1.26 row 66; fpga_counter.h): the hardware counter's configuration, the
+//result the main loop's pass holds and what it derived. Both calls are memory only (any context): the pass does every
+//bus access, a configuration is written by the next pass (GET_COUNTER is answered inside menus too).
+typedef struct
+{
+  uint8_t  gate;                //configured: 0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s (0x61 bits 1..0)
+  uint8_t  source;              //configured: 0 the trigger source, 1 CH1, 2 CH2, 3 EXT (0x61 bits 3..2)
+  uint8_t  level, hyst;         //in effect (0x62 as written; the trigger level when it is followed)
+  uint8_t  held;                //a result is held
+  uint8_t  current;             //and it is current: the gate on, the result younger than three gates + 100 ms
+  uint8_t  has_period;          //E >= 1
+  uint8_t  seq;                 //the result's sequence number
+  uint8_t  res_src;             //the result's source: 0 CH1, 1 CH2, 2 EXT
+  uint8_t  res_gate;            //the result's gate code
+  uint32_t e, t, w;             //periods, clocks, high clocks (5 ns clocks)
+  uint8_t  min, max;            //the source's raw codes over the gate (255 / 0 for EXT)
+} pc_hw_counter;
+
+void     pc_hal_counter_read(pc_hw_counter *c);                                        //any context (a memory read)
+void     pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst); //any context; level 0 = follow the trigger level
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Generator (Atlan4 DDS, FPGA 0x50-0x52)
 

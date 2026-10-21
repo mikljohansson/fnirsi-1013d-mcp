@@ -472,6 +472,54 @@ ui_ms_source ui_ms_get_source(int item)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+//C7 counter: the copy of the counter's latest result and the six timing cards' sources (the card rule: ui_meas.h)
+
+static ui_ms_counter ui_ms_cnt;
+
+void ui_ms_counter_set(const ui_ms_counter *c)
+{
+  ui_ms_cnt = *c;
+}
+
+int ui_ms_counter_text(int item, int ch, char *text)
+{
+  const ui_ms_counter *c = &ui_ms_cnt;
+
+  //The counter's result is for one channel: the other channel's cards (and anything else) use the record
+  if(!c->valid || (c->ch != ch))
+    return 0;
+
+  switch(item)
+  {
+    case UI_MEAS_FREQ:   ui_fmt_mhz(text, c->freq_mhz);  return 1;
+    case UI_MEAS_PERIOD: ui_fmt_ps(text, c->period_ps);  return 1;
+    case UI_MEAS_PWIDTH: ui_fmt_ps(text, c->width_ps);   return 1;
+    case UI_MEAS_NWIDTH: ui_fmt_ps(text, c->low_ps);     return 1;
+    //Duty in hundredths of a percent (ppm / 100), rounded
+    case UI_MEAS_PDUTY:  ui_fmt_sig4_fixed(text, (int32)((c->duty_ppm + 50) / 100), "%");              return 1;
+    case UI_MEAS_NDUTY:  ui_fmt_sig4_fixed(text, (int32)((1000000 - c->duty_ppm + 50) / 100), "%");    return 1;
+    default:             return 0;
+  }
+}
+
+static int ui_ms_cnt_freq(int ch, char *t)   { return ui_ms_counter_text(UI_MEAS_FREQ, ch, t); }
+static int ui_ms_cnt_period(int ch, char *t) { return ui_ms_counter_text(UI_MEAS_PERIOD, ch, t); }
+static int ui_ms_cnt_pwidth(int ch, char *t) { return ui_ms_counter_text(UI_MEAS_PWIDTH, ch, t); }
+static int ui_ms_cnt_nwidth(int ch, char *t) { return ui_ms_counter_text(UI_MEAS_NWIDTH, ch, t); }
+static int ui_ms_cnt_pduty(int ch, char *t)  { return ui_ms_counter_text(UI_MEAS_PDUTY, ch, t); }
+static int ui_ms_cnt_nduty(int ch, char *t)  { return ui_ms_counter_text(UI_MEAS_NDUTY, ch, t); }
+
+void ui_ms_counter_register(void)
+{
+  ui_ms_set_source(UI_MEAS_FREQ,   ui_ms_cnt_freq);
+  ui_ms_set_source(UI_MEAS_PERIOD, ui_ms_cnt_period);
+  ui_ms_set_source(UI_MEAS_PWIDTH, ui_ms_cnt_pwidth);
+  ui_ms_set_source(UI_MEAS_NWIDTH, ui_ms_cnt_nwidth);
+  ui_ms_set_source(UI_MEAS_PDUTY,  ui_ms_cnt_pduty);
+  ui_ms_set_source(UI_MEAS_NDUTY,  ui_ms_cnt_nduty);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 //MEASURES menu
 
 const char *ui_msm_title(int mode)

@@ -3399,8 +3399,9 @@ static PCHANNELSETTINGS scope_measures_source(int ch, uint32 *color)
 
 //fw 0.2.65: the chosen cards of a block in the chosen order (measuresstate holds the display rank, ui_meas.h), as many
 //as the block has places; with more chosen the last place reads "+N more". A live channel's card takes its value from a
-//registered card source (ui_ms_set_source, a future FPGA counter) when there is one, from the record statistics
-//otherwise; a reference trace always from its record.
+//registered card source (ui_ms_set_source; fw-c7: the FPGA counter's six timing cards, ui_meas.h "the card rule") when
+//there is one and it has a value for that channel (it returns 1), from the record statistics otherwise; a reference
+//trace always from its record.
 void scope_display_channel_measurements(int ch, int cap)
 {
   PCHANNELSETTINGS settings;
@@ -3420,9 +3421,7 @@ void scope_display_channel_measurements(int ch, int cap)
     measurementtext[0] = 0;
     src = live ? ui_ms_get_source(order[i]) : 0;
 
-    if(src)
-      src(ch, measurementtext);
-    else
+    if(!src || !src(ch, measurementtext))
       measurementfunctions[order[i]](settings);
 
     scope_draw_card(ui_ms_card_x(ch, i), UI_MS_SCOPE_Y, color, measurement_names[order[i]], measurementtext);
