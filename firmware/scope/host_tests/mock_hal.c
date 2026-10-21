@@ -71,6 +71,7 @@ void mock_reset(uint16_t fpga_version)
 
   mock_clear_resps();
   memset(&mock, 0, sizeof(mock));
+  mock_log_reset();                                  //D4 logger
   mock.now        = 5000;
   mock.version    = fpga_version;
   mock.ring_words = 8192;
@@ -977,4 +978,92 @@ uint8_t *pc_hal_sd_stage(uint32_t *capacity)
 {
   *capacity = sizeof(mock_stage);
   return mock_stage;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger: the log behind pc_hal_log_* (mock_hal.h). Words are appended by the test (mock_log_feed), byte k of word w is
+//(w * 7 + k) & 0xFF; start answers mock_log.start_rc
+mock_log_state mock_log;
+static uint8_t mock_log_mem[1u << 16];
+
+void mock_log_reset(void)
+{
+  memset(&mock_log, 0, sizeof(mock_log));
+}
+
+int pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit)
+{
+  uint8_t nch = (uint8_t)((ch_mask & 1) + ((ch_mask >> 1) & 1));
+  uint8_t bpw = (uint8_t)(nch * ((format == FPGA_LOG_F_HIGH) ? 1 : 2));
+
+  mock_log.starts++;
+  mock_log.ch_mask = ch_mask;
+  mock_log.format  = format;
+  mock_log.divider = divider;
+  mock_log.dc      = *dc;
+  mock_log.limit   = limit;
+  mock_log.next    = 0;
+  mock_log.gaps    = 0;
+  mock_log.flags   = 0;
+  mock_log.ms0     = mock.now;
+  pc_logring_reset(&mock_log.ring, mock_log_mem, sizeof(mock_log_mem), bpw);
+  mock_log.state   = (mock_log.start_rc == 0) ? FPGA_LOG_RUNNING : FPGA_LOG_ERROR;
+  mock_log.ms1     = mock.now;
+  return mock_log.start_rc;
+}
+
+void pc_hal_log_stop(uint8_t state)
+{
+  mock_log.stops++;
+  mock_log.stop_state = state;
+
+  if(mock_log.state == FPGA_LOG_RUNNING)
+  {
+    mock_log.state = state;
+    mock_log.ms1   = mock.now;
+  }
+}
+
+void pc_hal_log_info(pc_hw_log *l)
+{
+  memset(l, 0, sizeof(*l));
+  l->state      = mock_log.state;
+  l->ch_mask    = mock_log.ch_mask;
+  l->format     = mock_log.format;
+  l->flags      = mock_log.flags;
+  l->produced   = mock_log.ring.wr;
+  l->sent       = mock_log.ring.rd;
+  l->gaps       = mock_log.gaps;
+  l->ring_bytes = PC_LOG_RING_BYTES;
+  l->ms         = ((mock_log.state == FPGA_LOG_RUNNING) ? mock.now : mock_log.ms1) - mock_log.ms0;
+}
+
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags)
+{
+  mock_log.reads++;
+  return pc_logring_read(&mock_log.ring, dst, max, word, flags);
+}
+
+void mock_log_feed(uint32_t words, uint64_t skip, uint8_t flags)
+{
+  uint32_t room, i, k, bpw = mock_log.ring.bpw;
+  uint8_t *p;
+
+  if(skip)
+  {
+    mock_log.next += skip;
+    mock_log.gaps++;
+    mock_log.flags |= FPGA_LOG_FL_LAP;
+    flags |= PC_LOG_CF_GAP;
+  }
+
+  p = pc_logring_wptr(&mock_log.ring, mock_log.next, flags, &room);
+  assert(room >= words);
+
+  for(i=0;i<words;i++)
+    for(k=0;k<bpw;k++)
+      p[i * bpw + k] = (uint8_t)((mock_log.next + i) * 7 + k);
+
+  pc_logring_commit(&mock_log.ring, words, mock_log.next, flags);
+  mock_log.next += words;
 }

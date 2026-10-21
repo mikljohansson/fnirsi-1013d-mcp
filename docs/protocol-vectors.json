@@ -49,6 +49,9 @@
   "BODE_CTRL": 529,
   "READ_BODE": 530,
   "GET_COUNTER": 531,
+  "LOG_START": 532,
+  "LOG_READ": 533,
+  "LOG_STOP": 534,
   "SET_TRIGGER2": 537,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
@@ -7206,6 +7209,84 @@
    ]
   },
   {
+   "name": "req_log_start",
+   "description": "1.27 (fw-d4): log CH1, format 0 (legacy 8-bit), divider 399 (500 kS/s: the 1 ch 8-bit tier), until LOG_STOP",
+   "hex": "a513010014023700000010000000dc5a010000008f010000000000000000000095f50e91",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 55,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010000008f0100000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 55,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010000008f0100000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_read",
+   "description": "1.27 (fw-d4): the next chunk of the log, at most 65536 bytes (whole words); returns at once",
+   "hex": "a5130100150238000000080000003f720000010000000000cc0c7eae",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 56,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000010000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 533,
+     "seq": 56,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000010000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_stop",
+   "description": "1.27 (fw-d4): stop the log (the FPGA's tail is read into the DDR ring); the LOG summary",
+   "hex": "a513010016023900000000000000e001",
+   "frames": [
+    {
+     "cmd": 534,
+     "seq": 57,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 534,
+     "seq": 57,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ]
+  },
+  {
    "name": "resp_ping",
    "description": "PING response (spec section 13). The device parser drops frames with RESPONSE set",
    "hex": "a513010101000200000002000000b9ea6869ac2a93d8",
@@ -8179,6 +8260,154 @@
      "flags": 1,
      "len": 20,
      "payload": "040068797374657265736973203e206c6576656c"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "req_log_start_2ch_16bit_10s",
+   "description": "1.27 (fw-d4): CH1 + CH2, format 2 (filtered u16, SET_DECIM filter 1..3 first), divider 1599 (N 1600: 125 kS/s, the 2 ch 16-bit tier), 10 s",
+   "hex": "a513010014025a000000100000000081030200003f0600001027000000000000391b5c95",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 90,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "030200003f0600001027000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 90,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "030200003f0600001027000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_start_peak",
+   "description": "1.27 (fw-d4): CH1, format 3 (peak min / max pairs, SET_DECIM filter 4 first), divider 799 (window 800: 250 kS/s)",
+   "hex": "a513010014025b00000010000000d3c6010300001f030000000000000000000031a4c0b4",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 91,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010300001f0300000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 91,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010300001f0300000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_log_start_1_27",
+   "description": "1.27 (fw-d4) LOG_START response (LOG, 48 bytes): state 1 running, CH1, format 0, flags 0, divider 399, 100 ms, 400 clocks per sample (D + 1), 0 bytes produced / sent, 0 gaps, DDR ring 8 MiB, 0 ms",
+   "hex": "a513010114025c00000030000000ccee010100008f010000640000009001000000000000000000000000000000000000000000000000800000000000000000009c80df5b",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 92,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "010100008f01000064000000900100000000000000000000000000000000000000000000000080000000000000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_stop_1_27",
+   "description": "1.27 (fw-d4) LOG_STOP response: state 3 stopped, CH1 + CH2, format 2, flags 3 (a lap gap and a gap because the DDR ring was full), divider 1599, until stopped, 1600 clocks, 20 MB produced, 4000 bytes still unread, 2 gaps, 8 MiB ring, 40.012 s",
+   "hex": "a513010116025d000000300000009577030302033f0600000000000040060000002d310100000000601d31010000000002000000000080004c9c000000000000ccdf1bf8",
+   "frames": [
+    {
+     "cmd": 534,
+     "seq": 93,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "030302033f0600000000000040060000002d310100000000601d31010000000002000000000080004c9c000000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_read_1_27_gap",
+   "description": "1.27 (fw-d4) LOG_READ response: chunk 3, words 150..159 of a CH1 format 0 log (2 bytes per word: core B then core A), 20 bytes, flags 0x03 = running | gap (the counter jumped from 100 to 150: 50 words lost)",
+   "hex": "a513010115025e0000002400000079df030000009600000014000000030000001a1b212228292f3036373d3e44454b4c5253595a80af1898",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 94,
+     "status": 0,
+     "flags": 1,
+     "len": 36,
+     "payload": "030000009600000014000000030000001a1b212228292f3036373d3e44454b4c5253595a"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_read_1_27_ended",
+   "description": "1.27 (fw-d4) LOG_READ response after the end with nothing left: 0 bytes, flags 0x04 ended, format 1",
+   "hex": "a513010115025f00000010000000b27e070000009210000000000000040100000896f0b1",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 95,
+     "status": 0,
+     "flags": 1,
+     "len": 16,
+     "payload": "07000000921000000000000004010000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_start_e_bad_arg_rate",
+   "description": "1.27 (fw-d4) LOG_START E_BAD_ARG detail 1: the rate is above the contract's tiers (sample rate x bytes per sample x channels > 500,000 B/s); details 0 channels, 2 format (or the SET_DECIM filter does not fit it), 4 divider",
+   "hex": "a51301011402600004003d0000008086010072617465203e20353030206b422f733a203530306b203163682038622c203235306b20313662206f72203263682c203132356b2032636820313662e02d2cf6",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 96,
+     "status": 4,
+     "flags": 1,
+     "len": 61,
+     "payload": "010072617465203e20353030206b422f733a203530306b203163682038622c203235306b20313662206f72203263682c203132356b2032636820313662"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_e_state_logging",
+   "description": "1.27 (fw-d4) any command outside the F_BUSY / read-only sets and LOG_READ / LOG_STOP while logging: E_STATE detail 9",
+   "hex": "a513010100026100080019000000ac0e09006c6f6767696e673a204c4f475f53544f50206669727374d881760b",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 97,
+     "status": 8,
+     "flags": 1,
+     "len": 25,
+     "payload": "09006c6f6767696e673a204c4f475f53544f50206669727374"
     }
    ],
    "device_events": []

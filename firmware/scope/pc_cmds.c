@@ -15,6 +15,7 @@
 #include "pc_report.h"
 #include "pc_ident.h"
 #include "cap_stage.h"
+#include "fpga_log.h"         //D4 logger: the states, formats and flags (no bus access from here)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Dispatch table
@@ -130,6 +131,7 @@ void pc_variant_init(uint16_t version, pc_variant *v)
                   PC_CAP_HOLDOFF | PC_CAP_TRIG_TYPES |                                                 //1.26: 0x153C
                   PC_CAP_PEAK_DETECT |                                                                 //C6 peak detect
                   PC_CAP_COUNTER |                                                                     //C7 counter
+                  PC_CAP_LOGGER |                                                                      //D4 logger
                   PC_CAP_ENTER_FEL | PC_CAP_SHARED_MODE | PC_CAP_SD_SECTORS | PC_CAP_SCREENSHOT;
 
 #if PC_DEBUG
@@ -443,7 +445,8 @@ static uint16_t pc_features(const pc_session *s)
   return PC_FEAT_W_EXT_TRIGGER | PC_FEAT_W_DECIM | PC_FEAT_W_FIR | PC_FEAT_W_SEGMENTS | PC_FEAT_W_HW_AVERAGE |
          PC_FEAT_W_ENC_CHECK | PC_FEAT_W_CAPTURE | PC_FEAT_W_BODE | PC_FEAT_W_TRIG_TYPES |
          PC_FEAT_W_PEAK |                                                                 //C6 peak detect
-         PC_FEAT_W_COUNTER;                                                               //C7 counter
+         PC_FEAT_W_COUNTER |                                                              //C7 counter
+         PC_FEAT_W_LOGGER;                                                                //D4 logger
 }
 
 //1.17: features word, the UI's Average state and log2 of its records per hardware run (no FPGA access)
@@ -3226,6 +3229,214 @@ static int h_read_screen(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   return PC_OK;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger (fw-d4, item D4 of docs/plans/fpga-0x153c.md section 6.3; FPGA 0x153D 0x69 / 0x6A / 0x38; protocol 1.27 row 67,
+//byte-exact with mcp-d6). LOG_START arms the stream and the main loop becomes the log loop (pc_hal_scope.c): drain steps
+//into the 8 MiB DDR ring and MAIN polls, the Scope view frozen with a "Logging to the host" line. While it runs, every
+//command outside the F_BUSY and F_MODAL sets and LOG_READ / LOG_STOP answers E_STATE detail PC_STATE_LOGGING (pc_dispatch).
+//The log ends by LOG_STOP (state 3, the FPGA's tail read), its duration (2), or an error (4: the FPGA left stream mode, the
+//link reset or DTR dropped, or no LOG_READ for PC_LOG_HOST_MS); the DDR ring stays readable until the next LOG_START.
+
+//The LOG response (48 bytes): 0 state, 1 channels, 2 format, 3 flags, 4 u32 divider, 8 u32 duration_ms, 12 u32 sample
+//clocks, 16 u64 bytes produced, 24 u64 bytes sent, 32 u32 gaps, 36 u32 DDR ring bytes, 40 u32 ms since the start, 44 0
+static uint32_t pc_log_body(pc_session *s, uint8_t *p)
+{
+  pc_hw_log l;
+
+  pc_hal_log_info(&l);
+  memset(p, 0, PC_LOG_LEN);
+  p[0] = l.state;
+  p[1] = l.ch_mask;
+  p[2] = l.format;
+  p[3] = l.flags;
+  pc_put_u32(p + 4,  s->log_divider);
+  pc_put_u32(p + 8,  s->log_duration_ms);
+  pc_put_u32(p + 12, s->log_clocks);
+  pc_put_u64(p + 16, l.produced);
+  pc_put_u64(p + 24, l.sent);
+  pc_put_u32(p + 32, l.gaps);
+  pc_put_u32(p + 36, l.ring_bytes);
+  pc_put_u32(p + 40, l.ms);
+  return PC_LOG_LEN;
+}
+
+//Every poll: acq_state follows the log's end; MAIN stops a log whose host went away
+static void pc_log_service(pc_session *s, int ctx)
+{
+  pc_hw_log l;
+
+  if(s->acq_state != PC_ACQ_LOGGING)
+    return;
+
+  if((ctx == PC_CTX_MAIN) && (s->log_link_lost || ((pc_hal_ms() - s->log_read_ms) >= PC_LOG_HOST_MS)))
+  {
+    pc_hal_log_stop(FPGA_LOG_ERROR);
+    s->log_link_lost = 0;
+  }
+
+  pc_hal_log_info(&l);
+
+  if(l.state != FPGA_LOG_RUNNING)
+    s->acq_state = PC_ACQ_IDLE;
+}
+
+//LOG_START: u8 channels (bit 0 CH1, bit 1 CH2), u8 format (0 legacy 8-bit, 1 filtered high byte, 2 filtered 16-bit, 3 peak
+//pairs), u16 0, u32 divider (0x0D), u32 duration_ms (0 = until LOG_STOP), u32 0. The filter is SET_DECIM's (format 0 needs
+//it off, 1 / 2 a filter 1..3, 3 peak, each effective at this divider); the rate: sample rate x bytes per sample x channels
+//<= 500,000 B/s (contract 6.2: 500 kS/s 1 ch 8-bit, 250 kS/s 1 ch 16-bit / peak or 2 ch 8-bit, 125 kS/s 2 ch 16-bit)
+static int h_log_start(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint8_t  ch = req[0], fmt = req[1], set, mode, nch, bps;
+  uint32_t div = pc_get_u32(req + 4), dur = pc_get_u32(req + 8), clocks, wclocks;
+  uint64_t limit = 0;
+  pc_decim_cfg dc;
+  pc_hw_ui u;
+  int r;
+
+  (void)len;
+
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+    return pc_error(s, PC_E_STATE, 0, "host capture armed: STOP first");
+
+  pc_hal_ui_read(&u);
+
+  if(u.long_mode)
+    return pc_error(s, PC_E_STATE, 2, "UI long time base");
+
+  mode = pc_hal_display_mode();
+
+  if((mode != 0) && (mode != 4))
+    return pc_error(s, PC_E_STATE, PC_STATE_LOG_VIEW, "LOG_START needs the Scope view");
+
+  if((ch == 0) || (ch > 3))
+    return pc_error(s, PC_E_BAD_ARG, 0, "channels: bit 0 CH1, bit 1 CH2");
+
+  if(fmt >= FPGA_LOG_F_COUNT)
+    return pc_error(s, PC_E_BAD_ARG, 2, "format 0..3");
+
+  if(div > PC_DIVIDER_MAX)
+    return pc_error(s, PC_E_BAD_ARG, 4, "divider above 1048575");
+
+  set = pc_hal_decim_setting();
+  pc_decim_config(set & 3, set & (PC_DECIM_FLAGS | PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK), div, 2, pc_decim_has(), &dc);
+
+  if((fmt == FPGA_LOG_F_LEGACY) && pc_decim_wide(&dc))
+    return pc_error(s, PC_E_BAD_ARG, 2, "format 0 needs SET_DECIM filter 0");
+
+  if(((fmt == FPGA_LOG_F_HIGH) || (fmt == FPGA_LOG_F_16)) && (!dc.k || dc.peak))
+    return pc_error(s, PC_E_BAD_ARG, 2, "formats 1, 2 need SET_DECIM filter 1..3 at divider >= 1");
+
+  if((fmt == FPGA_LOG_F_PEAK) && !dc.peak)
+    return pc_error(s, PC_E_BAD_ARG, 2, "format 3 needs SET_DECIM filter 4 (peak) at divider >= 1");
+
+  //Sample clocks of 5 ns: D + 1 in the legacy layout (two samples per word), N on the 16-bit path (one per word)
+  clocks  = pc_decim_wide(&dc) ? dc.n : div + 1;
+  wclocks = pc_decim_wide(&dc) ? clocks : 2 * clocks;
+  nch     = (uint8_t)((ch & 1) + ((ch >> 1) & 1));
+  bps     = (uint8_t)(((fmt == FPGA_LOG_F_16) || (fmt == FPGA_LOG_F_PEAK)) ? 2 : 1);
+
+  //200e6 / clocks x bps x nch <= 500,000
+  if((uint32_t)400 * bps * nch > clocks)
+    return pc_error(s, PC_E_BAD_ARG, 1, "rate > 500 kB/s: 500k 1ch 8b, 250k 16b or 2ch, 125k 2ch 16b");
+
+  //Words for the duration, rounded up (200,000 clocks per ms)
+  if(dur)
+    limit = ((uint64_t)dur * 200000 + wclocks - 1) / wclocks;
+
+  //The UI's own conversions stop (the screen shows STOP after the log, as after a host ARM)
+  if(u.run)
+    pc_hal_ui_set_run(0);
+
+  if(s->settle_pending)
+  {
+    int32_t left = (int32_t)(s->settle_until - pc_hal_ms());
+
+    if((left > 0) && (left <= PC_SETTLE_MS))
+      pc_hal_delay_ms((uint32_t)left);
+
+    s->settle_pending = 0;
+  }
+
+  s->ring_valid      = 0;
+  s->log_used        = 1;
+  s->log_link_lost   = 0;
+  s->log_divider     = div;
+  s->log_duration_ms = dur;
+  s->log_clocks      = clocks;
+  s->log_seq         = 0;
+  s->log_read_ms     = pc_hal_ms();
+
+  r = pc_hal_log_start(ch, fmt, div, &dc, limit);
+
+  if(r == -1)
+    return pc_error(s, PC_E_FPGA, 0, "0x05 not ready");
+
+  if(r)
+    return pc_error(s, PC_E_FPGA, 1, "0x38: the FPGA does not stream (needs 0x153D)");
+
+  s->acq_state = PC_ACQ_LOGGING;
+  *rl = pc_log_body(s, resp);
+  return PC_OK;
+}
+
+//LOG_READ: u32 max_bytes (1..65536), u32 0. Returns at once: a 16-byte header (u32 seq: +1 per non-empty chunk, u32 the
+//FPGA word counter of the first word, u32 bytes, u8 flags: bit 0 running, 1 gap before this chunk, 2 ended (the log ended
+//and nothing is left after this chunk), 3 the gap includes words the full DDR ring refused; u8 format, u16 0) and whole
+//words of one segment, oldest first; 0 bytes when nothing is unread
+static int h_log_read(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  uint32_t max = pc_get_u32(req), n;
+  uint64_t w;
+  uint8_t  f;
+  pc_hw_log l;
+
+  (void)len;
+
+  if(!s->log_used)
+    return pc_error(s, PC_E_STATE, 0, "no log: LOG_START first");
+
+  if((max == 0) || (max > PC_LOG_READ_MAX))
+    return pc_error(s, PC_E_BAD_ARG, 0, "max_bytes 1..65536");
+
+  s->log_read_ms = pc_hal_ms();
+  n = pc_hal_log_read(resp + PC_LOG_HDR, max, &w, &f);
+  pc_hal_log_info(&l);
+
+  if(l.state == FPGA_LOG_RUNNING)
+    f |= PC_LOG_CF_RUNNING;
+  else if(l.sent == l.produced)
+    f |= PC_LOG_CF_ENDED;
+
+  if(n)
+    s->log_seq++;
+
+  pc_put_u32(resp,     s->log_seq);
+  pc_put_u32(resp + 4, (uint32_t)w);
+  pc_put_u32(resp + 8, n);
+  resp[12] = f;
+  resp[13] = l.format;
+  pc_put_u16(resp + 14, 0);
+  *rl = PC_LOG_HDR + n;
+  return PC_OK;
+}
+
+//LOG_STOP: no request bytes. Stops a running log (state 3; the words the FPGA wrote up to the stop are read into the DDR
+//ring), else changes nothing; the LOG response either way
+static int h_log_stop(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)req; (void)len;
+
+  if(s->acq_state == PC_ACQ_LOGGING)
+  {
+    pc_hal_log_stop(FPGA_LOG_STOPPED);
+    s->acq_state = PC_ACQ_IDLE;
+  }
+
+  *rl = pc_log_body(s, resp);
+  return PC_OK;
+}
+//D4 logger end
+
 static const pc_cmd_entry pc_cmds[] =
 {
   { PC_CMD_PING,         F_BUSY | F_CONTROL | F_BASIC, 0, h_ping },
@@ -3246,6 +3457,9 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_TRIGGER,  0,                            0, h_set_trigger },
   { PC_CMD_SET_TRIGGER2, 0,                            PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
   { PC_CMD_GET_COUNTER,  F_MODAL,                      PC_CAP_COUNTER, h_get_counter },       //C7 counter (memory only)
+  { PC_CMD_LOG_START,    0,                            PC_CAP_LOGGER, h_log_start },          //D4 logger
+  { PC_CMD_LOG_READ,     0,                            PC_CAP_LOGGER, h_log_read },           //D4 logger (MAIN: the drain's ring)
+  { PC_CMD_LOG_STOP,     F_CONTROL,                    PC_CAP_LOGGER, h_log_stop },           //D4 logger
   { PC_CMD_ARM,          0,                            0, h_arm },
   { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
   { PC_CMD_STOP,         F_CONTROL,                    0, h_stop },
@@ -3582,6 +3796,12 @@ static int pc_dispatch(pc_session *s, int ctx)
   {
     st = pc_error(s, PC_E_UNSUPPORTED, 0, "capability");
   }
+  //D4 logger: while logging only LOG_READ / LOG_STOP and the read-only sets run (the main loop is the log loop)
+  else if((s->acq_state == PC_ACQ_LOGGING) && !(e->flags & (F_BUSY | F_MODAL)) && (e->cmd != PC_CMD_LOG_READ) &&
+          (e->cmd != PC_CMD_LOG_STOP))
+  {
+    st = pc_error(s, PC_E_STATE, PC_STATE_LOGGING, "logging: LOG_STOP first");
+  }
   else if((ctx != PC_CTX_MAIN) && !(e->flags & F_BUSY) && !((ctx == PC_CTX_MODAL) && (e->flags & F_MODAL)))
   {
     //The timer-tick and BUSY polls leave these for the main loop. While the UI is modal (no main-loop pass for
@@ -3831,6 +4051,10 @@ static void pc_link_service(pc_session *s)
 {
   uint32_t ev = pc_hal_link_take_events();
 
+  //D4 logger: the host is gone; the next MAIN poll stops the log
+  if((ev & (PC_LINK_RESET | PC_LINK_DTR_DOWN)) && (s->acq_state == PC_ACQ_LOGGING))
+    s->log_link_lost = 1;
+
   if(ev & PC_LINK_RESET)
   {
     pc_parser_reset(&s->parser);
@@ -3903,6 +4127,7 @@ void pc_poll(pc_session *s, int ctx)
   //Link events in every context (session state only), before any new byte is parsed: the DTR edge of a new
   //connection must be seen before its first request
   pc_link_service(s);
+  pc_log_service(s, ctx);                         //D4 logger
 
   if(ctx == PC_CTX_MAIN)
   {
