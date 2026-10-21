@@ -945,6 +945,9 @@ void fpga_read_sample_data(PCHANNELSETTINGS settings, uint32 triggerpoint)
   //Calculate the signal center
   settings->center = (settings->max + settings->min) / 2;
 
+  //A peak record: Vmax / Vmin / Vpp from its min / max bytes (the center above stays the midpoint's)
+  pc_glue_peak_extremes(settings);
+
   //Calibration v4: an 8-bit full-class record of CH1 / CH2 to the A - B tracker
   acal_live_record(settings, wide);
   

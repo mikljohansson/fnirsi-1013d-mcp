@@ -900,9 +900,11 @@ Firmware sequence, derived from `fpga_do_conversion` [V `S100 fpga_control.c:604
    the arm (SET_TRIGGER2 writes them).
 5. Write 0x01 = 0 (release). State = ARMED, `ms_since_arm` restarts.
 
-**FORCE (0x0201).** REMOTE only, cap FORCE_TRIGGER. Ends an ARMED capture now. Implementation: write 0x1A
-= 0 (auto mode). The Atlan4 stop condition `~trigger_mode && time_base_timeout` then becomes true at once if
-the auto timeout has passed [V zaklad.v :444-447]; the next ARM restores the configured mode. Whether this
+**FORCE (0x0201).** REMOTE only, cap FORCE_TRIGGER. Ends an ARMED capture now. Implementation: write 0x0E
+= 0, then 0x1A = 0 (auto mode). The Atlan4 stop condition `~trigger_mode && time_base_timeout` then becomes true
+at once [V zaklad.v :444-447]; up to fw-small 0x1A = 0 alone left a capture armed with an explicit auto_timeout
+running until 0x0E expired. The firmware's auto-mode deadline uses the same writes. The next ARM restores the
+configured mode and 0x0E. Whether this
 works on each variant is test T7 [U]; the capability bit is only set after it passes. `E_STATE` if not
 ARMED.
 

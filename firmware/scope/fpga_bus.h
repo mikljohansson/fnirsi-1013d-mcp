@@ -58,6 +58,12 @@ typedef struct
 //0x01 = 0. 0 = released, -1 = ready never came
 int  fpga_arm_reset(const fpga_arm_cfg *c);
 
+//End a running capture now (fw-small): 0x0E = 0, then 0x1A = 0. The FPGA stops in auto mode only on ~trigger_mode &&
+//time_base_cnt > 0x0E (zaklad.v); 0x1A = 0 alone left an explicit auto_timeout (0x0E = the host's count) running up to
+//twice the deadline. On 0x153B+ the stop latches the newest total words (fpga/al3/README.md section 11, change 1) and a
+//0x0E / 0x1A write before the 0x14 read moves nothing (change 4). The next arm writes 0x0E again (fpga_arm_reset).
+void fpga_force_stop(void);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26; docs/plans/fpga-0x153c.md sections 2.1, 3, 3.6; the RTL
 // semantics in fpga/al3/AGENTS.md "0x153C C1 triggers"). Registers: 0x5E type (bits 2..0: 0 edge, 1 pulse width, 2 Nth

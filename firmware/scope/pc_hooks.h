@@ -93,6 +93,7 @@ uint32 pc_glue_decim_pre_words(uint32 samples);   //the same for the pretrigger,
 uint32 pc_glue_ui_read_start(uint32 addr);        //UI record start word: (0x14 - the 0x0B pretrigger words) mod the ring
 void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_data: 16-bit read + convert, odd pass
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
+void   pc_glue_peak_extremes(void *settings); //fpga_read_sample_data: a peak record's Vmax / Vmin / Vpp from its bytes
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
 //ui-sample: the ACQ menu's Sample row and the peak-detect record on screen (docs/plans/ui-rows.md section 3)
 void   pc_glue_acq_row_draw(void);    //the Average, Filter and Sample boxes and the Memory column's note (ui_acq_row_build)

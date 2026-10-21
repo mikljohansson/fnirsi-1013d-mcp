@@ -148,8 +148,8 @@ means 109..135, with CH1 A at a maximum standard deviation of 0.98 code, no rail
 - On 0x153A the firmware reads 0x36 after every accepted full-rate capture. A core whose count exceeds its chip
   partner's by more than 8 is flagged. A core flagged in 3 captures within a minute turns the Diagnostics verdict amber
   with "ADC capture flagged 3 times within a minute: run Calibrate."
-- The wizard's zero step measures at code 128 and fails with "ADC readout fault near code 128: check the FPGA
-  bitstream" when a core has no clean stage.
+- The wizard's zero step measures at code 128 and fails with "ADC readout fault near code 128: power-cycle and retry;
+  report it if it persists" when a core has no clean stage.
 
 One limit is written down as an inference: the self-check compares the two cores of a chip, so a fault on both cores
 of one chip at once would not be flagged after normal captures. The training sees it, since it counts each core alone

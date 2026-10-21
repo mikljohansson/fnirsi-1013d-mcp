@@ -1,7 +1,8 @@
 // test_peak_bars.c - the Scope view's bars for a peak-detect record (ui-sample, peak_bars.c), run natively: the column
 // walk at whole, fractional and zoomed-in steps, the correction and inversion, the record's end, the drawing into a
 // framebuffer column by column, the overload rule, the phosphor map's accumulation, and the decimation setting the UI
-// arms for Sample Peak and back (ui_ctrl.c ui_acq_decim_set into pc_decim_config, as pc_hal_scope.c pc_dec_config does).
+// arms for Sample Peak and back (ui_ctrl.c ui_acq_decim_set into pc_decim_config, as pc_hal_scope.c pc_dec_config does),
+// and (fw-small) the record's extremes for the Vmax / Vmin / Vpp cards (pb_extremes) against the drawn bars.
 
 #include <stdio.h>
 #include <string.h>
@@ -183,6 +184,64 @@ static void test_correction(void)
   T_TRUE(pb_next(&w, &lo, &hi));
   T_EQ(lo, 255 - pc_peak_code(200, gain, off));
   T_EQ(hi, 255 - pc_peak_code(105, gain, off));
+}
+
+//fw-small: the Vmax / Vmin / Vpp cards' extremes (pb_extremes) are the tallest bar's: the lowest min and the highest max
+//of the whole record through the same correction, inverted alike; the midpoint trace reaches the spike at about half
+static void test_extremes(void)
+{
+  static const uint32_t steps[] = { Q16(1.0), Q16(2.5), Q16(4.0), Q16(0.25) };
+  pb_walk  w;
+  int32_t  lo, hi, blo, bhi, l, h, mid_max = 0;
+  uint32_t gain = pc_peak_gain(70000, 71000), i, k;
+  int32_t  off  = pc_peak_off(-300000, -200000);
+  int      inv;
+
+  make_record();
+
+  //Identity correction: the spike 200 and the dip 20 in raw codes
+  pb_extremes(rec, N_REC, 65536, 0, 0, &lo, &hi);
+  T_EQ(lo, 20); T_EQ(hi, 200);
+  pb_extremes(rec, N_REC, 65536, 0, 1, &lo, &hi);
+  T_EQ(lo, 255 - 200); T_EQ(hi, 255 - 20);
+
+  //The midpoint trace (what the cards read before): the spike's sample at (105 + 200) / 2
+  for(i = 0; i < N_REC; i++)
+  {
+    int32_t m = pc_peak_mid((uint8_t)rec[i], (uint8_t)(rec[i] >> 8), 65536, 0);
+
+    if(m > mid_max)
+      mid_max = m;
+  }
+  T_EQ(mid_max, 153);
+  pb_extremes(rec, N_REC, 65536, 0, 0, &lo, &hi);
+  T_EQ(hi - mid_max, 47);                                     //the card now reads the spike, not its midpoint
+
+  //With a correction, both polarities and every column step: equal to the extremes over the drawn bars
+  for(inv = 0; inv < 2; inv++)
+  {
+    pb_extremes(rec, N_REC, gain, off, inv, &lo, &hi);
+    T_EQ(lo, inv ? 255 - pc_peak_code(200, gain, off) : pc_peak_code(20, gain, off));
+    T_EQ(hi, inv ? 255 - pc_peak_code(20, gain, off) : pc_peak_code(200, gain, off));
+
+    for(k = 0; k < sizeof(steps) / sizeof(steps[0]); k++)
+    {
+      blo = 255; bhi = 0;
+      pb_start(&w, rec, N_REC, 0, steps[k], gain, off, inv);
+
+      while(pb_next(&w, &l, &h))
+      {
+        if(l < blo) blo = l;
+        if(h > bhi) bhi = h;
+      }
+
+      T_EQ(blo, lo); T_EQ(bhi, hi);
+    }
+  }
+
+  //An empty record: nothing (the caller keeps the midpoint's values)
+  pb_extremes(rec, 0, gain, off, 0, &lo, &hi);
+  T_EQ(lo, 255); T_EQ(hi, 0);
 }
 
 //The drawing: one vertical run per column from the upper to the lower row, nothing else in the column
@@ -404,6 +463,7 @@ int main(void)
   test_walk_zoom();
   test_walk_end();
   test_correction();
+  test_extremes();
   test_draw_pixels();
   test_overload();
   test_phosphor();

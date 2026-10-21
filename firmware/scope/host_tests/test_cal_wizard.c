@@ -289,7 +289,7 @@ static void test_zero_fail_detail(void)
   rc[0] = ACAL_E_READOUT;
   cw_zero_result(&w, rc, match_ok);
   cw_zero_line(&w, 0, t);
-  T_STR(t, "CH1: ADC readout fault near code 128: check the FPGA bitstream");
+  T_STR(t, "CH1: ADC readout fault near code 128: power-cycle and retry; report it if it persists");
   T_TRUE(ui_text_width(&font_3, t) <= RESULT_W);
 
   //Other reasons keep their words
@@ -379,7 +379,7 @@ static void test_zero_fail_note(void)
   T_STR(t, "Capture stages: no clean stage for CH2 A, CH2 B");
   T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
   cw_zero_line(&w, 1, t);
-  T_STR(t, "CH2: ADC readout fault near code 128: check the FPGA bitstream");
+  T_STR(t, "CH2: ADC readout fault near code 128: power-cycle and retry; report it if it persists");
   rc[1] = ACAL_OK;
   ev(&w, CW_EV_CALIBRATE);
   take(&w);

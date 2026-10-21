@@ -218,7 +218,7 @@ int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_time
                     const pc_decim_cfg *dc, const pc_seq_cfg *sq);
 void     pc_hal_acq_poll(int *done, int *triggered);                                   //0x0A bit 0, 0x18 bit 0
 uint16_t pc_hal_acq_finish(void);                                                      //post-done writes, returns 0x14 & 0x1FFF
-void     pc_hal_force(void);                                                           //0x1A = 0
+void     pc_hal_force(void);                                                           //0x0E = 0, 0x1A = 0
 uint8_t  pc_hal_ext_status(void);                                                      //0x28: bit0 level, bit1 gen on, bit2 edge seen
 
 //Read count bytes of one core (0..3 = FPGA 0x20..0x23) from ring word start, splitting at the ring end, one dummy read

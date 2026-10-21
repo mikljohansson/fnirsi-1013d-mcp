@@ -116,6 +116,15 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   return 0;
 }
 
+void fpga_force_stop(void)
+{
+  //0x0E first: while 0x1A still reads normal its intermediate bytes stop nothing; then 0x1A = 0 meets time_base_cnt > 0
+  fpga_write_cmd(0x0E);
+  fpga_write_int(0);
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger types and hold-off (0x153C, fw-c5): fpga_bus.h
 
