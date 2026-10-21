@@ -276,6 +276,14 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-c5 (Opus, dispatched 04:32, branch fw-c5): 0x153C item C5, firmware trigger types + hold-off: PC_FW_FPGA_VERSION 0x153C,
+  caps bits, SET_TRIGGER2 0x0219 / GET_TRIGGER per the contract (protocol 1.26, row 66), the arm sequence of 3.5, runt /
+  window / range refused until 0x153E, fpga_model.c, host tests, vectors, docs. C6 (peak detect), C7 (counter) and the two
+  UI rows start after it merges.
+- mcp-c8 (Opus, dispatched 04:34, branch mcp-c8): MCP protocol 1.26 for 0x153C: SET_TRIGGER2 / GET_TRIGGER / GET_COUNTER /
+  SET_DECIM mode 4 / READ_RAW layout 3, scope.py methods, tools (trigger types on scope_set_trigger, scope_counter, peak on
+  scope_capture, report kinds), simulator models, vectors, docs; plus fw-one's leftovers (mismatch caveat in scope_info,
+  ui_averaging_records, the --variant table, "on 0x1534 / 0x1536" wording). Vectors reconciled with fw-c5 at the merge.
 - fpga-spec measured update (done 23:27, merged 23:29 as bb2880b; 827 lines): TD-measured deltas on the 0x153B source: DDS -61
   LUT, cruft (0x1B/0x3C/0x41/0x24-0x27 decoder entries, dec_neg, dec_swap, sample_read_enable, trigger_detect_enable, w_last
   under SIM) -78, divider compare 32->20 bits -53; the two-step fractional pattern core +48 LUT / +231 reg (one 16-bit
