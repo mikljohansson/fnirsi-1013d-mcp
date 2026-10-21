@@ -55,7 +55,7 @@ remote lock-out: you and the agent change the same live settings, and the screen
   arm, wait, force and stop; averaged captures aligned on an edge, or summed in the FPGA; a burst of
   triggers captured back to back (built and simulator-tested, not yet benched); capture and FFT; a
   pulse-induction decay fit; measurements; the hardware counter (frequency, period, width and duty at 5 ns
-  resolution, FPGA 0x153C); calibrate volts against a known DC voltage.
+  resolution, FPGA 0x153D); calibrate volts against a known DC voltage.
 - **Analyse**: decode UART, SPI or I2C from a capture; test captures against a mask built from a reference; a DVM
   readout (DC, AC RMS, true RMS, min, max, frequency) with a statement of its real resolution; export any result as CSV.
 - **Drive**, each with a confirmation token: the generator, a loopback self-test, a Bode sweep. Every
@@ -77,7 +77,7 @@ Code skills: `fnirsi-scope` (how to measure) and `fnirsi-install` (the install r
 ## What's next
 
 Ideas, not promises ([`docs/plans/roadmap.md`](docs/plans/roadmap.md), sections 6 and 8): more trigger types (pulse
-width, Nth edge, runt, window, timeout) behind a Type row in the trigger menu; peak-detect acquisition; a streaming
+width, Nth edge, timeout) behind a Type row in the trigger menu; peak-detect acquisition; a streaming
 data logger (continuous filtered samples at up to about 1 MS/s into the 32 MB RAM and on to the host); a hardware
 frequency and period counter feeding the measurement cards; deeper plain
 memory (about 24,576 samples per channel from the spare block RAM); a DVM readout, serial decode, mask testing and
@@ -112,7 +112,7 @@ when any check fails. In Claude Code the `fnirsi-install` skill picks the runboo
    [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) and check them with
    `sha256sum -c SHA256SUMS --ignore-missing`.
 2. **Back up** the SD card you will use and the FPGA flash, twice ([`docs/guide/prepare.md`](docs/guide/prepare.md)).
-3. **Flash the bitstream** (0x153B) with your SPI programmer as [`fpga/al3/dist/BITSTREAMS.md`](fpga/al3/dist/BITSTREAMS.md)
+3. **Flash the bitstream** (0x153D) with your SPI programmer as [`fpga/al3/dist/BITSTREAMS.md`](fpga/al3/dist/BITSTREAMS.md)
    describes. The FPGA comes before the card: with the stock bitstream, this firmware only shows a banner.
 4. **Prepare the card** with one FAT32 partition that starts at 8 MiB (sector 16384) or later: the `parted` and
    `diskpart` commands are in [`docs/guide/install.md`](docs/guide/install.md), "Prepare the card".

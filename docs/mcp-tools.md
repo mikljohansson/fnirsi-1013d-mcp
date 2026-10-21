@@ -195,7 +195,7 @@ available remotely in protocol v1."
 | `pretrigger_fraction` | 0..1 | or `pretrigger_samples` (even) |
 | `total_samples` | int | even, 80 .. max for the bitstream |
 | `auto_timeout` | float s | auto mode only |
-| `type` | `"edge"`, `"pulse_width"`, `"nth_edge"`, `"timeout"` | protocol 1.26 (caps TRIG_TYPES, SET_TRIGGER2): `runt` / `window` are refused with the hint "FPGA 0x153E" |
+| `type` | `"edge"`, `"pulse_width"`, `"nth_edge"`, `"timeout"` | protocol 1.26 (caps TRIG_TYPES, SET_TRIGGER2): `runt` / `window` are not offered and are refused |
 | `polarity` | `"positive"` / `"negative"` (pulse), `"rising"` / `"falling"` (edge, nth_edge), `"high"` / `"low"` (timeout) | per type; the edge type's polarity is `edge` |
 | `width` | float s | pulse_width: the width compared with (the trigger is the trailing edge); timeout: the held time. Converted to samples of the trigger stream in effect (one memory word on CH1 / CH2: 2 / fs legacy, 1 / fs filtered or peak; 5 ns on EXT), rounded to the nearest, clamped to 1 .. 16777215 with a caveat; the firmware converts nothing |
 | `longer` | bool | pulse_width: pulses longer than `width` (default shorter) |

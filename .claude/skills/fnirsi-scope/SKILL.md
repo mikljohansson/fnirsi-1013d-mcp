@@ -31,7 +31,7 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
 - Trigger types (caps `TRIG_TYPES`, guide 3c): `scope_set_trigger(type='pulse_width', polarity, width, longer)`,
   `type='nth_edge'` (`n`, `idle`), `type='timeout'` (`polarity`, `width`); widths in seconds, rounded to one
   trigger-stream sample (2 / fs legacy, 1 / fs filtered, 5 ns EXT: the result says). `hold_off` (seconds) skips
-  the pulses of a train. Runt / window need the 0x153E bitstream.
+  the pulses of a train.
 
 ## Take data
 
