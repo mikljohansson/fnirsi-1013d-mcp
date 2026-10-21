@@ -2263,7 +2263,11 @@ assign sampling_enable = ~(
 //at the next write clock edge (an auto capture whose time-out has elapsed stops there and W freezes).
 //Bookkeeping on clk_200MHz; the write clock is read only through the sequencer's settled snapshot (swc_rise_q, with
 //adv_d / swe_d / ssr_d = what the capture logic saw at that edge), as the sequencer's sn_* registers:
-//  p_wr / p_wa:  a word was written at the last write clock edge; the address after it (W, held while nothing is written);
+//  p_wr / p_wa:  a word was written at the last write clock edge; the address after it (W, held while nothing is written;
+//                0x153D: also loaded, with 0, at a reset edge: with the write clock at full rate the 0x05 ready wait is
+//                60 ns plus the bus time at every rate, and at D = 399 with K = 0 no stored pair need fall in that window,
+//                so without it W kept the previous record's end while lg_cnt read 0 and the firmware's base = W - count
+//                pointed 46 words past word 0: tb_seqcontract scenario L on the 646c453 source);
 //  p_rst:        that edge was a reset edge (0x01 = 1): its write is not counted, word 0 of the next capture is;
 //  lg_cnt:       words written since 0x01 = 0, 32 bits (wraps), as two 16-bit halves with a registered carry (lo_ones):
 //                writes are at least two clocks apart, so the flag is current at every count (a 32-bit increment in one
@@ -2310,7 +2314,7 @@ assign sampling_enable = ~(
       p_v   <= swc_rise_q;
       p_wr  <= swc_rise_q & adv_d & swe_d;
       p_rst <= ssr_d;
-      if(swc_rise_q & adv_d & swe_d)
+      if(swc_rise_q & (ssr_d | (adv_d & swe_d)))      //0x153D: a reset edge too (the address is 0 after it), see above
         p_wa <= sample_write_address;
       lg_wa <= p_wa;
 
