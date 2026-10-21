@@ -298,7 +298,7 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 
 static bode_eng eng;
 static dut      D;
-static bode_hw  HW = { &D, h_ms, h_gen, h_channel, h_info, h_arm, h_poll, h_force, h_read, 1 };
+static bode_hw  HW = { &D, h_ms, h_gen, h_channel, h_info, h_arm, h_poll, h_force, h_read };
 
 static void dut_rc(dut *d)
 {

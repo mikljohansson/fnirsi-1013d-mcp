@@ -148,12 +148,12 @@ extern fpga_bus_writes fpga_bus_wr;
 //Called with every completed write (command, value). 1 = one of the writes above (event 22 material)
 int  fpga_bus_note_write(uint8_t cmd, uint32_t value);
 
-//Decimation registers before a sampling reset (fw 0.2.87, from pc_dec_apply): 0x53 = mode and, with has_fir, 0x56 =
+//Decimation registers before a sampling reset (fw 0.2.87, from pc_dec_apply): 0x53 = mode and 0x56 =
 //cmd56 (bit 0 FIR enable, bit 1 peak detect: pc_decim_cmd56) when they differ from what the FPGA holds; with K = mode
 //bits 1:0 >= 1, 0x54 = shift at every call, so a shift written for another divider (or lost, or written by someone else)
 //cannot survive an arm. 1 = the filter must settle: a value differs from what the FPGA held, or the divider changed
 //since the previous call.
-int  fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift);
+int  fpga_decim_write(uint8_t mode, uint8_t cmd56, uint8_t shift);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator (FPGA 0x153D, fw-d5; cut to the square by fw-nopat, docs/plans/fpga-0x153c.md 2.1). The DDS (0x51 /

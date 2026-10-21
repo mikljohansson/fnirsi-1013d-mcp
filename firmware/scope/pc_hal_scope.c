@@ -710,12 +710,6 @@ static int16         pc_dec_feed[PC_DEC_RING + 2];    //converted samples for fp
 static int16        *pc_dec_even_src;
 int16               *pc_decim_src;
 
-//PC_DECIM_HAS_*: what the built-for bitstream offers (the filter with the FIR; pc_decim_has adds the capture stages)
-static int pc_dec_has(void)
-{
-  return PC_DECIM_HAS_FIR;
-}
-
 //fw 0.2.87: the divider the FPGA holds (the last 0x0D anyone wrote, tracked by fpga_bus_note_write), the UI table's
 //before the first write. Every decimation configuration is computed from it: the UI time/div can be snapped without a
 //0x0D write (acq_view_fit) and the session can forget a host's raw divider, the FPGA does neither (section 57).
@@ -786,10 +780,7 @@ static void pc_dec_apply(const pc_decim_cfg *c)
 {
   int settle;
 
-  if(!pc_dec_has())
-    return;
-
-  settle = fpga_decim_write(pc_decim_mode(c), pc_dec_has() >= PC_DECIM_HAS_FIR, pc_decim_cmd56(c), c->shift);
+  settle = fpga_decim_write(pc_decim_mode(c), pc_decim_cmd56(c), c->shift);
 
   if(pc_decim_wide(c))
   {
@@ -1145,7 +1136,7 @@ static void pc_dec_follow_mode(void)
 
   pc_dec_mode_seen = m;
 
-  if(pc_dec_has() && pc_dec_ui_wide())
+  if(pc_dec_ui_wide())
   {
     pc_dec_fit_memory();
     acq_view_fit(0);
@@ -1156,12 +1147,12 @@ static void pc_dec_follow_mode(void)
 
 static const char *pc_dec_names[8] = { "off", "boxcar", "CIC2", "CIC3", "off", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
 
-//Index into pc_dec_names: "+FIR" only where the bitstream has it
+//Index into pc_dec_names: "+FIR" with the filter on
 static uint32 pc_dec_name_index(void)
 {
   uint32 k = pc_dec_setting & 3;
 
-  return ((pc_dec_has() >= PC_DECIM_HAS_FIR) && (pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
+  return ((pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
 }
 
 //ui-sample (docs/plans/ui-rows.md section 3): the ACQ menu's row as data (ui_ctrl.h ui_acq_row_build)
@@ -1351,7 +1342,7 @@ void pc_glue_settings_defaults(void)
   if(pc_ready)
     pc_trig_restore_apply();
 
-  if(pc_dec_has() && (pc_dec_setting & 3))
+  if(pc_dec_setting & 3)
     pc_dec_fit_memory();
 }
 
@@ -1359,12 +1350,7 @@ void pc_glue_decim_tap(void)
 {
   uint32 k = pc_dec_setting & 3, fir = (pc_dec_setting & PC_DECIM_SET_FIR) != 0;
 
-  if(pc_dec_has() < PC_DECIM_HAS_FIR)
-  {
-    k   = (k + 1) & 3;
-    fir = 0;
-  }
-  else if(k && !fir)
+  if(k && !fir)
     fir = 1;
   else
   {
@@ -1413,7 +1399,7 @@ void pc_hal_decim_current(pc_decim_cfg *c, int *written)
 
 uint16_t pc_hal_decim_readback(void)
 {
-  return pc_dec_has() ? fpga_get_decim_state() : 0;
+  return fpga_get_decim_state();
 }
 
 const uint16_t *pc_hal_trace16(int ch, uint32_t *count)
@@ -1510,7 +1496,7 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8)(fpgasettings.settriggerpoint >> 8);
   b[n++] = (uint8)fpgasettings.totalsamples;
   b[n++] = (uint8)(fpgasettings.totalsamples >> 8);
-  b[n++] = pc_dec_has() ? pc_hal_decim_setting() : 0;
+  b[n++] = pc_hal_decim_setting();
   //1.26: the trigger extension (a type, N, H or hold-off change is a capture-relevant setting)
   b[n++] = fpga_trig.type;
   b[n++] = fpga_trig.longer;
@@ -1794,18 +1780,13 @@ int pc_glue_ui_has(int feature)
 
   switch(feature)
   {
-    case PC_FEAT_GEN_DDS:
-    case PC_FEAT_EXT_TRIGGER:
-    case PC_FEAT_DECIM:
-      return 1;
-
     case PC_FEAT_RTC:
       return pc_rtc_present;
 
     default:
       //With the Filter on or Sample Peak, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
       if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + ACQ_MEM_CHIPS))
-        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_has() && pc_dec_ui_wide(), PC_DECIM_MAX_TOTAL) >>
+        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_ui_wide(), PC_DECIM_MAX_TOTAL) >>
                 (feature - PC_FEAT_MEM_BASE)) & 1;
 
       return 1;
@@ -1832,16 +1813,10 @@ void pc_glue_ui_mask(int menu)
   switch(menu)
   {
 
-    case PC_MASK_TRIG_CHANNEL:
-      if(!pc_glue_ui_has(PC_FEAT_EXT_TRIGGER))
-        pc_mask_rect(TRIGGER_MENU_XPOS + 170, TRIGGER_MENU_YPOS + 127, 37, 26);
-      break;
-
     case PC_MASK_ACQ_FILTER:
       //1.00o5's Long memory slot holds the decimation Filter selector; ui-sample: the Average, Filter and Sample boxes
       //and the Memory column's note, drawn together (Peak greys two of them)
-      if(pc_glue_ui_has(PC_FEAT_DECIM))
-        pc_glue_acq_row_draw();
+      pc_glue_acq_row_draw();
       break;
 
     case PC_MASK_ACQ_MEMORY:
@@ -1971,7 +1946,6 @@ void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
 //fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
 //taken by a Bode capture (the PC's last capture is gone)
-uint32 pc_glue_caps(void)          { return pc_ready ? pc_sess.var.caps : 0; }
 uint32 pc_glue_ring_words(void)    { return (pc_ready && pc_sess.var.ring_words) ? pc_sess.var.ring_words : 8192; }
 
 int pc_glue_host_capture(void)
@@ -2196,7 +2170,7 @@ static void pc_ui_setting_restore(uint16 w)
   pc_dec_peak = peak;
 
   //Sample Peak runs the 16-bit layout: the depth limit as for the Filter (fixed up before this for the Filter alone)
-  if(pc_dec_has() && pc_dec_ui_wide())
+  if(pc_dec_ui_wide())
     pc_dec_fit_memory();
 }
 
@@ -2335,7 +2309,7 @@ static void pc_ui_fix_settings(void)
     }
   }
 
-  if(pc_dec_has() && (pc_dec_setting & 3))
+  if(pc_dec_setting & 3)
     pc_dec_fit_memory();
 
   //Trace style 3 was 1.00o5's "Pro", removed in fw 0.2.63: a sector saved with it draws Linear

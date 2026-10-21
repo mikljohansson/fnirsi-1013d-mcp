@@ -5906,7 +5906,6 @@ void scope_trigger_channel_select(void)
 
   //Display the CH2 text
   display_text(TRIGGER_MENU_XPOS+176, TRIGGER_MENU_YPOS+132, "EXT");
-  PC_UI_MASK(PC_MASK_TRIG_CHANNEL);
 }
 
 //==============================================================================

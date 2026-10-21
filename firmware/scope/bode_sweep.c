@@ -270,7 +270,7 @@ static void result(bode_eng *e, int i, const bode_meas *m, int coll, int retries
   int32 bg = e->bg_mdb[i][e->range[1] % 6];
   uint16 f = bode_meas_flags(m, coll);
 
-  if((pp->n >= 16) && !(pp->n & 3) && e->hw->has_fir && !e->last_fir)
+  if((pp->n >= 16) && !(pp->n & 3) && !e->last_fir)
                                               f |= BODE_F_FIR_OFF;
   if((bg > BODE_MDB_FLOOR) && (m->c[1].lvl_mdb < bg + NEAR_FLOOR_MDB))
                                               f |= BODE_F_NEAR_FLOOR;

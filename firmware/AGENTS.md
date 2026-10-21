@@ -6237,3 +6237,55 @@ Regression signs: the mismatch notice on 0x153D (the constant), LOG state 4 at o
   returned (the wizard's screen is gone). Both are older one-bitstream leftovers, not 0x153D checks; left for a cruft pass.
 - `docs/guide/install.md` / `agent-runbook.md` / `first-run.md` name 0x153B as the release's bitstream (the last release
   text); they move with the 0.3.0 release notes, not here.
+
+## 81. fw-left: the one-bitstream leftovers and FORCE on a sequencer run (fw 0.2.105, protocol 1.27 row 67)
+
+Branch `fw-left` from main 24b7a62. Commits 4865cd1, 9c56216, 0c0bf4c, a3d861a (the constant capability tests),
+4b0475d (`ACAL_E_GAIN_NONE`), 710f9a3 (FORCE), then the docs. `PC_FW_VERSION` / `PC_FW_FPGA_VERSION` untouched (0.2.105,
+0x153D). **Nothing benched, nothing flashed.**
+
+**Removed (constant on 0x153D, same behaviour on it)**
+- `bode_hw.has_fir` (bode_sweep.h / .c, pc_bode.c `bh_live`, test_bode_sweep's initialiser) and `pc_glue_caps`, its only
+  reader: FIR_OFF is flagged by the FIR path's rule (N >= 16, N % 4 == 0, the record not FIR) as before.
+- pc_hal_scope.c `pc_dec_has()` (returned PC_DECIM_HAS_FIR) and its nine tests: the apply's early return, the "+FIR" name
+  and the Filter tap's no-FIR step, the 0x29 readback, the fingerprint byte, the memory fits; `fpga_decim_write`'s
+  `has_fir` argument (every caller passed 1; 0x56 is written whenever it differs from what the FPGA holds).
+- `PC_FEAT_GEN_DDS` / `PC_FEAT_EXT_TRIGGER` / `PC_FEAT_DECIM` (pc_glue_ui_has answered 1): the generator button, the EXT
+  source box and the Filter box touch tests in statemachine.c, `PC_MASK_TRIG_CHANNEL` and its menu.c hook, the Filter
+  row's guard; spectrum.c's alias hint always names the Filter (firmware/README.md's message table follows). Kept:
+  `PC_FEAT_RTC` (the module) and `PC_FEAT_MEM_BASE` (the setting).
+- SET_DECIM filter 4's `PC_CAP_PEAK_DETECT` test (E_UNSUPPORTED "peak detect" unreachable).
+- `ACAL_E_GAIN_NONE` and its texts (adc_cal.c "gain: no generator", cal_wiz.c "no generator in this FPGA bitstream");
+  17 is a reserved comment, 18 / 19 keep their numbers. The wizard result codes are not on the wire and not saved
+  (GET_CAL / GET_HEALTH / CAL_PROBE carry none; docs/protocol.md lists only the texts of the gain checks in row 51), so
+  renumbering would have been safe, but nothing is gained. docs/guide/calibration.md never listed it.
+- Kept on purpose: the dispatch table's per-command caps test (wire semantics: a command whose cap is clear answers
+  E_UNSUPPORTED "capability", e.g. FORCE in release builds, READ_LIVE, ACQUIRE_AVG), and `pc_decim_config`'s `has` input
+  with `pc_decim_has()` (the pure maths the host tests and the mcp mirror exercise at the older levels; GET_DECIM why 6
+  is its wire value).
+
+**FORCE on a sequencer run** (section 76 "Open"): refused with E_STATE detail 0 "sequencer run: STOP ends it" while a
+run is armed (`s->cap_next.seq_mode`, the test STOP uses). Why the refusal and not restoring 0x0E: STOP ends a run with
+`pc_hal_seq_stop` (0x5D = 1, no restarts, then 0x1A = 0 against the arm's 0x0E), i.e. it never touches 0x0E and ends
+the run, not a segment; restoring 0x0E after a force would still leave 0x1A = 0, turning a normal-mode run's later
+segments into auto segments (the pre-fw-small behaviour), which nobody asked for. No detail code for "sequencer
+running" exists; detail 0 is FORCE's state detail ("not armed"), so a host that handles FORCE's E_STATE needs no change.
+PC_DEBUG builds only (release builds answer E_UNSUPPORTED as before). test_session (debug pass): FORCE on an armed
+circular run answers E_STATE 0, no force and no stop reach the HAL, STOP then ends the run as before. docs/protocol.md
+FORCE paragraph and the E_STATE row say so.
+
+**Tests**: `make -s test` all green (test_session 73149 / 73151, test_bode_sweep 2229, test_cal_wizard 655, test_fpga_bus
+10440), check_vectors OK, check_retired_regs OK; `make -s gcc10` without new warnings in the touched files (menu.c /
+statemachine.c show only the upstream unused-variable / implicit-declaration ones), the PC_DEBUG build links. gcc10
+image at 710f9a3: 810,496 bytes, sha256 10c1b294 (later commits give other hashes).
+
+**Bench (owner / coordinator, FEL)**: nothing new to see on 0x153D beyond section 80's list; check that the generator
+button, the trigger menu's EXT box and the ACQ Filter box still answer taps, the Filter steps off, boxcar, boxcar+FIR,
+CIC2, ... as before, and (PC_DEBUG build) SET_SEQ circular, ARM, FORCE: E_STATE 0, then STOP: DONE.
+
+**Open**
+- `pc_decim_config`'s `has` levels (NONE / CIC, `PC_DECIM_WHY_NOCAP`, `c->cap` = 0) remain for the maths tests and the
+  mcp mirror (`protocol.py` DecimConfig why 6); dropping them means test_adc_cal / test_session / decim_check cases at
+  HAS_CIC / HAS_NONE and the mcp side together: a cruft pass with the mcp agent.
+- Comments in pc_decim.h (PC_DECIM_HAS_* history, "on bitstreams without the FIR the bit is ignored") describe those
+  levels and stay with them.

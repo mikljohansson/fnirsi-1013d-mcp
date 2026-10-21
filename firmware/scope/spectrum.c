@@ -938,8 +938,7 @@ static void spec_draw_warnings(int k, uint64 fs_mhz, int hch)
       p = fmt_str(p, ch ? "CH2 overrange: increase V/div   " : "CH1 overrange: increase V/div   ");
 
   if(!k && (fs_mhz < 200000000000ull))
-    p = fmt_str(p, pc_glue_ui_has(PC_FEAT_DECIM) ? "Aliasing possible: set Acquisition > Filter   " :
-                                                   "Aliasing possible: use a faster time base   ");
+    p = fmt_str(p, "Aliasing possible: set Acquisition > Filter   ");
 
   if(!scopesettings.runstate && ((spec.view != VIEW_SPECTRUM) || (!spec.have[0] && !spec.have[1])))
     p = fmt_str(p, "Stopped: press RUN to fill the view   ");

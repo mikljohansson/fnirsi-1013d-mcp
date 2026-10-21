@@ -3482,6 +3482,16 @@ static void test_seq_segments(void)
   seq_status(0x64, 1000, 0);
   r = req(PC_CMD_ARM, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(mock.seq_cfg.flags, 1);
+#if PC_DEBUG
+  //fw-left: FORCE does not end a run (STOP does): no force, no stop
+  {
+    uint32_t f = mock.forces;
+
+    r = req(PC_CMD_FORCE, 0, 0);
+    T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 0);
+    T_EQ(mock.forces, f); T_EQ(mock.seq_stops, 0);
+  }
+#endif
   r = req(PC_CMD_STOP, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(mock.seq_stops, 1); T_EQ(r.p[1], PC_ACQ_ARMED);
   r = wait_done(100);

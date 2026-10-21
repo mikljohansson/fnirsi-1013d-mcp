@@ -907,8 +907,9 @@ Firmware sequence, derived from `fpga_do_conversion` [V `S100 fpga_control.c:604
 at once [V zaklad.v :444-447]; up to fw-small 0x1A = 0 alone left a capture armed with an explicit auto_timeout
 running until 0x0E expired. The firmware's auto-mode deadline uses the same writes. The next ARM restores the
 configured mode and 0x0E. Whether this
-works on each variant is test T7 [U]; the capability bit is only set after it passes. `E_STATE` if not
-ARMED.
+works on each variant is test T7 [U]; the capability bit is only set after it passes. `E_STATE` detail 0 if not
+ARMED, and since fw 0.2.105 (fw-left) also while a sequencer run is armed ("sequencer run: STOP ends it"): the 0x0E = 0
+would stay for the run's later segments and end each after about two words; STOP is the command that ends a run.
 
 **STOP (0x0202).** REMOTE only. Ends polling, state ABORTED, completes a pending WAIT or ACQUIRE_AVG with
 `E_ABORTED`. The FPGA is left running (in normal mode its ring keeps wrapping); the next ARM resets it.
@@ -1147,7 +1148,7 @@ the BOOT button [U: entry address and cache handling to be taken from Donwulff's
 | 5 | E_UNSUPPORTED | capability missing in this firmware build (detail 0); since 1.25 detail 1 = the FPGA runs another bitstream than the firmware is built for (section 5.1: every command outside the basic set) |
 | 6 | E_NOT_REMOTE | command needs REMOTE ownership |
 | 7 | E_BUSY | a deferred request is already pending (detail 0), or the UI is modal (before 1.23, detail 0); since 1.23 detail 2 the UI did not reach its main screen in 1.5 s, 3 a calibration measurement runs, 4 a file save runs, 5 USB drive mode (section 14 row 63); 1 READ_RAW waited for the UI capture in vain |
-| 8 | E_STATE | wrong acquisition state (READ_RAW before DONE, FORCE when not ARMED) |
+| 8 | E_STATE | wrong acquisition state (READ_RAW before DONE, FORCE when not ARMED or on a sequencer run) |
 | 9 | E_FPGA | FPGA did not become ready (0x05 poll timed out) |
 | 10 | E_ABORTED | deferred request ended by STOP, release or watchdog |
 | 11 | E_VERSION | header proto_major not supported |

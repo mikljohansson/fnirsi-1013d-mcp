@@ -122,6 +122,15 @@ sections 74 to 79.
   needs the open FPGA bitstream" screen and the Frequency response's "needs FPGA 0x1534 or later" are gone: the
   generator is always there (fb3a28a).
 
+**Leftovers (fw-left).**
+
+- FORCE (PC_DEBUG bench builds only) on an armed sequencer run answers E_STATE detail 0 "sequencer run: STOP ends it":
+  its 0x0E = 0 stayed for the run's later segments and ended each after about two words; STOP ends a run (710f9a3).
+- The remaining tests of features that are always present on 0x153D are gone, with no change in behaviour: the
+  Frequency response's FIR capability, the filter capability level in the acquisition code, the generator / EXT /
+  Filter menu tests, SET_DECIM's peak detect capability, and the wizard's never-returned "no generator" result
+  (4865cd1, 9c56216, 0c0bf4c, a3d861a, 4b0475d).
+
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):
