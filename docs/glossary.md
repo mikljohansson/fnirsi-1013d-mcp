@@ -50,6 +50,8 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 - **Decimation, boxcar, CIC, FIR**: at low rates the FPGA can average the fast samples instead of discarding them.
   Boxcar is a plain average; CIC a cascaded averaging filter with a soft roll-off; the FIR a 15-tap filter after the CIC
   that flattens its droop with a sharp cut-off (bitstream 0x1535+). Filtered samples are **16-bit** words.
+- **Hi-Res, Anti-alias**: the ACQ menu's names for two of those modes, as other scopes name them: Hi-Res is the boxcar,
+  Anti-alias is CIC3 with the FIR. The MCP tools keep the technical names (`boxcar`, `cic3+fir`).
 - **Legacy mode**: the plain 8-bit path without a filter, what the stock firmware always uses.
 - **Aliasing**: a signal above half the sample rate folding back to a lower frequency. The filters reject it; discarding
   samples does not.

@@ -15,6 +15,17 @@ program on the PC has the scope's serial port open or has sent it a request in t
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
 - Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
   mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base), Filter and Sample. The menu also shows the pass time, how long one screen update takes.
+  The Sample Rate and Time per Division choices stand in grids of five columns; a grey time/div cannot show the record
+  at this rate.
+- **Filter** (the third box of the row): below 200 MSa/s the FPGA filters the 200 MSa/s samples down to the rate
+  instead of skipping them, and the record holds 16-bit samples. A tap steps **Off** -> **Hi-Res** -> **Anti-alias**
+  -> Off; green means a filter is on. **Hi-Res** (as Tektronix and Rigol call it; Keysight's High Resolution) is the
+  mean of the samples in each interval: less noise, more resolution, no overshoot on edges, and it rejects signals far
+  above the rate. **Anti-alias** keeps the passband flat to a quarter of the rate and rejects everything above half of
+  it the most (the Spectrum's default), at the cost of up to about 7 % overshoot on a square wave's edges. The Scope
+  defaults to Hi-Res, the Spectrum analyser to Anti-alias; each keeps its own choice. A program on the PC can set other
+  filter modes (CIC2, CIC3, boxcar+FIR, CIC2+FIR): the box then shows that name, and a tap goes to Off. With a filter
+  on, memory depths above 6000 are not offered.
 - **Sample** (the fourth box of the row under the sample rates, Scope only): **Normal** stores the samples as before;
   **Peak** (peak detect) stores, for every sample the record keeps, the lowest and the highest of all the samples the
   ADC took at 200 MSa/s in that interval, so a spike shorter than the sample interval still shows. A tap toggles; green
@@ -187,8 +198,8 @@ RBW, Span, Center, Time and Capture. Time is the history the waterfall shows. Ca
 (memory depth / sample rate). THD reads "f0 too low" or "f0 too high" when the fundamental is too close to an end of
 the axis. The 8-bit ADC limits THD to about 0.3 %.
 
-**Warnings.** "CH1 overrange: increase V/div", "Aliasing possible: set Acquisition > Filter" (below 200 MSa/s with
-the filter off), "Stopped: press RUN to fill the view",
+**Warnings.** "CH1 overrange: increase V/div", "Aliasing possible: set Acquisition > Filter Anti-alias" (below 200
+MSa/s with the filter off), "Stopped: press RUN to fill the view",
 "No trigger: check the trigger level" (or the trigger type's hint, as in the Scope).
 
 ## Frequency response

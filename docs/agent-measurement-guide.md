@@ -105,7 +105,8 @@ instead of skipping samples,
 and store 16 bits.
 Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total of at most 8190 samples (set
 `scope_set_trigger total_samples` first) and that it is the scope's own Filter setting (tell the person, turn it
-`off` when done).
+`off` when done). The scope's ACQ > Filter box names `boxcar` "Hi-Res" and `cic3+fir` "Anti-alias" and shows any other
+mode by its own name.
 
 - **The decay constant is not biased.** Boxcar and CIC are linear filters and an exponential stays an exponential
   with the same tau after any of them; only the amplitude scales and the first K output samples after a sharp
