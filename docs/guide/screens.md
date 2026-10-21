@@ -14,7 +14,7 @@ program on the PC has the scope's serial port open or has sent it a request in t
 
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
 - Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
-  mode ({{AVERAGE_TEXT}}) and Filter. The menu also shows the pass time, how long one screen update takes.
+  mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base) and Filter. The menu also shows the pass time, how long one screen update takes.
 - Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2 or EXT), the position
   and Always 50 %.
 - The run-state chip beside the trigger reads STOP, RUN or WAIT (a single shot waiting for its trigger).
