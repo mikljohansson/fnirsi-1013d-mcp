@@ -91,10 +91,11 @@ read-back configuration). Errors raise MCP tool errors with the actionable text.
 
 ### 4.1 Session and status (tier 0/1)
 
-**`scope_info`** (tier 0). No parameters. Returns firmware version and build, protocol version, FPGA version
-word and variant name, serial, capability flags as names, ring and memory limits.
-Description caveat: "If fpga_variant is 'stock', pre-trigger and total samples are fixed (1500 / 3000) and
-there is no generator."
+**`scope_info`** (tier 0). No parameters. Returns firmware version and build, protocol version, the FPGA version
+word the scope reports and `fw_fpga_version` (the one the firmware is built for; `fpga_mismatch` when they differ,
+protocol 1.25), serial, capability flags as names, ring and memory limits. On a mismatch the caveats carry
+`Profile.mismatch_caveat()` (the scope shows a notice and refuses captures and settings until that bitstream is
+flashed); every tool that checks the scope first carries the same caveat.
 
 **`scope_profile`** (tier 0). No parameters. Returns section 3 merged with live values (current memory
 limit, which bitstream, which caps are unverified: `read_lag`, interleave order, FORCE).
@@ -194,11 +195,22 @@ available remotely in protocol v1."
 | `pretrigger_fraction` | 0..1 | or `pretrigger_samples` (even) |
 | `total_samples` | int | even, 80 .. max for the bitstream |
 | `auto_timeout` | float s | auto mode only |
+| `type` | `"edge"`, `"pulse_width"`, `"nth_edge"`, `"timeout"` | protocol 1.26 (caps TRIG_TYPES, SET_TRIGGER2): `runt` / `window` are refused with the hint "FPGA 0x153E" |
+| `polarity` | `"positive"` / `"negative"` (pulse), `"rising"` / `"falling"` (edge, nth_edge), `"high"` / `"low"` (timeout) | per type; the edge type's polarity is `edge` |
+| `width` | float s | pulse_width: the width compared with (the trigger is the trailing edge); timeout: the held time. Converted to samples of the trigger stream in effect (one memory word on CH1 / CH2: 2 / fs legacy, 1 / fs filtered or peak; 5 ns on EXT), rounded to the nearest, clamped to 1 .. 16777215 with a caveat; the firmware converts nothing |
+| `longer` | bool | pulse_width: pulses longer than `width` (default shorter) |
+| `n` | int 1..65535 | nth_edge: the edge to trigger on |
+| `idle` | float s | nth_edge: the count restarts after this long without any edge (0 = count from the arm); same conversion as `width`, 0 .. 16777215 samples |
+| `hold_off` | float s | caps HOLDOFF: from a record's trigger no trigger is accepted until it has elapsed, across re-arms and segments; 5 ns steps up to 21.47 s, rounded; 0 = off. Every SET_TRIGGER2 the tool sends also clears a hold-off still running at the next capture (the firmware writes 0x66) |
 
-Returns applied values, including the level actually reachable (codes are about 3.4 mV apart at 100 mV/div)
-and the pre/post window durations. Caveats: "Level is an 8-bit code compared to core A only; edges faster
-than 2 / fs may be missed." "Hold-off is not implemented in any current FPGA bitstream." "On the stock FPGA
-pre-trigger is fixed at 50 % and total at 3000."
+Returns applied values, including the level actually reachable (codes are about 3.4 mV apart at 100 mV/div),
+the pre/post window durations, `holdoff` (5 ns units) / `holdoff_s`, and from 1.26 `type` (name, polarity, the
+width / idle / held time in samples and seconds, `stream_sample_s`). Caveats: "Level is an 8-bit code compared to
+core A only; edges faster than 2 / fs may be missed."; for a type the resolution and position statement; a clamp or
+rounding of `width` / `idle` / `hold_off`. The type parameters need protocol 1.26 with caps TRIG_TYPES (refused with
+that hint below it). The client method is `Scope.set_trigger2(type=, polarity=, longer=, n=, h=, level=, holdoff=
+(5 ns units) | holdoff_s=)`, which round-trips GET_TRIGGER's 24-byte block and zeroes the fields a new type does
+not use (the firmware refuses N / H on the wrong type).
 
 ### 4.3 Acquisition (tier 1)
 
@@ -211,11 +223,17 @@ pre-trigger is fixed at 50 % and total at 3000."
 | `window` | `[t0, t1]` s relative to the trigger | whole capture | reads only this part (faster) |
 | `raw` | bool | false | also store raw codes per core |
 | `processed` | bool | false | use the firmware's processed trace instead of raw reads plus host compensation (slower, matches the screen) |
+| `peak` | bool | false | protocol 1.26 (caps PEAK_DETECT): peak detect for this capture: SET_DECIM 4 before the arm, the previous Filter restored after (a caveat says so); with the Filter already `peak` nothing is toggled. Refused at 200 MSa/s (peak needs a rate below it) and over 8190 samples |
 
 Returns per channel: min, max, mean, rms, Vpp, frequency estimate, clipped-sample count; `trigger`
 (`fired` / `auto_timeout` / `none`), `capture_id`, dt, sample count, file path, preview. Dynamic caveats:
 "N samples clipped at 0/255: increase volts_per_div", "auto trigger fired: data not synchronised",
 "signal frequency estimate X is above fs/2.5: aliasing likely", "frequency > 30 MHz: above analog bandwidth".
+A peak-detect record (`peak` true in the result, kind `peak` in the `.npz`) adds per channel `envelope` (min, max,
+mean and max width), the samples / preview as `<ch>_min` and `<ch>_max`, and the file `<ch>_min_volts`,
+`<ch>_max_volts`, `<ch>_min_codes`, `<ch>_max_codes`; `volts` / `codes` are the midpoint; the caveat says the
+envelope includes the noise extremes and that averaging is refused while peak detect is on (`scope_averaged_capture`
+refuses with a hint; SET_SEQ mode 2 answers E_STATE detail 7).
 
 **`fetch_waveform`** (tier 0 in LOCAL, 1 in REMOTE). Reads the current capture without re-arming (the UI's
 last trace in LOCAL). Same returns as `capture`.
@@ -243,7 +261,7 @@ Caveat on `force`: "Only available once verified on this FPGA variant; otherwise
 | `timeout_s` | float | 1.0 | per capture; timeouts are dropped and counted |
 | `reject_clipped` | bool | true | drop captures with clipped samples in the window |
 | `on_device` | bool | auto | use ACQUIRE_AVG when the firmware has it and `align="hardware"` |
-| `hardware` | bool | false | protocol 1.17 (bitstream 0x1536, fw >= 0.2.58): one FPGA averaging run sums the `n` records (SET_SEQ mode 2, READ_SEQ sums), no per-record transfer; `align="hardware"` only, records up to 2046 words, `n` <= 257 with 8-bit samples (65536 with the decimation filter); no per-sample std; refused with the GET_SEQ fit reason when the geometry does not fit. Opt-in until bench check 9 (firmware/AGENTS.md section 35) has compared it with READ_RAW on the unit |
+| `hardware` | bool | false | protocol 1.17 (caps SEQ): one FPGA averaging run sums the `n` records (SET_SEQ mode 2, READ_SEQ sums), no per-record transfer; `align="hardware"` only, records up to 2046 words, `n` <= 257 with 8-bit samples (65536 with the decimation filter); no per-sample std; refused with the GET_SEQ fit reason when the geometry does not fit. Opt-in until bench check 9 (firmware/AGENTS.md section 35) has compared it with READ_RAW on the unit |
 
 Returns mean waveform (file), per-sample standard deviation (file), `n_used`, `n_dropped` with reasons,
 estimated noise per sample before/after, effective resolution estimate, timing (captures per second).
@@ -251,7 +269,7 @@ Caveats: "Averaging reduces random noise by sqrt(n) but not the A/B interleave m
 quantisation of a noise-free signal, or trigger jitter (up to 2 / fs with hardware alignment).",
 "edge alignment needs a clean edge on align_channel with at least 3 samples on the slope".
 
-**`capture_segments`** (tier 1, protocol 1.17, bitstream 0x1536, fw >= 0.2.58). Segmented capture: the FPGA re-arms
+**`capture_segments`** (tier 1, protocol 1.17, caps SEQ). Segmented capture: the FPGA re-arms
 itself after every trigger and stores `count` records of the live trigger geometry (`set_trigger` total and
 pretrigger) in slots of 2^m words (the smallest slot that holds the record plus 2 words), each with a trigger
 timestamp in 5 ns units; the host reads the table and every segment afterwards (READ_SEQ, READ_RAW addr_mode 3).
@@ -307,10 +325,13 @@ can be hundreds of volts: use a 10x probe or a clamp and check the input rating 
 "with fs = F, the decay is sampled every 1/F; tau below ~5 samples is not resolvable", "AC coupling
 distorts decays longer than the coupling time constant [U value]; use DC coupling for decays".
 
-**`scope_set_decimation`** (tier 1, protocol 1.9, firmware >= 0.2.30 on FPGA 0x1534, capability DECIM). Param
-`filter`: `off` (legacy 8-bit sample skipping), `boxcar` (mean of N raw 200 MSa/s samples), `cic2`, `cic3` (2- / 3-fold
-boxcar), and on FPGA 0x1535 with firmware >= 0.2.44 (protocol 1.11, capability FIR) `boxcar+fir`, `cic2+fir`,
-`cic3+fir`: the CIC decimates by N / 2 and a 15-tap compensation FIR decimates by 2 (flat passband to fs / 4, about
+**`scope_set_decimation`** (tier 1, protocol 1.9, capability DECIM). Param `filter`: `off` (legacy 8-bit sample
+skipping), `boxcar` (mean of N raw 200 MSa/s samples), `cic2`, `cic3` (2- / 3-fold boxcar), with the FIR (protocol
+1.11, capability FIR) `boxcar+fir`, `cic2+fir`, `cic3+fir`, and `peak` (protocol 1.26, capability PEAK_DETECT, the
+ACQ menu's Sample = Peak: SET_DECIM filter 4, the firmware writes 0x53 K = 1 and 0x56 bit 1; every stored word is the
+window's raw min and max, the FIR is off, the shift unused; GET_DECIM's shift bytes carry bit 7 peak active / bit 6
+peak written; captures read READ_RAW layout 3; the Filter word is kept for the way back; the caveat names the
+refused averaging). The `+fir` choices: the CIC decimates by N / 2 and a 15-tap compensation FIR decimates by 2 (flat passband to fs / 4, about
 20 dB more alias rejection; gain (N/2)^K, S one higher, 250 ns latency). The FIR engages only at N >= 16 with
 N % 4 == 0 (10 MSa/s and slower); `effective` then reads e.g. `cic2+fir`, otherwise the result carries `fir_note`. It is the scope's acquisition Filter setting (shared, saved, part of settings_seq); the core-order and
 capture-edge flags are kept as they are. Returns `applied`: `setting`, `effective` and `reason` (the firmware
@@ -346,6 +367,30 @@ divider is labelled with the UI time base's rate" (known firmware limit).
 `rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay(CH1->CH2)`. Computed on the
 host from raw data with calibration. Caveat on rise time: "rise times below ~12 ns (0.35 / 30 MHz) measure
 the scope, not the signal".
+
+**`scope_counter`** (tier 0 reading; tier 1 when `gate` / `source` / `level` / `hysteresis` configure it, since the
+scope's measurement cards share the counter; protocol 1.26, caps COUNTER, GET_COUNTER 0x0213). The FPGA's reciprocal
+counter: over a gate of 10 ms / 100 ms (boot) / 1 s it counts E periods between the first and the last rising edge of
+the source (CH1 / CH2 through a Schmitt comparator at `level` with `hysteresis` codes, or EXT), T and W 5 ns clocks
+(period and high time), and the raw min / max over the gate.
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `gate` | `"10ms"`, `"100ms"`, `"1s"` | as set | configures the gate |
+| `source` | `"trigger"`, `"CH1"`, `"CH2"`, `"EXT"` | as set (boot: trigger = follows the trigger source) | |
+| `level` | float V | as set (boot: code 128) | comparator level at the probe tip, converted to a raw code (CH1 / CH2) |
+| `hysteresis` | int codes | as set (boot: 6) | codes below the level that read low |
+| `readings` | int 1..50 | 1 | snapshots, one per new gate (the tool waits for each gate to end) |
+
+Returns `source` (the effective channel), `gate_s`, `frequency_hz` = E / (T x 5 ns), `period_s`, `width_s` (positive),
+`duty` = W / T, `edges`, `vmin` / `vmax` / `vpp` (CH1 / CH2: the raw extremes through the 8-bit model's mean of both
+cores), `level_code` / `level_volts`, `hysteresis_codes`, every reading, `frequency_mean_hz` / `frequency_spread_hz`
+with several, a `.npz` (kind `counter`, `scope_report` plots it) and the `resolution` statement: one 5 ns clock over
+the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy (about 1e-5, uncalibrated) on top.
+Caveats: no valid count (fewer than two edges: raise the gate, set the level mid-swing), vmin / vmax include the
+noise extremes, the thresholds are raw codes. Wire: request u8 what (0 read / 1 configure), gate, source, level,
+hysteresis, 3 x 0; response 24 bytes: flags (new, valid, EXT, CH2), seq, gate, source, u32 E, T, W, u8 min, max,
+level, hysteresis, u32 freq_mHz. The firmware's implementation (item C7) must match these bytes.
 
 ### 4.3b Data tools: decode, mask test, CSV export, DVM (mcp-soft, 2026-10-20)
 
