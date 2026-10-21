@@ -425,7 +425,7 @@ hold-off, 0x37 / 0x34), PK (peak detect, 0x29 = 0x81 0xC0, READ_RAW layout 3), K
 T 1,998,000, W 999,000, min 40 / max 210; the step takes about 5 min of simulation for that gate). The older scenarios'
 bytes moved with the added strobes.
 
-**Tests.** `tb/run.sh` 16 steps on the committed source: RUN_RESULT_TEXT. The first full run on 1f1ded4 found a
+**Tests.** `tb/run.sh` 16 steps on the committed source: first full two-seed run on the pre-fix source 1f1ded4 (2026-10-21 10:50 ..): steps 1-15 PASS on both seeds (seed 12345: ext 39, decim 98 + cic_model 1868, long 8, seg 52 + seg_model 22 runs, trigpos 882, contract 24 = contract_0x153C.txt, encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, trigtypes 1293, peak 45; seed 4242: 39, 98 + 1874, fir 162 + cic_model 1572, 8, 55 + 22, 882, 24, encphase, 70 + 26, 2274, 38, 85, 1293, 45), the counter step (16) still running at the push, except tb_fir on seed 12345 (158 checks, 1 failed): a simulator event-ordering artefact of the div20 alias wire (an 0x0D write on the same instant as a write clock edge, resolved the other way than in the 0x1534 reference), fixed in bd24bdf with the bitstream byte-identical and the fixed source re-checked over the divergence with 0 mismatches; the two-seed rerun of all 16 steps on the final source bd24bdf is in progress (fpga-c4 amends this text when it finishes). The first full run on 1f1ded4 found a
 simulator race (tb_fir seed 12345, 158 checks 1 failed): the first div20 text's alias wire (`div20 = divider[19:0]`,
 `dec_ph = div20[19:1]`) made iverilog order an 0x0D write that lands on the same instant as a write clock edge the other
 way than in the 0x1534 reference, and the two decimators ran one write clock apart from then on (README section 15
