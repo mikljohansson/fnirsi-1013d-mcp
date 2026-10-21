@@ -359,7 +359,8 @@ module tb;
         end else
           ext_en = 0;
         start_capture;
-        wait_done(4000);
+        wait_done(100000);                                // 0x153D: an EXT capture with the pin driven (pattern off) never
+                                                          // triggers and runs to its time-out (up to 1.8 ms at divider 9)
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
         bus_cmp_on = rnd[2];
