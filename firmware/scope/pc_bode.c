@@ -27,7 +27,6 @@
 #include "fpga_bus.h"
 
 //pc_hal_scope.c (fw 0.2.66)
-uint32 pc_glue_caps(void);
 uint32 pc_glue_ring_words(void);
 int    pc_glue_host_capture(void);
 void   pc_glue_ring_taken(void);
@@ -319,8 +318,7 @@ static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
   return 0;
 }
 
-static const bode_hw bh_hw = { 0, bh_ms, bh_gen, bh_channel, bh_info, bh_arm, bh_poll, bh_force, bh_read, 0 };
-static bode_hw  bh_live;
+static const bode_hw bh_hw = { 0, bh_ms, bh_gen, bh_channel, bh_info, bh_arm, bh_poll, bh_force, bh_read };
 static bode_eng bh_eng;
 static uint8    bh_init;
 
@@ -328,9 +326,7 @@ bode_eng *bode_engine(void)
 {
   if(!bh_init)
   {
-    bh_live = bh_hw;
-    bh_live.has_fir = (pc_glue_caps() & PC_CAP_FIR) != 0;
-    bode_init(&bh_eng, &bh_live);
+    bode_init(&bh_eng, &bh_hw);
     bh_init = 1;
   }
 

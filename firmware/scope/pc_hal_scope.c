@@ -1971,7 +1971,6 @@ void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
 //fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
 //taken by a Bode capture (the PC's last capture is gone)
-uint32 pc_glue_caps(void)          { return pc_ready ? pc_sess.var.caps : 0; }
 uint32 pc_glue_ring_words(void)    { return (pc_ready && pc_sess.var.ring_words) ? pc_sess.var.ring_words : 8192; }
 
 int pc_glue_host_capture(void)

@@ -92,7 +92,6 @@ typedef struct
   int    (*poll)(void *ctx);                                               //1 done, 0 running, < 0 the host took over
   void   (*force)(void *ctx);
   int    (*read)(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap);  //0 ok
-  int    has_fir;
 } bode_hw;
 
 typedef struct
