@@ -1382,45 +1382,6 @@ freq_generator_dds_pwm u_freq
   wire [7:0]  trigger_level_eff = dec_on ? 8'h80 : trigger_level;
 
 //-------------------------------------------------------------------------------------
-//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
-//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
-//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
-//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
-//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
-//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
-//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
-
-  reg        ho_st_q = 0;
-  reg [32:0] ho_cnt = 0;
-  reg        ho_run = 0;
-  reg        ho_en = 0;                    //0x1B != 0, registered
-  reg [1:0]  ho_ct_s = 0;
-  reg        ho_ct_d = 0;
-  assign     ho_act = ho_run & ho_en;
-
-  always @(posedge clk_200MHz)
-    begin
-      ho_st_q <= sampling_triggered;
-      ho_en   <= (trig_holdoff != 32'd0);
-      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
-      ho_ct_d <= ho_ct_s[1];
-
-      if(ho_ct_s[1] ^ ho_ct_d)
-        ho_run <= 0;
-      else if(sampling_triggered & ~ho_st_q)
-        begin
-          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
-          ho_run <= 1;
-        end
-      else
-        begin
-          ho_cnt <= ho_cnt - 33'd1;
-          if(ho_cnt[32])
-            ho_run <= 0;
-        end
-    end
-
-//-------------------------------------------------------------------------------------
 //Sampling write address counter
 //This counter is reset when the reset is activated by the MCU
 
@@ -1497,6 +1458,45 @@ assign sampling_enable = ~(
   //on the stop edge's own evaluation is still taken: the record stays the newest total words, 0x18 then reads 1)
   //0x153C: and not while the trigger hold-off runs (ho_act, a clk_200MHz register: off the half-cycle compare path)
   assign trigger_check_enable = ((~sampling_triggered & sampling_half_way & sample_write_enable & ~ho_act));
+
+//-------------------------------------------------------------------------------------
+//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
+//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
+//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
+//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
+//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
+//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
+//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
+
+  reg        ho_st_q = 0;
+  reg [32:0] ho_cnt = 0;
+  reg        ho_run = 0;
+  reg        ho_en = 0;                    //0x1B != 0, registered
+  reg [1:0]  ho_ct_s = 0;
+  reg        ho_ct_d = 0;
+  assign     ho_act = ho_run & ho_en;
+
+  always @(posedge clk_200MHz)
+    begin
+      ho_st_q <= sampling_triggered;
+      ho_en   <= (trig_holdoff != 32'd0);
+      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
+      ho_ct_d <= ho_ct_s[1];
+
+      if(ho_ct_s[1] ^ ho_ct_d)
+        ho_run <= 0;
+      else if(sampling_triggered & ~ho_st_q)
+        begin
+          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
+          ho_run <= 1;
+        end
+      else
+        begin
+          ho_cnt <= ho_cnt - 33'd1;
+          if(ho_cnt[32])
+            ho_run <= 0;
+        end
+    end
 
 //--------------------------------------------------------------------------------------------
 //Sampling triggered detect
@@ -1834,6 +1834,10 @@ assign sampling_enable = ~(
   reg [15:0] pp_xa0 = 0, pp_xa1 = 0, pp_xa2 = 0, pp_xa3 = 0;   //0x153A: the record word's lanes, registered
   reg [63:0] pp_acc = 0;
   reg [16:0] pp_s0 = 0, pp_s1 = 0, pp_s2 = 0, pp_s3 = 0;
+  reg [31:0] pp_l0 = 0, pp_l2 = 0;         //0x153C: the 16-bit format's two 32-bit lane sums, added in the same stage as
+                                           //the legacy lanes (before, the carry of pp_s0 / pp_s2 into the high word was a
+                                           //second adder after the register, feeding the 64-bit select into aw_d: the
+                                           //clk_200MHz path that missed in two of three builds of the merged source)
 
   reg        tab_we = 0;                   //table entry write request
   reg [10:0] tab_a = 0;
@@ -1852,9 +1856,7 @@ assign sampling_enable = ~(
     pp_sat = s[16] ? 16'hFFFF : s[15:0];
   endfunction
 
-  wire [15:0] pp_w1 = pp_s1[15:0] + { 15'd0, pp_s0[16] };
-  wire [15:0] pp_w3 = pp_s3[15:0] + { 15'd0, pp_s2[16] };
-  wire [63:0] pp_w  = q_fmt16 ? { pp_w3, pp_s2[15:0], pp_w1, pp_s0[15:0] }
+  wire [63:0] pp_w  = q_fmt16 ? { pp_l2, pp_l0 }
                               : { pp_sat(pp_s3), pp_sat(pp_s2), pp_sat(pp_s1), pp_sat(pp_s0) };
 
   wire        q_mode_on = (seq_mode == 2'd1) || (seq_mode == 2'd2);
@@ -1900,6 +1902,8 @@ assign sampling_enable = ~(
       pp_s1  <= { 1'b0, pp_acc[31:16] } + { 1'b0, pp_xa1 };
       pp_s2  <= { 1'b0, pp_acc[47:32] } + { 1'b0, pp_xa2 };
       pp_s3  <= { 1'b0, pp_acc[63:48] } + { 1'b0, pp_xa3 };
+      pp_l0  <= pp_acc[31:0]  + { 16'd0, pp_xa0 };        //= { pp_s1 + carry, pp_s0[15:0] }: pp_xa1 = 0 in the 16-bit format
+      pp_l2  <= pp_acc[63:32] + { 16'd0, pp_xa2 };
       aw_we  <= pp_v4 | tab_we;
       aw_a   <= tab_we ? tab_a : pp_a4;
       aw_d   <= tab_we ? (tab_z ? 64'd0 : tab_d) : pp_w;
