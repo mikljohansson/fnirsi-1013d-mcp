@@ -2470,7 +2470,9 @@ firmware's P16 / H16 arithmetic of the contract is reproduced in `tb_pattern.v` 
 
 `tb/run.sh` step 18, `tb_pattern.v` (`ONLY=pattern`, about 9 minutes: the 1 kHz and 999.5 Hz squares are the cost), one
 instance with the AD9288 model and the bus sequences of tb_trigtypes.v, the pad watched for every edge. **10462 checks,
-0 failed, PASS on seed 12345 (511 s)**; seed 4242 and the full 18-step run: see the handoff in `fpga/al3/AGENTS.md`.
+0 failed, PASS on seeds 12345 (511 s alone) and 4242**, in the full `tb/run.sh` of the merged source too (19 steps, 18 PASS
+on both seeds; tb_decim's 2 failing checks are a testbench effect of the DDS's removal, reproduced against the base source:
+the handoff "0x153D D2 pattern generator" in `fpga/al3/AGENTS.md`).
 - G: 0x50 alone from power-on: the pin hi-Z (`We0`), driven low (`St0`) with 0x50 = 1, unchanged by 0x51 / 0x52 writes,
   high with 0x6D bit 2, 0x28 bit 1 follows 0x50, 0x39 reads 0.
 - S: the firmware's SET_GEN sequences (`gen_calc`: P16 / H16 of 7.4; enable 0x6D = 0x33, change 0x23). 10 MHz, 1 MHz,
@@ -2531,6 +2533,10 @@ path in b5 has positive slack. The no-engine variant at 78 % fails on the same p
 of 7.5 alone would not close timing either; it was not built. The measured cut table for D3 / the owner: `STEPS = 4`
 -172 / -208 (the `pat_gen` parameter; `tb_pattern.v` assumes 8), the engine -451 / -169 (its block, the 0x76-0x7D cases,
 read 0x42 and `pq_take` into `pat_gen`), C0's cruft -78 / -19 and div20 -53 / -24 (the latter shortens the worst path).
+The merged source after the merge of origin/main (C1 + C2 + C3 + D2, fw-d5 / mcp-d6, still without D1's logger; `~/d2/b6`):
+**7351 LUT (85.1 %) / 6416 reg / 8321 LE (96.3 %)**, `clk_200MHz` 22 errors at 6.492 ns (TNS -10.5) on the same old
+paths (the divider compare into `sample_write_clock` / `sce_q` -3.8 ns, the accumulator RAM -3.4 ns), `sample_write_clock`
+9.581 ns and `i_mcu_clk` 0 errors; `FPGA.bin` sha256 `84cbba5c8b769b7b7925bba17214f67ed74dbabc74c5b04fa760a38723bbe0d3`.
 `~/d2/b5` on the maintainer's WSL: `FPGA.bin` sha256 `12d7956c659e24d2fbdfbb644684e97e98dd25202c19963547a8564cea407d95` (not a release image; nothing in `dist/`).
 
 #### Bench checks (D3's bench, items 10 and 10b of the contract's section 9.2)

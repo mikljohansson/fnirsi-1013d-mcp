@@ -396,14 +396,15 @@ always block for `trig_src_pat` (0x15 = 3) after the decoder; the read-mux cases
 0x16 / 0x5E cases, `trigger_previous` and the two capture qualifiers are untouched; the timed trigger path is untouched.
 
 **Semantics as built** (README section 15 has the register map; every deviation was sent to fw-d5, whose `fpga_model.c`
-follows them, commit 2bd7042 in fw-d5): a step lasts n + carry(acc + f) clocks, one Bresenham accumulator per engine
+follows them, commit 2001e99 in fw-d5): a step lasts n + carry(acc + f) clocks, one Bresenham accumulator per engine
 cleared at a burst start only (every edge 0 .. 1 clock early against the ideal, the mean exact); a commit (0x6D bit 5) is
 taken at the next step boundary or at a start and `pending` clears there, but the generator prefetches two segments, so
 after a commit during step k the steps k + 1 and k + 2 run with the old entries and **the new ones apply from step
 k + 3** (at a start: from step 0; a commit while stopped stays pending until the start); a mode-3 write while idle is a
 start, a start bit or mode-3 write while running is ignored, mode 0 stops at once; the marker triggers the capture only
 with **both** 0x15 = 3 and 0x6D bit 3, through the EXT path (0x14 = the last word written before the marker clock);
-0x15 = 3 turns the CH1 / CH2 / EXT paths and the qualified types of the capture off; entry 7 without an end bit acts as
+0x15 = 3 turns the CH1 / CH2 / EXT paths and the qualified types of the capture off; with C2's peak detect on, the
+engine's 16-bit compare takes the window max / min byte like the capture's (0x79 = level << 8); entry 7 without an end bit acts as
 end, 0x6C index 8 .. 31 is ignored, n >= 2 (the firmware enforces it); step 0 of a burst begins 5 clocks after the start
 condition is seen (0x6D: 8 .. 9 clocks after the data strobe; the engine: 6 clocks = 30 ns after the event clock, i.e.
 37.5 ns after the qualifying word's write edge for CH1 / CH2, about 55 ns after the pad edge for EXT); the engine's
@@ -412,14 +413,32 @@ ignored, re-arm holds the qualifier in reset while the burst runs; 0x42 bit 7 re
 flag (bit 0 of the firmware's flags, 0x50) lets the engine run on EXT with the pin hi-Z; the firmware writes the gap as
 round(ns / 5) clocks (fw-d5 / coordinator).
 
-**Tests.** `tb/run.sh` step 18 (`ONLY=pattern`, about 9 min): **10462 checks, 0 failed, PASS on seed 12345**; the cases
+**Tests.** `tb/run.sh` step 18 (`ONLY=pattern`, about 9 min alone, 40 on the loaded machine): **10462 checks, 0 failed, PASS on seeds 12345 and 4242**; the cases
 and the measured numbers are in README section 15 "Tests" (edges 0 .. 1 clock early on fresh starts, a span under one
 clock after a change on the run; the engine's burst 6 clocks after the event clock in 96 runs). The equivalence
 testbenches changed for the DDS's removal: tb_ext_trigger, tb_decim, tb_fir and tb_seg write 0x52 = 0 to the reference
 (its DDS output stays low, the pattern's idle level) and a reset pulse before the first equivalence phase, their random
 phases write 0x52 = 0 and no longer write trigger source 3 (PATTERN now), tb_ext_trigger's generator check is the 1 MHz
 pattern on the pin and its source-3 case expects no EXT trigger; ext: 39 checks PASS, 0 mismatches. Full-run results on
-both seeds: TBD_FULL
+both seeds: **Full `tb/run.sh` (19 steps after the merge of C2) on the merged source, seeds 12345 (17514 s) and 4242 (16797 s), four to
+five hours each on the shared WSL: 18 of 19 steps PASS on both seeds** (ext 39, fir 166 / 165 + cic_model 1557 / 1543
+samples, long 8, seg 55 / 60 + seg_model 22 runs, trigpos 882, contract 12 with the transcript equal to contract_0x153B.txt,
+encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, trigtypes 1293, peak 45, counter 115, **pattern
+10462 / 10462**), and **tb_decim fails 2 of 104 / 103 checks on both seeds**: the K = 0 equivalence phases 1 and 4 report
+memory mismatches ("sample memory: 2 words differ" in 6 random captures of phase 1, "79 words differ" and the following
+bus reads of the record in phase 4; the other phases 0 mismatches, cic_model 1887 / 1884 samples PASS). **Not an RTL
+difference: the control run of the same tb_decim.v against the base source (origin/main 55e5f6b, before D2 and C2;
+`DUT=~/d2/base_zaklad.v ONLY=decim`, log `~/d2/run-basedecim.log`) reproduces every mismatch at the same simulation
+times** (28185969000 ps, 66987209000, 89732042000 ...). Cause (hypothesis, fpga-d2): the testbench changes for the DDS's
+removal. Without a DDS an EXT-source capture with 0x50 = 1 never triggers and runs to its time-out, so tb_decim's random
+phases now wait 100000 polls (as tb_fir does) and compare the memory of completed time-out captures, where the 0x153B
+stop semantics differ from the 0x1533 reference by design (the `mem_dirty` mask and the read-back handling of tb_fir /
+tb_seg exist for exactly that; tb_decim never needed them because its 4000-poll wait left those captures running).
+tb_decim now prints the first differing words with both values and the capture's geometry (`wa`, `w_last`, `ta`, the stop
+flags); the fix is tb_fir's mask ported to tb_decim, or the random phase skipping the memory compare of a capture the
+reference stopped at its time-out. D3 takes it on the integrated source. The same tb_decim passed on the pre-merge D2
+source this morning only because the 4000-poll wait left those captures unfinished (then the 0x14 check failed instead:
+`ec3a658`).
 
 **Build** (TD 4.6.8 SP1, `build.sh`, this branch alone): **7198 LUT (83.3 %) / 6127 reg / 8061 LE (93.3 %)**, `clk_200MHz`
 27 errors, 6.62 ns (TNS -17.5), `sample_write_clock` 9.617 ns and `i_mcu_clk` / `clkc[1]` 0 errors; against the C1 + C3
@@ -435,7 +454,20 @@ not the LUT count, is what the contract's budget (1.1) should have tracked; at 9
 old long paths. The cuts the contract names, measured: `STEPS = 4` -172 / -208 (parameter of `pat_gen`; `tb_pattern.v`
 assumes 8 entries), the routed single qualifier about -300 net (not built: the no-engine variant shows it does not close
 timing by itself), C0's cruft -78 / -19 and div20 -53 / -24 (the latter shortens the worst path). `~/d2/b5` holds the
-build (`FPGA.bin` sha256 in README section 15); `~/d2/var-noeng`, `~/d2/var-steps4` the variants.
+build (`FPGA.bin` sha256 in README section 15); `~/d2/var-noeng`, `~/d2/var-steps4` the variants. **The merged source**
+(this branch after the merge of origin/main with C2's peak detect, `~/d2/b6`): 7351 LUT (85.1 %) / 6416 reg / 8321 LE
+(96.3 %), `clk_200MHz` 22 errors at 6.492 ns (the divider compare -3.8, the accumulator RAM -3.4), the other clocks clean;
+D1's logger is not in it yet.
+
+**If the owner cuts the pattern for a plain accurate fractional square** (coordinator, 15:5x): a two-step generator
+with n_h / f_h and n_l / f_l written directly (no table, no shadows, no bursts, no engine, no marker) is the `cnt` /
+`acc` / `acc_sum` core of `pat_gen` with the entry select reduced to one bit: about 150 .. 190 LUT / 180 .. 270 reg
+(the contract's prototype measured +48 LUT / +231 reg for a u24 + u16 two-step core with the double buffer on top of the
+DDS-less design, before the pipelining; the registered load adder, the frozen-sign counter and the fraction pipeline add
+about 100 LUT), i.e. about 900 LUT / 650 reg less than D2 as built, roughly the C1 + C2 + C3 LE count plus 200 (about 81 %
+of the LEs). The glitch-free change needs the two shadow entries (+96 reg, +10 LUT) or the firmware's "duty first" write
+order of the DDS days. The square's registers would stay 0x6C (indices 0 and 1) and 0x6D mode 3 / commit so fw-d5's
+generator path (`gen_calc`, 0x33 / 0x23) is unchanged; drop 0x6E / 0x6F / 0x76-0x7D / 0x39 bytes 1..3 / 0x42 and 0x15 = 3.
 
 **For D3 (integration)**: the version byte 0x3D; `tb_pattern.v` accepts 0x06 >= 0x153B; merge with D1 touches the
 decoder / read mux / `mcu_state` lines (append-only on both sides) and the run.sh header. If the merged build misses
