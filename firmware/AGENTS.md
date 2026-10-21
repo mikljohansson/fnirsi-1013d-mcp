@@ -7,6 +7,7 @@ section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, 
 **Branch fw-d4 (2026-10-21): fw 0.2.104 + D4 (version provisional), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built-for word still 0x153C; section 74.**
 **Branch fw-d5 (2026-10-21): fw 0.2.104 + D5 (version provisional), protocol 1.27 (row 67): FPGA 0x153D, the generator as the pattern generator's two-step square (P16 / H16, glitch-free changes, the DDS writes gone), SET_PATTERN 0x0217, SET_PATTERN_TRIGGER 0x021A, capture trigger source 3 (the marker), GEN 40 bytes, Bode on P = 4 M; still built for 0x153C until D3; section 75.**
 **Branch fw-cruft (2026-10-21): main 703e9c9, what 0x153C dropped (version not bumped, protocol 1.27 row 67): no 0x0F writes, READ_LIVE / caps bit 9 retired, 0x53 = K alone (SET_DECIM flags bits 0..2 dropped); open: the roll mode still reads the removed 0x24 / 0x26 (section 77).**
+**Branch fw-roll (2026-10-21): main 2611de2, roll mode on the 0x153D logger stream (version not bumped, protocol unchanged): the long time bases draw corrected column means of both channels from fpga_log (roll.c, roll_view.c, pc_glue_roll_*), the 1.00o5 roll trigger kept on the columns, every arm releases the stream, host ARM / LOG_START take precedence over a rolling UI, averagecommand / fpga_average_trace_data(_long) gone, check_retired_regs covers 0x24..0x27; section 78.**
 **Branch fw-small (2026-10-21): main 803d215 + three small fixes (version not bumped), protocol unchanged: the forced stop writes 0x0E = 0 before 0x1A = 0 (`fpga_force_stop`), Vmax / Vmin / Vpp / Vp from the peak bytes with Sample = Peak (`pb_extremes`), the "ADC readout fault near code 128" message without the bitstream advice; section 76.**
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (fw 0.2.104), protocol 1.26 (row 66 "Peak detect"): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (fw 0.2.104), protocol 1.26 (row 66 addition): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
@@ -6016,3 +6017,115 @@ register byte). The audit missed it because it looked for READ_LIVE and literal 
 the channel settings. Left untouched here on the coordinator's instruction (`averagecommand` and the roll path exactly
 as they were); `check_retired_regs.py` does not list 0x24..0x27 for that reason (add them when the roll path changes).
 `scope_get_long_timebase_data1` (test.c 583) is a dead older copy with the same reads.
+
+## 78. fw-roll: roll mode on the 0x153D logger stream (version not bumped, protocol unchanged)
+
+Branch `fw-roll` from main 2611de2. Commits 8e1458d (roll.c + test_roll), 827506f (roll_view.c, the stream glue, the
+removals), 532f8af (host precedence), 7ca8d78 (check_retired_regs), then the docs. **Nothing benched, nothing flashed**;
+`PC_FW_VERSION` / `PC_FW_FPGA_VERSION` untouched (still 0x153C: on today's unit roll mode stops at once with "Roll mode
+needs FPGA bitstream 0x153D", the intended loud failure until the 0x153D integration). Owner decision 2026-10-21: roll
+draws real decimated samples from the logger, both channels, continuous, no RTL change (section 77 "Open" found the
+0x153C regression). User-facing description: firmware/README.md "Roll mode", docs/guide/screens.md "Roll mode".
+
+**What was built**
+- `roll.c/.h` (pure, host-tested): `roll_plan` (per time/div the 0x0D divider and the words per screen column, below),
+  `roll_feed` (legacy-layout words CH1 B, CH1 A, CH2 B, CH2 A into columns: the mean of the 2 W samples per channel, each
+  corrected per core with the readout's gain / offset, rounded, 0..255, mirrored when inverted; 64-bit integer maths once
+  per column, no float), the 3000-column record (Auto slides, Single ends with ROLL_EV_DONE, Normal empties and waits:
+  ROLL_EV_RESTART), the trigger (a crossing of the level between consecutive columns of the trigger channel in the edge's
+  direction; a gap clears the previous column), `roll_code`.
+- `pc_hal_scope.c` `pc_glue_roll_start / _running / _release / _read` (the `//fw-roll` block after the logger): the
+  logger's start with the plan's divider, K = 0, the sequencer off, `fpga_log_start(3, FPGA_LOG_F_LEGACY)` into a 32 KiB
+  ring of its own (`pc_roll_mem`, .bss; the host log's 8 MiB ring is not touched), `pc_glue_ui_capture_start` (a host
+  single in flight ends, the ring is invalid, as for a UI conversion); release = `fpga_log_stop(ENDED)` (0x69 = 0, no
+  tail) and 0x0D = `fpga_divider`. Running = open, RUNNING, the same time base and `fpga_divider` unchanged since the
+  start (a UI rate write also wrote 0x0D). `pc_hal_arm`, `pc_hal_log_start` and `fpga_do_conversion` call the release
+  first: one hand-over rule (whoever arms owns the FPGA), so calibration, AUTO SET, the Bode engine and the host never
+  meet a running stream.
+- `roll_view.c/.h` (device): `roll_view_pass` from the main loop's long-mode branch (was `scope_get_long_timebase_data`):
+  STOP releases; a changed trigger mode / source / edge / time base, or RUN after a Single record, resets the model; the
+  stream is started when not running for the time base (failure: STOP and the amber reason); `fpga_set_trigger_level`
+  while waiting (the 0x17 write is ignored while streaming), the corrections from `fpga_channel_correction`; up to 8 reads
+  of 2048 words per pass; the trace area redrawn only when columns came in (newest at x 726, one column per pixel, both
+  enabled channels, grid, pointers, cursors, the amber line). `roll_view_reset` from `scope_preset_values`' long branch.
+- Removed: `averagecommand` (variables.h, scope_functions.c), `fpga_average_trace_data(_long)` (fpga_control.c/.h),
+  test.c's `scope_get_long_timebase_data`, `_data1` (dead copy) and `scope_check_long_trigger` (and test.h), the
+  scopesettings fields `count` / `xpos` / `lastx` and the channel `sample1` / `sample2` (only the old roll used them), the
+  global `multiply` (only the old roll trigger used it; scope_functions.c's are locals). `previoustimerticks` stays (touch
+  tap timing; the old roll overwrote it).
+- pc_cmds.c: ARM and LOG_START no longer refuse the long time base (E_STATE detail 2): they stop the UI as in the short
+  ones (`pc_hal_ui_set_run(0)`), and the arm releases the stream. READ_RAW (latest capture) keeps detail 2 only while the
+  UI rolls, and the MAIN poll clears `ring_valid` only then. mcp protocol.py: the unused `LOG_S_LONG_TIMEBASE` removed and
+  the docstrings updated; docs/protocol.md rows 34 / 35 and row 67's LOG_START details say so. No wire layout change.
+- check_retired_regs.py: 0x24..0x27 retired, plus a `...command = 0x..` assignment pattern (it flags the two
+  averagecommand lines of 2611de2's scope_functions.c).
+
+**Divider and rate per time/div** (column = 1/50 division = W words of 2 (D + 1) x 5 ns)
+
+| time/div | D | W | samples / channel / column | per channel | FPGA ring before a lap |
+|---|---|---|---|---|---|
+| 50 s, 20 s, 10 s, 5 s, 2 s | 999,999 | 100, 40, 20, 10, 4 | 200, 80, 40, 20, 8 | 200 S/s | 82 s |
+| 1 s | 499,999 | 4 | 8 | 400 S/s | 41 s |
+| 500 ms | 249,999 | 4 | 8 | 800 S/s | 20 s |
+| 200 ms | 99,999 | 4 | 8 | 2 kS/s | 8.2 s |
+| 100 ms | 49,999 | 4 | 8 | 4 kS/s | 4.1 s |
+
+At most 2000 words/s (about 2.4 ms of bus time per second, far below the logger's 2 ch 8-bit tier). D + 1 = 10^6 is the
+largest round value under the 20-bit compare, which is why 2 s/div and slower share it and differ in W.
+
+**Decided and why**
+- **Legacy 8-bit layout, both channels always streamed**: no dependence on the UI's Filter / Sample setting, one word
+  layout, a channel switched on mid-roll has its history; the column mean of 8..200 samples is the anti-alias boxcar the
+  CIC would give (the 16-bit layout would need the filter set up per time base for no visible gain at these rates).
+- **The mean per column, not the newest word**: a boxcar over exactly the column's time (no mains hum aliased into slow
+  beats); 1.00o5 also averaged (10 peeks).
+- **The roll trigger kept** (brief item 2): it worked on 0x1532..0x153B (the live-pin reads worked there; Donwulff's "roll
+  does not work" in fpga/al3/README.md is about the 0x0F mux, which never mattered for these reads), but its level was the
+  pointer's screen position + 25 compared with averages scaled by a constant (right at one V/div only). Now the level is
+  `fpga_set_trigger_level`'s code compared with the columns as drawn. The sweep display became a scrolling one (the
+  owner's "continuous"); the 3000-column records and the Single stop / Normal restart are 1.00o5's.
+- **EXT runs as Auto with an amber line**: the stream has no EXT channel; 1.00o5 silently used CH2.
+- **The release in every arm** instead of an explicit stop at each place that leaves roll (time base, Spectrum, viewer,
+  restore, calibration, AUTO SET, host): one rule, and the roll pass restarts the stream when it is wanted.
+- **A restarted stream counts as a gap** (the partial column is dropped, the trigger needs two new columns); the trace
+  does not mark gaps.
+
+**Host test** `test_roll` (161 checks): the plan (exact column period, divider bound, tier, bus cost), `roll_code`
+(rounding, per-core gain / offset, limits, inversion, no overflow at 100 x 255 x 1.5), Auto across split feeds, a gap,
+the sliding record, EXT / no plan as Auto, the trigger (rising / falling, equal to the level, CH2 inverted, no crossing
+across a gap, Single full and stopped, Normal restart and re-trigger), and end to end on `fpga_model.c`'s 0x153D stream at
+100 ms/div through `fpga_log` + `pc_logring` (34 passes of 30 ms: every column equal to the boxcar of its words' indices,
+all words consumed, a 5 s stall gives one gap and correct columns after it, the release writes 0x69 = 0 only, 0x153C
+refused). test_session: ARM while rolling arms and stops the UI; LOG_START while rolling starts; READ_RAW detail 2 while
+rolling, detail 1 stopped. `make -s test` all green; check_vectors OK; `make gcc10`, `make` (GCC 13) and the PC_DEBUG
+build without new warnings in the touched files.
+
+**Bench (owner / coordinator; needs the 0x153D bitstream flashed and `PC_FW_FPGA_VERSION` 0x153D, i.e. after the D3
+integration; FEL, never without the backup)**
+1. A 1 Hz-ish signal (a function generator, or the calibration pin's generator at 1 Hz) on both CH1 and CH2, 1 V/div, ACQ
+   Roll, 1 s/div, trigger Auto, RUN: the trace scrolls continuously in from the right edge, both channels, real amplitude
+   (a 1 Vpp square is one division high), no pauses; taps answer at once (no busy wait). 100 ms/div: smooth, about 20
+   columns per pass; 50 s/div: one new column per second. Invert a channel: it mirrors.
+2. Trigger Normal, rising, level in the middle of the square: the trace waits, then starts at a rising edge. Single: stops
+   after 3000 columns (60 s at 1 s/div). Source EXT with Normal: the amber line, it rolls as Auto.
+3. Host while rolling: LOG_START (`scope_log_start`) takes over (STOP, "Logging to the host"), LOG_STOP, then RUN: the roll
+   resumes with an empty record. ARM (`scope_capture`) while rolling: the capture completes, the UI in STOP. READ_RAW of the
+   latest capture while rolling: E_STATE detail 2.
+4. Leave roll with the ACQ Roll box (a tap does not cross): the short time bases unchanged (a 1 kHz capture at 200 MSa/s
+   and 1 MSa/s, edges where they were). Spectrum from roll: roll goes off, the spectrum runs. AUTO SET from roll: it
+   captures (the stream released) and ends where AUTO SET leaves the scope.
+5. At 100 ms/div open a menu for more than 4 s: after it closes the trace continues (one gap, no garbage).
+6. On 0x153C (today, before the integration): RUN in roll stops at once with "Roll mode needs FPGA bitstream 0x153D".
+Regression signs: a trace that jumps every pass (the column phase lost), a flat line at mid-screen (the corrections or
+the lane order), the short time bases' rate wrong after roll (0x0D not restored), a host capture that never completes
+after roll (the stream not released: 0x69 still 1).
+
+**Open**
+- The viewer of a roll waveform or picture saved after this change is not rechecked: the roll no longer writes
+  `disp_xstart` / `disp_xend` / `triggerhorizontalposition` (1.00o5 wrote window values of 375..2625 there); it still sets
+  `disp_have_trigger` and `disp_first_sample` as before.
+- After a host capture or log in a long time base the screen keeps the frozen roll (the roll view draws only while
+  running): the host capture is in the trace buffers but not drawn, and "Log ended" is not shown, until RUN.
+- Gaps (a long menu, a restart) are not marked on the trace.
+- The trigger compares column means, so a pulse much shorter than a column (2 ms at 100 ms/div) may not trigger, as with
+  1.00o5's averages.
