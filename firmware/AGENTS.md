@@ -6,6 +6,7 @@ section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SE
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-c6 (2026-10-21): fw 0.2.103 + C5 + C6 (version provisional), protocol 1.26 (row 66 "Peak detect", provisional): peak detect on FPGA 0x153C (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3, GET_CAPTURE_INFO 79 bits 1 / 0, the shift byte's peak bits (0xC0) with mode 0x81, the mean-core full-class correction and the midpoint trace, averaging refused (E_STATE 7), caps bit 21 / features bit 9; section 70.**
 **Branch fw-c7 (2026-10-21): fw 0.2.103 + C7 (version provisional), protocol 1.26 (row 66 addition, provisional): the 0x153C hardware counter: boot 0x62 = 128 / 6 and 0x61 = gate 100 ms on the trigger source, one 0x35 read per main-loop pass (`fpga_counter.c`, 17 strobes), the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the level following the UI trigger level, GET_COUNTER 0x0213 (24 bytes, the mcp's layout), caps bit 22 COUNTER / features bit 10, the six timing cards fed by the counter for the trigger channel (`ui_meas.c`); section 71.**
+**Branch ui-sample (2026-10-21): fw 0.2.103 + C6 + ui-sample (version provisional), protocol 1.26 unchanged: the ACQ menu's Sample row (478 px menu, Normal / Peak, the greyed Filter / Average with the Memory column's note, word 211 bit 3), peak records drawn as bars per column (`peak_bars.c`), phosphor bars, Trace style "Bars"; section 73.**
 **Branch ui-type (2026-10-21): fw 0.2.103 + C5 + ui-type (version provisional), protocol 1.26 unchanged: the trigger menu's Type row (Edge / Pulse / Nth with Width, Shorter / Longer, N, Idle), the chip glyph, the notice queue, the hints, settings words 202 / 203; section 72.**
 **Branch fw-c5 (2026-10-21): fw 0.2.103 + C5 (version provisional, the coordinator numbers it), protocol 1.26 (row 66, provisional): built for FPGA 0x153C (`PC_FW_FPGA_VERSION`; a scope on 0x153B shows the mismatch notice until C4's bitstream is flashed), caps bits 2 HOLDOFF / 20 TRIG_TYPES, SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112, the trigger extension registers 0x5E / 0x5F / 0x60 / 0x1B / 0x66 in fpga_bus.c with the arm-window writes; section 69.**
 **Branch fw-one (2026-10-20): fw 0.2.103, protocol 1.25 (row 65): the firmware runs on one FPGA bitstream, `PC_FW_FPGA_VERSION` 0x153B (fixed caps, a mismatch notice screen, E_UNSUPPORTED detail 1, GET_INFO 80 / GET_HEALTH 128 bytes), the stock / Atlan / EF2 / EP4 arms, the encode-heal and core-order workarounds and the 0x1532..0x153A stop geometry removed; Average is one behaviour (the mean of N records on both paths); section 68.**
@@ -5569,3 +5570,98 @@ words); EXT: 10ns .. 50ms (10^7 words) for both, Idle Off then 10ns (decided 6).
 - The snap notices draw on the Scope's line only (`pc_glue_scope_warning`); the Spectrum's own line does not show them.
 - Roll mode: the - / + use the roll rate's range (the rows keep their values; nothing snaps).
 - The ACQ Sample row (ui-rows.md section 3) and the C6 / C7 items are separate.
+
+## 73. ui-sample: the ACQ Sample row (fw 0.2.103 + C6 + ui-sample, version provisional, protocol 1.26 unchanged)
+
+Branch `ui-sample` (worktree) from main ba6ce49 (fw-c6 merged). Brief: the ACQ Sample part of `docs/plans/ui-rows.md`
+(section 3, checklist items 8-10, section 4's Sample bit; the "Decided" section final), mockups
+`docs/mockups/ui-rows/AcqMenuSample.png`, `AcqMenuPeak.png`, `ScopePeak.png`. Commits: 7098449 (ui_ctrl: the row as data,
+word 211, Trace style Bars, test_ui), 4a93304 (peak_bars, phos_add_span, test_peak_bars), acc1884 (the firmware: menu,
+touch, glue, bars, phosphor, CTRL), 09dac96 (Sample Peak at 200 MSa/s), then the docs. **Nothing benched**: the firmware
+needs C4's 0x153C bitstream; the coordinator numbers the version and benches.
+
+**What was built**
+- **ui_ctrl.c/.h** (pure, `test_ui.c` `test_acq_row`): the geometry (`UI_ACQ_W` 478, the boxes `UI_ACQ_BOX_X(i)` = 8 + 98 i
+  at y + 163, 90 x 40, label line y + 168, value line y + 182; the Memory column's rule `UI_ACQ_COL_X` 402, header x + 415,
+  chips `UI_ACQ_CHIP_X` 413 (masks at 411, 58 x 29), pass time `UI_ACQ_PASS_X` 410 (was 312), the note at x + 410, y + 254,
+  four 18 px lines to y + 326, 66 px wide); `ui_acq_row_build(in, row)`: the four boxes' texts and states (OFF light grey /
+  white, ON green / black, GREY light grey / LIGHTGREY1 text with the value kept and no taps, NONE not drawn) and the note;
+  `ui_acq_peak_applied` (peak, Scope, not roll); `ui_acq_box_at` (the drawn box down to the rule at y 211, `UI_ACQ_ROW_HIT_BOTTOM`
+  210); `ui_acq_decim_set(filter_set, peak, spectrum)` (the UI's decimation byte: the Filter's K / FIR plus
+  `PC_DECIM_SET_PEAK` in the Scope view; `pc_dec_ui_set` calls it); `ui_word_ui` / `ui_word_ui_restore` (word 211: 0xC700,
+  bit 0 Grid, bits 1-2 the Spectrum's variant, **bit 3 Sample Peak**, marker check 0xFFF0); `ui_trace_names` "Bars".
+- **peak_bars.c/.h** (pure, `test_peak_bars.c`): `pb_walk` / `pb_start` / `pb_next`: the record's pairs walked per column with
+  the step as Q16 samples per column (column c covers floor(p) .. floor(p + step) - 1, at least floor(p); zoomed in several
+  columns share a sample), the lowest min byte and the highest max byte through `pc_peak_code` (the midpoint's mean-core
+  full-class correction, so the bar brackets the trace), swapped and mirrored when inverted; `pb_draw` (to_y / vline
+  callbacks, the rows ordered); `pb_phos_record` (one `phos_add_span` per column); `pb_overload`. **phos_map.c**
+  `phos_add_span` (one vertical run, each cell once, either order, clipped).
+- **pc_hal_scope.c**: `pc_dec_raw_peak[2]` / `pc_dec_peak_gain[2]` / `pc_dec_peak_off[2]` kept by `pc_glue_decim_read` for
+  a peak readout; `pc_glue_peak_record(ch, ...)` (0 in roll and in the waveform viewer); `pc_dec_ui_wide` (the Filter or
+  Sample Peak in the Scope view: the depth limit for the chips, `pc_dec_fit_memory` on a tap, on the mode follow and after
+  the word 211 restore); `pc_glue_trig_tw5` takes `pc_dec_ui_set` (a Peak record has the 16-bit word period);
+  `pc_glue_acq_row_draw` (Average, Filter, Sample, the note; replaces `pc_dec_draw_box`; the text centred on measured
+  widths), `pc_glue_acq_box_live`, `pc_glue_sample_tap` (toggle, fit, chips, row, re-arm), `pc_glue_sample_peak`;
+  `pc_glue_ui_setting_word` / `pc_ui_setting_restore` through the ui_ctrl codec.
+- **menu.c**: the rule at x + 402, "Memory" at x + 415, the chips at x + 413; `scope_acquisition_Average_mode_select` is
+  `PC_UI_MASK(PC_MASK_ACQ_FILTER)` (the whole row and note, so the roll toggle redraws Sample too). **variables.h**
+  `ACQ_MENU_WIDTH` 478 (the save / restore rectangle and the tap-outside test follow it). **statemachine.c**: the row's
+  branch is `ui_acq_box_at` (Roll, Average, Filter, Sample; a grey box takes no tap), the Memory column's hit from x + 402.
+- **scope_functions.c** `scope_display_channel_bars(settings, ch)` before the Trace style switch of both channels (after
+  `PC_PHOSPHOR_SKIP`): a peak record through `pb_draw` with `scope_code_to_y` and `display_draw_vert_line`, the trace
+  points at each column's middle (thumbnail); with Sample Peak and an 8-bit record (200 MSa/s) the Bars style's drawing.
+  One float multiply per channel per pass (the Q16 step), none per column. **phosphor.c**: a peak record adds bars
+  (`pb_phos_record`); the column key includes `dc.peak`. **ctrl_page.c**: Trace style grey and inert with
+  `pc_glue_sample_peak()` as in X-Y. **pc_seq_hw.c**: no Average while `pc_glue_sample_peak()` (also at 200 MSa/s).
+- Host tests: test_peak_bars (90 checks: walks at 4, 2.5 and 0.25 samples per column, the record's end, the correction
+  and inversion, the framebuffer column by column over 725 columns with the spike and dip rows, overload, phosphor twice,
+  the decimation configurations for Peak and back incl. the FIR, Filter off, the Spectrum, 6000 / 9000 samples),
+  test_ui `test_acq_row` (geometry, hits, both states' texts, grey boxes, the notes, Spectrum, roll, text fit, Bars, word
+  211 round trip and 0.2.56..0.2.103's words), test_acq_view (the chips with Peak). `make -s test` green; GCC 10 and 13
+  builds without warnings in the touched files (pc_seq_hw.c's two fw-one pointer warnings stay).
+
+**Strings (as implemented)**: box texts "Roll" / "mode", "Average" / "mode", "Filter" / <"off", "boxcar", "CIC2", "CIC3",
+"boxcar+FIR", "CIC2+FIR", "CIC3+FIR">, "Sample" / "Normal" or "Peak"; the note "Peak:" / "Filter and" / "Average" / "not
+applied" (31, 53, 48, 63 px in font_2) or in roll "Not in" / "roll mode" (32, 53 px); Trace style "Linear", "Dots", "Bars".
+
+**Decided and why**
+- **Persistence**: word 211 bit 3 (the plan's choice), not a new word: the word already holds UI view settings with a
+  marker, and a sector written before reads bit 3 clear (Normal). The marker check widened to 0xFFF0.
+- **Roll note persistent**, not only on a tap: the menu is modal, so a plot notice queued on a tap would show only after
+  the menu closes; the column's note slot is free in roll (Peak is not applied there). "Not in roll mode" is 88 px in
+  font_2 against the column's 66, so it stands on two lines. The Average box greys in roll the same way (it was drawn as
+  "off" with white text while not taking taps).
+- **The depth limit applies with the setting** (`pc_dec_ui_wide`), in roll too, as the Filter's does: leaving roll with
+  Peak would otherwise arm a 9000-sample record that falls back to legacy (why 3) with the menu saying Peak.
+- **At 200 MSa/s Peak stays consistent with the menu**: the FPGA path is legacy there (fw-c6, why 2), so the setting (not
+  the record's flag) skips Average and the view draws the record's per-column min / max (the Bars style), which is what
+  peak detect at the full rate is. Trace style is grey whenever Peak is applied.
+- The box texts are centred on their measured widths (font_2) instead of 1.00o5's hand offsets: the Average and Filter
+  texts move by a pixel or so; the Roll box is pc_glue_roll_label's as before.
+
+**Differences from the mockups (the firmware's pixels win)**: the texts are the bitmap fonts' (13 px), not the artboards'
+Arial; the greyed boxes keep the off boxes' fill (LIGHTGREY 0x333333) with LIGHTGREY1 text, the mockup's grey fill is a
+shade lighter; the note is in the pass time label's grey (0xA0A0A0); the rule under the row (y + 211) still spans the
+Memory column as on 0.2.63+. The ScopePeak board's Vmax reads the drawn spike; the firmware's cards read the midpoint
+trace (the brief), so a spike shows at about half its height in Vmax / Vpp (open below).
+
+**Bench (coordinator, FEL load after C4's 0x153C, never without the backup)**
+1. ACQ menu: 478 px, Sample "Normal" in a grey box as the fourth of the row, Memory column right of x 652, five chips,
+   the pass time under the rule; a tap right of the old edge (x 631..728) is inside the menu, x 735 closes it.
+2. Sample Peak: the box green "Peak", Filter and Average grey with their values, the four-line note, chips 3000 / 6000
+   only (a 9000+ depth snaps to 6000 with the time/div notice when needed); GET_DECIM 0 = 4, 26 / 27 = 0x81 / 0xC0 after
+   the next arm; GET_STATUS 46 = 0 with Average on; taps on the grey boxes do nothing. Normal: the Filter back (GET_DECIM
+   0 = the Filter, the FIR flag as before), the five chips again.
+3. 500 kSa/s, the 1 kHz square plus a short glitch (as fw-c6's bench): the trace as bars, the glitch a bar to its height
+   (ScopePeak); Normal misses it. Inverted channel: bars mirrored. Overload (V/div small enough to clip): the bars red.
+4. Phosphor on with Peak: the bars accumulate; X-Y with Peak: the Lissajous of the midpoints. CTRL Trace style grey.
+5. 200 MSa/s with Peak: the record's per-column min / max (bars), Average not running (GET_STATUS 46 = 0).
+6. Roll mode: Sample and Average grey, "Not in" / "roll mode"; Spectrum: no Sample box, the Filter / Average as there.
+7. Save settings with Peak, power cycle: Peak back (chips limited); Restore default settings: Normal.
+Regression signs: the Filter box text moved off centre, the memory chip hits off by 98 px (a missed `UI_ACQ_CHIP_X`),
+bars on a Normal record (a stale `pc_dec_raw_peak`), Average running with Peak.
+
+**Open**
+- Vmax / Vmin / Vpp from the bytes (ui-rows.md 3.3 and the ScopePeak board) are not built: the cards read the midpoint
+  trace (the brief); a peak record's min / max per channel are in `pc_dec_raw` for a later card source.
+- The pass-time line's colour and the note's are literal 0xA0A0A0 in pc_hal_scope.c (no palette name for it).

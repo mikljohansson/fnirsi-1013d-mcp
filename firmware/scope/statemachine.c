@@ -2602,35 +2602,47 @@ void handle_acquisition_menu_touch(void)
         }
         //======================================================================
         //Check on middle button line set
-        else if((ytouch >= ACQ_MENU_YPOS + 170) && (ytouch <= ACQ_MENU_YPOS + 210) && (xtouch >= ACQ_MENU_XPOS) && (xtouch <= ACQ_MENU_XPOS + 304))
-        {   
-          //Check ACQ mode (short or long) button if touch within this bounding box
-          if((xtouch >= ACQ_MENU_XPOS + 20) && (xtouch <= ACQ_MENU_XPOS + 90))
+        //ui-sample: the row of four boxes (Roll, Average, Filter, Sample; ui_ctrl.h), each box's drawn area down to the
+        //rule at y 211; a grey box (Average in roll or with Sample Peak, Filter with Peak, Sample in roll) takes no tap
+        else if(ui_acq_box_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS) >= 0)
+        {
+          int box = ui_acq_box_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS);
+
+          //Check ACQ mode (short or long) button
+          if(box == UI_ACQ_ROLL)
           {
             //Toggle the long_mode state
-            //scopesettings.long_mode ^= 1;
             scope_acquisition_ACQ_mode_select();
           }
-            
-          //Check Average button if touch within this bounding box
-          if((xtouch >= ACQ_MENU_XPOS + 120) && (xtouch <= ACQ_MENU_XPOS + 190)&&(!scopesettings.long_mode))
-          {        
+
+          //Average button
+          if((box == UI_ACQ_AVERAGE) && pc_glue_acq_box_live(UI_ACQ_AVERAGE))
+          {
             //Toggle the average_mode state
-            scopesettings.average_mode ^= 1;         
+            scopesettings.average_mode ^= 1;
             scope_acquisition_Average_mode_select();
             scope_acqusition_settings(0);
-          }    
-            
-          //Filter selector (bitstream 0x1534+) in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3 (+ FIR on 0x1535+)
+          }
+
+          //Filter selector in 1.00o5's Long memory slot: Off, Boxcar, CIC2, CIC3, each with the FIR
           //fw 0.2.64: a filter shortens the record to 8190 samples (16-bit layout): the time/div follows
-          if((xtouch >= ACQ_MENU_XPOS + 204) && (xtouch <= ACQ_MENU_XPOS + 294) && pc_glue_ui_has(PC_FEAT_DECIM))
+          if((box == UI_ACQ_FILTER) && pc_glue_ui_has(PC_FEAT_DECIM) && pc_glue_acq_box_live(UI_ACQ_FILTER))
           {
             pc_glue_decim_tap();
             acq_view_fit(1);
             scope_acquisition_timeperdiv_select();
             scope_acqusition_settings(0);
           }
-        }        
+
+          //Sample Normal / Peak (Scope only, not in roll): Peak runs the 16-bit path, the record and time/div follow
+          if((box == UI_ACQ_SAMPLE) && pc_glue_acq_box_live(UI_ACQ_SAMPLE))
+          {
+            pc_glue_sample_tap();
+            acq_view_fit(1);
+            scope_acquisition_timeperdiv_select();
+            scope_acqusition_settings(0);
+          }
+        }
         //======================================================================
         //Check on time per div being set
         else if((ytouch >= ACQ_MENU_YPOS + 240) && (ytouch <= ACQ_MENU_YPOS + 380) && (xtouch >= ACQ_MENU_XPOS) && (xtouch <= ACQ_MENU_XPOS + 304))
@@ -2668,13 +2680,13 @@ void handle_acquisition_menu_touch(void)
         }
         //====================================================================== 
         //Check on memory deep being set
-        else if((ytouch >= ACQ_MENU_YPOS + 32) && (ytouch <= ACQ_MENU_YPOS + 210) && (xtouch >= ACQ_MENU_XPOS + 304) && (xtouch <= ACQ_MENU_XPOS + ACQ_MENU_WIDTH))
+        else if((ytouch >= ACQ_MENU_YPOS + 32) && (ytouch <= ACQ_MENU_YPOS + 210) && (xtouch >= ACQ_MENU_XPOS + UI_ACQ_COL_X) && (xtouch <= ACQ_MENU_XPOS + ACQ_MENU_WIDTH))
         {
           //Check on the different bounding boxes for the separate settings
           for(i=0;i<(sizeof(memory_deep_texts) / sizeof(int8 *));i++)
           {
             //Calculate the coordinates for this setting            
-            x = 315 + ACQ_MENU_XPOS;
+            x = UI_ACQ_CHIP_X + ACQ_MENU_XPOS;
             y = (i * 36) + 33 + ACQ_MENU_YPOS;
 
             //Check if touch within this bounding box

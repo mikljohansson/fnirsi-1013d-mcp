@@ -440,8 +440,8 @@ contract's section 10) drives it as follows.
   give a legacy record (why 2 / 3) with the Sample setting kept. EXT shift: the boxcar's 120 ns + (N - 1) 2.5 ns + 40 ns
   of the capture stages; settle after the 0x56 write (1 + 10) N x 5 ns + 1 us (fpga-c2's note).
 - **The setting** (`pc_hal_scope.c`): `pc_dec_peak`, one Scope setting (the ACQ Sample row of `docs/plans/ui-rows.md`
-  section 3; the Spectrum view always acquires Normal, `pc_dec_ui_set`), not saved yet (the UI row item puts it in
-  settings word 211 bit 3 and draws the row; `pc_glue_settings_defaults` resets it). SET_DECIM filter 4 sets it and keeps
+  section 3; the Spectrum view always acquires Normal, `pc_dec_ui_set`), saved in settings word 211 bit 3 (ui-sample,
+  below; `pc_glue_settings_defaults` resets it). SET_DECIM filter 4 sets it and keeps
   the Filter's K / FIR for the way back; filter 0..3 clears it. It is in the settings fingerprint (`settings_seq`).
 - **The arm** (`pc_dec_apply`): `fpga_decim_write(mode = 1 | flags, cmd56 = 2, shift 0)` (0x53 / 0x54 / 0x56 only where
   they differ from what the FPGA holds, 0x54 at every 16-bit arm as before), then 0x55 = raw << 8 with raw =
@@ -464,8 +464,7 @@ contract's section 10) drives it as follows.
   16-bit (the latter now for single captures too), READ_RAW layout 3 (per channel the minima then the maxima; layout 2 on
   a peak record and layout 3 on any other record E_BAD_ARG 2), READ_TRACE 30 / 31. Caps bit 21 PEAK_DETECT, features
   bit 9. The bytes match mcp-c8's host vectors byte for byte (the coordinator's wire format).
-- **Not here**: the ACQ Sample row and the Scope view's bars (a later item on `docs/plans/ui-rows.md` section 3), the
-  counter (C7). GET_CAL 92..107 report the correction of the current divider's class: a host wanting the firmware's exact
+- **Not here**: the counter (C7). GET_CAL 92..107 report the correction of the current divider's class: a host wanting the firmware's exact
   midpoint codes needs the full-class values (at divider 0, or from the sector); the difference is the class zero of a
   code or so.
 - **Host tests**: `test_fpga_bus.c` `test_peak` (the writes and the 0x29 read-back against `fpga_model.c`, whose 0x56 bit 1
@@ -477,6 +476,22 @@ contract's section 10) drives it as follows.
   reads the same code in Normal and Peak (the midpoint); the generator's 1 kHz square at 10 kSa/s in Peak shows min / max
   pairs spanning the square (READ_RAW layout 3) where Normal aliases; a short glitch (the Bode output stepped by the host)
   at 500 kSa/s caught in Peak and missed in Normal; the trigger level on the rising max; Average greyed / GET_STATUS 46 = 0.
+- **The ACQ Sample row and the bars** (ui-sample, `docs/plans/ui-rows.md` section 3, mockups `docs/mockups/ui-rows/
+  AcqMenu*.png`, `ScopePeak.png`): the ACQ menu is 478 px wide (x 250 .. 728), the Memory column (rule, header, chips,
+  pass time) one 98 px box pitch right of 1.00o5's, and **Sample** ("Sample" / "Normal" or "Peak") is the row's fourth
+  90 x 40 box at x + 302, y + 163; the row and the column's note are data (`ui_ctrl.c` `ui_acq_row_build`, drawn by
+  `pc_glue_acq_row_draw`): with Peak the Filter and Average boxes are grey with their values kept and the note reads
+  "Peak:" / "Filter and" / "Average" / "not applied" (y + 254, four 18 px lines); in roll the Sample (and Average) box is
+  grey and the note reads "Not in" / "roll mode"; the Spectrum's menu has no Sample box. A tap toggles `pc_dec_peak`
+  (`pc_glue_sample_tap`): the UI conversion arms SET_DECIM filter 4's path (`ui_acq_decim_set`: the peak bit in the Scope
+  view, the Filter's K / FIR kept and back with Normal), the 16-bit depth limit (chips 3000 / 6000, `pc_dec_ui_wide`), no
+  Average while the setting is Peak (also at 200 MSa/s, where the record stays 8-bit). The Scope view draws a peak record
+  as **one vertical bar per column** (`peak_bars.c`: the linear trace's step as Q16 samples per column, the column's
+  lowest min to highest max through the midpoint's correction, inverted with the channel; `scope_display_channel_bars`)
+  in the caller's colour, red on overload (either byte at 0 or 255); at 200 MSa/s the 8-bit record's per-column min / max.
+  Phosphor adds the bars (`pb_phos_record`, each column's rows once per record); X-Y and the cards use the midpoints;
+  Trace style greys while Peak (its "Peak" value is now "Bars"). Host tests: `test_peak_bars.c`, `test_ui.c`
+  `test_acq_row`.
 ### Hardware counter (FPGA 0x153C, fw-c7, protocol 1.26 row 66)
 
 Bitstream 0x153C (fpga-c3, `fpga/al3/AGENTS.md` "0x153C C3 counter"; contract `docs/plans/fpga-0x153c.md` section 5) counts
@@ -1059,7 +1074,7 @@ at its ends and each half of the row steps that way. The plot under the panel is
 | fold-out | rows |
 |---|---|
 | Display (Scope) | Normal, X-Y (with icons: a clean trace, a Lissajous loop) / a line / Phosphor switch (graded-trace icon; second line the records per second "55 wfm/s", or "Not in roll mode" greyed) and, while it is on, Persistence (0.2 s, 1 s, 5 s, Infinite; a step clears), Palette (Mono, Heat), Clear (clears and closes) |
-| Trace style (Scope) | Linear, Dots, Peak (1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu; Pro removed in 0.2.63) |
+| Trace style (Scope) | Linear, Dots, Bars ("Peak" until ui-sample; 1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu; Pro removed in 0.2.63) |
 | Display (Spectrum) | Spectrum, Waterfall, Density (icons: bars, colour stripes, graded dots); saved in word 211; in Waterfall and Density a line and Channel (CH1 / CH2, since 0.2.63) |
 | Analyse (Spectrum) | Analyse (CH1, CH2, CH1 + CH2: the shown channel, the dBV / dBA unit and Auto's channel), FFT length, Window, Average / a line / Scale, Ref level (- / +), Reset |
 

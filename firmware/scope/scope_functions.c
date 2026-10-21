@@ -28,6 +28,7 @@
 #include "tb_view.h"
 #include "acq_view.h"
 #include "trig_ui.h"
+#include "peak_bars.h"
 #include "ref_and_math.h"
 /*
 //sinx
@@ -2196,6 +2197,7 @@ void scope_display_trace_data(void)
         
       //PC protocol build: in the phosphor view the map replaces the polyline (PC_PHOSPHOR_DRAW below)
       PC_PHOSPHOR_SKIP()
+      if(!scope_display_channel_bars(&scopesettings.channel1, 0))     //ui-sample: a peak record is bars
       switch(scopesettings.ACQ_trace)
       { 
                 //Linear trace mode
@@ -2228,6 +2230,7 @@ void scope_display_trace_data(void)
             else display_set_fg_color(CHANNEL2_COLOR);
         
               PC_PHOSPHOR_SKIP()
+              if(!scope_display_channel_bars(&scopesettings.channel2, 1))
               switch(scopesettings.ACQ_trace)
       { 
                 //Linear trace mode
@@ -2758,6 +2761,56 @@ void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
     display_draw_pixel(xpos, sample2);
   }
 }
+//==============================================================================
+//ui-sample (docs/plans/ui-rows.md 3.3): a peak-detect record (Sample Peak, FPGA 0x153C) as one vertical bar per column
+//from the column's lowest min to its highest max (peak_bars.h), whatever the Trace style. The step is the linear trace's,
+//taken once as Q16 samples per column: no soft-float per column. The colour and the overload red are the caller's (set
+//above from ADoverload, which the read sets when either byte of a pair is at 0 or 255). The trace points hold each
+//column's middle for the thumbnail. Returns 0 (nothing drawn) when the record is not a peak record.
+static int32_t scope_bars_to_y(void *ctx, int32_t code)
+{
+  return scope_code_to_y((PCHANNELSETTINGS)ctx, code);
+}
+
+static void scope_bars_vline(void *ctx, int32_t x, int32_t y0, int32_t y1)
+{
+  PCHANNELSETTINGS settings = (PCHANNELSETTINGS)ctx;
+  PDISPLAYPOINTS   tp       = &settings->tracepoints[settings->noftracepoints++];
+
+  display_draw_vert_line(x, y0, y1);
+  tp->x = x;
+  tp->y = (y0 + y1) >> 1;
+}
+
+int scope_display_channel_bars(PCHANNELSETTINGS settings, int ch)
+{
+  const uint16 *pairs;
+  uint32        n, gain;
+  int32         off;
+  pb_walk       w;
+  pb_draw_cb    cb = { scope_bars_to_y, scope_bars_vline, settings };
+
+  if(!pc_glue_peak_record(ch, &pairs, &n, &gain, &off))
+  {
+    //Sample Peak at 200 MSa/s: the FPGA stores every sample (no window to reduce), so the bars are the per-column min /
+    //max of the 8-bit record, the Bars trace style; Trace style is grey while Peak whatever the rate
+    if(pc_glue_sample_peak() && !scopesettings.waveviewmode)
+    {
+      scope_display_channel_peak_trace(settings);
+      return 1;
+    }
+
+    return 0;
+  }
+
+  pb_start(&w, pairs, n, (disp_first_sample > 0) ? (uint32)disp_first_sample : 0, (uint32)(disp_sample_step * 65536.0 + 0.5),
+           gain, off, settings->invert);
+
+  settings->noftracepoints = 0;
+  pb_draw(&w, disp_xstart, disp_xend, &cb);
+  return 1;
+}
+
 //==============================================================================
 void scope_display_channel_peak_trace(PCHANNELSETTINGS settings)//2
 {

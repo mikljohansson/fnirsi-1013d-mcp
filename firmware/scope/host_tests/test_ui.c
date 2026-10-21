@@ -398,10 +398,10 @@ static void test_ctrl_page(void)
     cur = 250; ui_bright_load(0, &cur, &back);  T_EQ(cur, UI_BRIGHT_DEFAULT);
   }
 
-  //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
-  //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
-  T_TRUE(UI_ACQ_PASS_X > 304);
-  T_TRUE(UI_ACQ_PASS_X + UI_ACQ_PASS_W < 378);
+  //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule (ui-sample: x 402) and left of the menu's
+  //edge (478), below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
+  T_TRUE(UI_ACQ_PASS_X > UI_ACQ_COL_X);
+  T_TRUE(UI_ACQ_PASS_X + UI_ACQ_PASS_W < UI_ACQ_W - 2);
   T_TRUE(UI_ACQ_PASS_Y > 211);
   T_TRUE(UI_ACQ_PASS_Y + 32 <= 378);
   T_TRUE(ui_text_width(&font_2, ui_acq_pass_label) <= UI_ACQ_PASS_W);
@@ -2264,8 +2264,171 @@ static void test_bode_grid(void)
   T_EQ(bu_slider_x_mhz(1), BU_SL_X);
   T_EQ(bu_slider_x_mhz(20000000000ull), BU_SL_X + BU_SL_W);
 }
+//ui-sample: the ACQ menu's row of four boxes and the Memory column's note (docs/plans/ui-rows.md section 3, the
+//AcqMenuSample / AcqMenuPeak mockups), the Trace style rename, settings word 211
+static const ui_acq_row *acq(int roll, int average, int filter_on, int peak, int spectrum, const char *fv)
+{
+  static ui_acq_row r;
+  ui_acq_in in;
+
+  in.roll = (uint8)roll; in.average = (uint8)average; in.filter_on = (uint8)filter_on; in.peak = (uint8)peak;
+  in.spectrum = (uint8)spectrum; in.filter_value = fv;
+  ui_acq_row_build(&in, &r);
+  return &r;
+}
+
+static void test_acq_row(void)
+{
+  static const char *fv[] = { "off", "boxcar", "CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
+  const ui_acq_row *r;
+  uint8 g, v, p;
+  int i;
+  uint32 j;
+
+  //Geometry: 478 px (x 250 .. 728, left of the right bar at 739); four boxes on the 98 px pitch, the fourth at x + 302,
+  //all left of the Memory column's rule at x + 402, which is 1.00o5's x + 304 moved by one pitch; chips and the pass
+  //time in the column; the note's four lines under the pass time and above the bottom edge
+  T_EQ(UI_ACQ_W, 478);
+  T_TRUE(250 + UI_ACQ_W <= UI_BAR_X - 10);
+  T_EQ(UI_ACQ_BOX_X(UI_ACQ_SAMPLE), 302);
+  T_EQ(UI_ACQ_COL_X, 304 + 98);
+  T_TRUE(UI_ACQ_BOX_X(UI_ACQ_SAMPLE) + UI_ACQ_BOX_W < UI_ACQ_COL_X);
+  T_EQ(UI_ACQ_CHIP_X, 315 + 98);
+  T_TRUE(UI_ACQ_CHIP_X + 54 < UI_ACQ_W - 1);
+  T_TRUE(UI_ACQ_NOTE_X > UI_ACQ_COL_X);
+  T_TRUE(UI_ACQ_NOTE_X + UI_ACQ_NOTE_W <= UI_ACQ_W - 2);
+  T_TRUE(UI_ACQ_NOTE_Y >= UI_ACQ_PASS_Y + 32);
+  T_EQ(UI_ACQ_NOTE_Y + UI_ACQ_NOTE_LINES * UI_ACQ_NOTE_DY, 326);
+  T_TRUE(UI_ACQ_NOTE_Y + UI_ACQ_NOTE_LINES * UI_ACQ_NOTE_DY <= 386 - 8);
+
+  //Hit areas: each box's drawn area down to the rule at y 211; between the boxes and above them nothing
+  T_EQ(ui_acq_box_at(8, 163), UI_ACQ_ROLL);
+  T_EQ(ui_acq_box_at(97, 210), UI_ACQ_ROLL);
+  T_EQ(ui_acq_box_at(98, 180), -1);
+  T_EQ(ui_acq_box_at(106, 180), UI_ACQ_AVERAGE);
+  T_EQ(ui_acq_box_at(250, 180), UI_ACQ_FILTER);
+  T_EQ(ui_acq_box_at(302, 163), UI_ACQ_SAMPLE);
+  T_EQ(ui_acq_box_at(391, 203), UI_ACQ_SAMPLE);
+  T_EQ(ui_acq_box_at(392, 180), -1);
+  T_EQ(ui_acq_box_at(350, 162), -1);
+  T_EQ(ui_acq_box_at(350, 211), -1);
+
+  //Normal (AcqMenuSample): Filter off, Sample "Normal" grey-box white text, no note
+  r = acq(0, 0, 0, 0, 0, "off");
+  T_STR(r->line1[UI_ACQ_ROLL], "Roll");       T_STR(r->line2[UI_ACQ_ROLL], "mode");
+  T_STR(r->line1[UI_ACQ_AVERAGE], "Average"); T_STR(r->line2[UI_ACQ_AVERAGE], "mode");
+  T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "off");
+  T_STR(r->line1[UI_ACQ_SAMPLE], "Sample");   T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");
+  for(i = 0; i < UI_ACQ_BOXES; i++)
+    T_EQ(r->state[i], UI_ACQ_BOX_OFF);
+  for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+    T_TRUE(r->note[i] == 0);
+
+  //Average on, Filter CIC2: green boxes
+  r = acq(0, 1, 1, 0, 0, "CIC2");
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_OFF);
+
+  //Peak (AcqMenuPeak): Sample green "Peak"; Filter and Average grey with their values kept; the four-line note
+  r = acq(0, 1, 1, 1, 0, "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_ON);
+  T_STR(r->line2[UI_ACQ_SAMPLE], "Peak");
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
+  T_STR(r->line2[UI_ACQ_FILTER], "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_GREY);
+  T_EQ(r->state[UI_ACQ_ROLL], UI_ACQ_BOX_OFF);
+  T_STR(r->note[0], "Peak:");
+  T_STR(r->note[1], "Filter and");
+  T_STR(r->note[2], "Average");
+  T_STR(r->note[3], "not applied");
+  r = acq(0, 0, 0, 1, 0, "off");
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
+  T_STR(r->line2[UI_ACQ_FILTER], "off");
+
+  //Back to Normal: both boxes as they were, the note gone
+  r = acq(0, 1, 1, 0, 0, "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
+  T_TRUE(r->note[0] == 0);
+
+  //Spectrum: no Sample box (the slot stays empty), Peak kept but not applied there: Filter and Average as normal
+  r = acq(0, 1, 1, 1, 1, "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_NONE);
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
+  T_TRUE(r->note[0] == 0);
+  T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 0, 0, 0, 1, 1, 0 }), 0);
+
+  //Roll: Sample grey with its kept value, Average grey, the note "Not in" / "roll mode"
+  r = acq(1, 1, 1, 1, 0, "CIC2");
+  T_EQ(r->state[UI_ACQ_ROLL], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_GREY);
+  T_STR(r->line2[UI_ACQ_SAMPLE], "Peak");
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_GREY);
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_STR(r->note[0], "Not in");
+  T_STR(r->note[1], "roll mode");
+  T_TRUE(r->note[2] == 0);
+  r = acq(1, 0, 0, 0, 0, "off");
+  T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_GREY);
+  T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 1, 0, 0, 1, 0, 0 }), 0);
+  T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 0, 0, 0, 1, 0, 0 }), 1);
+
+  //Fit: every box text in its 90 px box (13 px font, 4 px in), every note line in the column (and the roll note's one
+  //line would not: why it is two)
+  for(j = 0; j < sizeof(fv) / sizeof(fv[0]); j++)
+  {
+    r = acq(0, 0, 1, 1, 0, fv[j]);
+    for(i = 0; i < UI_ACQ_BOXES; i++)
+    {
+      T_TRUE(ui_text_width(&font_2, r->line1[i]) <= UI_ACQ_BOX_W - 8);
+      T_TRUE(ui_text_width(&font_2, r->line2[i]) <= UI_ACQ_BOX_W - 8);
+    }
+    for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+      T_TRUE(ui_text_width(&font_2, r->note[i]) <= UI_ACQ_NOTE_W);
+  }
+  r = acq(1, 0, 0, 0, 0, "off");
+  T_TRUE(ui_text_width(&font_2, r->note[0]) <= UI_ACQ_NOTE_W);
+  T_TRUE(ui_text_width(&font_2, r->note[1]) <= UI_ACQ_NOTE_W);
+  T_TRUE(ui_text_width(&font_2, ui_phos_note_roll) > UI_ACQ_NOTE_W);
+  T_EQ(ui_text_width(&font_2, "not applied"), 63);
+
+  //Trace style: "Peak" renamed "Bars" (one word, one meaning: Peak is the Sample state)
+  T_STR(ui_trace_names[0], "Linear");
+  T_STR(ui_trace_names[1], "Dots");
+  T_STR(ui_trace_names[2], "Bars");
+  for(i = 0; i < UI_TRACE_COUNT; i++)
+    T_TRUE(strcmp(ui_trace_names[i], "Peak") != 0);
+
+  //Word 211: Grid, the Spectrum's variant, Sample Peak (bit 3) round trip; a word written before ui-sample (bit 3 clear)
+  //reads Normal; a wrong marker restores nothing
+  for(j = 0; j < 16; j++)
+  {
+    uint16 w = ui_word_ui(j & 1, (j >> 1) & 3, (j >> 3) & 1);
+
+    T_EQ(w & 0xFFF0, 0xC700);
+    g = v = p = 9;
+    T_TRUE(ui_word_ui_restore(w, &g, &v, &p));
+    T_EQ(g, j & 1);
+    T_EQ(v, (j >> 1) & 3);
+    T_EQ(p, (j >> 3) & 1);
+  }
+  T_EQ(ui_word_ui(1, 2, 0), 0xC705);                  //what fw 0.2.56 .. 0.2.103 wrote for Grid on, Density
+  T_EQ(ui_word_ui(1, 2, 1), 0xC70D);
+  g = v = p = 9;
+  T_TRUE(ui_word_ui_restore(0xC705, &g, &v, &p));
+  T_EQ(p, 0);
+  g = v = p = 9;
+  T_FALSE(ui_word_ui_restore(0xC715, &g, &v, &p));
+  T_FALSE(ui_word_ui_restore(0x0000, &g, &v, &p));
+  T_EQ(p, 9);
+}
+
 int main(void)
 {
+  test_acq_row();
   test_sig4();
   test_cards();
   test_menu();
