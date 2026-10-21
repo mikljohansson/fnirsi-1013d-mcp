@@ -66,7 +66,6 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
   uint8_t  k = k_req & 3;
   uint32_t n = pc_decim_n(divider), m;
 
-  c->flags     = 0;
   c->why       = PC_DECIM_WHY_NONE;
   c->k         = 0;
   c->shift     = 0;
@@ -84,9 +83,6 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
     c->why = PC_DECIM_WHY_NOCAP;
     return;
   }
-
-  //The swap bit is written with every mode, the legacy one included; 0x53 bits 3 / 4 are always 0 (pc_decim.h)
-  c->flags = flags & PC_DECIM_FLAGS;
 
   //0x56 is written as requested; the FPGA engages the FIR only where it is eligible. C6: the FIR is off while peak
   //detect is on (the FPGA would ignore it; the firmware writes bit 0 = 0 so 0x29 reads what runs)
@@ -149,7 +145,7 @@ void pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_t to
 
 uint8_t pc_decim_mode(const pc_decim_cfg *c)
 {
-  return (uint8_t)((c->k & 3) | c->flags);
+  return (uint8_t)(c->k & 3);                            //0x53 bits 4..2 are written 0 (pc_decim.h)
 }
 
 uint8_t pc_decim_status(const pc_decim_cfg *c)

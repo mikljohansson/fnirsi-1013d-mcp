@@ -755,8 +755,6 @@ uint32_t pc_hal_trace_capacity(void)
 //SET_DECIM and GET_DECIM all act on the mode on screen.
 static uint8         pc_dec_set_mode[2] = { PC_DECIM_DEFAULT_SCOPE, PC_DECIM_DEFAULT_SPEC };
 #define pc_dec_setting (pc_dec_set_mode[spectrum_mode() != SPECTRUM_MODE_SCOPE])
-static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
-                                                      //saved), falling-edge capture A / B (hidden, saved)
 //C6 peak detect (0x153C, docs/plans/fpga-0x153c.md section 4; the ACQ Sample row of docs/plans/ui-rows.md section 3): one
 //Scope setting, not per mode (the Spectrum always acquires Normal), saved in word 211 bit 3 (ui-sample). SET_DECIM
 //filter 4 and the ACQ menu's Sample box set it and keep the Filter's K / FIR for the way back; filter 0..3 clears it
@@ -807,7 +805,7 @@ static int pc_dec_ui_wide(void)
 //set: bits 1:0 K, PC_DECIM_SET_FIR, PC_DECIM_SET_PEAK (pc_dec_ui_set, or 0 for the legacy path)
 static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 {
-  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & (PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK))), pc_hal_divider_now(),
+  pc_decim_config(set & 3, (uint8)(set & (PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK)), pc_hal_divider_now(),
                   fpgasettings.totalsamples, pc_decim_has(), c);
 }
 
@@ -1480,13 +1478,12 @@ void pc_glue_decim_tap(void)
 
 uint8_t pc_hal_decim_setting(void)
 {
-  return (uint8_t)(pc_dec_ui_set() | pc_dec_flags);
+  return pc_dec_ui_set();
 }
 
 void pc_hal_decim_set(uint8_t setting)
 {
   pc_dec_setting = setting & (PC_DECIM_SET_FIR | 3);
-  pc_dec_flags   = setting & PC_DECIM_FLAGS;
   pc_dec_peak    = (setting & PC_DECIM_SET_PEAK) ? 1 : 0;                  //C6: the Sample row's state
 
   if((pc_dec_setting & 3) || pc_dec_peak)

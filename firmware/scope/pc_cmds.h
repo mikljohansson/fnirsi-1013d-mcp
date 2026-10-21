@@ -152,7 +152,7 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 
 //READ_RAW / READ_TRACE interleave order: 0 = core B before core A in each word (1.00o5 convention, P-7.3). Fixed since
 //fw 0.2.62: FPGA 0x1538 guarantees it at every rate (0x33 bits 3:2 = 01, checked at boot), the calibration's per-core
-//zeros and gains, acal_track's A - B model and the 0x53 swap bit (clear) all assume it
+//zeros and gains and acal_track's A - B model assume it (0x153C has no core-order swap bit)
 #define PC_INTERLEAVE_ORDER 0
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -189,7 +189,7 @@ typedef struct
   uint32_t   divider;
   uint32_t   pretrigger;        //samples
   uint32_t   total;
-  uint8_t    decim;             //1.9: decimation filter as written for it (0x29 byte 0 layout: bit 7 16-bit, bit 2 swap, K)
+  uint8_t    decim;             //1.9: decimation filter as written for it (0x29 byte 0 layout: bit 7 16-bit, K)
   uint8_t    decim_shift;       //S
   uint32_t   decim_n;           //N (0 when K = 0)
   uint16_t   ext_shift;         //EXT trigger with K >= 1: latency correction in samples (pc_decim_ext_shift)

@@ -386,6 +386,12 @@ static void test_decim_write(void)
   T_EQ(decim_arm(PC_DECIM_OFF, 0, &c), 1);
   T_EQ(fm.reg_53, 0); T_EQ(fm_trace_find(0x54, 15, 0), -1);
 
+  //fw-cruft: 0x53 bits 4..2 (the swap / falling-edge bits 0x153C ignores) never reach the bus, whatever the caller passes
+  fm.ntrace = 0;
+  (void)fpga_decim_write(0x1E, 1, 0, 0);
+  T_EQ(fm.reg_53, 0x02); T_EQ(fm_trace_find(0x53, 0x1E, 0), -1);
+  (void)fpga_decim_write(0x00, 1, 0, 0);
+
   //Bode-engine-like sequence (pc_bode.c bh_arm): a UI legacy conversion at D 19, then per step the engine's rate write,
   //its mode (CIC3 + FIR at N = 16 x 2^k, legacy at D 0) and the arm; between the steps the UI writes its own rate.
   //After each arm the model's 0x54 is the shift for the model's divider, written after the 0x0D and before 0x01 = 1.

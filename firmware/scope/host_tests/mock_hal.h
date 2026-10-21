@@ -51,7 +51,7 @@ typedef struct
   uint32_t fpga_ops;              //calls of HAL functions that drive the FPGA bus on the scope (test_fast_path_no_fpga)
 
   //Decimation filter (0x1534+)
-  uint8_t  decim_setting;         //pc_hal_decim_setting (bits 1:0 K, PC_DECIM_SWAP)
+  uint8_t  decim_setting;         //pc_hal_decim_setting (bits 1:0 K, SET_FIR, SET_PEAK)
   pc_decim_cfg decim_cur;         //written at the last arm
   int      decim_written;
   uint32_t decim_arms;            //arms with a non-NULL configuration

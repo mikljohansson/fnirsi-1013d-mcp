@@ -884,7 +884,8 @@ uint8_t fpga_io_strobe_read(void)
         out = (uint8_t)((fm_holdoff_running() ? 0x10 : 0) | ((fm.reg_5e & 0x04) << 1));
       break;
 
-    //Decimation state (0x1534+): byte 0 = { dec_on, fir_en, fir_act, 0, 0, swap, K }, byte 1 = the shift; 0x153C (C6):
+    //Decimation state (0x1534+): byte 0 = { dec_on, fir_en, fir_act, 0, 0, swap, K } (0x153C: bits 4..2 read 0, the
+    //swap and neg registers are gone), byte 1 = the shift; 0x153C (C6):
     //byte 1 bits 7 / 6 = peak active / peak as written (equal: active whenever written), the FIR off while peak is on
     case 0x29:
       if(fm.version >= 0x1534)
@@ -893,7 +894,8 @@ uint8_t fpga_io_strobe_read(void)
         int      fir = (fm.reg_56 & 1) && (fm.reg_53 & 3) && (n >= 16) && ((n & 3) == 0) && !fm_peak_on();
 
         if(fm.nbytes++ == 0)
-          out = (uint8_t)((fm_dec_on() ? 0x80 : 0) | ((fm.reg_56 & 1) ? 0x40 : 0) | (fir ? 0x20 : 0) | (fm.reg_53 & 0x07));
+          out = (uint8_t)((fm_dec_on() ? 0x80 : 0) | ((fm.reg_56 & 1) ? 0x40 : 0) | (fir ? 0x20 : 0) |
+                        (fm.reg_53 & ((fm.version >= 0x153C) ? 0x03 : 0x07)));
         else
           out = (uint8_t)((fm_peak_on() ? 0xC0 : 0) | (fm.reg_54 & 0x3F));
       }

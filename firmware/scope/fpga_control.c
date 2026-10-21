@@ -1515,7 +1515,7 @@ void fpga_set_decim_level(uint16 level)
 
 uint16 fpga_get_decim_state(void)
 {
-  //High byte {bit 7 16-bit layout active, bit 6 FIR enable, bit 5 FIR active, bit 4 neg B, bit 3 neg A, bit 2 swap,
+  //High byte {bit 7 16-bit layout active, bit 6 FIR enable, bit 5 FIR active, bits 4..2 0 (0x153C),
   //bits 1:0 K}, low byte S
   fpga_write_cmd(0x29);
   return(fpga_read_short());

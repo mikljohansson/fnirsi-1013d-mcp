@@ -4,7 +4,7 @@
 //
 // Every capture goes through the paths the host's own captures use (pc_hal_scope.c): the raw divider write
 // (pc_hal_timebase_write), the arm with the decimation filter configuration of this capture (pc_hal_arm: CIC3 + FIR at
-// N = 16 x 2^k, legacy 200 MSa/s at divider 0; the 0x53 swap / falling-edge bits from the Filter setting), FPGA auto mode
+// N = 16 x 2^k, legacy 200 MSa/s at divider 0), FPGA auto mode
 // with pretrigger 0 (no trigger needed: the phase of H cancels the record's start), and the 1.00o5 readout
 // (pc_hal_trace_build), which leaves the 16-bit words in pc_hal_trace16 and the corrected 8-bit codes in the trace
 // buffers. Scale per channel as the readout converts: the decimation scale with gain16 folded in, corr16, the range's
@@ -180,9 +180,8 @@ static int bh_arm(void *ctx, const bode_plan *pp, uint32 total, uint8 level)
   }
 
   //CIC3 + FIR at N = 16 x 2^k (the firmware drops to CIC2 beyond its exactness limit, GET_DECIM's why), legacy at
-  //divider 0; the swap and falling-edge bits as the Filter setting has them
-  pc_decim_config((pp->n > 1) ? PC_DECIM_CIC3 : PC_DECIM_OFF,
-                  (uint8)((pc_hal_decim_setting() & PC_DECIM_FLAGS) | ((pp->n > 1) ? PC_DECIM_SET_FIR : 0)), div, total,
+  //divider 0
+  pc_decim_config((pp->n > 1) ? PC_DECIM_CIC3 : PC_DECIM_OFF, (uint8)((pp->n > 1) ? PC_DECIM_SET_FIR : 0), div, total,
                   pc_decim_has(), &dc);
 
   memset(&sq, 0, sizeof(sq));
