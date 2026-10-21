@@ -1489,3 +1489,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   tool's own backup backups/20261021-173709-pre-write.bin = 1391978c.., 69 sectors erased, 1104 pages programmed, verified
   read-back 07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77 (the 0x153C padded image). Rollback = the 0x153B
   padded image written the same way. Next: power-cycle, FEL 0.2.104, the 0x153C checks.
+- 2026-10-21 17:38: power-cycled after the flash: `#VER` fw=0.2.102 proto=1.24 fpga=0x153c (the card's firmware boots on the
+  new bitstream). FEL-load of fw 0.2.104 (7c640ab5..): `#VER` fw=0.2.104 proto=1.26 fpga=0x153c, GET_INFO fpga_flags 0, no
+  notice; the Scope view runs (CH1 the 1 kHz square through the RC ladder, 500 kSa/s, 200 us/div, Auto, CH1 rising).
