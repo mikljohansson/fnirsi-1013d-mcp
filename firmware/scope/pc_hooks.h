@@ -6,6 +6,8 @@
 #ifndef PC_HOOKS_H
 #define PC_HOOKS_H
 
+#include <stdint.h>
+
 //UI features the running hardware may lack (fw 0.2.6, firmware/README.md "Hidden menu options"). PC_UI_HAS(f) goes
 //into a touch condition, PC_UI_MASK(m) paints over the unsupported parts of a menu just drawn.
 #define PC_FEAT_GEN_DDS       1     //generator menu: Atlan DDS bitstreams only (not stock 0x1432)
@@ -66,6 +68,11 @@ int  pc_glue_fpga_mismatch(void);     //fw-one: the FPGA runs another bitstream 
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
+//fw-roll: the roll mode's stream on the 0x153D logger (pc_hal_scope.c; roll.h, roll_view.c)
+int   pc_glue_roll_start(uint8 tpd, uint32_t *wpc); //stream for roll time base tpd: 0 running, -1 no ready, -2 no stream
+int   pc_glue_roll_running(uint8 tpd);            //1 while the stream runs for tpd
+void  pc_glue_roll_release(void);                 //0x69 = 0 and the UI's 0x0D back (every arm calls it; no-op when off)
+int32 pc_glue_roll_read(uint8 *dst, uint32 max, int *gap); //whole words drained and read, -1 the stream stopped
 int  pc_glue_battery_level(int raw, int charging, int shown);   //filtered battery level for the indicator
 void pc_glue_boot_splash(void);       //boot: show scope.bmp if the card has it, otherwise nothing (no error box)
 void pc_glue_ui_mask(int menu);       //PC_MASK_*: paint over what it does not support (current draw buffer)

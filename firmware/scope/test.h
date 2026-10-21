@@ -42,9 +42,6 @@ void average_filter(uint8* input, size_t size, size_t window_size);
  
 //void scope_preset_long_mode(void);
 
-void scope_get_long_timebase_data(void);
-
-void scope_check_long_trigger(void);
 
 
 

@@ -76,6 +76,8 @@ SRCS += fpga_bus.c
 SRCS += fpga_counter.c
 # D4 logger (fw-d4): the 0x153D streaming logger's drain and its DDR ring
 SRCS += fpga_log.c pc_logring.c
+# fw-roll: the roll mode's trace from the logger stream (roll.c pure, host_tests/test_roll.c; roll_view.c draws)
+SRCS += roll.c roll_view.c
 # fw-d5 (FPGA 0x153D): the generator as a two-step pattern, the P16 / H16 maths (host_tests/test_fpga_bus.c test_gen_formulas)
 SRCS += gen_pat.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)

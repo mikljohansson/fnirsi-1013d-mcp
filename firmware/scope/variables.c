@@ -863,9 +863,6 @@ const VOLTCALCDATA volt_calc_data[7][7] =
 //                                       5V     2.5V       1V    500mV    200mV    100mV      50mV
 const int32 signal_adjusters[7] = { 3600000, 3600000, 3700000, 3700000, 3800000, 3800000, 7600000 };
 
-//multiply for autoset (min, max, center, peak2peak)    
-const int32 multiply = 3689650;  
-//int32 multiply = 3289650;  
 
 //Table for converting on samples based period time to frequency
 const FREQCALCDATA freq_calc_data[29] =
