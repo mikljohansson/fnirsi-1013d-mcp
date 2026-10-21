@@ -276,6 +276,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-c8b (Opus, dispatched 09:00, done 09:2x, merged 09:2x): counter level 0 = follow (simulator), the host bug where
+  read_counter re-sent the level it read and pinned it on any gate change (fixed: the client remembers the level it set;
+  scope_counter level='trigger'), peak detect aligned with all 41 decim_peak device vectors (legacy cases write nothing,
+  FIR dropped / refused with peak, settle 11 N x 5 ns + 1 us), the simulator's GET_CAL gated flag follows the divider,
+  README 35 tools / release notes 37 and 35; 524 tests. Remaining host-vs-firmware differences are timing-of-application
+  only (the firmware applies a counter configuration on the next pass; the simulator at once).
 - Coordinator 09:03: the fw-d5 and mcp-d6 briefs wrongly named a SET_SWEEP 0x0218; the contract has none (the chirp is the
   host stepping SET_GEN through the double buffer). fw-d5 caught it; both agents told to follow the contract.
 - fw-d4 / fw-d5 / mcp-d6 (Opus, dispatched 09:03-09:05, branches of the same names): 0x153D firmware and host from the
