@@ -1,15 +1,19 @@
 """Host-driven Bode / frequency-response sweep (docs/plans/bode-design.md steps H1-H3).
 
-Stepped single tone: the calibration-pin DDS runs at f = 50 MHz / M for an integer M (clean edges, no pattern tones),
-CH1 sits on the DUT input, CH2 on its output, and H(f) = X2 / X1 from a single-bin DFT at the exact DDS frequency
-f_a = round(2^32 / M) x 50 MHz / 2^32 over a coherent record (an integer number of stimulus periods), so the square
-wave's harmonics land on other bins and drop out. Rate per point (design 3.2): the 0x1535 CIC3 + FIR at
+Stepped single tone: the calibration pin's generator (since FPGA 0x153D the two-step pattern on the 5 ns clock,
+docs/plans/fpga-0x153c.md 7.4) runs a strictly periodic square of an integer period P (n_h = ceil(P / 2), n_l =
+floor(P / 2), no fraction), so f = 200 MHz / P exactly; CH1 sits on the DUT input, CH2 on its output, and H(f) =
+X2 / X1 from a single-bin DFT at f over a coherent record (an integer number of stimulus periods), so the square
+wave's harmonics land on other bins and drop out. Up to protocol 1.26 the stimulus was the 50 MHz DDS with M = P / 4
+(the plan maps exactly with P = 4 M; the grid is four times finer now).
+
+Rate per point (design 3.2): the 0x1535 CIC3 + FIR at
 N = 16 x 2^k (FIR-legal: N >= 16, N % 4 == 0) with 257..512 samples per period below 24 kHz, N = 16 (12.5 MSa/s) up to
 1.5 MHz, legacy 200 MSa/s above.
 
 Pieces, from pure to hardware:
 
-- ``plan_point`` / ``plan_sweep``: the deterministic frequency plan (M, N, samples per period p / q, record L,
+- ``plan_point`` / ``plan_sweep``: the deterministic frequency plan (P, N, samples per period p / q, record L,
   settle time), shared with the later on-device engine.
 - ``tone`` / ``measure_pair``: the DFT, H, and the per-point quality numbers (SNR from the record's residual bins,
   leakage next to the fundamental = coherence, the half-record settle check, clipping, CH1 level).
@@ -39,7 +43,7 @@ import numpy as np
 
 from . import protocol as P
 
-GEN_CLOCK_HZ = P.GEN_CLOCK_HZ  # DDS clock, 50 MHz
+GEN_CLOCK_HZ = P.GEN_CLOCK_HZ  # the generator's clock: 200 MHz (5 ns)
 ADC_CLOCK_HZ = P.BASE_CLOCK_HZ  # 200 MSa/s per channel
 #: above this the plan uses the legacy 200 MSa/s capture (design 3.2)
 LEGACY_ABOVE_HZ = 1.5e6
@@ -51,8 +55,11 @@ MIN_RECORD = 2048
 MAX_RECORD = P.DECIM_MAX_TOTAL
 MIN_FREQ_HZ = 1.0
 MAX_FREQ_HZ = 10e6
-#: coherence error (periods) above which the DFT uses a Hann window (below about 50 Hz for some M)
+#: coherence error (periods) above which the DFT uses a Hann window; with an integer period P the record is exactly
+#: coherent (the DDS's 32-bit increment rounding needed it below about 50 Hz up to protocol 1.26)
 HANN_ABOVE_PERIODS = 1e-3
+#: the shortest stimulus period in 5 ns clocks (2 + 2: 50 MHz; the plan stops at MAX_FREQ_HZ anyway)
+MIN_PERIOD = 4
 #: settle presets in stimulus periods before the record (design 3.3)
 SETTLE_PRESETS = {"fast": 3, "normal": 10, "resonant": 50, "high_q": 200}
 FIRST_POINT_SETTLE_FACTOR = 3
@@ -138,13 +145,15 @@ def parse_settle(settle: str | float | int | None) -> float:
     return parse_settle(v)
 
 
-def phase_inc_for(m: int) -> int:
-    """round(2^32 / M), the SET_GEN raw phase increment for a period of M DDS clocks."""
-    return ((1 << 32) + m // 2) // m
+def period_frequency(period: int) -> float:
+    """The stimulus frequency of a period of P clocks of 5 ns: 200 MHz / P, exact."""
+    return GEN_CLOCK_HZ / period
 
 
-def dds_frequency(phase_inc: int) -> float:
-    return phase_inc * GEN_CLOCK_HZ / 2 ** 32
+def period_mhz(period: int) -> int:
+    """200e9 / P in mHz, rounded half to even in integers (the firmware's planner, bode_dsp.c)."""
+    q, r = divmod(int(GEN_CLOCK_HZ) * 1000, period)
+    return q + (1 if 2 * r > period or (2 * r == period and q & 1) else 0)
 
 
 @dataclass(frozen=True)
@@ -152,14 +161,13 @@ class PointPlan:
     """One frequency point (design 3.2)."""
 
     f_requested: float
-    #: stimulus period in 50 MHz DDS clocks
-    m: int
+    #: stimulus period P in 5 ns clocks (SET_GEN P16 = P << 16, H16 = ceil(P / 2) << 16)
+    period: int
     #: decimation factor (1 = legacy 200 MSa/s)
     n: int
-    phase_inc: int
-    #: the frequency the DFT uses: phase_inc x 50 MHz / 2^32
+    #: the frequency the DFT uses: 200 MHz / P, exact
     f_actual: float
-    #: samples per period 4M / N = p / q in lowest terms
+    #: samples per period P / N = p / q in lowest terms
     p: int
     q: int
     #: record length (samples analysed) and the number of p-blocks in it
@@ -181,7 +189,7 @@ class PointPlan:
 
     @property
     def periods(self) -> int:
-        """Nominal stimulus periods in the record (exact for the planned M; f_actual differs by the inc rounding)."""
+        """Stimulus periods in the record (exact: the period is an integer number of clocks)."""
         return self.blocks * self.q
 
     @property
@@ -200,13 +208,14 @@ class PointPlan:
 
     @property
     def coherence_error(self) -> float:
-        """Periods by which the record misses a whole number at the real DDS frequency (the 32-bit increment
-        rounding: up to 0.5 % at 1 Hz, below 1e-5 above 1 kHz)."""
+        """Periods by which the record misses a whole number at the stimulus frequency: 0 up to the float rounding
+        (an integer period P; the DDS of protocol 1.26 and older missed by up to 0.5 % at 1 Hz)."""
         return abs(self.record * self.f_actual / self.sample_rate - self.periods)
 
     @property
     def window(self) -> str:
-        """'rect' for a coherent record, 'hann' where the increment rounding leaves it more than 1e-3 periods off."""
+        """'rect' for a coherent record (always, on the integer-period stimulus); 'hann' would be used more than 1e-3
+        periods off."""
         return "hann" if self.coherence_error > HANN_ABOVE_PERIODS else "rect"
 
     @property
@@ -225,24 +234,27 @@ def plan_point(f_req: float) -> PointPlan:
     """The plan for one requested frequency (design 3.2)."""
     if not MIN_FREQ_HZ <= f_req <= MAX_FREQ_HZ:
         raise ValueError(f"frequency {f_req:g} Hz outside {MIN_FREQ_HZ:g} Hz .. {MAX_FREQ_HZ:g} Hz")
-    m0 = max(2, int(round(GEN_CLOCK_HZ / f_req)))
-    if GEN_CLOCK_HZ / m0 > LEGACY_ABOVE_HZ:
-        n, m = 1, m0
+    p0 = max(MIN_PERIOD, int(round(GEN_CLOCK_HZ / f_req)))
+    if GEN_CLOCK_HZ / p0 > LEGACY_ABOVE_HZ:
+        n, period = 1, p0
     else:
         n = 16
-        while 4 * m0 > MAX_SPP * n:
+        while p0 > MAX_SPP * n:
             n *= 2
-        # below 24 kHz the samples per period must be an integer S (else p keeps M's odd part and no record fits)
-        m = m0 if n == 16 else int(round(4 * m0 / n)) * n // 4
-    spp = Fraction(4 * m, n)
+        # below 24 kHz the samples per period must be an integer S (else p keeps P's odd part and no record fits)
+        period = p0 if n == 16 else int(round(p0 / n)) * n
+        if n == 16 and period > MAX_RECORD // 2:
+            # an odd P above 4095 at N = 16 has q = 16 and one block of P samples per record (no halves, no noise
+            # estimate): round P to even (the C planner's rule, bode_dsp.c div_round_even)
+            period = int(round(p0 / 2)) * 2
+    spp = Fraction(period, n)
     p, q = spp.numerator, spp.denominator
     j = max(math.ceil(MIN_PERIODS / q), math.ceil(MIN_RECORD / p))
     if j % 2 and (j + 1) * p <= MAX_RECORD:
         j += 1  # an even number of blocks: the halves hold whole periods (settle check)
     if j * p > MAX_RECORD:
-        raise ValueError(f"no coherent record for {f_req:g} Hz (M {m}, N {n}, p {p})")  # cannot happen in range
-    inc = phase_inc_for(m)
-    return PointPlan(f_req, m, n, inc, dds_frequency(inc), p, q, j * p, j)
+        raise ValueError(f"no coherent record for {f_req:g} Hz (P {period}, N {n}, p {p})")  # cannot happen in range
+    return PointPlan(f_req, period, n, period_frequency(period), p, q, j * p, j)
 
 
 def log_points(start: float, stop: float, points: int) -> list[float]:
@@ -256,13 +268,13 @@ def log_points(start: float, stop: float, points: int) -> list[float]:
 
 
 def plan_sweep(start: float, stop: float, points: int) -> list[PointPlan]:
-    """Log-spaced points from start to stop (either order; measured low to high), snapped to integer M, merged when
-    two requests give the same M (design 3.1)."""
+    """Log-spaced points from start to stop (either order; measured low to high), snapped to an integer period P,
+    merged when two requests give the same P (design 3.1)."""
     lo, hi = sorted((float(start), float(stop)))
     out: list[PointPlan] = []
     for f in log_points(lo, hi, points):
         pp = plan_point(f)
-        if out and out[-1].m == pp.m:
+        if out and out[-1].period == pp.period:
             continue
         out.append(pp)
     return out
@@ -299,17 +311,18 @@ def plan_vectors() -> dict[str, Any]:
     """The planner's output for VECTOR_FREQS and two sweeps: what the on-device engine (design step D1) must match."""
     def row(pp: PointPlan) -> dict[str, Any]:
         # f_req to 9 digits: np.geomspace differs in the last bit between platforms; the plan does not
-        return {"f_req": float(f"{pp.f_requested:.9g}"), "m": pp.m, "n": pp.n, "divider": pp.divider, "phase_inc": pp.phase_inc,
-                "f_mhz": int(round(pp.f_actual * 1000)), "p": pp.p, "q": pp.q, "record": pp.record,
-                "total": pp.total_samples}
+        return {"f_req": float(f"{pp.f_requested:.9g}"), "period": pp.period, "n": pp.n, "divider": pp.divider,
+                "f_mhz": period_mhz(pp.period), "p": pp.p, "q": pp.q,
+                "record": pp.record, "total": pp.total_samples}
 
     def sweep(a: float, b: float, n: int) -> dict[str, Any]:
         return {"start": a, "stop": b, "points": n, "plan": [row(pp) for pp in plan_sweep(a, b, n)]}
 
-    return {"format": "fnirsi1013d-bode-plan", "version": 1,
+    return {"format": "fnirsi1013d-bode-plan", "version": 2,
             "notes": "mcp/src/fnirsi1013d/bode.py plan_point / plan_sweep (docs/plans/bode-design.md 3.1-3.2). "
-                     "f_req in Hz to 9 significant digits (sweeps: np.geomspace), f_mhz = round(phase_inc x 50e9 / 2^32), divider = N - 1 "
-                     "(0 = legacy 200 MSa/s), record = samples analysed, total = the even trigger total. "
+                     "f_req in Hz to 9 significant digits (sweeps: np.geomspace), period = P in 5 ns clocks (FPGA "
+                     "0x153D pattern), f_mhz = round(200e9 / P), divider = N - 1 (0 = legacy 200 MSa/s), record = "
+                     "samples analysed, total = the even trigger total. "
                      "Regenerate: python -m fnirsi1013d.bode --write-vectors ../docs/bode-plan-vectors.json",
             "points": [row(plan_point(f)) for f in VECTOR_FREQS],
             "sweeps": [sweep(100.0, 1e6, 50), sweep(10.0, 100e3, 20), sweep(1e6, 10e6, 30)]}
@@ -680,7 +693,7 @@ class SweepResult:
         P_ = self.points
         return {"f_requested": np.array([p.plan.f_requested for p in P_]),
                 "f_actual": np.array([p.plan.f_actual for p in P_]),
-                "m": np.array([p.plan.m for p in P_]), "n": np.array([p.plan.n for p in P_]),
+                "period": np.array([p.plan.period for p in P_]), "n": np.array([p.plan.n for p in P_]),
                 "h": np.array([p.h for p in P_]), "h_raw": np.array([p.h_raw for p in P_]),
                 "x1": np.array([p.x1 for p in P_]), "x2": np.array([p.x2 for p in P_]),
                 "mag_db": np.array([p.mag_db for p in P_]), "phase_deg": np.array([p.phase_deg for p in P_]),
@@ -694,12 +707,13 @@ class SweepResult:
 
 @dataclass
 class ThruCal:
-    """H of a sweep with both probes on the DUT input (design 2.2): the CH1 / CH2 mismatch per (M, N). Valid while
-    the frequency plan, both ranges, probes and coupling stay as they were."""
+    """H of a sweep with both probes on the DUT input (design 2.2): the CH1 / CH2 mismatch per (P, N). Valid while
+    the frequency plan, both ranges, probes and coupling stay as they were. File version 2 (protocol 1.27, keys by
+    the period P); a version 1 file (the DDS's M) is refused: measure the thru again."""
 
     name: str
     created: str
-    #: (m, n) -> H
+    #: (period, n) -> H
     points: dict[tuple[int, int], complex]
     ch1_range: dict[tuple[int, int], int]
     ch2_range: dict[tuple[int, int], int]
@@ -710,7 +724,7 @@ class ThruCal:
     def from_sweep(cls, res: SweepResult, name: str, probes: tuple[float, float]) -> "ThruCal":
         pts, r1, r2, fl = {}, {}, {}, {}
         for p in res.points:
-            k = (p.plan.m, p.plan.n)
+            k = (p.plan.period, p.plan.n)
             pts[k] = p.h_raw
             r1[k], r2[k] = p.ch1_range, p.ch2_range
             if p.flags:
@@ -718,9 +732,9 @@ class ThruCal:
         return cls(name, res.started, pts, r1, r2, probes, fl)
 
     def to_json(self) -> dict[str, Any]:
-        return {"format": "fnirsi1013d-bode-thru", "version": 1, "name": self.name, "created": self.created,
+        return {"format": "fnirsi1013d-bode-thru", "version": 2, "name": self.name, "created": self.created,
                 "probes": list(self.probes),
-                "points": [{"m": k[0], "n": k[1], "re": v.real, "im": v.imag, "ch1_range": self.ch1_range[k],
+                "points": [{"period": k[0], "n": k[1], "re": v.real, "im": v.imag, "ch1_range": self.ch1_range[k],
                             "ch2_range": self.ch2_range[k], "flags": self.flags.get(k, [])}
                            for k, v in sorted(self.points.items(), key=lambda kv: -kv[0][0])]}
 
@@ -735,9 +749,12 @@ class ThruCal:
         d = json.loads(Path(path).read_text(encoding="utf-8"))
         if d.get("format") != "fnirsi1013d-bode-thru":
             raise ValueError(f"{path}: not a thru calibration file")
+        if d.get("version", 1) < 2:
+            raise ValueError(f"{path}: a thru calibration of the DDS stimulus (protocol 1.26 and older, keyed by M): "
+                             "the generator is the 5 ns pattern since FPGA 0x153D; measure the thru again")
         pts, r1, r2, fl = {}, {}, {}, {}
         for e in d["points"]:
-            k = (int(e["m"]), int(e["n"]))
+            k = (int(e["period"]), int(e["n"]))
             pts[k] = complex(e["re"], e["im"])
             r1[k], r2[k] = int(e["ch1_range"]), int(e["ch2_range"])
             if e.get("flags"):
@@ -745,9 +762,9 @@ class ThruCal:
         return cls(d["name"], d.get("created", ""), pts, r1, r2, tuple(d.get("probes", (1.0, 1.0))), fl)
 
     def apply(self, p: PointResult) -> None:
-        """Divide the point's H by the calibration's H at the same (M, N); flags 'no_cal' when the plan has no such
+        """Divide the point's H by the calibration's H at the same (P, N); flags 'no_cal' when the plan has no such
         point and 'cal_range' when the ranges differ from the calibration's."""
-        k = (p.plan.m, p.plan.n)
+        k = (p.plan.period, p.plan.n)
         hc = self.points.get(k)
         if hc is None or not hc or not math.isfinite(abs(hc)):
             p.flags.append("no_cal")
@@ -866,8 +883,11 @@ class BodeRunner:
             except Exception as e:  # noqa: BLE001 - restore as much as possible, report the rest
                 errs.append(f"{what}: {e}")
 
-        step("generator", lambda: s.set_gen(enable=bool(sv.gen.enable), phase_inc=sv.gen.phase_inc,
-                                            threshold=sv.gen.duty_threshold))
+        def gen() -> None:
+            note = s.restore_gen(sv.gen)
+            if note:
+                errs.append(f"generator: {note}")
+        step("generator", gen)
         if sv.decim is not None:
             step("filter", lambda: s.set_decim(sv.decim.filter, sv.decim.flags))
         for c, cfg in enumerate(sv.channels):
@@ -941,7 +961,7 @@ class BodeRunner:
         if not caps & P.Caps.DECIM:
             raise BodeError("the Bode sweep needs the decimation filter (FPGA 0x1534+, caps DECIM): without it the "
                             "slower rates skip samples and alias the stimulus harmonics")
-        if not caps & P.Caps.GENERATOR_DDS:
+        if not caps & P.Caps.GENERATOR:
             raise BodeError("the Bode sweep needs the programmable generator (AL3 bitstream)")
         if caps & P.Caps.EXT_TRIGGER and s.get_trigger(cached=False).source == 2:
             self.caveats.append("the trigger source was EXT (the calibration pin): set to CH1 for the sweep and "
@@ -973,7 +993,8 @@ class BodeRunner:
 
     def _gen(self, on: bool, pp: PointPlan | None = None) -> None:
         if pp is not None:
-            self.s.set_gen(enable=on, phase_inc=pp.phase_inc, threshold=1 << 31)
+            p16, h16 = P.gen_period_p16(pp.period)
+            self.s.set_gen(enable=on, p16=p16, h16=h16)
         else:
             self.s.set_gen(enable=on)
         if on != self._gen_on:
@@ -1337,7 +1358,7 @@ DEVICE_CAVEATS = (
 
 
 def point_from_row(row: P.BodeRow, pp: PointPlan, probes: tuple[float, float] = (1.0, 1.0)) -> PointResult:
-    """A READ_BODE row as the host tool's PointResult (f from M through the plan; H, V1, V2 from centi-units)."""
+    """A READ_BODE row as the host tool's PointResult (f from P through the plan; H, V1, V2 from centi-units)."""
     mag, ph = row.mag_cdb / 100.0, row.phase_cdeg / 100.0
     h = 10 ** (mag / 20) * complex(math.cos(math.radians(ph)), math.sin(math.radians(ph)))
     x1 = 10 ** (row.v1_cdbv / 2000.0) * math.sqrt(2) + 0j
@@ -1355,14 +1376,14 @@ def result_from_device(hdr: P.BodeHeader, rows: list[P.BodeRow], *, probes: tupl
                        estimate_s: float = 0.0, started: str = "") -> SweepResult:
     """The device's table as a SweepResult (the same structure as a host sweep, so the two compare point by point).
     The plan comes from the header's start / stop / points (the device's planner is the host's ``plan_sweep``); a row
-    whose M is not in it gets its own ``plan_point``."""
+    whose P is not in it gets its own ``plan_point``."""
     plans = plan_sweep(hdr.start_chz / 100.0, hdr.stop_chz / 100.0, max(1, hdr.points)) if hdr.start_chz else []
-    by_m = {pp.m: pp for pp in plans}
+    by_p = {pp.period: pp for pp in plans}
     pts = []
     for r in rows:
-        if not r.measured or not r.m:
+        if not r.measured or not r.period:
             continue
-        pp = by_m.get(r.m) or plan_point(GEN_CLOCK_HZ / r.m)
+        pp = by_p.get(r.period) or plan_point(GEN_CLOCK_HZ / r.period)
         pts.append(point_from_row(r, pp, probes))
     role = "thru" if hdr.view & P.BodeHeader.V_THRU_SWEEP else "measure"
     res = SweepResult(pts, float(SETTLE_PRESETS[P.BODE_SETTLES[hdr.settle]]) if hdr.settle < 4 else math.nan,
@@ -1391,7 +1412,7 @@ def result_from_device(hdr: P.BodeHeader, rows: list[P.BodeRow], *, probes: tupl
                            "probe ground clips), ch2_range='auto', or a less sensitive CH2 range")
     if res.thru_cal == "device":
         res.caveats.append(f"the scope's own thru calibration was applied (state {hdr.thru_state}): H is divided by "
-                           "the thru's H at the same (M, N) on the scope")
+                           "the thru's H at the same (P, N) on the scope")
     res.meta = {"where": "device", "sweep_id": hdr.sweep_id, "state": hdr.state_name, "reason": hdr.reason_text,
                 "thru": hdr.thru_state, "thru_applied": hdr.thru_applied, "view_shown": bool(hdr.view & 1),
                 "plan": plan_summary(plans) if plans else {}, "probes": list(probes)}
@@ -1414,8 +1435,8 @@ def device_sweep(scope: Any, start: float, stop: float, points: int, *, settle: 
     caps = s.info.caps
     if s.info.proto_minor < 20:
         raise BodeError("the device sweep needs firmware 0.2.66 or later (protocol 1.20)")
-    if not caps & P.Caps.DECIM or not caps & P.Caps.GENERATOR_DDS:
-        raise BodeError("the device sweep needs the decimation filter and the DDS generator (FPGA 0x1534+)")
+    if not caps & P.Caps.DECIM or not caps & P.Caps.GENERATOR:
+        raise BodeError("the device sweep needs the decimation filter and the generator (FPGA 0x1534+)")
     settle_code, ch2_code = device_settle_code(settle), device_ch2_code(ch2_range)
     lo, hi = sorted((float(start), float(stop)))
     if not (MIN_FREQ_HZ <= lo and hi <= MAX_FREQ_HZ) or not 1 <= points <= 200:
@@ -1615,9 +1636,9 @@ def main(argv: Iterable[str] | None = None) -> int:
     settle = parse_settle(a.settle)
     est = estimate_duration(plans, settle, not a.no_background, a.ch2_range == "auto")
     if a.plan_only:
-        print(f"{'f_req':>12} {'f_actual':>12} {'M':>9} {'N':>6} {'p/q':>9} {'L':>5} {'settle_s':>9}")
+        print(f"{'f_req':>12} {'f_actual':>12} {'P':>9} {'N':>6} {'p/q':>9} {'L':>5} {'settle_s':>9}")
         for pp in plans:
-            print(f"{pp.f_requested:>12.4f} {pp.f_actual:>12.4f} {pp.m:>9} {pp.n:>6} {f'{pp.p}/{pp.q}':>9} "
+            print(f"{pp.f_requested:>12.4f} {pp.f_actual:>12.4f} {pp.period:>9} {pp.n:>6} {f'{pp.p}/{pp.q}':>9} "
                   f"{pp.record:>5} {pp.settle_s(settle):>9.4f}")
         print(f"{len(plans)} points, estimated {est:.1f} s")
         return 0

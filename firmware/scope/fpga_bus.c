@@ -116,6 +116,15 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   return 0;
 }
 
+void fpga_force_stop(void)
+{
+  //0x0E first: while 0x1A still reads normal its intermediate bytes stop nothing; then 0x1A = 0 meets time_base_cnt > 0
+  fpga_write_cmd(0x0E);
+  fpga_write_int(0);
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger types and hold-off (0x153C, fw-c5): fpga_bus.h
 
@@ -129,17 +138,40 @@ static void fpga_write_u24(uint8_t cmd, uint32_t v)
   fpga_write_byte((uint8_t)v);
 }
 
-void fpga_trig_arm(void)
+//D5 pattern: the per-engine code tables (contract 7.5): the capture's scattered registers and the pattern trigger
+//engine's contiguous block 0x76..0x7C, in the order source, polarity, level 8, level 16, type, N, H
+const fpga_trig_codes fpga_trig_cap_codes = { 0x15, 0x16, 0x17, 0x55, 0x5E, 0x5F, 0x60 };
+const fpga_trig_codes fpga_trig_pat_codes = { 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C };
+
+void fpga_trig_type_regs(const fpga_trig_codes *c, const fpga_trig_ext *t)
 {
-  fpga_write_cmd(0x5E);
-  fpga_write_byte((uint8_t)((fpga_trig.type & 0x07) | (fpga_trig.longer ? 0x08 : 0x00)));
+  fpga_write_cmd(c->type);
+  fpga_write_byte((uint8_t)((t->type & 0x07) | (t->longer ? 0x08 : 0x00)));
 
   //The edge type looks at neither; the qualified types take N and H at the first write clock edge after the release
-  if(fpga_trig.type != FPGA_TRIG_EDGE)
+  if(t->type != FPGA_TRIG_EDGE)
   {
-    fpga_write_u24(0x5F, fpga_trig.n & FPGA_TRIG_N_MAX);
-    fpga_write_u24(0x60, fpga_trig.h & FPGA_TRIG_N_MAX);
+    fpga_write_u24(c->n, t->n & FPGA_TRIG_N_MAX);
+    fpga_write_u24(c->h, t->h & FPGA_TRIG_N_MAX);
   }
+}
+
+void fpga_trig_edge_regs(const fpga_trig_codes *c, uint8_t source, uint8_t polarity, uint8_t level, uint16_t level16)
+{
+  fpga_write_cmd(c->src);
+  fpga_write_byte(source);
+  fpga_write_cmd(c->pol);
+  fpga_write_byte(polarity);
+  fpga_write_cmd(c->lvl8);
+  fpga_write_byte(level);
+  fpga_write_cmd(c->lvl16);
+  fpga_write_short(level16);
+}
+//D5 pattern end
+
+void fpga_trig_arm(void)
+{
+  fpga_trig_type_regs(&fpga_trig_cap_codes, &fpga_trig);
 }
 
 void fpga_trig_write(const fpga_trig_ext *t, int clear)
@@ -262,3 +294,149 @@ int fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift)
 
   return settle;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D5 pattern: the pattern generator (= the generator) and its trigger engine (FPGA 0x153D, fw-d5): fpga_bus.h
+
+fpga_pat_cfg   fpga_pat;
+fpga_ptrig_cfg fpga_ptrig;
+uint8_t        fpga_trig_marker;
+
+void fpga_pat_step_write(uint8_t index, const fpga_pat_step *st)
+{
+  fpga_write_cmd(0x6C);
+  fpga_write_byte((uint8_t)(((st->flags & FPGA_PAT_S_END) ? 0x80 : 0) | ((st->flags & FPGA_PAT_S_MARK) ? 0x40 : 0) |
+                            ((st->flags & FPGA_PAT_S_LEVEL) ? 0x20 : 0) | (index & 0x1F)));
+  fpga_write_int(st->dur);
+  fpga_write_short(st->frac);
+}
+
+void fpga_pat_ctl(uint8_t v)
+{
+  fpga_write_cmd(0x6D);
+  fpga_write_byte(v);
+}
+
+void fpga_pat_drive(int on)
+{
+  //0x50 as 1.00o5 writes it (4 bytes): 1 = the pin is driven with the pattern's level, 0 = hi-Z (the EXT input)
+  fpga_write_cmd(0x50);
+  fpga_write_int(on ? 1 : 0);
+  fpga_pat.drive = (uint8_t)(on != 0);
+}
+
+//The control byte the firmware's copy describes, without the self-clearing bits
+static uint8_t fpga_pat_ctl_byte(void)
+{
+  return (uint8_t)((fpga_pat.mode & 3) | (fpga_pat.ctl & FPGA_PAT_CTL_KEEP));
+}
+
+void fpga_pat_square(const gp_square *sq)
+{
+  fpga_pat_step hi = { FPGA_PAT_S_LEVEL, sq->f_h, sq->n_h };
+  fpga_pat_step lo = { FPGA_PAT_S_END, sq->f_l, sq->n_l };
+  int running = fpga_pat.square && (fpga_pat.mode == FPGA_PAT_CONT);
+
+  if(!running)
+  {
+    //From a pattern, a level or off: stop, no gap, then the two entries and commit + start in one control write
+    fpga_pat.mode = FPGA_PAT_OFF;
+    fpga_pat.ctl  = 0;
+    fpga_pat_ctl(0);
+
+    if(fpga_pat.gap)
+    {
+      fpga_write_cmd(0x6F);
+      fpga_write_int(0);
+      fpga_pat.gap = 0;
+    }
+  }
+
+  //Entries 0 and 1 go to the shadow; the commit makes them pending, taken at the next step boundary (or by the start):
+  //18 strobes for a running square, glitch-free and phase-continuous
+  fpga_pat_step_write(0, &hi);
+  fpga_pat_step_write(1, &lo);
+
+  fpga_pat.step[0] = hi;
+  fpga_pat.step[1] = lo;
+  fpga_pat.n       = 2;
+  fpga_pat.square  = 1;
+  fpga_pat.mode    = FPGA_PAT_CONT;
+  fpga_pat_ctl((uint8_t)(fpga_pat_ctl_byte() | FPGA_PAT_CTL_COMMIT | (running ? 0 : FPGA_PAT_CTL_START)));
+}
+
+void fpga_pat_level(uint8_t level)
+{
+  fpga_pat.mode   = FPGA_PAT_OFF;
+  fpga_pat.ctl    = level ? FPGA_PAT_CTL_IDLE : 0;
+  fpga_pat.square = 0;
+  fpga_pat_ctl(fpga_pat_ctl_byte());
+}
+
+void fpga_pat_load(const fpga_pat_cfg *c, int commit, int start)
+{
+  uint8_t i;
+
+  fpga_pat.square = 0;
+
+  for(i=0;i<c->n;i++)
+  {
+    fpga_pat_step st = c->step[i];
+
+    st.flags = (uint8_t)((st.flags & (FPGA_PAT_S_LEVEL | FPGA_PAT_S_MARK)) | ((i == c->n - 1) ? FPGA_PAT_S_END : 0));
+    fpga_pat_step_write(i, &st);
+    fpga_pat.step[i] = st;
+  }
+
+  fpga_write_cmd(0x6E);
+  fpga_write_short(c->r);
+  fpga_write_cmd(0x6F);
+  fpga_write_int(c->gap);
+
+  fpga_pat.n    = c->n;
+  fpga_pat.r    = c->r;
+  fpga_pat.gap  = c->gap;
+  fpga_pat.mode = (uint8_t)(c->mode & 3);
+  fpga_pat.ctl  = (uint8_t)(c->ctl & FPGA_PAT_CTL_KEEP);
+
+  fpga_pat_ctl((uint8_t)(fpga_pat_ctl_byte() | (commit ? FPGA_PAT_CTL_COMMIT : 0) | (start ? FPGA_PAT_CTL_START : 0)));
+}
+
+void fpga_pat_status(uint8_t out[4])
+{
+  fpga_write_cmd(0x39);
+  out[0] = fpga_read_byte();
+  out[1] = fpga_read_byte();
+  out[2] = fpga_read_byte();
+  out[3] = fpga_read_byte();
+}
+
+void fpga_ptrig_write(const fpga_ptrig_cfg *p)
+{
+  fpga_ptrig = *p;
+
+  //Disarmed while the configuration changes, then armed (writing 1 restarts the engine's state) with the event flag
+  //cleared
+  fpga_write_cmd(0x7D);
+  fpga_write_byte(0);
+  fpga_trig_edge_regs(&fpga_trig_pat_codes, p->source, p->polarity, p->level, p->level16);
+  fpga_trig_type_regs(&fpga_trig_pat_codes, &p->x);
+  fpga_write_cmd(0x7D);
+  fpga_write_byte((uint8_t)((p->armed ? 0x01 : 0) | (p->rearm ? 0x02 : 0) | 0x04 | (p->route ? 0x08 : 0)));
+}
+
+void fpga_ptrig_level16(uint16_t level16)
+{
+  fpga_ptrig.level16 = level16;
+  fpga_write_cmd(0x79);
+  fpga_write_short(level16);
+}
+
+void fpga_ptrig_status(uint8_t out[3])
+{
+  fpga_write_cmd(0x42);
+  out[0] = fpga_read_byte();
+  out[1] = fpga_read_byte();
+  out[2] = fpga_read_byte();
+}
+//D5 pattern end

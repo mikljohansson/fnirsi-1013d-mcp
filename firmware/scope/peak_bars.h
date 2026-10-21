@@ -58,6 +58,11 @@ uint32_t pb_draw(pb_walk *w, int32_t x0, int32_t x1, const pb_draw_cb *cb);
 //1 when any pair of the record has a byte at a rail (pc_peak_overload's rule over the record)
 int  pb_overload(const uint16_t *pairs, uint32_t n);
 
+//fw-small: the record's extremes for the Vmax / Vmin / Vpp cards (docs/plans/ui-rows.md 3.3): lo from the lowest min byte,
+//hi from the highest max byte, each through pc_peak_code as the bars take them (so the cards read the tallest bar), swapped
+//and mirrored when inverted. n = 0 leaves lo = 255, hi = 0 (no record). Vavg, Vrms and the timing cards stay on the midpoint
+void pb_extremes(const uint16_t *pairs, uint32_t n, uint32_t gain, int32_t off, int invert, int32_t *lo, int32_t *hi);
+
 //Phosphor (docs/plans/ui-rows.md 3.3, decided 4): add the record's bars to a hit-count map, each column's rows min .. max
 //once per record, for map columns x0 .. x1 - 1 (screen x - PHOS_X0) walked from w; lut: code -> map row (phosphor.c's
 //table from 1.00o5's mapping). Returns the cells touched.

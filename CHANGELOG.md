@@ -32,6 +32,24 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Unnumbered (provisional) - fw-small (protocol unchanged): three small fixes
+
+Branch `fw-small`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 76.
+
+- **The auto-mode deadline stops the capture at the deadline**: the forced stop (the host's and the Scope view's
+  auto-mode deadline, FORCE, the Frequency response and Average deadlines) writes 0x0E = 0 before 0x1A = 0. With an
+  explicit SET_TRIGGER `auto_timeout` it wrote 0x1A = 0 alone, the FPGA's own count (0x0E) had not expired, and the
+  record ended up to twice the deadline later; a trigger in between was reported untriggered. Host test
+  `test_fpga_bus` test_force_deadline. (53551d4)
+- **Vmax / Vmin / Vpp with Sample = Peak read the peaks**: the cards take the lowest min byte and the highest max byte of
+  the peak record, as the bars draw them (Vp too); a narrow spike showed at about half its height (the midpoint trace).
+  Vavg, Vrms, the centre the 50 % trigger level takes, Freq, Period, the widths and the duties stay on the midpoint
+  trace. Host test
+  `test_peak_bars` test_extremes. (7c3ced0)
+- **Calibration**: "ADC readout fault near code 128" now says "power-cycle and retry; report it if it persists" instead
+  of "check the FPGA bitstream" (there is one bitstream to run); `docs/guide/calibration.md` explains the message again.
+  (cee3268)
+
 #### Unreleased, provisional (fw-d4, protocol 1.27, row 67): the streaming logger for FPGA 0x153D
 
 Not numbered and not benched: needs the 0x153D bitstream (item D3); the built-for word stays 0x153C until that
@@ -50,6 +68,26 @@ integration, and on 0x153C LOG_START answers E_FPGA detail 1.
   channel mask, the lap and DDR-full gaps, the duration, the tail after a stop, and the drain cost at the contract's
   rates: 500 kB/s through, CPU duty 52-60 % best case, 78-82 % worst case), `test_session` test_logger; eleven 1.27
   logger vectors (151 total). (46d1bb6)
+
+#### Unnumbered (provisional) - fw-d5 (protocol 1.27, row 67): the generator as a pattern, FPGA 0x153D
+
+Branch `fw-d5`, not benched, not numbered (`PC_FW_VERSION` unchanged, still built for 0x153C until the 0x153D
+integration). Needs bitstream 0x153D: on 0x153C the generator writes go to unused codes. Commits 30fe638 (generator,
+SET_PATTERN, SET_PATTERN_TRIGGER, source 3), 4743591 (Bode on P), 4f12433 (model and bus tests), 5e5545f (vectors).
+
+- The generator is the pattern generator's two-step square on the 200 MHz clock (5 ns edges, every edge within one clock
+  of ideal, the mean frequency exact to 2^-16 of a clock per period); a frequency or duty change while it runs is
+  glitch-free. The DDS writes (0x51 / 0x52) are gone. The menu, the calibration wizard (its static levels and 1 kHz),
+  the boot state and the Frequency response engine use it.
+- SET_GEN: the raw modes are the period P16 and the high time H16 in 1/65536 of a 5 ns clock; GEN is 40 bytes with the
+  pattern status (the pending bit a host chirp paces on), the source byte, P16 and H16. GET_INFO's generator clock is
+  200 MHz; caps bit 1 is renamed GENERATOR.
+- New: SET_PATTERN 0x0217 (up to 8 steps with a marker, single / R bursts / continuous, idle level, gap, start source),
+  SET_PATTERN_TRIGGER 0x021A (the pattern's own trigger engine with the SET_TRIGGER2 vocabulary), capture trigger source
+  3 = the pattern's marker ("PAT" on the trigger button). Caps bits 24 PATTERN_GEN and 27 PATTERN_TRIGGER, features bits
+  12 and 13.
+- Frequency response: the stimulus period is P clocks of 5 ns (P = 4 M of the DDS era), the frequency grid four times
+  finer; READ_BODE's row field 0 is P; `docs/bode-plan-vectors.json` version 2.
 
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
@@ -1549,6 +1587,23 @@ was found (commit not identified).
   passed on hardware (0b9c783, a7579d5, a4577f3, f7bd2bf, f9f9349).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
+
+- 2026-10-21 (mcp-d6, provisional, protocol 1.27 / FPGA 0x153D, docs/plans/fpga-0x153c.md item D6; simulator only):
+  the host side of the 0x153D generation, byte-exact with fw-d4's logger and fw-d5's generator / pattern vectors.
+  **The generator is the pattern**: SET_GEN's raw modes are P16 / H16 (the period and high part in 1/65536 of a 5 ns
+  clock), GET_GEN 40 bytes with the pattern status (`pending`: a change not yet taken), gen_clock 200 MHz, caps bit 1
+  renamed GENERATOR; `scope_generator` reports the exact frequency, the period in clocks and P16 / H16 (3fea867,
+  1c5715f). **Bode on P = 4 M**: `bode.py` plans an integer period of 5 ns clocks (four times finer, even P above 4095
+  at N = 16), records always coherent; `docs/bode-plan-vectors.json` version 2 (`period`), byte-identical with the
+  firmware's; thru files version 2 (a version 1 file is refused: measure the thru again) (3fea867). **New tools**:
+  `scope_log` / `scope_log_status` / `scope_log_stop` (the streaming logger at the 500 / 250 / 125 kS/s tiers into
+  raw files plus `log.json`, `logfile.load_log`, a summary for `scope_report`), `scope_pattern` (8-step pulse
+  patterns, the marker as trigger source `pattern`, the pattern trigger engine, `capture=true`), `scope_sweep` (a
+  host-stepped chirp, about 2,000 steps/s), `scope_set_trigger(source='pattern')`, report kinds `log` and `pattern`
+  (1c5715f). Simulator: the pattern core (one fraction accumulator, bursts, gap, marker, the pending handshake), the
+  marker trigger, the engine on the TrigQual model, the logger with `--log-stall` / `--log-ring` (3fea867, 6a69b9e).
+  The self-test's fast square is 200 MHz / 201 (an even period puts every edge at one ADC core). 14 host vectors
+  (bb2c107).
 
 - 2026-10-21 (mcp-c8b): the host matches fw 0.2.104. `scope_counter`'s level follows the trigger level as the
   firmware does at boot (a volts level pins it, `level='trigger'` follows again, `level_follows_trigger` in the

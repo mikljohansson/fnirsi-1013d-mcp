@@ -44,17 +44,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **Auto-mode records on 0x1532..0x153A are spliced by the forced stop** (fw 0.2.97, branch fw-arm, bench pending: firmware/AGENTS.md section 64)
 - [x] **Frequency response engine arms normal** (fw 0.2.97, fw-arm, section 64: not taken as written. The engine keeps FPGA auto with its CH1 trigger, 0x0E moved to the stop geometry's W, so a missing trigger gives a contiguous record instead of a forced, spliced one; a trigger more than total words before W completes; spliced / cut records are retaken.)
 
-- [ ] **0x153B+: the deadline force must write 0x0E = 0 too** (fpga-gen13, 10-20 20:27, from the code, not benched): on
-  `PC_STOP_NEWEST` the host poll, `pc_ui_auto_service` and FORCE call `pc_hal_force` (0x1A = 0 alone); the FPGA stops only
-  when `~trigger_mode_s && time_base_timeout` (`time_base_cnt > 0x0E`, zaklad.v). With the default 0x0E = total samples and a
-  deadline of at least two records that is true. With an explicit SET_TRIGGER `auto_timeout` the firmware writes 0x0E = that
-  *sample* count as a *word* count (`pc_auto_timeout` -> `fpga_arm_reset`) and forces at about the time of that many samples
-  (`pc_host_auto_ms` = deadline(cfg) / 2): in the legacy layout (two samples per word) the force comes at half the FPGA's
-  count, nothing stops, the record ends on the FPGA's own time-out up to twice later (0x14 = W - total + pre, contiguous),
-  and a trigger in between is reported untriggered (`host_forced`). Fix: `pc_hal_force_stop` (0x0E = 0, then 0x1A = 0) on
-  0x153B+ too; change 4 of README section 11 makes the 0x0E write before the 0x14 read harmless there. test_fpga_bus: the
-  0x153B model with 0x0E = 2 x the deadline in words, force at the deadline, done within 2 write clocks. The same race
-  existed on every bitstream before fw 0.2.97 (fpga/al3/AGENTS.md "0x153B 'spliced' on the unit", hypothesis (c)).
+- [x] **0x153B+: the deadline force must write 0x0E = 0 too** (fw-small 53551d4: `fpga_force_stop` writes 0x0E = 0, then 0x1A = 0, for every `pc_hal_force` caller; test_fpga_bus test_force_deadline; firmware/AGENTS.md section 76, bench pending)
 
 - [x] **Device sweep flags stricter than the host's** (fw 0.2.87, bench pending)
 
@@ -282,6 +272,51 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- mcp-ci done 11:4x, merged 11:5x: the Bode tests compare the generator's configuration (the live 0x39 bits masked; the
+  sweep's last SET_GEN leaves PENDING for up to two steps), and the simulator's log lap hook fires only once a word is unread
+  (the IndexError was lap[0], the lap had skipped 0 words when the first read shared the start's clock tick; Python 3.12 on
+  Windows has a 15.6 ms clock). No host behaviour change, no CHANGELOG entry. ruff clean, 53 tests of the three files pass
+  locally; the CI run of this push is the proof.
+- mcp-ci (Opus explicitly, dispatched 11:27, branch mcp-ci): the Windows CI mcp job has failed on both pushes since mcp-d6
+  (runs 39569591451, 39576242367; Linux and the local Windows run green): test_bode_sim / test_bode_device compare a GET_GEN
+  snapshot that includes the live 0x39 pattern status byte (128 before, 129 / 161 after), and test_d27's logger overflow test
+  (32 KiB ring, log_stall_s 0.3) finds no lost chunk on the slow runner. Fix the tests (compare configuration, make the stall
+  deterministic), keep the contract assertions. Owner reported the failure 11:2x.
+- fw-small done 11:1x, merged 11:1x as the merge of 85b9315: fpga_force_stop (0x0E = 0 then 0x1A = 0, test_force_deadline fails
+  33 checks without it), Vmax / Vmin / Vpp from the peak bytes with Sample = Peak (pc_glue_peak_extremes, pb_extremes test),
+  the readout-fault text no longer points at the bitstream (calibration.md row back). Host tests green, check_vectors OK, gcc10
+  sha256 42288cb180dfcd3b3aaa386429791e992e0e7fdf19f2059e80a78b83229ff440 (unnumbered, 0.2.104 + D4 + D5 + fw-small). Open from
+  the handoff (section 76): FORCE during a sequencer run (debug builds) ends later segments after ~2 words; STOP ends a run.
+  Bench: an explicit auto_timeout stops at the deadline; a spike with Peak reads full height in Vmax / Vpp.
+- fw-small (Opus explicitly, dispatched 11:0x, branch fw-small): the three small firmware items left open by fw-one, fpga-gen13
+  and ui-sample, bundled while the FPGA runs finish: (1) `pc_hal_force` writes 0x0E = 0 before 0x1A = 0 so an explicit
+  auto_timeout stops at the deadline (queue item "the deadline force must write 0x0E = 0 too", test_fpga_bus model); (2) the
+  Vmax / Vmin / Vpp cards read the peak record's min / max bytes with Sample = Peak (ui-sample section 73 "Open", ui-rows.md
+  3.3), the ScopePeak board and the cards agree on a spike; (3) the "ADC readout fault near code 128" wizard message: keep it
+  only if ACAL_E_READOUT is still reachable with the one supported bitstream and document it in calibration.md, else remove
+  the code path. fw-d5 follow-up 2001e99 (host model start latencies) merged 10:5x as 3a81158, host tests green.
+- Coordinator 10:2x: fpga-d2 reported its detached WSL runs dying with empty logs (a broad `pkill -f` from another agent on
+  the shared WSL instance); rule sent to fpga-c4 and fpga-d1 and to be written into fpga/al3/AGENTS.md "Build" by C4: kill
+  only by PID or by a pattern with your own work directory, never by vvp / run.sh / td / build.sh / tb_.
+- fpga-c4 (Fable, dispatched 09:54, branch fpga-c4): 0x153C integration: the C0 cruft removal (section 13 list, 0x1B kept,
+  div20), version byte 0x3C, the timing re-roll on the merged source (known misses on q_pass / pp_i), contract_0x153C.txt,
+  run.sh 16 steps on two seeds, dist entry as a candidate (min_firmware 0.2.104), BITSTREAMS.md row, AGENTS.md status
+  with the owner's flash checklist.
+- fpga-c2 (Fable, dispatched 22:21, cut off and resumed, done 09:5x, merged 09:53 as 50cbc71): peak detect as the one-
+  register switch (dec_on includes peak_en; decim_chan at order 0 already behaves as K = 1); the shared dec_trig_sample
+  lines take the window max / min as the trigger byte; the reserved-bit writes in tb_decim / tb_fir / tb_seg keep bit 1
+  clear; tb_peak 45; full run.sh 16 steps ALL PASS both seeds on the merged source; TD +136 LUT alone with a -0.504 ns
+  miss on the sequencer's pp_i enable (lottery). WSL note: detached runs die when no wsl.exe stays attached.
+- mcp-d6 (Opus, dispatched 09:05, done 10:2x, merged 10:23 as fc71df7): protocol 1.27 on the host, byte-matched to fw-d4 and
+  fw-d5 (test_d27 holds their vector payloads; bode-plan-vectors.json v2 byte-identical): scope_log / scope_log_status /
+  scope_log_stop (raw sample files + log.json, pumped in the background under the session lock), scope_pattern (tier 3,
+  capture=true arms first), scope_sweep (host-stepped, ~2,000 steps/s), source "pattern", GEN exact frequency, report
+  kinds log / pattern; 549 tests; README 40 tools. Note: the self-test's fast square is 200 MHz / 201 now (an even period
+  puts every edge on the same core, so the T4 interleave check lost its information: bench item). Main with fw-d5 +
+  mcp-d6: host tests green, check_vectors OK, gcc10 builds (817,152 B), ruff clean; pushed when pytest finishes.
+- fw-d5 re-push 2bd7042 merged 10:01 as 238ee86 (local only): host tests green except test_bode.py (PointPlan.period comes
+  with mcp-d6's bode.py), check_vectors OK; main is pushed together with mcp-d6 so CI stays green. fpga-d2's final rule: a
+  commit during step k applies from step k+3, step 0 starts about 35-40 ns after the start write (the model follows).
 - fw-d5 (Opus, dispatched 09:03, reported 09:4x, merge handed back 09:50): the generator as a fractional two-step pattern
   behind SET_GEN (P16 / H16 raw modes; GEN response 40 B with the 0x39 status), SET_PATTERN 0x0217 (12 + 8n B, start at
   offset 10, pin hi-Z flag), SET_PATTERN_TRIGGER 0x021A (28 B, response 32 B), trigger source 3 = the marker (button

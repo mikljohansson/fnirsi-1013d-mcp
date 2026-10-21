@@ -59,6 +59,7 @@ probe". **Calibrate** stays, so you can try again. There is no Skip.
 | No signal on CH1: tip on the post? | Put the probe tip on the calibration post |
 | the post signal clips: set the probe to 1X | Switch the probe to 1X |
 | the post signal moved: hold the tip still | Retry without moving the probe |
+| ADC readout fault near code 128: power-cycle and retry; report it if it persists | The ADC data near mid-scale came back garbled at 200 MSa/s: no capture timing read cleanly for a core, or samples hit 0 / 255 only at full rate with the input at 0 V. Switch the scope off and on, let it warm up and retry. If it fails again, open an issue with the step's second line (the measurement point and raw values) and a Diagnostics screenshot |
 
 A failed zero step also shows a small second line with the measurement point and the raw values. It is meant for a bug
 report.

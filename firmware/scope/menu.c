@@ -37,6 +37,7 @@
 #include "slider_ov_draw.h"
 #include "acq_view.h"
 #include "trig_ui.h"
+#include "fpga_bus.h"         //D5: fpga_trig_marker
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -2405,7 +2406,7 @@ void scope_trigger_settings(int mode)
       }
 
       //Display the text
-      display_text(TRIGGER_BUTTON_XPOS+40, TRIGGER_BUTTON_YPOS+19, "EXT");
+      display_text(TRIGGER_BUTTON_XPOS+40, TRIGGER_BUTTON_YPOS+19, fpga_trig_marker ? "PAT" : "EXT");   //D5: the host's marker source
       break;
   }
 }
