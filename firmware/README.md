@@ -2423,8 +2423,9 @@ at code 128 (8 conversions gated, 64 at 200 MSa/s). 0.2.67-0.2.78 measured it as
 side (`acal_zero_split`, CAL_PROBE byte 248) so the step passed on FPGA 0x1538 / 0x1539, whose 200 MSa/s capture garbled
 cores near 0x7F / 0x80; the maintainer removed that workaround (2026-10-19 20:30, fail fast), so CAL_PROBE byte 248 is always
 0. A clip found only at 200 MSa/s while the gated point at the same PWM is quiet and within 8 codes of 128 reports "ADC
-readout fault near code 128: check the FPGA bitstream" (ACAL_E_READOUT, `acal_readout_fault`): such a bitstream fails
-the step instead of being calibrated around the fault.
+readout fault near code 128: power-cycle and retry; report it if it persists" (ACAL_E_READOUT, `acal_readout_fault`;
+"check the FPGA bitstream" until fw-small, when there was a bitstream to pick): such a capture fails the step instead of
+being calibrated around the fault.
 
 **Capture stage training (fw 0.2.79, FPGA 0x153A, protocol 1.24, row 64; `cap_stage.c`, `cap_hw.c`).** On 0x153A each
 channel's zero step starts with the training of its two cores' capture stages (`cal_train`): range 0, the input parked at
@@ -2433,7 +2434,8 @@ code 128 by the gated centre search, a quiet input required (gated within-captur
 (threshold 0x64 = 8 codes; a clean stage reads 0). Per core the clean stage of {3, 4} whose outer neighbour is clean too
 is taken (the power-on one when the clean run is symmetric), else the clean one of {3, 4}, else a clean reserve 2 / 5; a
 B core with no clean stage is tried again with its reference bit (0x63 bit 12 / 13, timed by the chip's A encode). A core
-with no clean stage fails the channel with "ADC readout fault near code 128: check the FPGA bitstream"; a passed
+with no clean stage fails the channel with "ADC readout fault near code 128: power-cycle and retry; report it if it
+persists" (fw-small; "check the FPGA bitstream" before); a passed
 channel's note reads "Capture stages: CH1 A4 B4". Save stores the value with the calibration in sector 708 bytes
 488..503 (u32 'ACAP', u16 version 1, u16 length 16, u16 the 0x63 value, u16 the FPGA version word, u32 CRC-32 of the 12
 bytes before; after the provenance trailer, outside the v3 block, so an older firmware's 708 save clears it); Cancel and
