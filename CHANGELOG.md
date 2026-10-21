@@ -32,6 +32,25 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Unreleased, provisional (fw-d4, protocol 1.27, row 67): the streaming logger for FPGA 0x153D
+
+Not numbered and not benched: needs the 0x153D bitstream (item D3); the built-for word stays 0x153C until that
+integration, and on 0x153C LOG_START answers E_FPGA detail 1.
+
+- **Streaming logger** (contract `docs/plans/fpga-0x153c.md` item D4, section 6): LOG_START 0x0214 / LOG_READ 0x0215 /
+  LOG_STOP 0x0216 log CH1 and / or CH2 as raw 8-bit samples, the filtered word's high byte, filtered 16-bit or peak
+  pairs, for a duration or until stopped, at the contract's rates: 500 kS/s 1 ch 8-bit, 250 kS/s 1 ch 16-bit / peak or
+  2 ch 8-bit, 125 kS/s 2 ch 16-bit (sample rate x bytes x channels <= 500 kB/s; higher is E_BAD_ARG detail 1). The scope
+  drains the FPGA ring (0x69 / 0x6A / 0x38) into an 8 MiB DDR ring (the NOLOAD `.logring` section, 16.8 s at 500 kB/s)
+  and serves chunks of whole words with a sequence number, the FPGA word counter, the gap / ended flags. A lap of the
+  FPGA ring or a full DDR ring is a gap (flag, counter jump), and the log continues. GET_STATUS acq_state 5 while
+  logging; every other acquisition command answers E_STATE detail 9; the Scope view shows "Logging to the host: 12 s,
+  6.0 MB" in its notice slot. Caps bit 23 LOGGER, features bit 11. (2101a2c, ff3a1cb)
+- Host tests: `test_log` (the DDR ring and its segments, the drain against the model's 0x153D stream for every format and
+  channel mask, the lap and DDR-full gaps, the duration, the tail after a stop, and the drain cost at the contract's
+  rates: 500 kB/s through, CPU duty 52-60 % best case, 78-82 % worst case), `test_session` test_logger; eleven 1.27
+  logger vectors (151 total). (46d1bb6)
+
 #### 0.2.104 - 2026-10-21 (protocol 1.26, row 66): built for FPGA 0x153C
 
 One firmware for bitstream 0x153C: trigger types (pulse width, Nth edge, timeout) with hold-off, peak detect, the
