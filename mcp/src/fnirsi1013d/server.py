@@ -132,18 +132,25 @@ STATIC_PROFILE: dict[str, str] = {
     "analog_bandwidth": "about 20-40 MHz (-3 dB) depending on unit; treat 30 MHz as the limit, not 100 MHz",
     "interleave_artefacts": "A/B core offset (1.4-5.5 codes before compensation) gives a spur at fs/2; gain/"
                             "timing mismatch gives an image at fs/2 - f",
-    "memory_per_channel": "stock FPGA 0x1432: 3000 samples (fixed 50 % trigger); Atlan4 AL3 0x1532: up to "
-                          "16382; EF2 0x1632 / EP4 0x1732: up to 12286",
-    "trigger": "edge on core A of CH1 or CH2, 8-bit level, quantised to 2 / fs; no hold-off. EXT (3.3 V logic on "
-               "the calibration pin, shared with the generator) only on bitstream 0x1533+ with caps EXT_TRIGGER; "
-               "EXT latency 20-25 ns from the pin, pulses >= 10 ns",
+    "memory_per_channel": "8192 ring words per ADC core: up to 16382 samples per channel (8-bit), 8190 with the "
+                          "decimation filter or peak detect (16-bit words); programmable pre-trigger and total",
+    "trigger": "edge on core A of CH1 or CH2, 8-bit level, quantised to 2 / fs; types pulse width (shorter / longer), "
+               "Nth edge (with an idle time) and timeout (caps TRIG_TYPES), one word of resolution; a trigger hold-off "
+               "in 5 ns units (caps HOLDOFF). EXT (3.3 V logic on the calibration pin, shared with the generator) with "
+               "caps EXT_TRIGGER; EXT latency 20-25 ns from the pin, pulses >= 10 ns",
+    "counter": "a hardware reciprocal counter (caps COUNTER): frequency, period, positive width and duty of CH1, CH2 "
+               "or EXT over a 10 ms / 100 ms / 1 s gate at 5 ns resolution (the 50 MHz crystal's accuracy), plus the "
+               "raw min / max over the gate",
+    "peak_detect": "peak-detect acquisition (caps PEAK_DETECT): at rates below 200 MSa/s every word stores the min "
+                   "and max of its window of raw 200 MSa/s samples, so glitches shorter than a sample period are kept; "
+                   "no averaging while it is on",
     "ranges_1x": "5 V, 2.5 V, 1 V, 500 mV, 200 mV, 100 mV per div (relays), 50 mV per div (software zoom of "
                  "100 mV, same ~3.4 mV per code)",
     "full_scale": "about 256 codes = ~8.8 divisions; e.g. ~0.88 V at 100 mV/div [U]",
     "coupling": "DC or AC (relay)",
     "input": "1 MOhm; assume 40 V peak maximum at 1x and use a 10x probe for anything higher [U]",
-    "generator": "square wave only on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz; only on "
-                 "Atlan4 bitstreams. No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
+    "generator": "square wave only on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz (caps "
+                 "GENERATOR_DDS). No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
                  "DC level is the USB ground, 1.24 V below the probe ground (reads -1.24 / +1.9 V): a timing reference, not "
                  "a voltage reference",
     "throughput": "~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for "
@@ -328,6 +335,9 @@ class Session:
             menu_note.append(MENU_CLOSED_NOTE)
         if s.shared:
             notes = menu_note
+            mm = s.profile().mismatch_caveat()
+            if mm:
+                notes.append(mm)
             if st.display_mode in (1, 2, 3):
                 notes.append(SPECTRUM_VIEW_NOTE)
             elif st.display_mode == P.DisplayMode.PHOSPHOR:
@@ -826,6 +836,10 @@ def _decim_summary(st: P.DecimState) -> dict[str, Any]:
     return out
 
 
+#: protocol 1.26 peak detect
+PEAK_CAVEAT = ("peak detect: each stored sample is the min and max of its window of raw 200 MSa/s samples; the "
+               "envelope includes the noise extremes (a few codes wider than the signal); averaging (the ACQ Average, "
+               "scope_averaged_capture, hardware runs) is refused while it is on")
 DECIM_CAVEATS = [
     "the filter is the scope's acquisition Filter setting: shared with the person at the scope and saved with its "
     "settings; turn it off when done unless they want it",
@@ -842,6 +856,17 @@ def _level_volts(s: Scope, src: int, level_code: int) -> float | None:
     return s.scale(src).volts_for_raw_a(level_code)
 
 
+def _trigger_stream_period(s: Scope, source: int) -> float:
+    """Protocol 1.26: the period of the samples the trigger qualifier counts (N, H): one ring word for CH1 / CH2
+    (10 (D + 1) ns legacy, N x 5 ns with the filter or peak detect), one 5 ns clock for EXT."""
+    if source == 2:
+        return 1.0 / P.BASE_CLOCK_HZ
+    tb = s.get_timebase()
+    tr = s.get_trigger()
+    words = tr.total_words or 1
+    return tb.dt * (tr.total_samples / words)  # 2 dt legacy, dt (= N x 5 ns) in the 16-bit layout
+
+
 def _trigger_summary(s: Scope) -> dict[str, Any]:
     tr = s.get_trigger()
     tb = s.get_timebase()
@@ -853,16 +878,35 @@ def _trigger_summary(s: Scope) -> dict[str, Any]:
            "pretrigger_fraction": _r6(tr.pretrigger_samples / tr.total_samples) if tr.total_samples else None,
            "pre_trigger_time": _r6(tr.pretrigger_samples * tb.dt),
            "post_trigger_time": _r6((tr.total_samples - tr.pretrigger_samples) * tb.dt),
-           "auto_timeout_s": _r6(tr.auto_timeout * 2 * tb.dt), "holdoff": tr.holdoff}
+           "auto_timeout_s": _r6(tr.auto_timeout * 2 * tb.dt), "holdoff": tr.holdoff,
+           "holdoff_s": _r6(tr.holdoff * P.TRIG2_HOLDOFF_UNIT_NS * 1e-9)}
     if tr.source <= 1:
         cfg = s.get_channel(tr.source)
         out["level_step_volts"] = _r6(s.scale(tr.source, cfg).gain_a * cfg.probe_factor)
+    t2 = tr.trigger2
+    if t2 is not None:  # 1.26
+        per = _trigger_stream_period(s, tr.source)
+        d: dict[str, Any] = {"type": t2.type_name, "polarity": t2.polarity_name, "stream_sample_s": _r6(per)}
+        if t2.type == P.TRIG_PULSE_WIDTH:
+            d["condition"] = "longer" if t2.longer else "shorter"
+            d["width_s"] = _r6(t2.n * per)
+            d["width_samples"] = t2.n
+        elif t2.type == P.TRIG_NTH_EDGE:
+            d["n"] = t2.n
+            d["idle_s"] = _r6(t2.n2_or_h * per)
+            d["idle_samples"] = t2.n2_or_h
+        elif t2.type == P.TRIG_TIMEOUT:
+            d["held_s"] = _r6(t2.n * per)
+            d["held_samples"] = t2.n
+        if t2.flags & P.TRIG2_F_CLEAR_HOLDOFF:
+            d["clear_holdoff_pending"] = True
+        out["type"] = d
     return out
 
 
 def _gen_summary(s: Scope) -> dict[str, Any]:
     if not s.profile().has_generator:
-        return {"available": False, "note": "stock FPGA: the calibration pin outputs a fixed 1 kHz square wave"}
+        return {"available": False, "note": "no programmable generator in this firmware's caps (GENERATOR_DDS)"}
     g = s.get_gen()
     return {"available": True, "enabled": bool(g.enable), "frequency": _r6(g.frequency_hz),
             "duty_percent": _r6(g.duty * 100)}
@@ -876,7 +920,13 @@ def _capture_caveats(cap: Capture, freq: dict[str, float | None]) -> list[str]:
         cav.append("record may be spliced: the scope had to force this capture's stop (or the FPGA's auto time-out cut "
                    "a late trigger), so part of the record can come from an earlier pass of the sample ring (a phase "
                    "jump at one sample); capture again (FPGA 0x153A and older)")
-    if cap.decim is not None:
+    if cap.peak and cap.decim is not None:
+        d = cap.decim
+        cav.append(f"peak-detect record (N = {d.n}): each sample is the min and max of {d.n} raw 200 MSa/s samples "
+                   f"({fmt_si(5e-9 * d.n, 's')}); volts / codes are the midpoint of the two, min / max carry the "
+                   "envelope through the 8-bit model's mean of both cores; the noise extremes over a window widen the "
+                   "envelope by a few codes; averaging is refused while peak detect is on")
+    elif cap.decim is not None:
         d = cap.decim
         cav.append(f"decimated capture ({d.filter_name}, N = {d.n}): each sample is the filter output over "
                    f"{d.n * d.k - d.k + 1} raw samples ({fmt_si(5e-9 * (d.k * (d.n - 1) + 1), 's')}), resolution "
@@ -907,6 +957,11 @@ def _channel_result(cap: Capture, name: str, inline_max: int) -> dict[str, Any]:
                 "duty": _r6(fr["duty"]) if fr["duty"] is not None else None,
                 "clipped_samples": int(ch.clipped.sum()), "volts_per_lsb": _r6(ch.volts_per_lsb),
                 "scaling": ch.scale.source if ch.scale is not None else "firmware"})
+    if ch.peak:  # 1.26: the envelope's extremes and width
+        assert ch.min_volts is not None and ch.max_volts is not None
+        out["envelope"] = {"min": _r6(float(ch.min_volts.min())), "max": _r6(float(ch.max_volts.max())),
+                           "mean_width": _r6(float(np.mean(ch.max_volts - ch.min_volts))),
+                           "max_width": _r6(float(np.max(ch.max_volts - ch.min_volts)))}
     return out
 
 
@@ -922,16 +977,23 @@ def _save_capture(sess: Session, cap: Capture, kind: str, extra_meta: dict[str, 
     for name, ch in cap.channels.items():
         if ch.samples16 is not None:
             arrays[f"{name}_samples16"] = ch.samples16
+        if ch.peak:  # 1.26: the envelope in volts and as raw codes
+            arrays[f"{name}_min_volts"] = ch.min_volts.astype(np.float32)  # type: ignore[union-attr]
+            arrays[f"{name}_max_volts"] = ch.max_volts.astype(np.float32)  # type: ignore[union-attr]
+            arrays[f"{name}_min_codes"] = ch.min_codes  # type: ignore[assignment]
+            arrays[f"{name}_max_codes"] = ch.max_codes  # type: ignore[assignment]
     meta = {"capture_id": cap.capture_id, "dt": cap.dt, "divider": cap.divider, "start_sample": cap.start_sample,
             "pretrigger_samples": cap.pretrigger_samples, "total_samples": cap.total_samples,
             "triggered": cap.triggered, "auto_timeout": cap.auto_timeout, "maybe_spliced": cap.maybe_spliced,
-            "origin": cap.origin,
+            "origin": cap.origin, "peak": cap.peak,
             "channels": {n: c.config.to_dict() for n, c in cap.channels.items()},
             "trigger": cap.trigger.to_dict(), "scaling": SCALING_CAVEAT}
+    if cap.peak:
+        meta["kind"] = "peak"
     if cap.decim is not None:
         d = cap.decim
         meta["decimation"] = {"filter": d.filter_name, "k": d.k, "n": d.n, "shift": d.shift, "gain": d.gain,
-                              "codes_per_count": d.code_per_count}
+                              "codes_per_count": d.code_per_count, "peak": d.peak}
     if extra_meta:
         meta.update(extra_meta)
     return sess.save_npz(kind, arrays, meta)
@@ -953,7 +1015,14 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         "t_start": _r6(float(cap.t[0])) if cap.n else None, "t_end": _r6(float(cap.t[-1])) if cap.n else None,
         "channels": chans, "file": path,
     }
-    if cap.n <= sess.cfg.inline_max_points:
+    if cap.peak:  # 1.26: the envelope, not the midpoint
+        if cap.n <= sess.cfg.inline_max_points:
+            out["samples"] = {"t": A._r(cap.t), **{f"{n}_min": A._r(c.min_volts) for n, c in cap.channels.items()},
+                              **{f"{n}_max": A._r(c.max_volts) for n, c in cap.channels.items()}}
+        else:
+            out["preview"] = {**{f"{n}_min": A.preview(cap.t, c.min_volts) for n, c in cap.channels.items()},
+                              **{f"{n}_max": A.preview(cap.t, c.max_volts) for n, c in cap.channels.items()}}
+    elif cap.n <= sess.cfg.inline_max_points:
         out["samples"] = {"t": A._r(cap.t), **{n: A._r(c.volts) for n, c in cap.channels.items()}}
     else:
         out["preview"] = {n: A.preview(cap.t, c.volts) for n, c in cap.channels.items()}
@@ -968,6 +1037,8 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         d = cap.decim
         out["decimation"] = {"filter": d.filter_name, "n": d.n, "shift": d.shift,
                              "codes_per_count": _r6(d.code_per_count)}
+    if cap.peak:
+        out["peak"] = True
     out["caveats"] = list(cap.notes) + _capture_caveats(cap, freq) + STANDING_CAVEATS
     return out
 
@@ -1096,32 +1167,34 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(0, title="Scope identity", read_only=True, idempotent=True)
     async def scope_info() -> dict[str, Any]:
-        """Identify the connected scope: firmware version and build, protocol version, FPGA version word and
-        variant ('stock', 'al3', 'ef2', 'ep4'), serial, capability flags by name, ring size and memory limits.
-
-        If fpga_variant is 'stock', pre-trigger and total samples are fixed (1500 / 3000) and there is no
-        generator."""
+        """Identify the connected scope: firmware version and build, protocol version, the FPGA version word the scope
+        reports and the one the firmware is built for (fw_fpga_version; fpga_mismatch when they differ: the scope then
+        shows a notice and refuses captures and settings until that bitstream is flashed), serial, capability flags by
+        name, ring size and memory limits."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             i = s.identify()
             p = s.profile()
+            mm = p.mismatch_caveat()
             return {"ok": True, "link": s.t.link.description, "fw_version": i.fw_version_str,
                     "fw_build": f"{i.fw_build:08x}", "protocol": f"{i.proto_major}.{i.proto_minor}",
-                    "fpga_version": f"0x{i.fpga_version:04X}", "fpga_variant": p.variant, "serial": i.serial_str,
+                    "fpga_version": f"0x{i.fpga_version:04X}", "fpga_variant": p.variant,
+                    "fw_fpga_version": f"0x{p.fw_fpga_version:04X}" if p.fw_fpga_version else None,
+                    "fpga_mismatch": p.fpga_mismatch, "serial": i.serial_str,
                     "caps": p.caps, "ring_words": i.ring_words, "max_total_samples": i.max_total_samples,
                     "min_total_samples": i.min_total_samples, "read_lag": i.read_lag,
                     "interleave_order": "B before A" if i.interleave_order == 0 else "A before B",
                     "generator_clock_hz": i.gen_clock_hz, "max_response_payload": i.max_response_payload,
-                    "caveats": (["stock FPGA: pre-trigger and total samples are fixed (1500 / 3000), no "
-                                 "generator"] if p.variant == "stock" else [])}
+                    "caveats": [mm] if mm else []}
         return await run("scope_info", 0, {}, go)
 
     @register(0, title="Scope capability profile", read_only=True, idempotent=True)
     async def scope_profile() -> dict[str, Any]:
         """Capability profile with standing caveats: sample-rate formula, resolution, bandwidth, interleave
-        artefacts, memory per FPGA variant, trigger limits, ranges, generator, throughput, merged with live
-        values (current memory limit, which bitstream, which facts are still unverified: read_lag, interleave
-        order, FORCE). Read this once before planning measurements."""
+        artefacts, memory, trigger types and limits, counter, peak detect, ranges, generator, throughput, merged with
+        live values (current memory limit, which bitstream the scope runs and which the firmware needs, which caps
+        are present, which facts are still unverified: read_lag, interleave order, FORCE). Read this once before
+        planning measurements."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             p = s.profile()
@@ -1132,16 +1205,22 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if i.caps & P.Caps.INTERLEAVE_UNVERIFIED:
                 unverified.append("A/B interleave order is the 1.00o5 convention, not measured (T4)")
             if not i.caps & P.Caps.FORCE_TRIGGER:
-                unverified.append("FORCE not verified on this variant (T7): use trigger mode 'auto' instead")
+                unverified.append("FORCE not verified on this unit (T7): use trigger mode 'auto' instead")
             unverified.append("trigger_addr alignment +-1 word (T5); voltage scaling (T8)")
+            mm = p.mismatch_caveat()
             return {"ok": True, "static": STATIC_PROFILE,
                     "live": {"fpga_variant": p.variant, "fpga_version": f"0x{i.fpga_version:04X}",
+                             "fw_fpga_version": f"0x{p.fw_fpga_version:04X}" if p.fw_fpga_version else None,
+                             "fpga_mismatch": p.fpga_mismatch,
                              "max_total_samples": i.max_total_samples, "min_total_samples": i.min_total_samples,
                              "programmable_trigger_position": p.programmable, "generator": p.has_generator,
                              "device_averaging": p.has(P.Caps.DEVICE_AVERAGE), "force": p.has(P.Caps.FORCE_TRIGGER),
                              "screenshot": p.has(P.Caps.SCREENSHOT), "ext_trigger": p.has(P.Caps.EXT_TRIGGER),
-                             "segments_and_hardware_averaging": p.has(P.Caps.SEQ), "caps": p.caps},
-                    "unverified": unverified, "caveats": STANDING_CAVEATS}
+                             "segments_and_hardware_averaging": p.has(P.Caps.SEQ),
+                             "trigger_types": p.has(P.Caps.TRIG_TYPES), "trigger_holdoff": p.has(P.Caps.HOLDOFF),
+                             "peak_detect": p.has(P.Caps.PEAK_DETECT), "counter": p.has(P.Caps.COUNTER),
+                             "caps": p.caps},
+                    "unverified": unverified, "caveats": ([mm] if mm else []) + STANDING_CAVEATS}
         return await run("scope_profile", 0, {}, go)
 
     @register(0, title="Scope status", read_only=True)
@@ -1150,8 +1229,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         LOCAL/REMOTE), display_mode (what the trace area shows: scope, spectrum, waterfall, density (protocol
         1.7, the spectrum view and its sub-views), phosphor (1.13) or bode (1.20, the scope's Bode plot); a number for
         a mode this host does not know), from protocol 1.17 the bitstream's features (ext_trigger, decim, fir,
-        segments, hw_average; enc_check 1.19; bode 1.20) and the
-        acquisition menu's Average (ui_averaging off / software / hardware, hardware_averaging, records per run),
+        segments, hw_average; enc_check 1.19; bode 1.20; capture_stages 1.24; trig_types, peak, counter 1.26) and the
+        acquisition menu's Average (ui_averaging off / mcu / hardware: since fw 0.2.103 every displayed record is the
+        mean of ui_averaging_records records, summed by the MCU or by one FPGA run; hardware_averaging says which),
         run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
         the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
         battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
@@ -1183,7 +1263,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     extra["features"] = P.feature_names(st.features)
                     extra["ui_averaging"] = P.UI_AVERAGE_NAMES.get(st.ui_average, st.ui_average)
                     extra["hardware_averaging"] = st.ui_average == 2
-                    if st.ui_average == 2:
+                    if st.ui_average in (1, 2):
                         extra["ui_averaging_records"] = 1 << st.ui_average_log2n
             else:
                 extra = {"mode": "exclusive (legacy firmware)"}
@@ -1524,8 +1604,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     ) -> dict[str, Any]:
         """Present a saved result to the person: a PNG plot and a self-contained HTML page (the plot embedded, the
         result table, the caveats and the generating command; no scripts or CDNs, works offline, light and dark).
-        Works for scope_capture / scope_read_capture, scope_averaged_capture, scope_decay_fit,
-        scope_capture_segments, scope_capture_and_fft, scope_spectrum and scope_bode_sweep (host or device) results.
+        Works for scope_capture / scope_read_capture (also peak-detect records: the min / max envelope as a band),
+        scope_averaged_capture, scope_decay_fit, scope_capture_segments, scope_capture_and_fft, scope_spectrum,
+        scope_bode_sweep (host or device), scope_decode, scope_mask_test, scope_dvm and scope_counter results.
         Files go to <home>/reports/<date>/ (FNIRSI_MCP_HOME, default ~/.fnirsi1013d). Without matplotlib (pip
         install "fnirsi1013d[plot]") there is no PNG and the page carries the numbers only. Touches no scope.
 
@@ -1737,33 +1818,41 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
     @register(1, title="Set the decimation filter", idempotent=True)
     async def scope_set_decimation(
-        filter: Annotated[Literal["off", "boxcar", "boxcar+fir", "cic2", "cic2+fir", "cic3", "cic3+fir"], Field(
+        filter: Annotated[Literal["off", "boxcar", "boxcar+fir", "cic2", "cic2+fir", "cic3", "cic3+fir", "peak"], Field(
             description="off = legacy 8-bit sample skipping; boxcar = mean of N raw samples; cic2 / cic3 = 2- / "
-                        "3-fold boxcar (better alias rejection, slightly less noise reduction per N); +fir (FPGA "
-                        "0x1535+, caps FIR) adds the CIC compensation FIR: flat passband to fs/4 and about 20 dB "
-                        "more alias rejection, active at 10 MSa/s and slower")],
+                        "3-fold boxcar (better alias rejection, slightly less noise reduction per N); +fir (caps FIR) "
+                        "adds the CIC compensation FIR: flat passband to fs/4 and about 20 dB more alias rejection, "
+                        "active at 10 MSa/s and slower; peak (caps PEAK_DETECT) = peak detect: every stored sample is "
+                        "the min and max of its window of N raw 200 MSa/s samples (glitches are kept; no averaging)")],
     ) -> dict[str, Any]:
-        """The scope's decimation filter (protocol 1.9, FPGA 0x1534+, capability DECIM). At sample rates below
-        200 MSa/s the FPGA filters every raw 200 MSa/s sample instead of skipping, N = 200 MSa/s / output rate, and
-        stores 16-bit samples: anti-aliased and up to about 8 + log2(sqrt N) bits (noise permitting). Returns the
-        effective filter (the firmware lowers the order where it would not be exact: CIC3 only up to N = 10,334,
-        CIC2 up to 1,050,630; 200 MSa/s and totals over 8190 stay legacy), N, the output shift S, the resolution in
-        codes per stored count and an effective-bits estimate. The +fir choices (protocol 1.11, FPGA 0x1535) run
-        the CIC on N / 2 and a 15-tap compensation FIR decimating by 2 (only where N >= 16 and N % 4 == 0; the
-        result's effective filter says whether it engaged). Needs scope_set_trigger total_samples <= 8190 first.
-        Captures and fetches then read the 16-bit samples automatically (the .npz gets CH<n>_samples16). For decay
-        curves: cic2 or boxcar at the rate the decay needs; see the measurement guide."""
+        """The scope's decimation filter (protocol 1.9, capability DECIM). At sample rates below 200 MSa/s the FPGA
+        filters every raw 200 MSa/s sample instead of skipping, N = 200 MSa/s / output rate, and stores 16-bit
+        samples: anti-aliased and up to about 8 + log2(sqrt N) bits (noise permitting). Returns the effective filter
+        (the firmware lowers the order where it would not be exact: CIC3 only up to N = 10,334, CIC2 up to 1,050,630;
+        200 MSa/s and totals over 8190 stay legacy), N, the output shift S, the resolution in codes per stored count
+        and an effective-bits estimate. The +fir choices (protocol 1.11) run the CIC on N / 2 and a 15-tap
+        compensation FIR decimating by 2 (only where N >= 16 and N % 4 == 0; the result's effective filter says
+        whether it engaged). Needs scope_set_trigger total_samples <= 8190 first. Captures and fetches then read the
+        16-bit samples automatically (the .npz gets CH<n>_samples16). For decay curves: cic2 or boxcar at the rate the
+        decay needs; see the measurement guide.
+
+        'peak' (protocol 1.26, caps PEAK_DETECT) is the ACQ menu's Sample = Peak: the same 16-bit layout, each word
+        the window's raw min and max, so a spike shorter than the sample period still shows; captures return min / max
+        envelopes (scope_capture peak=true does it for one capture). Averaging (scope_averaged_capture, the ACQ
+        Average) is refused while it is on; the Filter setting is kept for the way back ('off' or a filter restores)."""
         args = {"filter": filter}
 
         def go() -> dict[str, Any]:
             notes = sess.ensure_control()
             s = sess.get_scope()
             if not s.profile().has(P.Caps.DECIM):
-                raise ToolError("scope_set_decimation: this firmware / bitstream has no decimation filter "
-                                "(capability DECIM: firmware >= 0.2.30 with FPGA 0x1534)")
+                raise ToolError("scope_set_decimation: this firmware has no decimation filter (caps DECIM)")
             if filter.endswith("+fir") and not s.profile().has(P.Caps.FIR):
-                raise ToolError("scope_set_decimation: this bitstream has no compensation FIR (capability FIR: "
-                                "firmware >= 0.2.44 with FPGA 0x1535); use the filter without +fir")
+                raise ToolError("scope_set_decimation: no compensation FIR in this firmware's caps (FIR); use the "
+                                "filter without +fir")
+            if filter == "peak" and not s.profile().has(P.Caps.PEAK_DETECT):
+                raise ToolError("scope_set_decimation: no peak detect in this firmware's caps (PEAK_DETECT, protocol "
+                                "1.26 on FPGA 0x153C)")
             if filter != "off" and s.get_trigger(cached=False).total_samples > P.DECIM_MAX_TOTAL:
                 raise ToolError(f"scope_set_decimation: the trigger total is over {P.DECIM_MAX_TOTAL} samples; "
                                 f"scope_set_trigger(total_samples <= {P.DECIM_MAX_TOTAL}) first")
@@ -1774,6 +1863,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 cav.insert(0, f"effective filter is {summ['effective']}: {summ['reason']}")
             if "fir_note" in summ:
                 cav.insert(0, summ["fir_note"])
+            if filter == "peak":
+                cav.insert(0, PEAK_CAVEAT)
             return {"ok": True, "applied": summ, "timebase": _timebase_summary(s), "caveats": cav}
         return await run("scope_set_decimation", 1, args, go)
 
@@ -1781,8 +1872,31 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     async def scope_set_trigger(
         source: Annotated[Literal["CH1", "CH2", "EXT"] | None, Field(description="trigger channel; EXT = the "
                           "calibration pin as a 3.3 V logic input referenced to the USB ground, not the probe ground "
-                          "(bitstream 0x1533+, caps EXT_TRIGGER, generator off; level ignored)")] = None,
-        edge: Annotated[Literal["rising", "falling"] | None, Field(description="trigger edge")] = None,
+                          "(caps EXT_TRIGGER, generator off; level ignored)")] = None,
+        edge: Annotated[Literal["rising", "falling"] | None, Field(description="trigger edge (the edge type); for "
+                        "the other types see polarity")] = None,
+        type: Annotated[Literal["edge", "pulse_width", "nth_edge", "timeout", "runt", "window"] | None, Field(
+            description="trigger type (protocol 1.26, caps TRIG_TYPES): edge; pulse_width = the trailing edge of a "
+                        "pulse shorter (default) or longer than `width`; nth_edge = the n-th edge of `polarity` since "
+                        "the arm, or of each burst when `idle` separates bursts; timeout = the level held for `width` "
+                        "with no edge. runt / window need FPGA 0x153E (caps TRIG_RUNT_WINDOW)")] = None,
+        polarity: Annotated[Literal["positive", "negative", "rising", "falling", "high", "low"] | None, Field(
+            description="per type: pulse_width positive / negative pulse; nth_edge rising / falling counted edge; "
+                        "timeout high / low held level; edge rising / falling (same as edge)")] = None,
+        width: Annotated[float | str | None, Field(description="pulse_width: the width to compare with (seconds, "
+                        "e.g. '15us'); timeout: the held time. Converted to samples of the trigger stream in effect: "
+                        "one memory word on CH1 / CH2 (2 / fs legacy, 1 / fs with a filter or peak detect), 5 ns on "
+                        "EXT; rounded, clamped to 1 .. 2^24 - 1 samples")] = None,
+        longer: Annotated[bool | None, Field(description="pulse_width: trigger on pulses longer than width (default "
+                                                         "shorter)")] = None,
+        n: Annotated[int | None, Field(ge=1, le=65535, description="nth_edge: the edge to trigger on (1..65535)")] = None,
+        idle: Annotated[float | str | None, Field(description="nth_edge: the count restarts after the level held this "
+                        "long without an edge (seconds, same units as width; 0 = count from the arm)")] = None,
+        hold_off: Annotated[float | str | None, Field(description="trigger hold-off (seconds, caps HOLDOFF): from one "
+                           "record's trigger no trigger is accepted until it has elapsed, across re-arms and segments; "
+                           "5 ns steps up to 21 s; 0 = off")] = None,
+        clear_hold_off: Annotated[bool, Field(description="the next capture also clears a hold-off still running "
+                                                           "from an earlier trigger")] = False,
         level: Annotated[float | str | None, Field(description="trigger level in volts at the probe tip, "
                                                                "converted to a raw core-A code")] = None,
         level_code: Annotated[int | None, Field(ge=0, le=255, description="raw core-A code 0..255; alternative "
@@ -1799,14 +1913,16 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         auto_timeout: Annotated[float | str | None, Field(description="auto mode: seconds without a trigger "
                                                                       "before the capture completes anyway")] = None,
     ) -> dict[str, Any]:
-        """Set trigger source, edge, level, mode and the capture geometry (pre-trigger and total samples).
-        Returns applied values, the level actually reachable (codes are about 3.4 mV apart at 100 mV/div) and
-        the pre/post trigger durations.
+        """Set trigger source, edge, level, mode and the capture geometry (pre-trigger and total samples), and
+        (protocol 1.26, caps TRIG_TYPES) the trigger type with its parameters and the hold-off. Returns applied
+        values, the level actually reachable (codes are about 3.4 mV apart at 100 mV/div), the pre/post trigger
+        durations and, for a type, the width / idle / hold-off as rounded to the stream's samples.
 
-        Level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed. Hold-off is not
-        implemented in any current FPGA bitstream. On the stock FPGA pre-trigger is fixed at 50 % and total at
-        3000."""
-        args = {k: v for k, v in dict(source=source, edge=edge, level=level, level_code=level_code, mode=mode,
+        Level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed. Widths and idle times
+        resolve to one trigger-stream sample (2 / fs legacy, 1 / fs filtered, 5 ns on EXT); the hold-off to 5 ns."""
+        args = {k: v for k, v in dict(source=source, edge=edge, type=type, polarity=polarity, width=width, longer=longer,
+                                      n=n, idle=idle, hold_off=hold_off, clear_hold_off=clear_hold_off or None,
+                                      level=level, level_code=level_code, mode=mode,
                                       pretrigger_fraction=pretrigger_fraction, pretrigger_samples=pretrigger_samples,
                                       total_samples=total_samples, auto_timeout=auto_timeout).items() if v is not None}
 
@@ -1818,8 +1934,15 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             cav = list(notes)
             src = None if source is None else ("CH1", "CH2", "EXT").index(source)
             if src == 2 and not prof.has(P.Caps.EXT_TRIGGER):
-                raise ValueError("source 'EXT' needs an FPGA bitstream with an external trigger input (0x1533 or "
-                                 f"later; this one is 0x{prof.info.fpga_version:04X}). Trigger on CH2 instead.")
+                raise ValueError("source 'EXT' needs the external trigger input (caps EXT_TRIGGER); this firmware's "
+                                 "caps lack it. Trigger on CH2 instead.")
+            if type in ("runt", "window"):
+                raise ValueError(f"trigger type {type!r} needs FPGA bitstream 0x153E (caps TRIG_RUNT_WINDOW, protocol "
+                                 "1.28); this generation has edge, pulse_width, nth_edge and timeout")
+            typed = any(v is not None for v in (type, polarity, width, longer, n, idle, hold_off)) or clear_hold_off
+            if typed and (cur.trigger2 is None or not prof.has(P.Caps.TRIG_TYPES)):
+                raise ValueError("trigger types and the hold-off need protocol 1.26 with caps TRIG_TYPES (FPGA 0x153C, "
+                                 "fw 0.2.104+); this firmware has the edge trigger only")
             gen_was_on = src == 2 and prof.has_generator and bool(s.get_gen().enable)
             eff_src = cur.source if src is None else src
             if eff_src == 2:
@@ -1845,17 +1968,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 if pretrigger_fraction is not None:
                     pre = int(round(pretrigger_fraction * t_eff / 2)) * 2
                     pre = min(pre, t_eff - 2)
-                if not prof.programmable:
-                    if (total is not None and total != 3000) or (pre is not None and pre != 1500):
-                        raise ValueError("the stock FPGA (0x1432) has a fixed geometry: pretrigger 1500, total "
-                                         "3000. Flash the Atlan4 AL3 bitstream for programmable geometry.")
                 i = prof.info
                 if total is not None:
                     if total % 2:
                         raise ValueError(f"total_samples must be even (got {total})")
                     if not i.min_total_samples <= total <= i.max_total_samples:
-                        raise ValueError(f"total_samples {total} not in {i.min_total_samples}.."
-                                         f"{i.max_total_samples} for this FPGA ({prof.variant})")
+                        raise ValueError(f"total_samples {total} not in {i.min_total_samples}..{i.max_total_samples}")
                 if pre is not None:
                     if pre % 2:
                         raise ValueError(f"pretrigger_samples must be even (got {pre})")
@@ -1869,17 +1987,89 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             s.set_trigger(source=src, edge=None if edge is None else P.EDGES.index(edge), level=code,
                           mode=None if mode is None else P.TRIG_MODES.index(mode), pretrigger_samples=pre,
                           total_samples=total, auto_timeout=ato)
+            if typed:
+                cav += _apply_trigger_type(s, type, polarity, width, longer, n, idle, hold_off, clear_hold_off)
             summ = _trigger_summary(s)
             if src == 2 and gen_was_on:
                 cav.append("the generator was switched off: the calibration pin is now the EXT trigger input")
             if mode == "single":
                 cav.append("host captures never re-arm on their own: 'single' behaves like 'normal' for them")
-            cav += ["level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed",
-                    "hold-off is not implemented in any current FPGA bitstream"]
-            if not prof.programmable:
-                cav.append("stock FPGA: pre-trigger fixed at 50 %, total 3000 samples")
+            cav.append("level is an 8-bit code compared to core A only; edges faster than 2 / fs may be missed")
+            if not prof.has(P.Caps.HOLDOFF):
+                cav.append("hold-off is not implemented by this firmware / bitstream (caps HOLDOFF)")
             return {"ok": True, "applied": summ, "caveats": cav}
         return await run("scope_set_trigger", 1, args, go)
+
+    def _apply_trigger_type(s: Scope, type_: str | None, polarity: str | None, width: float | str | None,
+                            longer: bool | None, n: int | None, idle: float | str | None, hold_off: float | str | None,
+                            clear_hold_off: bool) -> list[str]:
+        """Protocol 1.26: the SET_TRIGGER2 block from the tool's arguments; seconds become samples of the trigger
+        stream in effect (one word on CH1 / CH2, 5 ns on EXT), rounded to the nearest and clamped to the FPGA's
+        ranges, which the returned caveats name."""
+        cav: list[str] = []
+        cur = s.get_trigger(cached=False)
+        t2 = cur.trigger2
+        assert t2 is not None
+        per = _trigger_stream_period(s, cur.source)
+        tname = type_ if type_ is not None else t2.type_name
+        ttype = P.TRIG_TYPE_NAMES.index(tname)
+        kw: dict[str, Any] = {"type": ttype}
+        if polarity is not None:
+            names = P.TRIG_POLARITY_NAMES[ttype]
+            alias = {"rising": 0, "positive": 0, "high": 0, "falling": 1, "negative": 1, "low": 1}
+            pol = alias[polarity]
+            if polarity not in names:
+                cav.append(f"polarity {polarity!r} read as {names[pol]!r} for the {tname} type")
+            kw["polarity"] = pol
+        if longer is not None:
+            kw["longer"] = longer
+
+        def to_samples(name: str, secs: float | str, lo: int, hi: int) -> int:
+            v = parse_quantity(secs, "s")
+            samples = int(round(v / per))
+            clamped = min(hi, max(lo, samples))
+            if clamped != samples:
+                cav.append(f"{name} {fmt_si(v, 's')} is {samples} trigger samples of {fmt_si(per, 's')}: clamped to "
+                           f"{clamped} ({fmt_si(clamped * per, 's')})")
+            elif abs(samples * per - v) > 1e-12:
+                cav.append(f"{name} rounded to {samples} trigger samples = {fmt_si(samples * per, 's')} (resolution "
+                           f"{fmt_si(per, 's')})")
+            return clamped
+
+        if width is not None:
+            if ttype not in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT):
+                raise ValueError("width applies to the pulse_width and timeout types")
+            kw["n"] = to_samples("width", width, 1, P.TRIG2_MAX_N)
+        if n is not None:
+            if ttype != P.TRIG_NTH_EDGE:
+                raise ValueError("n applies to the nth_edge type (use width for pulse_width / timeout)")
+            kw["n"] = n
+        if idle is not None:
+            if ttype != P.TRIG_NTH_EDGE:
+                raise ValueError("idle applies to the nth_edge type")
+            kw["h"] = to_samples("idle", idle, 0, P.TRIG2_MAX_N)
+        if ttype == P.TRIG_NTH_EDGE and "n" not in kw and not 1 <= t2.n <= P.TRIG2_MAX_NTH:
+            kw["n"] = 1
+        if ttype in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT) and "n" not in kw and t2.n < 1:
+            kw["n"] = 1
+        if hold_off is not None:
+            v = parse_quantity(hold_off, "s")
+            ns = int(round(v * 1e9))
+            units = P.trig2_holdoff_units(ns)
+            if units > P.TRIG2_MAX_HOLDOFF_UNITS:
+                units = P.TRIG2_MAX_HOLDOFF_UNITS
+                cav.append(f"hold_off clamped to {fmt_si(units * 5e-9, 's')}")
+            kw["holdoff_ns"] = units * P.TRIG2_HOLDOFF_UNIT_NS
+            if kw["holdoff_ns"] != ns:
+                cav.append(f"hold_off rounded up to {units} x 5 ns = {fmt_si(units * 5e-9, 's')}")
+        if clear_hold_off:
+            kw["clear_holdoff"] = True
+        s.set_trigger2(**kw)
+        if ttype != P.TRIG_EDGE:
+            cav.append(f"{tname} trigger: widths and counts resolve to one trigger-stream sample ({fmt_si(per, 's')}); "
+                       "the trigger position is the qualifying edge (pulse_width: the trailing edge; timeout: the "
+                       "sample that completes the held time)")
+        return cav
 
     # ---- tier 1: acquisition -------------------------------------------------------------------------------
 
@@ -1894,38 +2084,67 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         raw: Annotated[bool, Field(description="also store raw codes per ADC core in the file")] = False,
         processed: Annotated[bool, Field(description="use the firmware's processed trace (slower, matches the "
                                                      "screen) instead of raw reads plus host compensation")] = False,
+        peak: Annotated[bool, Field(description="peak detect for this capture (protocol 1.26, caps PEAK_DETECT): "
+                                                "every sample is the min and max of its window of raw 200 MSa/s "
+                                                "samples, so glitches shorter than 1 / fs show; returns min / max "
+                                                "envelopes; the previous Filter setting is restored afterwards")] = False,
     ) -> dict[str, Any]:
         """Take one host single capture with the live settings: arm, wait for the trigger, read. The scope
         screen shows it and the scope stays in STOP afterwards (resume with scope_acquisition_control(action=
         'run')). Returns per channel min, max, mean, rms, Vpp, frequency estimate and clipped-sample count; the
         trigger outcome ('fired', 'auto_timeout', 'none'), capture_id, settings_seq, dt, sample count, the .npz
         file path (t, volts, codes, clipped flags, metadata) and either the samples inline (<= 2000 points) or a
-        decimated min/max preview.
+        decimated min/max preview. With peak detect (peak=true, or the Filter set to 'peak') the per-channel result
+        adds `envelope`, the samples / preview are `<ch>_min` and `<ch>_max`, and the .npz carries `<ch>_min_volts`,
+        `<ch>_max_volts`, `<ch>_min_codes`, `<ch>_max_codes` (volts / codes are the midpoint).
 
         Dynamic caveats report clipping, unsynchronised auto-trigger data, likely aliasing and content above the
         analog bandwidth."""
-        args = {"channels": channels, "timeout_s": timeout_s, "window": window, "raw": raw, "processed": processed}
+        args = {"channels": channels, "timeout_s": timeout_s, "window": window, "raw": raw, "processed": processed,
+                "peak": peak}
 
         def go() -> dict[str, Any]:
             notes = sess.ensure_control()
             s = sess.get_scope()
             chans = _channels_arg(channels, [CHANNEL_NAMES[c] for c in (0, 1) if s.get_channel(c).enable] or ["CH1"])
-            w = _window_arg(window)
-            a, n = _sample_window(s, w)
-            s.arm()
-            st = s.wait(timeout_s)
-            if st.acq_state != P.AcqState.DONE:
-                s.stop()
-                return {"ok": False, "trigger": "none", "acq_state": P.AcqState(st.acq_state).name,
-                        "caveats": notes + [f"no trigger within {timeout_s} s: check the trigger level/source with "
-                                            "scope_get_config, use mode='auto', or raise timeout_s"]}
-            if processed:
-                cap = s.read_trace_capture(chans)
-                if w is not None:
-                    cap = _slice_capture(cap, a, n)
-            else:
-                cap = s.read_capture(chans, a, n, keep_raw=raw, st=st)
-            out = _capture_result(sess, cap, "capture")
+            restore: str | None = None
+            if peak:
+                if not s.profile().has(P.Caps.PEAK_DETECT):
+                    raise ToolError("scope_capture(peak=true): no peak detect in this firmware's caps (PEAK_DETECT, "
+                                    "protocol 1.26 on FPGA 0x153C)")
+                before = s.get_decim()
+                if before.filter != P.DECIM_PEAK:
+                    if s.get_trigger(cached=False).total_samples > P.DECIM_MAX_TOTAL:
+                        raise ToolError(f"scope_capture(peak=true): the trigger total is over {P.DECIM_MAX_TOTAL} "
+                                        f"samples; scope_set_trigger(total_samples <= {P.DECIM_MAX_TOTAL}) first")
+                    restore = before.filter_setting
+                    st_d = s.set_decim("peak")
+                    if not st_d.next.peak:
+                        s.set_decim(restore)
+                        raise ToolError(f"scope_capture(peak=true): peak detect does not apply here: "
+                                        f"{P.DECIM_WHY[st_d.why]} (it needs a rate below 200 MSa/s)")
+            try:
+                w = _window_arg(window)
+                a, n = _sample_window(s, w)
+                s.arm()
+                st = s.wait(timeout_s)
+                if st.acq_state != P.AcqState.DONE:
+                    s.stop()
+                    return {"ok": False, "trigger": "none", "acq_state": P.AcqState(st.acq_state).name,
+                            "caveats": notes + [f"no trigger within {timeout_s} s: check the trigger level/source "
+                                                "with scope_get_config, use mode='auto', or raise timeout_s"]}
+                if processed:
+                    cap = s.read_trace_capture(chans)
+                    if w is not None:
+                        cap = _slice_capture(cap, a, n)
+                else:
+                    cap = s.read_capture(chans, a, n, keep_raw=raw, st=st)
+            finally:
+                if restore is not None:
+                    s.set_decim(restore)
+                    notes.append(f"peak detect was switched on for this capture and the Filter set back to "
+                                 f"'{restore}'")
+            out = _capture_result(sess, cap, "peak" if cap.peak else "capture")
             if s.shared:
                 notes.append("the scope screen shows this capture and the scope is now in STOP; "
                              "scope_acquisition_control(action='run') resumes its own acquisition")
@@ -2043,6 +2262,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             t0 = time.monotonic()
             while True:
                 cctx = await anyio.to_thread.run_sync(s.capture_context)
+                if cctx.decim is not None and cctx.decim.peak:  # 1.26: the mean of min / max words means nothing
+                    raise ToolError(f"{tool}: averaging is refused while peak detect is on (the records hold min / "
+                                    "max pairs); scope_set_decimation(filter='off' or a filter) first")
                 try:
                     res = await _averaged_run(ctx, s, cctx, n=n, chans=chans, w=w, align=align,
                                               align_channel=align_channel, align_level=align_level,
@@ -2733,6 +2955,134 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             out["caveats"] = notes + [SCALING_CAVEAT]
             return out
         return await run("scope_measure", 1 if capture else 0, args, go)
+
+    @register(1, title="Hardware counter", read_only=False, idempotent=True)
+    async def scope_counter(
+        gate: Annotated[Literal["10ms", "100ms", "1s"] | None, Field(description="gate time (configures the "
+                        "counter, which the scope's measurement cards share; default: as set, 100 ms at boot)")] = None,
+        source: Annotated[Literal["trigger", "CH1", "CH2", "EXT"] | None, Field(description="what to count: "
+                          "'trigger' follows the trigger source (the boot setting), or a channel / EXT")] = None,
+        level: Annotated[float | str | None, Field(description="comparator level in volts at the probe tip (CH1 / "
+                         "CH2; converted to a raw code); default: as set (128 = mid-screen at boot)")] = None,
+        hysteresis: Annotated[int | None, Field(ge=0, le=255, description="codes below the level that read low "
+                                                                            "(boot: 6, about 3 x the noise)")] = None,
+        readings: Annotated[int, Field(ge=1, le=50, description="snapshots to take, one per new gate (the tool waits "
+                                                                 "for each gate to end)")] = 1,
+    ) -> dict[str, Any]:
+        """The scope's hardware reciprocal counter (protocol 1.26, caps COUNTER, FPGA 0x153C): frequency, period,
+        positive pulse width and duty of CH1, CH2 or EXT counted at 200 MHz over a 10 ms / 100 ms / 1 s gate, plus the
+        raw min / max over the gate (as volts and Vpp for CH1 / CH2). Resolution one 5 ns clock over the gate (5e-7 at
+        10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy on top; range about 1 Hz (two edges in a 1 s gate) to the
+        30 MHz front end. Tier 0 when it only reads; configuring the gate, source or thresholds is a tier 1 change
+        the measurement cards on the scope follow. Needs no capture; `readings` > 1 returns every snapshot and the
+        spread, and saves them as a .npz for scope_report."""
+        args = {k: v for k, v in dict(gate=gate, source=source, level=level, hysteresis=hysteresis,
+                                      readings=readings).items() if v is not None}
+        configuring = any(v is not None for v in (gate, source, level, hysteresis))
+        if configuring:
+            need_tier(1, "scope_counter with gate / source / level / hysteresis")
+
+        def go() -> dict[str, Any]:
+            s = sess.get_scope()
+            if not s.profile().has(P.Caps.COUNTER):
+                raise ToolError("scope_counter: no hardware counter in this firmware's caps (COUNTER, protocol 1.26 "
+                                "on FPGA 0x153C); use scope_measure(items=['frequency', 'duty']) on a capture")
+            notes: list[str] = []
+            kw: dict[str, Any] = {}
+            if gate is not None:
+                kw["gate"] = ("off", "10ms", "100ms", "1s").index(gate)
+            if source is not None:
+                kw["source"] = P.COUNTER_SOURCES.index(source)
+            cur = s.read_counter()
+            eff_src = P.COUNTER_SOURCES[kw.get("source", cur.source)]
+            if eff_src == "trigger":
+                eff_src = ("CH1", "CH2", "EXT")[min(s.get_trigger(cached=False).source, 2)]
+            if level is not None:
+                if eff_src == "EXT":
+                    notes.append("level is ignored for EXT (3.3 V logic input)")
+                else:
+                    ch = channel_index(eff_src)
+                    v = parse_quantity(level, "V")
+                    raw = round(s.scale(ch, s.get_channel(ch, cached=False)).raw_a_for_volts(v))
+                    kw["level"] = int(min(255, max(0, raw)))
+                    if raw != kw["level"]:
+                        notes.append(f"level {v:g} V is outside the channel's range; clamped to code {kw['level']}")
+            if hysteresis is not None:
+                kw["hysteresis"] = hysteresis
+            if kw:
+                notes += sess.ensure_control()
+                cur = s.read_counter(**kw)
+            if cur.gate == 0:
+                raise ToolError("scope_counter: the counter gate is off; pass gate='100ms' (or '10ms', '1s')")
+            gate_s = cur.gate_s
+            snaps: list[P.CounterResp] = []
+            last_seq: int | None = None
+            deadline = time.monotonic() + (3 * gate_s + 0.5) * readings + 2.0
+            while len(snaps) < readings and time.monotonic() < deadline:
+                r = cur if not snaps and kw else s.read_counter()  # a configure call already answered a snapshot
+                if r.new and r.seq != last_seq:
+                    snaps.append(r)
+                    last_seq = r.seq
+                    continue
+                time.sleep(min(0.05, max(0.005, gate_s / 10)))
+            if not snaps:
+                raise ToolError("scope_counter: no new gate result within the wait; check the scope")
+            src_name = snaps[-1].effective_source
+            sc = None if src_name == "EXT" else s.scale(channel_index(src_name), s.get_channel(channel_index(src_name)))
+            rows = []
+            for r in snaps:
+                row: dict[str, Any] = {"seq": r.seq, "valid": r.valid, "frequency_hz": _r6(r.frequency_hz),
+                                       "period_s": _r6(r.period_s), "width_s": _r6(r.width_s), "duty": _r6(r.duty),
+                                       "edges": r.e, "min_code": r.min, "max_code": r.max,
+                                       "firmware_frequency_hz": _r6(r.freq_mhz / 1000) if r.freq_mhz else None}
+                if sc is not None:
+                    row["vmin"] = _r6(float(sc.volts_mean_raw(np.array([float(r.min)]))[0]))
+                    row["vmax"] = _r6(float(sc.volts_mean_raw(np.array([float(r.max)]))[0]))
+                    row["vpp"] = _r6(row["vmax"] - row["vmin"]) if row["vmax"] is not None else None
+                rows.append(row)
+            last = snaps[-1]
+            freqs = [r.frequency_hz for r in snaps if r.frequency_hz is not None]
+            out: dict[str, Any] = {"ok": True, "source": src_name, "gate_s": gate_s, "level_code": last.level,
+                                   "hysteresis_codes": last.hysteresis, "valid": last.valid,
+                                   "frequency_hz": _r6(last.frequency_hz), "period_s": _r6(last.period_s),
+                                   "width_s": _r6(last.width_s), "duty": _r6(last.duty), "edges": last.e,
+                                   "readings": rows}
+            if sc is not None:
+                out["level_volts"] = _r6(sc.volts_for_raw_a(last.level))
+                out.update({k: rows[-1].get(k) for k in ("vmin", "vmax", "vpp")})
+            if len(freqs) > 1:
+                out["frequency_spread_hz"] = _r6(max(freqs) - min(freqs))
+                out["frequency_mean_hz"] = _r6(sum(freqs) / len(freqs))
+            res_rel = last.resolution
+            out["resolution"] = (f"one 5 ns clock in {last.t} over the {fmt_si(gate_s, 's')} gate: "
+                                 f"{res_rel:.2g} relative ({fmt_si(res_rel * (last.frequency_hz or 0), 'Hz')}); the "
+                                 "50 MHz crystal's accuracy (about 1e-5, uncalibrated) dominates above that"
+                                 if last.valid else "no valid count: fewer than two edges in the gate")
+            if not last.valid:
+                notes.append("no valid count in the gate: raise the gate time, check the level against the signal "
+                             "(scope_capture shows it) or the source")
+            if sc is not None:
+                notes.append("vmin / vmax are the raw extremes over the whole gate through the 8-bit model (mean of "
+                             "both cores), noise peaks included: a few codes wider than a capture's min / max")
+            if snaps and src_name != "EXT":
+                notes.append("the counter thresholds are raw codes: with a signal that does not cross the level by "
+                             "more than the hysteresis the count is 0")
+            arrays = {"capture_t_s": np.arange(len(snaps), dtype=np.float64) * gate_s,
+                      "frequency_hz": np.array([r.frequency_hz or math.nan for r in snaps]),
+                      "period_s": np.array([r.period_s or math.nan for r in snaps]),
+                      "width_s": np.array([r.width_s or math.nan for r in snaps]),
+                      "duty": np.array([r.duty if r.duty is not None else math.nan for r in snaps]),
+                      "min_code": np.array([r.min for r in snaps]), "max_code": np.array([r.max for r in snaps])}
+            if sc is not None:
+                arrays["vmin"] = np.array([row["vmin"] for row in rows], dtype=np.float64)
+                arrays["vmax"] = np.array([row["vmax"] for row in rows], dtype=np.float64)
+            meta = {"kind": "counter", "args": args, "source": src_name, "gate_s": gate_s, "level_code": last.level,
+                    "hysteresis_codes": last.hysteresis, "n_readings": len(snaps), "resolution": out["resolution"],
+                    "caveats": notes, "scaling": SCALING_CAVEAT}
+            out["file"] = sess.save_npz("counter", arrays, meta)
+            out["caveats"] = notes
+            return out
+        return await run("scope_counter", 1 if configuring else 0, args, go)
 
     # ---- host-side data tools: decode, mask test, CSV export, DVM (docs/mcp-tools.md 4.3b) --------------------
 

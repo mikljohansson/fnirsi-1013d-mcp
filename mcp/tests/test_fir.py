@@ -57,7 +57,7 @@ def test_suspend_event_fields(ev, text):
 def test_fir_variant_set_decim(sim_factory):
     srv = sim_factory(signal="dc:v=0.1")
     with Scope.connect(srv.url) as s:
-        assert s.info.fpga_version == 0x153B and s.info.caps & P.Caps.FIR and s.info.caps & P.Caps.DECIM
+        assert s.info.fpga_version == P.FW_FPGA_VERSION and s.info.caps & P.Caps.FIR and s.info.caps & P.Caps.DECIM
         s.set_timebase(divider=19)
         s.set_decim("cic2", flags=P.SetDecimReq.NEG_B)
         st = s.set_decim("cic2+fir")
