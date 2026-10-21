@@ -421,7 +421,12 @@ word R + 8192 at 100 and 5 Mwords/s, the empty ring, stop, restart). **Full `tb/
 (hence the time): ext 39, decim 98 + cic_model 1876 / 1873, fir 163 / 165 + cic_model 1612 / 1638, long 8, seg 53 + seg_model
 22, trigpos 882, contract 12 (= contract_0x153B.txt), encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85,
 trigtypes 1293, counter 115, stream 757; every equivalence phase 0 mismatches. The source of the runs is commit 9607b13 (the
-RTL) with ed8b9d4 (the tb); the one-chunk smoke runs (516 checks) passed on both seeds too (378 s / 595 s).
+RTL) with ed8b9d4 (the tb); the one-chunk smoke runs (516 checks) passed on both seeds too (378 s / 595 s). **Merge with
+origin/main at c5ecf09** (fpga-c2's peak detect, 50cbc71): `zaklad.v` auto-merged (C2's blocks and mine touch no common
+line), conflicts only in `run.sh` (usage line, step headers), `FPGA commands.txt` (header bullets) and the README (C2 took
+section 14, the logger is section 15), resolved "keep both, theirs first"; on the merged source the stream step (516 checks,
+`STREAM_CHUNKS=1`, seed 12345) and the ext equivalence step (39 checks, seed 4242) pass; the full 17-step run above is the
+pre-merge source, as C1's was (D3's integration run repeats every step on the merged 0x153D source anyway).
 
 **Build**: TD 4.6.8 SP1 headless (`~/d1/td/b2`, this branch = C1 + C3 + logger, version byte 0x3B): **6208 LUT (71.9 %) / 5363
 reg / 6977 LE**, block RAM and M18x18 unchanged: **+129 LUT / +186 reg / +155 LE** over the merged C1 + C3 build (6079 / 5177 /
