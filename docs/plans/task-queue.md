@@ -272,8 +272,8 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
-- fpga-c4 pushed 7f6eb3a 14:0x (asked to push before its rerun on the final source finishes; the rerun text follows in one
-  more commit), merged 14:1x: dist/al3-0x153C.bin 282,898 B sha256 2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2,
+- fpga-c4 pushed 7f6eb3a 13:5x (asked to push before its rerun on the final source finishes; the rerun text follows in one
+  more commit), merged 14:0x: dist/al3-0x153C.bin 282,898 B sha256 2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2,
   padded 1 MiB 07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77, status unbenched, min firmware 0.2.104,
   bitstreams.py check 10 consistent. TD h4: 6126 LUT (70.9 %), clk_200MHz 0 errors (+0.228 ns), cruft removal -206 LUT.
   First two-seed run ALL PASS except the tb_fir seed-12345 divergence (a simulator event-ordering race of the div20 alias
