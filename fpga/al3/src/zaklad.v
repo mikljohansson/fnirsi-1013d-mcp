@@ -1849,8 +1849,10 @@ assign sampling_enable = ~(
 //The sequencer (clk_200MHz, below) raises seq_req to restart the capture logic; the rising edge of
 //its sampled copy is the one-write-clock pulse seq_rst_c (in cap_rst). In segment mode the slot
 //base moves on by one slot at each restart, or back to slot 0 when the sequencer set seq_wrap.
-//ts_cnt counts 5 ns units from the release of the MCU sampling reset: 2 (D + 1) per write clock
-//edge, D the effective divider (0 with K >= 1). For the record that just ended, ts_cap holds
+//ts_cnt counts 5 ns units from the release of the MCU sampling reset: 2 per write clock edge (0x153D: the
+//write clock runs at full rate at every setting; up to 0x153C 2 (D + 1) with K = 0). ts_cap has no reset: it is
+//loaded at the first stored word of every record (st_s is 0 there), before the sequencer can see the record end
+//(fpga-d3c register audit, README section 17). For the record that just ended, ts_cap holds
 //ts_cnt from the last edge that latched trigger_address and seq_trig holds sampling_triggered as of
 //the last word written. Both are taken one write clock late from registered copies (st_s, adv_d,
 //swe_d, ts_d) of exactly what the trigger_address logic saw, so sampling_triggered gains one load
@@ -2360,14 +2362,28 @@ assign sampling_enable = ~(
         end
     end
 
+//=====================================================================================
+
+  //Select the address and clock source based on the sample read enbale setting
+
+  //0x1539: the memory's read port (rising edge of i_mcu_clk) takes the read pointer through sample_read_addr_n, a copy
+  //made on the falling edge before it. The port reads the same address as before (the pointer as it was before that
+  //rising edge), but the pointer's own update on that rising edge can no longer race the port's address register.
+  always @(negedge i_mcu_clk)
+    sample_read_addr_n <= sample_read_offset;
+
+  assign sample_read_address = sample_read_addr_n;
+
+  assign sample_read_clock   = i_mcu_clk;    //0x153C: 0x0F (sample_read_enable) is gone; both arms of its mux were i_mcu_clk
+
 //-------------------------------------------------------------------------------------
 //Hardware counter with min / max (0x153C, C3; from the gen8 design), clk_200MHz. Input stream k_cs, one bit per 5 ns:
 //  EXT: ext_level (synchronised and majority filtered);
 //  CH1 / CH2: the captured pair of each write clock (adc*_w: core B the earlier sample, core A the later one, T/2 apart)
 //  through a Schmitt trigger (high at code >= level, low below level - hysteresis, 0x62), the earlier sample's state
-//  from the clock after the write clock's rise, the later one's from the clock after its fall: at 200 MSa/s (divider 0,
-//  or any K >= 1, which forces the full-rate write clock) one sample per 5 ns, at slower legacy rates each sample held
-//  for half a word.
+//  from the clock after the write clock's rise, the later one's from the clock after its fall: one sample per 5 ns at
+//  every setting (0x153D: the write clock runs at full rate always; up to 0x153C at slower legacy rates each sample was
+//  held for half a divided word).
 //Reciprocal counting over a gate of exactly 2e6 / 2e7 / 2e8 clocks (10 ms / 100 ms / 1 s, 0x61): from the first rising
 //edge of k_cs in the gate to the last one, E = the number of periods, T = clocks between those edges, W = clocks k_cs was
 //high in them; plus the minimum and maximum raw code of the source's pair over the gate (both cores, every write clock;
@@ -2533,20 +2549,6 @@ assign sampling_enable = ~(
           m_new  <= (k_seq != m_seq);
         end
     end
-
-//=====================================================================================
-
-  //Select the address and clock source based on the sample read enbale setting
-
-  //0x1539: the memory's read port (rising edge of i_mcu_clk) takes the read pointer through sample_read_addr_n, a copy
-  //made on the falling edge before it. The port reads the same address as before (the pointer as it was before that
-  //rising edge), but the pointer's own update on that rising edge can no longer race the port's address register.
-  always @(negedge i_mcu_clk)
-    sample_read_addr_n <= sample_read_offset;
-
-  assign sample_read_address = sample_read_addr_n;
-
-  assign sample_read_clock   = i_mcu_clk;    //0x153C: 0x0F (sample_read_enable) is gone; both arms of its mux were i_mcu_clk
 
 //-------------------------------------------------------------------------------------
 //Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
