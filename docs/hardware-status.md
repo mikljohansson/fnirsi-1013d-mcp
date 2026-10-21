@@ -1472,3 +1472,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   node. 21:57: docs/screenshots/scope-deep-memory.png: 16,382 samples (max_total_samples), pretrigger 1300, 500 kSa/s,
   200 us/div, filter off (it already was), STOP, READ_SCREEN; the overview bar shows the whole record with the window at
   its start. Scope put back to RUN with the 6000 / 3000 geometry.
+- 2026-10-21 17:31-17:33: bench batch for 0.3.0 starts (owner present, scope on). Before: fw 0.2.102 on 0x153B (GET_INFO fpga
+  0x153B). `tools/bitstreams.py pack --out backups/dist-0x153C`: al3-0x153c.bin 2580b090...c7f2, flash1m 07393bf5...1f77,
+  0x153b flash1m 1391978c...3b88, all equal to the manifest. 17:31 FEL-load of the pinned fw 0.2.104
+  (backups/fw-0.2.104_7c640ab5.bin, RAM only): `#VER` fw=0.2.104 proto=1.26 fpga=0x153b. **Mismatch notice checked against a
+  real mismatch**: the screen "FPGA bitstream: This firmware needs FPGA bitstream 0x153C. This scope has 0x153B." with
+  Diagnostics / Settings / USB drive; GET_INFO fw_fpga 0x153C, fpga_flags 1; ARM -> E_UNSUPPORTED detail 1 "FPGA bitstream
+  mismatch: this firmware needs 0x153C". Next: the owner flashes 0x153C.
