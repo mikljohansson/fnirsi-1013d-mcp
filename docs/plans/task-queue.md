@@ -276,6 +276,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-d5 (Opus, dispatched 09:03, reported 09:4x, merge handed back 09:50): the generator as a fractional two-step pattern
+  behind SET_GEN (P16 / H16 raw modes; GEN response 40 B with the 0x39 status), SET_PATTERN 0x0217 (12 + 8n B, start at
+  offset 10, pin hi-Z flag), SET_PATTERN_TRIGGER 0x021A (28 B, response 32 B), trigger source 3 = the marker (button
+  "PAT"), Bode on P = 4 M (vectors file version 2, even P above 4095 at N = 16), 18 strobes per frequency step; caps
+  bits 1 GENERATOR / 24 / 27, features 12 / 13; gcc10 e900d830 (provisional). Its push predates fw-d4's merge: 14 files
+  conflict, so fw-d5 merges origin/main (-X renormalize) in its worktree and pushes again; the two Bode tests wait for
+  mcp-d6's bode.py. fpga-d2 rule: a commit during step k applies from step k+2.
 - fw-d4 (Opus, dispatched 09:03, done 09:3x, merged 09:40 as a304273): the streaming logger: LOG_START 16 B / LOG 48 B /
   LOG_READ (16 B header + whole words, oldest first, never across a gap) / LOG_STOP, 8 MiB NOLOAD .logring in DDR, acq_state
   5, the contract tiers at 500 kB/s with 52-82 % CPU duty in the host model, gap and lap flags, the Scope view's "Logging
