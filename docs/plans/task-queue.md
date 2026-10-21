@@ -276,6 +276,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-small (Opus explicitly, dispatched 11:0x, branch fw-small): the three small firmware items left open by fw-one, fpga-gen13
+  and ui-sample, bundled while the FPGA runs finish: (1) `pc_hal_force` writes 0x0E = 0 before 0x1A = 0 so an explicit
+  auto_timeout stops at the deadline (queue item "the deadline force must write 0x0E = 0 too", test_fpga_bus model); (2) the
+  Vmax / Vmin / Vpp cards read the peak record's min / max bytes with Sample = Peak (ui-sample section 73 "Open", ui-rows.md
+  3.3), the ScopePeak board and the cards agree on a spike; (3) the "ADC readout fault near code 128" wizard message: keep it
+  only if ACAL_E_READOUT is still reachable with the one supported bitstream and document it in calibration.md, else remove
+  the code path. fw-d5 follow-up 2001e99 (host model start latencies) merged 10:5x as 3a81158, host tests green.
 - Coordinator 10:2x: fpga-d2 reported its detached WSL runs dying with empty logs (a broad `pkill -f` from another agent on
   the shared WSL instance); rule sent to fpga-c4 and fpga-d1 and to be written into fpga/al3/AGENTS.md "Build" by C4: kill
   only by PID or by a pattern with your own work directory, never by vvp / run.sh / td / build.sh / tb_.
