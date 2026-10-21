@@ -6,6 +6,10 @@ bitstream) and the touch panel address write 0x3C / read 0x41. The firmware supp
 (fw-one), so a literal fpga_write_cmd of one of them is dead traffic (fw-cruft). The model (fpga_model.c) does not
 decode them either: this source check is what keeps them out.
 
+0x153C also dropped reads 0x24..0x27 (the live ADC pins, 78ccaa0). The roll mode read 0x24 / 0x26 through a command
+byte held in the channel settings (`averagecommand`, written later with fpga_write_cmd(settings->...)) until fw-roll
+moved it onto the 0x153D logger stream, so the check also fails on a `...command = 0x..` assignment of a retired code.
+
 Usage: python3 -I check_retired_regs.py <firmware/scope directory>
 """
 
@@ -13,8 +17,18 @@ import pathlib
 import re
 import sys
 
-RETIRED = {0x0F: "sample_read_enable", 0x3C: "touch panel address write", 0x41: "touch panel address read"}
+RETIRED = {
+    0x0F: "sample_read_enable",
+    0x24: "live ADC pins, CH1",
+    0x25: "live ADC pins, CH1",
+    0x26: "live ADC pins, CH2",
+    0x27: "live ADC pins, CH2",
+    0x3C: "touch panel address write",
+    0x41: "touch panel address read",
+}
 PATTERN = re.compile(r"\b(?:fpga_write_cmd|fpga_write_u24|seq_w8)\s*\(\s*0x([0-9A-Fa-f]{1,2})\s*\)")
+#: a command byte kept in the channel settings (adc1command, the former averagecommand, ...) and written later
+FIELD = re.compile(r"\b\w*command\s*=\s*0x([0-9A-Fa-f]{1,2})\b")
 
 
 def main() -> int:
@@ -23,15 +37,15 @@ def main() -> int:
     for path in sorted(root.glob("*.[ch]")):
         for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             code = line.split("//", 1)[0]
-            for m in PATTERN.finditer(code):
+            for m in list(PATTERN.finditer(code)) + list(FIELD.finditer(code)):
                 cmd = int(m.group(1), 16)
                 if cmd in RETIRED:
                     hits.append(f"{path.name}:{lineno}: 0x{cmd:02X} ({RETIRED[cmd]}): {line.strip()}")
     if hits:
-        print("retired FPGA commands still written:")
+        print("retired FPGA commands still addressed:")
         print("\n".join(hits))
         return 1
-    print(f"check_retired_regs: OK (no write of {', '.join(f'0x{c:02X}' for c in RETIRED)})")
+    print(f"check_retired_regs: OK (no access to {', '.join(f'0x{c:02X}' for c in RETIRED)})")
     return 0
 
 
