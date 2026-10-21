@@ -330,10 +330,14 @@ int pc_glue_sys_menu_height(void);
 #define TRIGGER_MENU_XPOS      TRIGGER_BUTTON_XPOS-38//28
 #define TRIGGER_MENU_YPOS                       48//46
 #define TRIGGER_MENU_WIDTH                     220//210//166
-//5 rows (no Hold off row: never sent to the FPGA); fw 0.2.71: 24 px more in Frequency response for the line "Not used by
-//the sweep" (bode_ui.h BU_TRIG_NOTE_H)
+//6 rows at a 56 px pitch (no Hold off row: never sent to the FPGA; ui-type: the Type row sixth), 336 px; 94 px more for
+//the type's two parameter rows (Pulse: Width, Shorter / Longer; Nth: N, Idle), none in Frequency response, where the line
+//"Not used by the sweep" adds 24 px (fw 0.2.71, bode_ui.h BU_TRIG_NOTE_H): menu.c scope_trigger_menu_height. The screen
+//under the menu is saved and restored at its largest height (the type changes inside the menu), clipped to the screen
 int bode_view_active(void);
-#define TRIGGER_MENU_HEIGHT                    (280 + (bode_view_active() ? 24 : 0))
+int scope_trigger_menu_height(void);
+#define TRIGGER_MENU_HEIGHT                    scope_trigger_menu_height()
+#define TRIGGER_MENU_SAVE_H                    432
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Signal generator button and menu
@@ -851,6 +855,7 @@ extern uint8 triggermenuopen;
 extern uint8 genmenuopen;                  
 extern uint8 freqmenuopen;                 
 extern uint8 dutymenuopen;                 
+extern uint8 trignmenuopen;                //ui-type: the keypad for the Nth edge's N, under the trigger menu
 
 extern uint8 keymenuopen; 
 
