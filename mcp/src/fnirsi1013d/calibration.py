@@ -220,8 +220,8 @@ class ChannelScale:
     ``zero_a``/``zero_b`` are raw (uncompensated) core codes of 0 V; ``gain_*`` volts per raw code. The firmware's
     READ_TRACE code of core k is ``zero_k + adc_k_comp + corr_gain_k x (raw - zero_k)``: with the 1.00o5
     compensations corr_gain = 1 and comp = whole codes; with calibration v3 (protocol 1.12) zero + comp = T (the
-    common 0 V code) and corr_gain = G_k (the per-core, per-class gain correction), applied on the scope with dither.
-    ``wide_gain`` is the 16-bit path's factor on the mean raw code (v3: gain16 = the harmonic mean of the full-class
+    common 0 V code) and corr_gain = G_k (the per-core gain correction), applied on the scope with dither.
+    ``wide_gain`` is the 16-bit path's factor on the mean raw code (v3: gain16 = the harmonic mean of
     G_A, G_B; 1 otherwise)."""
 
     zero_a: float
@@ -235,16 +235,15 @@ class ChannelScale:
     corr_gain_a: float = 1.0
     corr_gain_b: float = 1.0
     wide_gain: float = 1.0
-    #: calibration v4 (protocol 1.15, row 54), full class only: the tracked A - B = track_d + track_e x (x = code -
-    #: 128, taken out symmetrically: A - (d + e x) / 2, B + (d + e x) / 2) and the common mode cm (codes) the scope
-    #: subtracts from every full-class code, 8-bit and 16-bit
+    #: calibration v4 (protocol 1.15, row 54), 8-bit readouts: the tracked A - B = track_d + track_e x (x = code -
+    #: 128, taken out symmetrically: A - (d + e x) / 2, B + (d + e x) / 2). The 16-bit path weighs both cores equally,
+    #: so the A - B split cancels there
     track_d: float = 0.0
     track_e: float = 0.0
-    track_cm: float = 0.0
 
     @property
     def _v4(self) -> bool:
-        return bool(self.track_d or self.track_e or self.track_cm)
+        return bool(self.track_d or self.track_e)
 
     def _core(self, core: str) -> tuple[float, float, float, float, int]:
         if core == "A":
@@ -252,8 +251,8 @@ class ChannelScale:
         return self.zero_b, self.gain_b, self.adc_b_comp, self.corr_gain_b, -1
 
     def _v4_code(self, c: np.ndarray, s: int) -> np.ndarray:
-        """v3 code -> v4 code: c - s (d + e (c - 128)) / 2 - cm (s = +1 core A, -1 core B)."""
-        return c - s * (self.track_d + self.track_e * (c - 128.0)) / 2 - self.track_cm
+        """v3 code -> v4 code: c - s (d + e (c - 128)) / 2 (s = +1 core A, -1 core B)."""
+        return c - s * (self.track_d + self.track_e * (c - 128.0)) / 2
 
     def volts_raw(self, raw: np.ndarray, core: str) -> np.ndarray:
         z, g, comp, cg, s = self._core(core)
@@ -273,7 +272,7 @@ class ChannelScale:
 
     def volts_compensated(self, codes: np.ndarray, core: str) -> np.ndarray:
         """Codes that already include the firmware's per-core correction (READ_TRACE; from protocol 1.15 with v4
-        too, so code - T is the voltage in gated-reference codes)."""
+        too, so code - T is the voltage in codes of the channel's mean gain)."""
         z, g, comp, cg, _s = self._core(core)
         return (np.asarray(codes, np.float64) - z - comp) / cg * g * self.probe
 
@@ -283,22 +282,19 @@ class ChannelScale:
         return 2 * self.gain_a * self.gain_b / (self.gain_a + self.gain_b)
 
     def volts_mean_raw(self, mean_raw: np.ndarray) -> np.ndarray:
-        """A 16-bit (filtered) sample converted to the mean raw code of its window (out x 2^S / gain): volts (v4: the
-        common mode cm taken out, as corr16 does)."""
-        m = np.asarray(mean_raw, np.float64) - (self.zero_a + self.zero_b) / 2 - self.track_cm / self.wide_gain
+        """A 16-bit (filtered) sample converted to the mean raw code of its window (out x 2^S / gain): volts."""
+        m = np.asarray(mean_raw, np.float64) - (self.zero_a + self.zero_b) / 2
         return m * self._mean_gain * self.probe
 
     def volts_wide_codes(self, codes: np.ndarray) -> np.ndarray:
         """The firmware's 8-bit READ_TRACE codes of a 16-bit capture (codes_mean_raw, rounded) to volts."""
-        m = (self.zero_a + self.zero_b) / 2 + (np.asarray(codes, np.float64) - self.zero_compensated +
-                                               self.track_cm) / self.wide_gain
+        m = (self.zero_a + self.zero_b) / 2 + (np.asarray(codes, np.float64) - self.zero_compensated) / self.wide_gain
         return self.volts_mean_raw(m)
 
     def codes_mean_raw(self, mean_raw: np.ndarray) -> np.ndarray:
-        """The firmware's 8-bit code (unrounded) of a 16-bit sample's mean raw code: T + gain16 (m - mean zero) - cm
-        (corr16 carries -16 cm from protocol 1.15)."""
+        """The firmware's 8-bit code (unrounded) of a 16-bit sample's mean raw code: T + gain16 (m - mean zero)."""
         return self.zero_compensated + (np.asarray(mean_raw, np.float64) - (self.zero_a + self.zero_b) / 2) * \
-            self.wide_gain - self.track_cm
+            self.wide_gain
 
     def volts_mean_compensated(self, codes: np.ndarray) -> np.ndarray:
         """Mean of the two compensated cores (ACQUIRE_AVG), converted with the cores' mean zero and gain."""
@@ -322,13 +318,12 @@ class ChannelScale:
         return (self.gain_a + self.gain_b) / 2 * self.probe
 
 
-def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None,
-                  clock_class: int = 1) -> ChannelScale:
+def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None) -> ChannelScale:
     """Scale for channel ``ch`` with ChannelConfig ``cfg`` and CalResp ``cal_resp``. Order: the scope's calibration
-    v3 when it is in use for the channel (protocol 1.12, row 51: per-core zeros and offset slopes of
-    ``clock_class``, 0 full rate / 1 gated, and per-core, per-class gain corrections G_k[c] onto the gated mean
-    gain), then ``unit`` (per-unit calibration file), then the firmware formula. With v3 a unit file that fits the
-    range contributes only its (gated, per-core) gains, carried to the capture's class by G_k[c] / G_k[gated]."""
+    v3 when it is in use for the channel (protocol 1.12, row 51: per-core zeros and offset slopes, and per-core gain
+    corrections G_k onto the channel's mean gain; one calibration class since fw 0.2.105, every capture at any rate
+    or filter), then ``unit`` (per-unit calibration file), then the firmware formula. With v3 a unit file that fits
+    the range contributes only its per-core gains, as volts per corrected code (in place of the firmware's)."""
     ca, cb = int(cal_resp.adc_a_comp), int(cal_resp.adc_b_comp)
     probe = cfg.probe_factor
     fw_g = cfg.volts_per_lsb
@@ -338,25 +333,25 @@ def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None
         raise ValueError("the scope uses calibration v2 (firmware 0.2.43-0.2.44), which this host no longer "
                          "decodes; update the firmware to 0.2.45 or later and re-run the base calibration")
     if version == 3:
-        from .protocol import CAL_CLASS_FULL, CAL_CLASS_GATED, CAL_CLASS_NAMES, cal_target
+        from .protocol import cal_target
         r = min(cfg.range, 6)
         dco = cfg.offset_pwm - cal_resp.dc_calibration_offset[r]  # offset_pwm = centre[range] + dcoffset
-        za = cal_resp.zero_at(clock_class, 0, r, dco)
-        zb = cal_resp.zero_at(clock_class, 1, r, dco)
+        za = cal_resp.zero_at(0, r, dco)
+        zb = cal_resp.zero_at(1, r, dco)
         t = cal_target(dco, cal_resp.dc_shift_value)
-        Ga, Gb = cal_resp.gain_corr(clock_class, 0), cal_resp.gain_corr(clock_class, 1)
-        src = f"scope calibration v3 ({CAL_CLASS_NAMES[clock_class]} clock)"
+        Ga, Gb = cal_resp.gain_corr(0), cal_resp.gain_corr(1)
+        src = "scope calibration v3"
         ga, gb = fw_g * Ga, fw_g * Gb
         if unit is not None and unit.has(ch, cfg.range):
             fa, fb = unit.core_fit(ch, cfg.range, "A"), unit.core_fit(ch, cfg.range, "B")
             assert fa is not None and fb is not None
-            ga = (fa.gain or fw_g) * Ga / cal_resp.gain_corr(CAL_CLASS_GATED, 0)
-            gb = (fb.gain or fw_g) * Gb / cal_resp.gain_corr(CAL_CLASS_GATED, 1)
+            ga = (fa.gain or fw_g) * Ga
+            gb = (fb.gain or fw_g) * Gb
             src += ", unit-calibration gains"
-        sc = ChannelScale(za, zb, ga, gb, t - za, t - zb, probe, src, Ga, Gb, cal_resp.gain16_full() / 65536.0)
-        if clock_class == CAL_CLASS_FULL and getattr(cal_resp, "has_tracker", False):
-            sc.track_d, sc.track_e, sc.track_cm = cal_resp.track_d, cal_resp.track_e, cal_resp.track_cm
-            sc.source += f", v4 tracking (A-B {sc.track_d:+.2f} code, cm {sc.track_cm:+.2f} code)"
+        sc = ChannelScale(za, zb, ga, gb, t - za, t - zb, probe, src, Ga, Gb, cal_resp.stored_gain16() / 65536.0)
+        if getattr(cal_resp, "has_tracker", False):
+            sc.track_d, sc.track_e = cal_resp.track_d, cal_resp.track_e
+            sc.source += f", v4 tracking (A-B {sc.track_d:+.2f} code)"
         return sc
     if unit is not None and unit.has(ch, cfg.range):
         fa = unit.core_fit(ch, cfg.range, "A")

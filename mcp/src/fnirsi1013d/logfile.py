@@ -169,12 +169,12 @@ def volts_model(s: Scope, plan: LogPlan) -> dict[str, dict[str, Any]]:
         sgn = -1.0 if cfg.invert else 1.0
         lanes = []
         if plan.fmt == P.LOG_FMT_RAW8:
-            sc = s.scale(c, cfg, P.cal_clock_class(plan.divider, False))
+            sc = s.scale(c, cfg)
             for core in ("B", "A"):
                 v0, v1 = (float(x) for x in sc.volts_raw(np.array([0.0, 255.0]), core))
                 lanes.append([sgn * (v1 - v0) / 255.0, sgn * v0])
         else:
-            sc = s.scale(c, cfg, P.CAL_CLASS_FULL)
+            sc = s.scale(c, cfg)
             assert dec is not None
             per = {P.LOG_FMT_HIGH8: 256 * dec.code_per_count, P.LOG_FMT_WIDE16: dec.code_per_count,
                    P.LOG_FMT_PEAK: 1.0}[plan.fmt]

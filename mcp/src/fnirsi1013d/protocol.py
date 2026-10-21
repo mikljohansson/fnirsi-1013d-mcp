@@ -2799,29 +2799,30 @@ class CalProbeReq(Payload):
 #: CAL_PROBE rc (ACAL_* of adc_cal.h); -1 = mode 1 cancelled on the screen
 ACAL_RESULTS = {0: "OK", 4: "RESPONSE", 5: "CLIP", 6: "NOISE", 7: "ZERO", 8: "SPREAD", 9: "SLOPE", 10: "DRIFT",
                 11: "CLASS", 18: "TIMING", 19: "READOUT", -1: "CANCELLED"}
+#: 11 (CLASS: full-rate and gated zeros apart) is retired since fw 0.2.105 (one calibration class, FPGA 0x153D: the
+#: ADCs always run at full rate); the name stays for older answers
 ACAL_RESULT_TEXT = {
     0: "passed", 4: "no response to the offset (the input is not at 0 V, or the front end does not move)",
     5: "the input is not at 0 V: a sample at code 0 or 255", 6: "too much noise", 7: "zero out of range",
     8: "the cores' zeros are too far apart", 9: "offset slope out of range", 10: "the zero drifted between captures",
-    11: "the gated and full-rate classes disagree", 18: "ADC capture timing: the 200 MSa/s data stays garbled",
-    19: "samples at 0 / 255 only at 200 MSa/s with the gated twin point quiet near 128: the FPGA 0x1538 readout fault",
+    11: "retired (fw before 0.2.105: the gated and full-rate classes disagreed)",
+    18: "ADC capture timing: the 200 MSa/s data stays garbled",
+    19: "ADC readout fault: a core has no clean capture stage (the capture stage training failed)",
     -1: "cancelled on the screen"}
-#: CAL_PROBE point order (row 61)
-CAL_PROBE_POINTS = ("coarse high (PWM 500)", "coarse low (PWM 1200)", "gated slope low (centre - 150)",
-                    "gated slope high (centre + 150)", "gated zero (pair)", "full-rate zero (pair)",
-                    "full-rate high (+150)", "full-rate low (-150)")
+#: CAL_PROBE point order (row 61). Point 4 (the gated zero) is not measured since fw 0.2.105 (one calibration class);
+#: points 0..3 are taken at 2 MSa/s (the centre search), 5..7 at 200 MSa/s (the calibration's values)
+CAL_PROBE_POINTS = ("coarse high (PWM 500)", "coarse low (PWM 1200)", "slope low (centre - 150, 2 MSa/s)",
+                    "slope high (centre + 150, 2 MSa/s)", "retired (gated zero, not measured since fw 0.2.105)",
+                    "full-rate zero (pair)", "full-rate high (+150)", "full-rate low (-150)")
+#: CAL_PROBE point / failure "class" byte: since fw 0.2.105 the rate the point was measured at (0 200 MSa/s, 1 2 MSa/s)
+CAL_PROBE_RATES = ("200 MSa/s", "2 MSa/s")
 CAL_PROBE_BYTES = 252
 #: CAL_PROBE flags (byte 7)
 CALP_GARBLED, CALP_NO_CENTRE, CALP_PRESTROBE, CALP_MODE1 = 0x01, 0x02, 0x04, 0x08
-#: the wizard's noise limit per class (RMS about the mean of all conversions, 1/16 code; firmware adc_cal.h
-#: ACAL_MAX_NOISE16_*, the Diagnostics limits too): full rate 3 codes, gated 1 code (fw 0.2.100; 3 codes up to 0.2.99)
-CAL_NOISE_LIMIT16_FULL = 48
-CAL_NOISE_LIMIT16_GATED = 16
+#: the wizard's noise limit (RMS about the mean of all conversions, 1/16 code; firmware adc_cal.h ACAL_MAX_NOISE16, the
+#: Diagnostics limit too): 3 codes for every point since fw 0.2.105 (one calibration class)
+CAL_NOISE_LIMIT16 = 48
 
-
-def cal_noise_limit16(gated: int | bool) -> int:
-    """The wizard's noise limit of a class (CAL_PROBE point class: 1 gated, 0 full rate), 1/16 code."""
-    return CAL_NOISE_LIMIT16_GATED if gated else CAL_NOISE_LIMIT16_FULL
 _CALP_HDR = struct.Struct("<BBhBBBBiIHHHH")
 _CALP_CORE = struct.Struct("<iHHBBH")
 
@@ -2919,7 +2920,7 @@ class CalProbeResp:
         fail = None
         if self.rc not in (0, -1) and self.fail_point != 0xFF:
             fail = {"point": CAL_PROBE_POINTS[self.fail_point] if self.fail_point < 8 else self.fail_point,
-                    "class": "gated" if self.fail_class else "full rate", "core": "AB"[self.fail_core & 1],
+                    "rate": CAL_PROBE_RATES[self.fail_class & 1], "core": "AB"[self.fail_core & 1],
                     "value": self.fail_value, "within_capture_rms_codes": round(self.fail_within16 / 16, 3)}
             if self.rc in (6, 10):
                 fail["value_codes"] = round(self.fail_value / 16, 3)
@@ -2927,12 +2928,12 @@ class CalProbeResp:
         for p in self.points:
             if not p.measured:
                 continue
-            pts.append({"point": p.name, "pwm": p.pwm, "class": "gated" if p.cls else "full rate",
+            pts.append({"point": p.name, "pwm": p.pwm, "rate": CAL_PROBE_RATES[p.cls & 1],
                         "conversions": p.conversions,
                         **{f"core_{'AB'[k]}": {"mean": round(c.mean, 3), "rms": round(c.rms, 3),
                                                 "rms_within": round(c.rms_within, 3), "lowest": c.lo,
                                                 "highest": c.hi, "clipped": c.clipped,
-                                                "noisy": round(c.rms * 16) > cal_noise_limit16(p.cls)}
+                                                "noisy": round(c.rms * 16) > CAL_NOISE_LIMIT16}
                            for k, c in enumerate(p.cores)}})
         return {"channel": f"CH{self.channel + 1}", "range": self.range,
                 "volts_per_div": RANGE_VOLTS_PER_DIV[self.range] if self.range < 6 else None,
@@ -3343,7 +3344,7 @@ def log_check(channels: int, fmt: int, divider: int) -> tuple[int, str] | None:
 #: GET_CAL byte 73 (protocol 1.10, bits 3 / 4 from 1.12)
 CAL_LOADED = 0x01  # a calibration block is loaded
 CAL_BOUND = 0x02  # bound to the current PWM centres (dc_calibration_offset[0..5])
-CAL_GATED = 0x04  # the current divider is gated (legacy divider >= 1): the gated class applies
+#: bit 2 (the current divider is gated, fw 0.2.45-0.2.104) is reserved since fw 0.2.105: one calibration class
 CAL_GAINS_MEASURED = 0x08  # 1.12: gains measured for this channel (gain_range != 0xFF)
 CAL_GAINS_KEPT = 0x10  # 1.12: the gains were carried over from an earlier calibration
 #: GET_CAL byte 256 track_flags (protocol 1.15, row 54)
@@ -3351,22 +3352,12 @@ TRACK_RECORD = 0x01  # a record was accepted since the reset (boot or a calibrat
 TRACK_E = 0x02  # e identifiable at the last solve (spread of x >= 8 codes RMS)
 TRACK_Q = 0x04  # q identifiable at the last solve
 TRACK_LAST_USABLE = 0x08  # the last offered record was usable
-TRACK_APPLIES = 0x10  # applies to the channel's next 8-bit readout (v3 bound, full class, last arm legacy K = 0)
-TRACK_PROBE_DATA = 0x20  # a valid class probe since the reset
-TRACK_PROBE_VALID = 0x40  # the last class probe was valid
+TRACK_APPLIES = 0x10  # applies to the channel's next 8-bit readout (v3 bound, last arm legacy K = 0, any divider)
+#: bits 5 / 6 (the class probe, fw 0.2.50-0.2.104) are reserved since fw 0.2.105
 #: GET_CAL ages: none since the reset
 CAL_AGE_NONE = 0xFFFFFFFF
-#: clock classes (row 48): 0 full rate (legacy divider 0 and every filtered capture), 1 gated (legacy divider >= 1)
-CAL_CLASS_FULL = 0
-CAL_CLASS_GATED = 1
-CAL_CLASS_NAMES = ("full", "gated")
 #: v3 gain_range when the gains were never measured (gains 32768 = 1)
 CAL_GAIN_NONE = 0xFF
-
-
-def cal_clock_class(divider: int, decimated: bool) -> int:
-    """The clock class of a capture: full at divider 0 and for every filtered (16-bit) capture, else gated."""
-    return CAL_CLASS_FULL if divider == 0 or decimated else CAL_CLASS_GATED
 
 
 def _rdiv(n: int, d: int) -> int:
@@ -3386,8 +3377,10 @@ def cal_target(dcoffset: int, dc_shift_value: int) -> int:
 class CalResp(Payload):
     """GET_CAL: 72 bytes up to protocol 1.9; 1.12 (fw 0.2.45, row 51): 256 bytes with the calibration v3 state, the
     next readout's per-core gains and offsets, and the channel's stored v3 block; 1.15 (fw 0.2.50, row 54): 288 bytes,
-    the v4 tracker (A - B = d + e x + q x^2 of the full-rate cores, and the full class's common mode cm against the
-    gated class) from byte 256, and gain_a .. off_b / corr16 then include it. (1.10-1.11 sent a 248-byte v2 layout,
+    the v4 tracker (A - B = d + e x + q x^2 of the cores) from byte 256, and gain_a .. off_b then include it. Since
+    fw 0.2.105 (FPGA 0x153D, the ADCs always at full rate) there is one calibration class: the stored block's class-1
+    (gated) slots and the class probe's bytes 280..287 are reserved (0) and not decoded. (1.10-1.11 sent a 248-byte
+    v2 layout,
     which this host no longer decodes: ``cal_version`` 2 is refused by the volts model.) Shorter answers parse with
     the missing tail zero; ``nbytes`` is the length received (0 for a locally built one)."""
 
@@ -3396,11 +3389,12 @@ class CalResp(Payload):
               ("dc_shift_size", "i"), ("dc_shift_value", "i"), ("adc_a_rawavg", "I"), ("adc_b_rawavg", "I"),
               ("cal_version", "B"), ("cal_flags", "B"), ("comp_a", "h"), ("comp_b", "h"), ("frac_a", "B"),
               ("frac_b", "B"), ("cal_zero_q8", "i"), ("corr16", "i"), ("cal_shift", "i"), ("gain_a", "I"),
-              ("gain_b", "I"), ("off_a", "i"), ("off_b", "i"), ("gain16", "I"), ("pwm", "6H"), ("zero", "24h"),
-              ("slope", "24h"), ("noise", "24B"), ("gain", "4H"), ("gain_range", "B"), ("gain_flags", "B"),
+              ("gain_b", "I"), ("off_a", "i"), ("off_b", "i"), ("gain16", "I"), ("pwm", "6H"), ("zero", "12h"),
+              ("_rz", "24x"), ("slope", "12h"), ("_rs", "24x"), ("noise", "12B"), ("_rn", "12x"), ("gain", "2H"),
+              ("_rg", "4x"), ("gain_range", "B"), ("gain_flags", "B"),
               ("gain_lever", "H"), ("track_flags", "B"), ("_r2", "x"), ("track_d_q8", "h"), ("track_e_q24", "i"),
               ("track_q_q24", "i"), ("track_age_ms", "I"), ("track_records", "I"), ("track_last_pairs", "H"),
-              ("track_spread16", "H"), ("cm_q8", "h"), ("cm_probes", "H"), ("cm_age_ms", "I"),
+              ("track_spread16", "H"), ("_r_cm", "8x"),
               ("prov_state", "B"), ("_r3", "3x"), ("prov", "56s"), ("prov_power_ons_since", "I"),
               ("prov_minutes_since", "I"), ("cap_trailer", "B"), ("cap_flags", "B"), ("cap_stored", "H"),
               ("cap_stored_fpga", "H"), ("cap_value", "H")]
@@ -3416,7 +3410,7 @@ class CalResp(Payload):
     adc_b_rawavg: int = 0
     #: calibration in use for this channel (1 = the 1.00o5 compensations, 3 = v3; 0 = firmware before 1.10)
     cal_version: int = 0
-    #: CAL_LOADED / CAL_BOUND / CAL_GATED / CAL_GAINS_MEASURED / CAL_GAINS_KEPT
+    #: CAL_LOADED / CAL_BOUND / CAL_GAINS_MEASURED / CAL_GAINS_KEPT
     cal_flags: int = 0
     #: the correction at each core's 0 V point (T16 - z16) in whole codes and sixteenths
     comp_a: int = 0
@@ -3435,22 +3429,21 @@ class CalResp(Payload):
     off_a: int = 0
     off_b: int = 0
     gain16: int = 65536
-    #: the stored v3 block: PWM centres it was measured at, zero[class][core][range] (1/16 code, raw codes at
-    #: dcoffset 0), slope[class][core][range] (Q16 codes per PWM count), noise[class][core][range] (RMS, 1/16 code),
-    #: gain[class][core] (Q15, 32768 = 1), the hardware range the gains were measured on (CAL_GAIN_NONE = never),
-    #: gain_flags (bit 0 carried over), gain_lever (gated span of the mean of both cores, 1/16 code)
+    #: the stored v3 block (class 0, the one calibration class): PWM centres it was measured at, zero[core][range]
+    #: (1/16 code, raw codes at dcoffset 0), slope[core][range] (Q16 codes per PWM count), noise[core][range] (RMS,
+    #: 1/16 code), gain[core] (Q15, 32768 = 1), the hardware range the gains were measured on (CAL_GAIN_NONE =
+    #: never), gain_flags (bit 0 carried over), gain_lever (span between the post levels, mean of both cores, 1/16 code)
     pwm: tuple[int, ...] = field(default_factory=lambda: (0,) * 6)
-    zero: tuple[int, ...] = field(default_factory=lambda: (0,) * 24)
-    slope: tuple[int, ...] = field(default_factory=lambda: (0,) * 24)
-    noise: tuple[int, ...] = field(default_factory=lambda: (0,) * 24)
-    gain: tuple[int, ...] = field(default_factory=lambda: (32768,) * 4)
+    zero: tuple[int, ...] = field(default_factory=lambda: (0,) * 12)
+    slope: tuple[int, ...] = field(default_factory=lambda: (0,) * 12)
+    noise: tuple[int, ...] = field(default_factory=lambda: (0,) * 12)
+    gain: tuple[int, ...] = field(default_factory=lambda: (32768,) * 2)
     gain_range: int = CAL_GAIN_NONE
     gain_flags: int = 0
     gain_lever: int = 0
     #: 1.15 (row 54): TRACK_* bits; d (1/256 code), e and q (Q24) of A - B = d + e x + q x^2 (x = code - 128; d and e
-    #: applied in the full class, q only reported); age (ms, CAL_AGE_NONE = none since the reset), accepted records,
-    #: usable pairs of the last offered record, RMS spread of the accumulated x (1/16 code); the full class's common
-    #: mode against the gated class (1/256 code, subtracted by the readouts), valid probes and the last one's age
+    #: applied to the 8-bit readouts, q only reported); age (ms, CAL_AGE_NONE = none since the reset), accepted
+    #: records, usable pairs of the last offered record, RMS spread of the accumulated x (1/16 code)
     track_flags: int = 0
     track_d_q8: int = 0
     track_e_q24: int = 0
@@ -3459,9 +3452,6 @@ class CalResp(Payload):
     track_records: int = 0
     track_last_pairs: int = 0
     track_spread16: int = 0
-    cm_q8: int = 0
-    cm_probes: int = 0
-    cm_age_ms: int = CAL_AGE_NONE
     #: 1.16 (row 55): calibration provenance: 0 none on the card, 1 valid, 2 present but unreadable; the stored
     #: 56 bytes (sector 708 bytes 432..487, parse_provenance); power-ons and operating minutes since (CAL_AGE_NONE =
     #: unknown)
@@ -3543,12 +3533,12 @@ class CalResp(Payload):
 
     @property
     def track_d(self) -> float:
-        """A - B offset at code 128 the full-class readouts take out, codes."""
+        """A - B offset at code 128 the 8-bit readouts take out, codes."""
         return self.track_d_q8 / 256.0
 
     @property
     def track_e(self) -> float:
-        """A - B slope (codes per code) the full-class readouts take out."""
+        """A - B slope (codes per code) the 8-bit readouts take out."""
         return self.track_e_q24 / 16777216.0
 
     @property
@@ -3556,52 +3546,48 @@ class CalResp(Payload):
         """The bow estimate (codes per code^2), reported, not applied."""
         return self.track_q_q24 / 16777216.0
 
-    @property
-    def track_cm(self) -> float:
-        """Full-class common mode against the gated class, codes (subtracted from full-class codes)."""
-        return self.cm_q8 / 256.0
-
     @staticmethod
-    def _i(cls_: int, core: int, rng: int) -> int:
-        return 12 * cls_ + 6 * core + min(rng, 5)
+    def _i(core: int, rng: int) -> int:
+        return 6 * core + min(rng, 5)
 
-    def zero_raw(self, cls: int, core: int, rng: int) -> float:
+    def zero_raw(self, core: int, rng: int) -> float:
         """Stored raw 0 V code of core (0 A, 1 B) at dcoffset 0, codes."""
-        return self.zero[self._i(cls, core, rng)] / 16.0
+        return self.zero[self._i(core, rng)] / 16.0
 
-    def slope_codes(self, cls: int, core: int, rng: int) -> float:
+    def slope_codes(self, core: int, rng: int) -> float:
         """Stored offset slope, codes per PWM count."""
-        return self.slope[self._i(cls, core, rng)] / 65536.0
+        return self.slope[self._i(core, rng)] / 65536.0
 
-    def noise_rms(self, cls: int, core: int, rng: int) -> float:
-        return self.noise[self._i(cls, core, rng)] / 16.0
+    def noise_rms(self, core: int, rng: int) -> float:
+        return self.noise[self._i(core, rng)] / 16.0
 
-    def zero16_at(self, cls: int, core: int, rng: int, dcoffset: int) -> int:
+    def zero16_at(self, core: int, rng: int, dcoffset: int) -> int:
         """z16 = zero + round(slope x dcoffset / 4096), 1/16 code (adc_cal.c acal_correction)."""
-        i = self._i(cls, core, rng)
+        i = self._i(core, rng)
         return self.zero[i] + _rdiv(self.slope[i] * dcoffset, 4096)
 
-    def zero_at(self, cls: int, core: int, rng: int, dcoffset: int) -> float:
+    def zero_at(self, core: int, rng: int, dcoffset: int) -> float:
         """Raw 0 V code of a core at ``dcoffset`` (raw uncompensated codes, the READ_RAW reference)."""
-        return self.zero16_at(cls, core, rng, dcoffset) / 16.0
+        return self.zero16_at(core, rng, dcoffset) / 16.0
 
-    def gain_q16(self, cls: int, core: int) -> int:
-        """G_k[c] in Q16 (acal_gain16; 65536 when the gains were never measured)."""
-        return 65536 if self.gain_range == CAL_GAIN_NONE else 2 * self.gain[2 * cls + core]
+    def gain_q16(self, core: int) -> int:
+        """G_k in Q16 (acal_gain16; 65536 when the gains were never measured)."""
+        return 65536 if self.gain_range == CAL_GAIN_NONE else 2 * self.gain[core]
 
-    def gain_corr(self, cls: int, core: int) -> float:
-        """G_k[c] = g_ref / g_k[c]: the factor that puts core k of class c onto the gated mean gain."""
-        return self.gain_q16(cls, core) / 65536.0
+    def gain_corr(self, core: int) -> float:
+        """G_k: puts core k onto the channel's mean gain (the scale the volts calibration is fitted on)."""
+        return self.gain_q16(core) / 65536.0
 
-    def gain16_full(self) -> int:
-        """16-bit path gain (Q16): the harmonic mean of the full-class gains of both cores, as the firmware rounds it."""
-        a, b = self.gain_q16(CAL_CLASS_FULL, 0), self.gain_q16(CAL_CLASS_FULL, 1)
+    def stored_gain16(self) -> int:
+        """16-bit path gain (Q16): the harmonic mean of the gains of both cores, as the firmware rounds it."""
+        a, b = self.gain_q16(0), self.gain_q16(1)
         return (2 * a * b + (a + b) // 2) // (a + b)
 
 
 @dataclass
 class AdcCalChannel:
-    """One channel of the calibration v3 block (sector 708 bytes 128..431), decoded like GET_CAL bytes 112..255."""
+    """One channel of the calibration v3 block (sector 708 bytes 128..431), decoded like GET_CAL bytes 112..255: the
+    class-0 slots only (zero / slope / noise [core][range], gain [core]); the class-1 (gated) slots are ignored."""
 
     pwm: tuple[int, ...]
     zero: tuple[int, ...]
@@ -3826,7 +3812,7 @@ def parse_cap_trailer(b: bytes) -> tuple[int, int, int]:
 
 
 #: callers of event types 21 / 22 (b >> 12, protocol rows 57 / 58)
-FPGA_CALLERS = {0: "UI", 1: "host", 2: "calibration wizard", 3: "v4 class probe", 4: "check"}
+FPGA_CALLERS = {0: "UI", 1: "host", 2: "calibration wizard", 3: "v4 class probe (retired in fw 0.2.105)", 4: "check"}
 #: event type 21 reasons (a >> 5 & 3, protocol 1.19)
 ENC_REASONS = {0: "check after a rate write", 1: "record data check", 2: "FPGA 0x33", 3: "boot convention check"}
 
@@ -4057,16 +4043,17 @@ class SaveReportResp(Payload):
 
 
 ADC_CAL_MAGIC = b"ACAL"
-_ADC_CAL_CH = struct.Struct("<6H24h24h24B4HBBH")
+_ADC_CAL_CH = struct.Struct("<6H12h24x12h24x12B12x2H4xBBH")
 
 
 def parse_adc_cal_block(block: bytes) -> list[AdcCalChannel]:
-    """The v3 block: u32 'ACAL', u16 version 3, u16 length 304, u16 classes 2, u16 0, two channels of 144 bytes,
-    u32 zlib.crc32 of the 300 bytes before it. Raises ValueError when the header or the CRC is wrong."""
+    """The v3 block: u32 'ACAL', u16 version 3, u16 length 304, u16 classes (1 from fw 0.2.105; 2 from fw
+    0.2.45-0.2.104, whose class-1 gated slots are ignored), u16 0, two channels of 144 bytes, u32 zlib.crc32 of the
+    300 bytes before it. Raises ValueError when the header or the CRC is wrong."""
     if len(block) < 304 or block[:4] != ADC_CAL_MAGIC:
         raise ValueError("not a calibration block")
     ver, length, classes, _r = struct.unpack_from("<HHHH", block, 4)
-    if ver != 3 or length != 304 or classes != 2:
+    if ver != 3 or length != 304 or classes not in (1, 2):
         raise ValueError(f"calibration block version {ver}, length {length}, classes {classes} (host decodes v3)")
     (crc,) = struct.unpack_from("<I", block, 300)
     if crc != zlib.crc32(block[:300]):
@@ -4074,7 +4061,7 @@ def parse_adc_cal_block(block: bytes) -> list[AdcCalChannel]:
     out = []
     for i in range(2):
         v = _ADC_CAL_CH.unpack_from(block, 12 + 144 * i)
-        out.append(AdcCalChannel(v[:6], v[6:30], v[30:54], v[54:78], v[78:82], v[82], v[83], v[84]))
+        out.append(AdcCalChannel(v[:6], v[6:18], v[18:30], v[30:42], v[42:44], v[44], v[45], v[46]))
     return out
 
 
