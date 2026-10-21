@@ -55,6 +55,18 @@ uint8_t pc_seq_fit(const pc_seq_cfg *c, uint32_t pre_words, uint32_t total_words
   return PC_SEQ_FIT_OK;
 }
 
+//C6 peak detect: a peak word is { max, min } raw codes, so an averaging run's lane sums would mix the two; segments hold
+//whole words and are fine
+uint8_t pc_seq_fit_rec(const pc_seq_cfg *c, uint32_t pre_words, uint32_t total_words, int wide, int peak)
+{
+  uint8_t f = pc_seq_fit(c, pre_words, total_words, wide);
+
+  if((f == PC_SEQ_FIT_OK) && peak && (c->mode == PC_SEQ_AVERAGE))
+    return PC_SEQ_FIT_PEAK;
+
+  return f;
+}
+
 uint32_t pc_seq_holdoff_units(uint32_t ns)
 {
   return (uint32_t)(((uint64_t)ns + 4) / 5);
@@ -128,28 +140,50 @@ uint32_t pc_seq_dead_ns(uint32_t total_words, uint32_t pre_words, uint32_t word_
   return total_words * 5 + 40 + (2 + pre_words) * word_ns + 100;
 }
 
+uint32_t pc_seq_ui_plan_n(uint64_t per_record_ns, uint32_t *run_us)
+{
+  uint32_t n = PC_SEQ_UI_MAX_N;
+  uint64_t run;
+
+  *run_us = 0;
+
+  if(per_record_ns == 0)
+    return 0;
+
+  while((n >= PC_SEQ_UI_MIN_N) && ((uint64_t)n * per_record_ns > (uint64_t)PC_SEQ_UI_BUDGET_US * 1000))
+    n >>= 1;
+
+  if(n < PC_SEQ_UI_MIN_N)
+    return 0;
+
+  run     = (uint64_t)n * per_record_ns;
+  *run_us = (uint32_t)((run + 999) / 1000);
+  return n;
+}
+
 uint32_t pc_seq_ui_plan(uint32_t total_words, uint32_t pre_words, uint32_t divider, uint32_t *run_us)
 {
   uint64_t word_ns = 10ull * ((uint64_t)divider + 1);
-  uint64_t rec_ns, run;
-  uint32_t n = PC_SEQ_UI_MAX_N;
 
   *run_us = 0;
 
   if((total_words == 0) || (total_words > PC_SEQ_AVG_MAX_TOTAL) || (pre_words >= total_words) || (word_ns > 1000000))
     return 0;
 
-  rec_ns = (uint64_t)total_words * word_ns + pc_seq_dead_ns(total_words, pre_words, (uint32_t)word_ns);
+  return pc_seq_ui_plan_n((uint64_t)total_words * word_ns + pc_seq_dead_ns(total_words, pre_words, (uint32_t)word_ns), run_us);
+}
 
-  while((n >= PC_SEQ_UI_MIN_N) && ((uint64_t)n * rec_ns > (uint64_t)PC_SEQ_UI_BUDGET_US * 1000))
-    n >>= 1;
+uint32_t pc_seq_ui_plan_mcu(uint32_t total_words, uint32_t pre_words, uint32_t divider, int wide, uint32_t *run_us)
+{
+  uint64_t word_ns = (wide ? 5ull : 10ull) * ((uint64_t)divider + 1);
 
-  if(n < PC_SEQ_UI_MIN_N)
+  *run_us = 0;
+
+  if((total_words == 0) || (pre_words >= total_words) || (word_ns > 1000000))
     return 0;
 
-  run     = (uint64_t)n * rec_ns;
-  *run_us = (uint32_t)((run + 999) / 1000);
-  return n;
+  return pc_seq_ui_plan_n((uint64_t)total_words * word_ns + pc_seq_dead_ns(total_words, pre_words, (uint32_t)word_ns) +
+                          (uint64_t)total_words * PC_SEQ_UI_READ_BYTES * PC_SEQ_UI_READ_NS, run_us);
 }
 
 uint32_t pc_seq_recip(uint32_t c)

@@ -276,6 +276,95 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fw-d4 (Opus, dispatched 09:03, done 09:3x, merged 09:40 as a304273): the streaming logger: LOG_START 16 B / LOG 48 B /
+  LOG_READ (16 B header + whole words, oldest first, never across a gap) / LOG_STOP, 8 MiB NOLOAD .logring in DDR, acq_state
+  5, the contract tiers at 500 kB/s with 52-82 % CPU duty in the host model, gap and lap flags, the Scope view's "Logging
+  to the host" notice with no UI pass while logging, auto-stop 10 s without a LOG_READ; register semantics agreed with
+  fpga-d1 (0x6A = next word to read, full detector, 0x38 byte 0 = { stream, lap, 0, W[12:8] }), bytes agreed with mcp-d6;
+  test_log 344, 151 vectors; gcc10 488d2827 (provisional). Deviations: LOG_READ returns at once, header 4..7 = the FPGA
+  word counter, features bit 11, LOG_START needs the Scope view and a format matching the Filter.
+- Coordinator 09:42: the fw-d4 merge brought 30 files in with CRLF on every line (and Atlan's vendor files had been CRLF
+  since the start); the coordinator's CR check with the shell escape never worked. Fixed 0f177ca: every text file LF,
+  .gitattributes text=auto eol=lf (al_ip sources excluded), merge.renormalize on; host tests, vectors and the gcc10
+  build re-verified after the normalisation.
+- mcp-c8b (Opus, dispatched 09:00, done 09:1x, merged 09:17 as 2c29614): counter level 0 = follow (simulator), the host bug where
+  read_counter re-sent the level it read and pinned it on any gate change (fixed: the client remembers the level it set;
+  scope_counter level='trigger'), peak detect aligned with all 41 decim_peak device vectors (legacy cases write nothing,
+  FIR dropped / refused with peak, settle 11 N x 5 ns + 1 us), the simulator's GET_CAL gated flag follows the divider,
+  README 35 tools / release notes 37 and 35; 524 tests. Remaining host-vs-firmware differences are timing-of-application
+  only (the firmware applies a counter configuration on the next pass; the simulator at once).
+- Coordinator 09:03: the fw-d5 and mcp-d6 briefs wrongly named a SET_SWEEP 0x0218; the contract has none (the chirp is the
+  host stepping SET_GEN through the double buffer). fw-d5 caught it; both agents told to follow the contract.
+- fw-d4 / fw-d5 / mcp-d6 (Opus, dispatched 09:03-09:05, branches of the same names): 0x153D firmware and host from the
+  contract in parallel with the RTL: D4 LOG_START / LOG_READ / LOG_STOP with the DDR ring, acq_state 5, the contract
+  rates; D5 the generator as a two-step fractional pattern behind SET_GEN (P16 / H16), SET_PATTERN / SET_PATTERN_TRIGGER /
+  SET_SWEEP, Bode P = 4 M; D6 MCP 1.27 (scope_log, scope_pattern, scope_sweep, source "pattern", simulator). The firmware
+  writes its bytes into protocol.md row 67; D6 matches at the merge (as C5 / C8). PC_FW_FPGA_VERSION stays 0x153C until
+  the 0x153D integration (D3).
+- fpga-d1 / fpga-d2 (Fable, dispatched 09:0x, branches of the same names): 0x153D items D1 (logger RTL: 0x69 / 0x6A / 0x38,
+  stream gating, word counter, lap; tb_stream step 17) and D2 (pat_gen: 8 steps u32 + u16 fraction, double buffer, bursts /
+  repeat / gap / continuous, marker as trigger source 0x15 = 3, the DDS removed, the pattern trigger engine 0x76-0x7D /
+  0x42 as a third trig_qual instance with the routed fallback if timing fails; tb_pattern step 18). Both start from main
+  with C1 + C3 (C2 and C4 land in parallel); C4 owns the version byte, the contract file, dist and the C0 cruft removal.
+- mcp-c8b (Opus, dispatched 09:0x, branch mcp-c8b): host follow-ups to fw 0.2.104: simulator counter level 0 = follow, the
+  full-class peak correction and the "not written" legacy case, the tool count in README / release notes, mcp/AGENTS.md.
+- fw 0.2.104 numbered 08:5x (built for 0x153C: fw-c5, fw-c6, fw-c7, ui-type, ui-sample merged; ui-sample done 08:5x, merged
+  08:57 as 2d4861f): host tests green on merged main, check_vectors OK (140); gcc10 sha256 7c640ab5fe1f9b1c75dc321c96038e7dc3fe8fb88fd9e105e81cf344351d2cbc pinned as
+  backups/fw-0.2.104_7c640ab5.bin. Needs the 0x153C bitstream on the unit (C4 pending on fpga-c2); on 0x153B it shows the
+  notice. ui-sample notes: Vmax/Vpp cards read the midpoint trace with Peak (open), at 200 MSa/s the record stays 8-bit
+  and is drawn as bars from the samples, the roll-mode note is always shown in roll.
+- ui-sample (Opus explicitly, dispatched 08:33, branch ui-sample): the ACQ Sample row per ui-rows.md (478 px menu, fourth box,
+  Peak greys Filter and Average with the four-line note, no box in Spectrum, grey in roll), the UI's conversion through
+  fw-c6's peak mode, the bars trace (integer step, overload from either byte, phosphor accumulates, X-Y midpoints), trace
+  style "Peak" renamed "Bars", persistence, tests, docs.
+- fw-c6 (dispatched 05:12, cut off and resumed, done 08:3x, merged 08:32 as ba6ce49): peak detect in the firmware byte-exact
+  with the host: SET_DECIM filter 4 (the Filter's K / FIR kept behind it), GET_DECIM 0x81 / 0xC0 bytes, GET_CAPTURE_INFO 79
+  bits 1/0, READ_RAW layout 3 minima then maxima, READ_TRACE 8-bit = the corrected midpoint and WIDE = the pairs, SET_SEQ
+  mode 2 E_STATE 7, totals > 8190 refused while Peak; the full-class mean-core correction; 0x53 = 1 written at a peak arm;
+  140 vectors; caps bit 21, features bit 9 (0x7FF); gcc10 41bd66ce (provisional). Note for C8: GET_CAL reports the gated
+  class at D > 0, the peak correction uses the full class.
+- fw-c7 (dispatched 05:13, cut off and resumed, done 08:1x, merged 08:19 as 4639122): the counter in the firmware:
+  fpga_counter.c (boot 0x62 128/6 and 0x61 gate 100 ms source 0; one 0x35 read per pass, 17 strobes; 64-bit integer
+  derivation), the rate-change rule = rewrite 0x61 (0 then value) and drop that pass's result, the level follows the
+  trigger level unless a host pins it (level 0 = follow); GET_COUNTER byte-exact with the host; the Freq / Period / +-Width
+  / +-Duty cards of the trigger source's channel take the counter while a current result holds (Vmin/Vmax/Vpp stay
+  record-based: deviation from contract section 5); caps bit 22, features bit 10; 137 vectors; gcc10 3faa7a98 (provisional).
+  MCP follow-up: the simulator refuses hysteresis > level for level 0; accept it as the firmware does (level 0 = follow).
+- Coordinator 08:10: the account's Fable quota cut off fw-c6 and fw-c7 mid-edit; the owner reset it and both were resumed
+  in place. Record correction: every agent dispatched since 22:00 without an explicit model (labelled "Opus" above) ran
+  on the coordinator's model, Fable, because a general-purpose agent inherits it. From here firmware, MCP and docs
+  agents are dispatched with model opus explicitly; FPGA RTL stays on Fable per the owner.
+- ui-type (Opus, dispatched 05:13, done 05:4x, merged 05:48 as ae449b8): the trigger menu's Type row per ui-rows.md: trig_ui
+  module (ladder, word period, ranges, snap, settings words 202/203 with 0xA000, glyphs), the Pulse polarity row, the
+  keypad for N, a two-slot notice queue (time/div first), the shared No-trigger hint, the menu edits through fpga_trig_write
+  (SET_TRIGGER2's path), a host SET_TRIGGER2 syncs the menu; the Frequency response sweep arms the edge type around
+  pc_hal_arm; test_trig_ui 340 checks; gcc10 d14151b1 (provisional). Deviations: row labels stay white in the viewer, a
+  host timeout type shows no chosen box, the Nth glyph is two short steps with stubs (the mockup's comb renders solid).
+- mcp-c8 (Opus, dispatched 04:32, done 05:3x, merged 05:38 as bcb269b): protocol 1.26 on the host; Trigger2
+  byte-identical to fw-c5; peak detect and GET_COUNTER wire formats from the contract (sent to fw-c6 / fw-c7 to match:
+  SET_DECIM filter 4, shift-byte bits 7/6, mode 0x81, READ_RAW layout 3 = minima then maxima per channel, GET_CAPTURE_INFO
+  79 bits 1/0, E_STATE 7; GET_COUNTER 0x0213 request 8 B with what = configure, response 24 B with level / hysteresis /
+  freq_mHz); tools scope_set_trigger types, scope_counter (tier 0 read / 1 configure), scope_capture(peak=true),
+  report kinds; simulator TrigQual port, hold-off, peak records, counter; 131 vectors; fw-one leftovers done; 520 tests.
+- fw-c6 / fw-c7 / ui-type (Opus, dispatched 05:12-05:13, branches of the same names): C6 firmware peak detect (SET_DECIM
+  mode 4, READ_RAW layout 3, the refusals, fpga_model, features bit 9, caps bit 21), C7 firmware counter (boot 0x61/0x62,
+  the once-per-pass 0x35 reader, the cards' sources, GET_COUNTER / SET_COUNTER, features bit 10, caps bit 22), the trigger
+  menu's Type row per docs/plans/ui-rows.md (rows, glyphs, ladder, snap notices queued, hints, persistence 0xA000). C6 and
+  C7 share pc_cmds.c / fpga_model.c in delimited blocks; the ACQ Sample row follows C6.
+- fw-c5 (Opus, dispatched 04:32, done 05:10, merged 05:11 as c432354): built for 0x153C, protocol 1.26 row 66: SET_TRIGGER2
+  0x0219 24 B (type, polarity, flags LONGER, source, N u32, H u32, level, level2 = 0, hold-off u32 in 5 ns, reserved),
+  GET_TRIGGER 52 B (old 28 + the body in effect), GET_STATUS 52 B (0x37, 0x34 byte 0, edges to count), GET_CAPTURE_INFO
+  112 B; caps bits 2 and 20, features bit 8 (the contract's 5/6/7 were taken); the arm window writes 0x5E/0x5F/0x60 on
+  every arm, 0x1B/0x66 only on a definition; host tests green, 115 vectors OK; gcc10 bde3ee77 (not pinned: the unit shows
+  the mismatch notice until 0x153C is flashed). mcp-c8 told the exact bytes 05:12.
+- fw-c5 (Opus, dispatched 04:32, branch fw-c5): 0x153C item C5, firmware trigger types + hold-off: PC_FW_FPGA_VERSION 0x153C,
+  caps bits, SET_TRIGGER2 0x0219 / GET_TRIGGER per the contract (protocol 1.26, row 66), the arm sequence of 3.5, runt /
+  window / range refused until 0x153E, fpga_model.c, host tests, vectors, docs. C6 (peak detect), C7 (counter) and the two
+  UI rows start after it merges.
+- mcp-c8 (Opus, dispatched 04:32, branch mcp-c8): MCP protocol 1.26 for 0x153C: SET_TRIGGER2 / GET_TRIGGER / GET_COUNTER /
+  SET_DECIM mode 4 / READ_RAW layout 3, scope.py methods, tools (trigger types on scope_set_trigger, scope_counter, peak on
+  scope_capture, report kinds), simulator models, vectors, docs; plus fw-one's leftovers (mismatch caveat in scope_info,
+  ui_averaging_records, the --variant table, "on 0x1534 / 0x1536" wording). Vectors reconciled with fw-c5 at the merge.
 - fpga-spec measured update (done 23:27, merged 23:29 as bb2880b; 827 lines): TD-measured deltas on the 0x153B source: DDS -61
   LUT, cruft (0x1B/0x3C/0x41/0x24-0x27 decoder entries, dec_neg, dec_swap, sample_read_enable, trigger_detect_enable, w_last
   under SIM) -78, divider compare 32->20 bits -53; the two-step fractional pattern core +48 LUT / +231 reg (one 16-bit
@@ -350,6 +439,23 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   runbook). Follow-ups: docs/mcp-tools.md capability rows and agent-measurement-guide.md line ~58 still say "on 0x1534 /
   0x1536" (fix with fw-one's merge, when the caps become fixed per firmware); calibration.md's "ADC readout fault near
   code 128" row removed although the firmware message may still exist (fw-one removes or keeps the message; align then).
+- fw-one (Opus, dispatched 22:02, done 04:23, merged 04:24 as 1f13767, numbered fw 0.2.103 / protocol 1.25 at 868f8c9):
+  PC_FW_FPGA_VERSION 0x153B with fixed caps, the version word read once at boot sets only the mismatch flag; the notice
+  screen (Diagnostics / Settings / USB drive reachable, acquisition and the generator off, basic USB commands answered,
+  the rest E_UNSUPPORTED detail 1); stock / Atlan / 0x1532..0x1537 / EF2 / EP4 code removed (enc_heal workarounds,
+  legacy geometry, 0x0E = W-2, spliced bit, variant arms); Average = mean of N records on both paths (planner shared,
+  GET_STATUS 46/47); 0x53 bits 3/4 written 0, divider bound 0xFFFFF (UI max 399,999); mcp protocol 1.25, simulator one
+  bitstream with --fpga-version. Coordinator: gcc10 image 772,096 B sha256 7f87eb635eaacc0091bae7d604c84abf70c7a820
+  18e0c5fcfbdc7baf0dc9faba pinned as backups/fw-0.2.103_7f87eb63.bin (not loaded: scope off); host tests green,
+  check_vectors OK, mcp ruff clean and 501 tests; guide placeholders filled; contract protocol minors renumbered
+  1.26..1.28. Bench tomorrow: the notice against a real mismatch (0x153A rollback image or the stock word), the Average
+  passes, the soak repeat. Open for C8: scope_info / capture caveats from Profile.mismatch_caveat(), scope_status
+  ui_averaging_records for the MCU state, mcp/README --variant table, "on 0x1534 / 0x1536" mentions in mcp-tools.md and
+  the measurement guide. Open small: "ADC readout fault near code 128" message still in the firmware (calibration.md row
+  removed); the 0x0E = 0 force (two lines in pc_hal_force).
+- Coordinator 03:36-04:1x: the account's usage limit cut off fw-one and fpga-c2 (both terminated by the API, work saved in
+  their worktrees); resumed after the 04:10 reset with the remaining steps (fw-one: screenshots.py kwarg, merge main, tests,
+  gcc10 hash, push; fpga-c2: merge main with C1 and C3, the shared two-line change, re-simulate, push).
 - fpga-c3 (done 03:3x, merged 03:34 as f629cec): C3 counter with min/max (0x61, 0x62, read 0x35 = 16 bytes, 17 strobes per
   read); tb_counter 115 checks both seeds; full run.sh 16 steps ALL PASS on the merged C1+C3 source both seeds; TD +347 LUT
   alone, merged C1+C3 6079 LUT (70 %) with 8 setup errors (-0.763 ns) on the sequencer's q_pass adder: placement spread, C4

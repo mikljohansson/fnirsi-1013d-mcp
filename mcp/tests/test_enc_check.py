@@ -75,7 +75,7 @@ def test_event_types_21_and_22_in_words():
 
 def test_event_log_fpga_trace_switch(sim_factory):
     """1.22: GET_EVENT_LOG flags bits 2:1 switch event type 22 on / off; the response word at 2 says the level."""
-    srv = sim_factory(variant="al3e")
+    srv = sim_factory()
     with Scope.connect(srv.url) as s:
         assert s.event_log().fpga_trace is False
         assert s.event_log(fpga_trace=True).fpga_trace is True and srv.device.fpga_trace
@@ -104,7 +104,7 @@ def test_ui_yield_wire():
 def test_event_log_tool_fpga_trace(sim_factory, tmp_path):
     from test_server import client_for
 
-    srv = sim_factory(variant="al3e")
+    srv = sim_factory()
 
     async def main():
         async with client_for(srv, tmp_path) as c:
@@ -118,13 +118,13 @@ def test_event_log_tool_fpga_trace(sim_factory, tmp_path):
 
 
 def test_simulator_counts_full_rate_captures(sim_factory):
-    srv = sim_factory(variant="al3e", signal="sine:freq=10kHz,amp=0.25")
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     d = srv.device
     with Scope.connect(srv.url) as s:
         assert s.info.caps & P.Caps.ENC_CHECK and s.info.proto_minor >= 19
         assert s.status().features & P.Features.ENC_CHECK
         h = s.health()
-        assert h.length == 124 and h.layout == 2 and (h.enc_mode, h.enc_checked, h.enc_boot33) == (2, 0, 0xF6)
+        assert h.length == 128 and h.layout == 3 and (h.enc_mode, h.enc_checked, h.enc_boot33) == (2, 0, 0xF6)
         assert h.describe_enc()["text"] == "encode check, no 200 MSa/s capture yet"
         s.set_timebase(divider=0)
         assert s.capture(["CH1"]) is not None
@@ -142,19 +142,12 @@ def test_simulator_counts_full_rate_captures(sim_factory):
         s.set_timebase(divider=9)  # not full rate: not checked
         s.capture(["CH1"])
         assert s.health().enc_checked == 3
-    srv = sim_factory(variant="al3f")
-    with Scope.connect(srv.url) as s:
-        h = s.health()
-        assert h.enc_mode == 1 and not s.info.caps & P.Caps.ENC_CHECK
-        assert not s.status().features & P.Features.ENC_CHECK
-    with Scope.connect(sim_factory(variant="stock").url) as s:
-        assert s.health().enc_mode == 0
 
 
 def test_health_tool_and_capture_caveat(sim_factory, tmp_path):
     from test_server import client_for
 
-    srv = sim_factory(variant="al3e", signal="sine:freq=10kHz,amp=0.25")
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     d = srv.device
 
     async def main():

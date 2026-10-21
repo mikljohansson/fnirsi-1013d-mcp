@@ -254,6 +254,15 @@ uint32_t phos_add_record(phos_map *m, const uint8_t *codes, uint32_t n, const ui
   return touches;
 }
 
+uint32_t phos_add_span(phos_map *m, int32_t x, int32_t y1, int32_t y2, uint32_t inc)
+{
+  if(!inc || (x < 0) || (x > PHOS_W - 1))
+    return 0;
+
+  return (y1 <= y2) ? emit(m, x, y1, y2, ((inc > 255) ? 255 : inc) * 0x01010101u) :
+                      emit(m, x, y2, y1, ((inc > 255) ? 255 : inc) * 0x01010101u);
+}
+
 uint32_t phos_add_line(phos_map *m, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int skip_first, uint32_t inc)
 {
   int32_t  dx = (x2 > x1) ? x2 - x1 : x1 - x2, sx = (x1 < x2) ? 1 : -1;

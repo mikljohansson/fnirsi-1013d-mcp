@@ -63,6 +63,9 @@
 #define UD_ID_LATER      13
 #define UD_ID_CAL_NOW    14
 #define UD_ID_DCSHIFT    15
+#define UD_ID_DIAG       16       //the FPGA mismatch screen's buttons (fw-one)
+#define UD_ID_SETTINGS   17
+#define UD_ID_USB        18
 
 //Pages
 #define UD_PAGE_STATUS    0
@@ -120,8 +123,9 @@ typedef struct
   const pc_image_id *run;             //the running image
   const pc_card_id  *card;            //the card image (SD_INFO 64..), 0 = not read yet
   uint32_t           sd_sectors;      //0: no card
-  uint16_t           fpga;            //FPGA version word (command 0x06)
-  uint8_t            variant;         //protocol variant: 0 unknown, 1 stock 0x1432, 2 AL3, 3 EF2, 4 EP4
+  uint16_t           fpga;            //FPGA version word (command 0x06), as read
+  uint8_t            variant;         //protocol variant byte (2, AL3; the wire encoding of P-5.1)
+  uint8_t            mismatch;        //fpga != PC_FW_FPGA_VERSION: the firmware does not run on it (pc_cmds.h)
   uint32_t           caps;            //GET_INFO caps (PC_CAP_*)
   uint8_t            battery;         //0..20
   uint8_t            charging;
@@ -148,6 +152,9 @@ typedef struct
 //Page builders. note may be 0. Each starts with the common header (title, four tabs, Back).
 void ud_build(ud_page *pg, int page, const ud_input *in, const ud_note *note);
 void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, int volts_due);
+//The notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for (fw-one;
+//in->fpga the word read, PC_FW_FPGA_VERSION the needed one): what to do, and the three screens that still work
+void ud_build_fpga_mismatch(ud_page *pg, const ud_input *in);
 
 //The button under a touch: its id, UD_ID_NONE when none (hit area = drawn area)
 int  ud_hit(const ud_page *pg, int x, int y);

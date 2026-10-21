@@ -18,15 +18,16 @@
 #define PC_AUTO_MIN_MS    100
 uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 
-//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A an auto capture arms the FPGA's own auto mode
-//with 0x0E = W - 2 (pc_auto_stop_word for the deadline), and the firmware's own time-out is a safety net this much after
-//the FPGA's stop (plus an eighth of it); a record it has to force is flagged "may be spliced"
-#define PC_AUTO_NET_MS    50
-uint32_t pc_auto_net_ms(uint32_t stop_ms);
-
-//GET_CAPTURE_INFO flags bit 6 (fw 0.2.97): the record may be joined from two passes of the ring (a stop the firmware
-//forced on a bitstream that latches 0x14 = pretrigger, or a trigger the FPGA's auto time-out may have cut)
-#define PC_CAPTURE_F_SPLICED  0x40
+//The FPGA bitstream this firmware is built for (owner decision 2026-10-20: every firmware version supports the latest
+//bitstream only, fpga/al3/dist/manifest.json "recommended"). The capability word, the geometry and every feature
+//decision derive from this constant; the version word the FPGA reports (command 0x06) is read once at boot and only
+//compared with it. A different word (older or newer) is a mismatch: the UI shows the notice screen (ui_diag.c
+//ud_build_fpga_mismatch), GET_INFO 78 / GET_HEALTH 126 bit 0 report it, and every command that would touch the
+//acquisition answers E_UNSUPPORTED detail PC_UNSUP_FPGA_MISMATCH (F_BASIC commands keep working: pc_cmds.c).
+#define PC_FW_FPGA_VERSION  0x153C
+#define PC_FW_FPGA_VERSION_TEXT "0x153C"  //the same word as text (the mismatch error's text, pc_dispatch); keep in step
+#define PC_FPGA_F_MISMATCH  0x01      //GET_INFO 78 / GET_HEALTH 126 bit 0
+#define PC_UNSUP_FPGA_MISMATCH 1      //E_UNSUPPORTED detail: the running bitstream is not PC_FW_FPGA_VERSION
 
 #ifndef PC_FW_VERSION
 #if PC_FIFO_MAP == 1
@@ -39,7 +40,7 @@ uint32_t pc_auto_net_ms(uint32_t stop_ms);
 #else
 #define PC_FW_VERSION_MMU ""
 #endif
-#define PC_FW_VERSION     "0.2.102" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
+#define PC_FW_VERSION     "0.2.104" PC_FW_VERSION_MAP PC_FW_VERSION_MMU
 #endif
 
 //The build identity record (build_id.c, pc_ident.h; host tests: mock_hal.c)
@@ -118,6 +119,7 @@ uint32_t pc_auto_net_ms(uint32_t stop_ms);
 #define PC_ACQ_TRIGGERED  2
 #define PC_ACQ_DONE       3
 #define PC_ACQ_ABORTED    4
+#define PC_ACQ_LOGGING    5     //D4 logger (1.27): the streaming logger runs (LOG_START .. its end)
 
 //Responses cached for duplicate requests (P-4.3)
 #define PC_CACHE_PAYLOAD  256
@@ -155,11 +157,18 @@ uint32_t pc_auto_net_ms(uint32_t stop_ms);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//The bitstream's geometry and capabilities (P-5.1). Fixed per firmware since fw-one: AL3A10 PC_FW_FPGA_VERSION, variant 2
+//on the wire, ring 8192 words, 16382 samples per channel; caps from the constant, never from the version word. The version
+//word read at boot is kept for GET_INFO 8 and the mismatch flag only.
+#define PC_FPGA_RING_WORDS  8192
+#define PC_FPGA_MAX_TOTAL   16382
+#define PC_FPGA_VARIANT     2
+
 typedef struct
 {
-  uint16_t version;             //raw word from FPGA command 0x06
-  uint8_t  variant;             //P-5.1: 0 unknown, 1 stock, 2 AL3, 3 EF2, 4 EP4
-  uint8_t  read_lag;
+  uint16_t version;             //raw word from FPGA command 0x06 (what the scope runs)
+  uint8_t  variant;             //PC_FPGA_VARIANT (wire encoding of P-5.1 kept)
+  uint8_t  mismatch;            //version != PC_FW_FPGA_VERSION: acquisition refused, notice screen
   uint16_t ring_words;
   uint16_t max_total;
   uint32_t caps;
@@ -172,7 +181,7 @@ typedef struct
   uint32_t   seq;               //settings_seq at arm, PC_SEQ_INVALID when it changed before DONE
   uint8_t    origin;
   uint8_t    flags;             //bit0 triggered, bit1 auto timeout, bit2/3 overload CH1/CH2, bit4 settings changed,
-                                //bit5 EXT edge, bit6 may be spliced (PC_CAPTURE_F_SPLICED)
+                                //bit5 EXT edge (bit6 was "may be spliced" on fw 0.2.97..0.2.102, 0x1532..0x153A only)
   uint16_t   trigger_addr;
   uint16_t   capture_start;
   uint8_t    timeperdiv;        //0xFF: raw divider
@@ -197,6 +206,12 @@ typedef struct
   uint16_t   seq_pre_words;     //0x0B / 0x0C as written
   uint16_t   seq_total_words;
   pc_hw_channel ch[2];
+  //1.26: the trigger extension in effect at the arm (GET_CAPTURE_INFO 96..111); the polarity is `edge`, the level `level`
+  uint8_t    trig_type;
+  uint8_t    trig_flags;
+  uint32_t   trig_n;
+  uint32_t   trig_h;
+  uint32_t   trig_holdoff;
 } pc_capture;
 
 typedef struct
@@ -246,6 +261,20 @@ typedef struct
   uint8_t    ring_valid;        //the FPGA ring still holds capture cap (no arm since its DONE)
   uint8_t    ui_started;        //a UI conversion started and has not been counted yet
   uint8_t    ext_flags;         //FPGA 0x28 at the last MAIN poll (EXT_TRIGGER only): bit0 level, bit1 gen on, bit2 edge
+  uint8_t    trig_st[4];        //1.26: FPGA 0x37 and the 3 bytes of 0x34, read at every MAIN poll while a host capture is
+                                //in flight (GET_STATUS 48..51); zeroed at ARM
+  //C7 counter: GET_COUNTER's NEW bit = the result's sequence number differs from the one the previous GET_COUNTER
+  //returned (or none was returned yet)
+  uint8_t    cnt_seen;
+  uint8_t    cnt_seen_seq;
+  //D4 logger: what LOG_START took, the chunk sequence and the host watchdog
+  uint8_t    log_used;          //a LOG_START ran since boot (LOG_READ refused before)
+  uint8_t    log_link_lost;     //a link reset or DTR drop while logging: stopped at the next MAIN poll
+  uint32_t   log_divider;
+  uint32_t   log_duration_ms;
+  uint32_t   log_clocks;        //5 ns clocks per sample: D + 1 (format 0), N (16-bit path)
+  uint32_t   log_seq;           //non-empty chunks returned
+  uint32_t   log_read_ms;       //the last LOG_READ (or the start)
   uint8_t    ui_trig;           //0x18 at the UI capture's DONE
   uint16_t   ui_addr;           //0x14 of the UI capture
 
@@ -266,10 +295,6 @@ typedef struct
   uint8_t    fw_auto;           //fw 0.2.41: host auto mode armed normal, firmware time-out at auto_ms
   uint8_t    host_forced;       //the firmware time-out ended it (untriggered)
   uint32_t   auto_ms;
-  uint8_t    auto_geom;         //fw 0.2.97: armed FPGA auto with the stop geometry (PC_STOP_RING0), stop at auto_stop
-  uint32_t   auto_stop;         //  words written at the FPGA's time-out stop (W = 0x0E + 2)
-  uint32_t   auto_stop_ms;      //  the time W takes
-  uint8_t    cap_spliced;       //fw 0.2.97: this record may be spliced (GET_CAPTURE_INFO flags bit 6)
   uint8_t    armed_once;
   uint32_t   capture_id;
   uint32_t   arm_ms;
@@ -284,7 +309,6 @@ typedef struct
   pc_decim_cfg arm_dc;
   pc_seq_cfg arm_seq;
   uint32_t   arm_auto;
-  uint8_t    arm_prog;
   uint8_t    arm_normal;
   eh_cap     enc_cap;
   uint32_t   settle_until;
@@ -385,7 +409,20 @@ int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a
 //one channel's GET_CAL body (PC_CAL_RESP_LEN bytes), the SD_INFO body (112 bytes; ident: identify the card image,
 //MAIN context; returns 0, or 1 without a card). The report: pc_report.h
 #define PC_LINK_COUNTERS  70
-#define PC_HEALTH_LEN     124     //96 in 1.16-1.18, 104 in 1.19-1.23
+#define PC_INFO_LEN       80      //76 up to 1.24: 76 u16 built-for FPGA word, 78 u8 fpga_flags (PC_FPGA_F_MISMATCH), 79 0
+#define PC_STATUS_LEN     52      //48 in 1.17-1.25; 1.26: 48 u8 0x37, 49 u8 0x34 byte 0, 50 u16 edges still to count
+#define PC_TRIGGER_LEN    52      //28 up to 1.25; 1.26: 28.. the SET_TRIGGER2 body that reproduces the trigger
+#define PC_CAPTURE_INFO_LEN 112   //96 in 1.17-1.25; 1.26: 96 type, 97 flags, 98 u16 0, 100 u32 N, 104 u32 H, 108 u32 hold-off
+#define PC_LOG_LEN        48      //D4 logger (1.27): LOG_START / LOG_STOP response (protocol row 67)
+#define PC_LOG_HDR        16      //D4 logger (1.27): LOG_READ chunk header
+#define PC_LOG_READ_MAX   65536u  //D4 logger: LOG_READ max_bytes 1..65536
+#define PC_LOG_HOST_MS    10000u  //D4 logger: a running log with no LOG_READ for this long is stopped (state 4): the host
+                                  //went away, and the frozen screen must not stay frozen
+#define PC_STATE_LOGGING  9       //D4 logger: E_STATE detail of a command refused while logging
+#define PC_STATE_LOG_VIEW 10      //D4 logger: E_STATE detail of LOG_START outside the Scope view
+#define PC_COUNTER_LEN    24      //1.26 (fw-c7): GET_COUNTER: flags, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz
+#define PC_HEALTH_LEN     128     //96 in 1.16-1.18, 104 in 1.19-1.23, 124 in 1.24 (layout 2); layout 3: 124 built-for word,
+                                  //126 fpga_flags, 127 0
 #define PC_CAL_RESP_LEN   364     //356 in 1.16-1.23, 72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
 #define PC_SD_INFO_LEN    112     //64 before 1.16
 uint32_t pc_link_counters(pc_session *s, uint32_t *v);
@@ -394,9 +431,9 @@ void     pc_cal_body(int ch, uint8_t *resp);
 int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, uint8_t *scratch, uint32_t scratch_bytes);
 
 //Exposed for tests
-void     pc_variant_from_version(uint16_t version, pc_variant *v);
-void     pc_variant_core_order(pc_variant *v);
-int      pc_decim_has_caps(uint32_t caps);           //PC_DECIM_HAS_* (| PC_DECIM_HAS_CAPSTAGES) for pc_decim_config          //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
+void     pc_variant_init(uint16_t version, pc_variant *v);    //the fixed geometry and caps; mismatch from the word read
+void     pc_variant_core_order(pc_variant *v);               //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
+int      pc_decim_has(void);                                 //PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES: what pc_decim_config gets
 uint32_t pc_gen_phase_from_mhz(uint64_t freq_mhz);
 uint64_t pc_gen_mhz_from_phase(uint32_t phase_inc);
 uint32_t pc_gen_thr_from_bp(uint32_t duty_bp);

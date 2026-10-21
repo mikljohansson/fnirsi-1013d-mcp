@@ -42,8 +42,14 @@ PROTO_MAJOR = 1
 #: CAL_PROBE, the calibration wizard's zero measurement from the host; 1.22 (fw 0.2.72, row 62): the FPGA bus contract,
 #: link counters 64-67; 1.23 (fw 0.2.78, row 63): requests close the modal screens; 1.24 (fw 0.2.79, row 64,
 #: provisional numbering): FPGA 0x153A capture stages (caps CAPTURE_STAGES, features bit 7, GET_HEALTH 124 bytes
-#: layout 2, GET_CAL 364 bytes, event 23, EXT shifts 12 / 14 legacy samples)
-PROTO_MINOR = 24
+#: layout 2, GET_CAL 364 bytes, event 23, EXT shifts 12 / 14 legacy samples); 1.25 (fw 0.2.102): one built-for
+#: bitstream (FW_FPGA_VERSION, 0x153B then; GET_INFO 80 bytes with 76..79 fw_fpga_version / fpga_flags, GET_HEALTH 128 bytes
+#: layout 3 with 124..127 the same; a mismatch answers E_UNSUPPORTED detail 1 to every command outside BASIC_CMDS), one
+#: UI Average behaviour (GET_STATUS 46: 1 = the MCU's mean of N records, 2 = a sequencer run); 1.26 (FPGA 0x153C,
+#: docs/plans/fpga-0x153c.md, provisional numbering): trigger types (SET_TRIGGER2 0x0219, GET_TRIGGER 52 bytes, caps
+#: TRIG_TYPES), the trigger hold-off (caps HOLDOFF: 0x1B in 5 ns units), peak detect (SET_DECIM filter 4, READ_RAW
+#: layout 3, GET_CAPTURE_INFO 79 bit 1, caps PEAK_DETECT) and the hardware counter (GET_COUNTER 0x0213, caps COUNTER)
+PROTO_MINOR = 26
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -105,6 +111,10 @@ class Cmd(enum.IntEnum):
     READ_SEQ = 0x0210  # protocol 1.17: segment table or averaged record of the latest run
     BODE_CTRL = 0x0211  # protocol 1.20, fw 0.2.66, cap DECIM: start / stop the on-device Bode sweep, the view, thru
     READ_BODE = 0x0212  # protocol 1.20: the Bode sweep's header and its 20-byte rows
+    #: protocol 1.26 (FPGA 0x153C, cap COUNTER): the hardware counter's snapshot (read 0x35), or its configuration
+    GET_COUNTER = 0x0213
+    #: protocol 1.26 (cap TRIG_TYPES): trigger type, polarity, N / H, hold-off: the 0x153C trigger qualifier
+    SET_TRIGGER2 = 0x0219
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -138,6 +148,22 @@ BUSY_ALLOWED = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTER
 #: Control requests allowed while a deferred request is pending (section 3.2).
 #: SET_ACQ_STATE (1.3) is a control request too: RUN/STOP while a WAIT is pending aborts it (E_ABORTED).
 CONTROL_CMDS = frozenset({Cmd.GET_STATUS, Cmd.STOP, Cmd.SET_REMOTE, Cmd.PING, Cmd.SET_ACQ_STATE})
+#: Protocol 1.25 (fw 0.2.102): the commands a scope whose FPGA does not run the firmware's bitstream still answers
+#: (the firmware's F_BASIC set: the link, the diagnostics readers, the card, the screen, FEL; nothing that configures
+#: or reads the acquisition). Every other command gets E_UNSUPPORTED detail UNSUP_FPGA_MISMATCH with FPGA_MISMATCH_TEXT.
+BASIC_CMDS = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY, Cmd.TEST_PATTERN, Cmd.GET_LINK_STATS,
+                        Cmd.GET_BAD_FRAME, Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH, Cmd.READ_SPECTRUM, Cmd.SD_INFO,
+                        Cmd.SD_READ_SECTORS, Cmd.SD_STAGE, Cmd.SD_WRITE_SECTORS, Cmd.SAVE_REPORT, Cmd.GET_CAL,
+                        Cmd.READ_SCREEN, Cmd.FFT_BENCH, Cmd.ENTER_FEL})
+#: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
+#: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
+#: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.
+FW_FPGA_VERSION = 0x153C
+#: GET_INFO 78 / GET_HEALTH 126 bit 0: the version word the FPGA reported at boot differs from fw_fpga_version
+FPGA_F_MISMATCH = 0x01
+#: E_UNSUPPORTED detail of every non-basic command on such a scope, with this text
+UNSUP_FPGA_MISMATCH = 1
+FPGA_MISMATCH_TEXT = f"FPGA bitstream mismatch: this firmware needs 0x{FW_FPGA_VERSION:04X}"
 DEFERRED_CMDS = frozenset({Cmd.WAIT, Cmd.ACQUIRE_AVG})
 
 
@@ -167,7 +193,8 @@ STATUS_HINTS: dict[int, str] = {
     Status.E_BAD_LEN: "payload length wrong for the command",
     Status.E_UNKNOWN_CMD: "firmware does not know this command; check the firmware version",
     Status.E_BAD_ARG: "a field is out of range",
-    Status.E_UNSUPPORTED: "not available on this FPGA bitstream or firmware build",
+    Status.E_UNSUPPORTED: "not available on this FPGA bitstream or firmware build (detail 1: the scope does not run "
+                          "the bitstream the firmware is built for; flash it, docs/guide/prepare.md)",
     Status.E_NOT_REMOTE: "command needs REMOTE ownership; acquire the remote session first",
     Status.E_BUSY: "the scope cannot take the request now (see busy_hint for the reason)",
     Status.E_STATE: "wrong acquisition state (e.g. read before the capture is DONE)",
@@ -210,6 +237,15 @@ class Caps(enum.IntFlag):
     ENC_CHECK = 1 << 18
     #: protocol 1.24 (FPGA 0x153A+): per-core ADC capture stage (0x63), outlier counters (0x36)
     CAPTURE_STAGES = 1 << 19
+    #: protocol 1.26 (FPGA 0x153C): trigger types pulse width / Nth edge / timeout (0x5E, 0x5F, 0x60, read 0x34),
+    #: SET_TRIGGER2; HOLDOFF (bit 2) is set with it: 0x1B is a trigger hold-off in 5 ns units
+    TRIG_TYPES = 1 << 20
+    #: protocol 1.26 (FPGA 0x153C): peak-detect acquisition (0x56 bit 1), SET_DECIM filter 4, READ_RAW layout 3
+    PEAK_DETECT = 1 << 21
+    #: protocol 1.26 (FPGA 0x153C): the hardware counter with min / max (0x61, 0x62, read 0x35), GET_COUNTER
+    COUNTER = 1 << 22
+    #: protocol 1.28 (FPGA 0x153E): runt and window types, the pulse-width range (SET_TRIGGER2 types 4 / 5, RANGE)
+    TRIG_RUNT_WINDOW = 1 << 26
 
 
 class Features(enum.IntFlag):
@@ -223,14 +259,22 @@ class Features(enum.IntFlag):
     ENC_CHECK = 1 << 5  # 0x1538+ (protocol 1.19)
     BODE = 1 << 6  # protocol 1.20: what the on-device Bode plot needs (DECIM and GENERATOR_DDS: AL3 0x1534+)
     CAPTURE_STAGES = 1 << 7  # 0x153A+ (protocol 1.24): ADC capture stages and outlier counters
+    #: 0x153C (protocol 1.26). The contract (docs/plans/fpga-0x153c.md 2.3) names bits 5-7, which rows 58 / 60 / 64 had
+    #: taken; the next free bits are used
+    TRIG_TYPES = 1 << 8
+    PEAK = 1 << 9
+    COUNTER = 1 << 10
 
 
 def feature_names(features: int) -> list[str]:
     return [f.name.lower() for f in Features if features & f and f.name]
 
 
-#: GET_STATUS byte 46 (protocol 1.17): the acquisition menu's Average
-UI_AVERAGE_NAMES = {0: "off", 1: "software", 2: "hardware"}
+#: GET_STATUS byte 46 (protocol 1.17): the acquisition menu's Average. Since fw 0.2.102 (1.25) one behaviour, the mean
+#: of N records (byte 47 = log2 N; 0 = single records, two did not fit the 40 ms budget): 1 = summed by the MCU
+#: (16-bit records and legacy records over 2046 words), 2 = one sequencer run (legacy records that fit the
+#: accumulator). Before 0.2.102, 1 was a software running average.
+UI_AVERAGE_NAMES = {0: "off", 1: "mcu", 2: "hardware"}
 
 
 def caps_names(caps: int) -> list[str]:
@@ -260,10 +304,16 @@ CMD_CAP: dict[Cmd, Caps] = {
     Cmd.READ_SEQ: Caps.SEQ,
     Cmd.BODE_CTRL: Caps.DECIM,
     Cmd.READ_BODE: Caps.DECIM,
+    Cmd.GET_COUNTER: Caps.COUNTER,
+    Cmd.SET_TRIGGER2: Caps.TRIG_TYPES,
 }
 
 
 class FpgaVariant(enum.IntEnum):
+    """GET_INFO byte 10 (wire encoding). Since fw 0.2.102 the firmware supports one bitstream (FW_FPGA_VERSION, an AL3)
+    and always reports 2; the variant byte no longer encodes the version word (the stock / EF2 / EP4 values are history,
+    kept for older answers)."""
+
     UNKNOWN = 0
     STOCK = 1
     AL3 = 2
@@ -271,10 +321,6 @@ class FpgaVariant(enum.IntEnum):
     EP4 = 4
 
 
-#: 0x1533: AL3 with the external trigger on the calibration pin (fpga/al3, fpga-gen2; caps EXT_TRIGGER)
-FPGA_VERSION_WORDS = {0x1432: FpgaVariant.STOCK, 0x1532: FpgaVariant.AL3, 0x1533: FpgaVariant.AL3,
-                      0x1632: FpgaVariant.EF2,
-                      0x1732: FpgaVariant.EP4}
 VARIANT_NAMES = {FpgaVariant.UNKNOWN: "unknown", FpgaVariant.STOCK: "stock", FpgaVariant.AL3: "al3",
                  FpgaVariant.EF2: "ef2", FpgaVariant.EP4: "ep4"}
 
@@ -791,7 +837,9 @@ def _cstr(b: bytes | str) -> str:
 
 @dataclass
 class InfoResp(Payload):
-    """GET_INFO response, 76 bytes (section 8.2)."""
+    """GET_INFO response (section 8.2): 76 bytes up to protocol 1.24, 80 since 1.25 (fw 0.2.102): 76 u16
+    ``fw_fpga_version`` (the bitstream the firmware is built for), 78 u8 ``fpga_flags`` (FPGA_F_MISMATCH: the scope
+    runs another word), 79 0. A 76-byte answer reads them as 0 (``fpga_mismatch`` False)."""
 
     FIELDS = [("proto_major", "B"), ("proto_minor", "B"), ("max_request_frame", "H"),
               ("max_response_payload", "I"), ("fpga_version", "H"), ("fpga_variant", "B"), ("adc_bits", "B"),
@@ -799,7 +847,7 @@ class InfoResp(Payload):
               ("caps", "I"), ("gen_clock_hz", "I"), ("max_total_samples", "H"), ("min_total_samples", "H"),
               ("read_lag", "B"), ("n_ranges", "B"), ("n_hw_ranges", "B"), ("interleave_order", "B"),
               ("fw_version", "16s"), ("fw_build", "I"), ("serial", "16s"), ("screen_width", "H"),
-              ("screen_height", "H")]
+              ("screen_height", "H"), ("fw_fpga_version", "H"), ("fpga_flags", "B"), ("_r79", "x")]
     proto_major: int = PROTO_MAJOR
     proto_minor: int = PROTO_MINOR
     max_request_frame: int = MAX_REQUEST_FRAME
@@ -824,6 +872,9 @@ class InfoResp(Payload):
     serial: bytes = b""
     screen_width: int = 800
     screen_height: int = 480
+    #: 1.25: the bitstream this firmware is built for (0 in a 76-byte answer) and the FPGA_F_* flags
+    fw_fpga_version: int = 0
+    fpga_flags: int = 0
 
     @property
     def fw_version_str(self) -> str:
@@ -833,19 +884,28 @@ class InfoResp(Payload):
     def serial_str(self) -> str:
         return _cstr(self.serial)
 
+    @property
+    def fpga_mismatch(self) -> bool:
+        """1.25: the FPGA reported another version word than the firmware is built for; every command outside
+        BASIC_CMDS answers E_UNSUPPORTED detail UNSUP_FPGA_MISMATCH until that bitstream is flashed."""
+        return bool(self.fpga_flags & FPGA_F_MISMATCH)
+
 
 @dataclass
 class StatusResp(Payload):
     """GET_STATUS response body: 28 bytes in protocol 1.0, 32 in 1.1 (pass_ms, pass_max_ms appended; a 1.0
     device leaves them 0), 44 in 1.3 (settings_seq, capture_settings_seq, run_state, capture_origin), 48 in 1.17
-    (features, UI Average). Also returned by SET_REMOTE, ARM, FORCE, STOP, WAIT and SET_ACQ_STATE."""
+    (features, UI Average), 52 in 1.26 (the trigger qualifier's status: FPGA 0x37, 0x34 byte 0, the edges still to
+    count; read while a host capture is in flight, zeroed at ARM, the last values kept after DONE). Also returned by
+    SET_REMOTE, ARM, FORCE, STOP, WAIT and SET_ACQ_STATE."""
 
     FIELDS = [("control", "B"), ("acq_state", "B"), ("flags", "B"), ("ui_busy", "B"), ("capture_id", "I"),
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
               ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
               ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
               ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("display_mode", "B"),
-              ("features", "H"), ("ui_average", "B"), ("ui_average_log2n", "B")]
+              ("features", "H"), ("ui_average", "B"), ("ui_average_log2n", "B"),
+              ("fpga_37", "B"), ("fpga_34", "B"), ("edges_left", "H")]
     control: int = 0
     acq_state: int = 0
     flags: int = 0
@@ -876,14 +936,43 @@ class StatusResp(Payload):
     display_mode: int = 0
     #: 1.17: Features of the bitstream (0 before 1.17)
     features: int = 0
-    #: 1.17: the acquisition menu's Average: 0 off, 1 software, 2 hardware (UI_AVERAGE_NAMES)
+    #: 1.17: the acquisition menu's Average (UI_AVERAGE_NAMES): 0 off; since 1.25 the mean of N records summed by
+    #: 1 the MCU or 2 the sequencer (before 0.2.102: 1 was a software running average)
     ui_average: int = 0
-    #: 1.17: log2 of the records per UI hardware-averaging run (ui_average 2 only)
+    #: 1.17: log2 of the records N per displayed record (ui_average 1 or 2; 0 = single records)
     ui_average_log2n: int = 0
+    #: 1.26: FPGA read 0x37 = { 0, 0, 0, hold-off running (0x10), type bit 2, 0, 0, 0 }
+    fpga_37: int = 0
+    #: 1.26: FPGA read 0x34 byte 0 = { 0, 0, counting (0x20), pulse began (0x10), EXT (0x08), longer (0x04), type[1:0] }
+    fpga_34: int = 0
+    #: 1.26: Nth edge: edges still to count (0x34 bytes 1..2)
+    edges_left: int = 0
 
     @property
     def shared(self) -> bool:
         return self.control == Control.SHARED
+
+    @property
+    def holdoff_running(self) -> bool:
+        return bool(self.fpga_37 & STATUS37_HOLDOFF_RUNNING)
+
+    def trigger_status(self) -> dict[str, Any]:
+        """1.26: the qualifier's status words in words."""
+        t = (self.fpga_34 & STATUS34_TYPE_MASK) | (4 if self.fpga_37 & STATUS37_TYPE2 else 0)
+        return {"type": TRIG_TYPE_NAMES[t] if t < len(TRIG_TYPE_NAMES) else t,
+                "holdoff_running": self.holdoff_running, "counting": bool(self.fpga_34 & STATUS34_COUNTING),
+                "pulse_began": bool(self.fpga_34 & STATUS34_PULSE_BEGAN), "ext": bool(self.fpga_34 & STATUS34_EXT),
+                "longer": bool(self.fpga_34 & STATUS34_LONGER), "edges_left": self.edges_left}
+
+
+#: GET_STATUS 48 (FPGA 0x37) and 49 (FPGA 0x34 byte 0) bits, protocol 1.26
+STATUS37_HOLDOFF_RUNNING = 0x10
+STATUS37_TYPE2 = 0x08
+STATUS34_COUNTING = 0x20
+STATUS34_PULSE_BEGAN = 0x10
+STATUS34_EXT = 0x08
+STATUS34_LONGER = 0x04
+STATUS34_TYPE_MASK = 0x03
 
 
 @dataclass
@@ -926,8 +1015,9 @@ class CaptureInfoHeader(Payload):
     F_SETTINGS_CHANGED: ClassVar[int] = 0x10
     #: 1.4: an EXT edge was seen during this capture
     F_EXT_EDGE: ClassVar[int] = 0x20
-    #: fw 0.2.97 (protocol 1.24, spare bit): the record may be joined from two passes of the ring (a stop the firmware
-    #: forced on FPGA 0x1532..0x153A / EF2 / EP4, or a trigger the FPGA's auto time-out may have cut)
+    #: fw 0.2.97..0.2.102 (protocol 1.24, spare bit): the record may be joined from two passes of the ring (a stop the
+    #: firmware forced on FPGA 0x1532..0x153A / EF2 / EP4). Never set since fw 0.2.102 (1.25: the firmware supports
+    #: 0x153B only, whose forced stop keeps the record whole); decoded for captures from older firmware
     F_MAYBE_SPLICED: ClassVar[int] = 0x40
 
 
@@ -946,9 +1036,26 @@ class CaptureChannelInfo(Payload):
 
 
 @dataclass
+class CaptureTrig2(Payload):
+    """GET_CAPTURE_INFO bytes 96..111 (protocol 1.26): the trigger extension the capture was armed with: 96 u8 type,
+    97 u8 flags, 98 u16 0, 100 u32 N, 104 u32 H, 108 u32 hold-off in 5 ns units (the polarity is byte 22, the level
+    byte 23)."""
+
+    FIELDS = [("type", "B"), ("flags", "B"), ("_r", "2x"), ("n", "I"), ("h", "I"), ("holdoff", "I")]
+    type: int = 0  # TRIG_EDGE (defined below)
+    flags: int = 0
+    n: int = 0
+    h: int = 0
+    holdoff: int = 0
+
+    def trigger2(self, polarity: int, source: int, level: int) -> "Trigger2":
+        return Trigger2(self.type, polarity, self.flags, source, self.n, self.h, level, 0, self.holdoff, 0)
+
+
+@dataclass
 class CaptureInfo:
     """Decoded GET_CAPTURE_INFO (68 bytes; 76 from protocol 1.9 with the capture's decimation filter; 96 from 1.17
-    with the capture's sequencer run, ``run``)."""
+    with the capture's sequencer run, ``run``; 112 from 1.26 with the trigger extension ``trig2``)."""
 
     header: CaptureInfoHeader
     channels: list[CaptureChannelInfo]
@@ -960,15 +1067,19 @@ class CaptureInfo:
     has_decim: bool = False
     #: 1.17: the capture's sequencer run (bytes 76..95; ``run.mode`` 0 = a single capture), None before 1.17
     run: "SeqRunInfo | None" = None
+    #: 1.26: the trigger type, flags, N, H and hold-off as armed (bytes 96..111), None before 1.26
+    trig2: "CaptureTrig2 | None" = None
 
     SIZE: ClassVar[int] = 36 + 2 * 16
 
     def pack(self) -> bytes:
         out = self.header.pack() + b"".join(c.pack() for c in self.channels)
-        if self.has_decim or self.run is not None:
+        if self.has_decim or self.run is not None or self.trig2 is not None:
             out += struct.pack("<BBHI", self.decim_mode, self.decim_shift, self.ext_shift, self.decim_n)
-        if self.run is not None:
-            out += self.run.pack()
+        if self.run is not None or self.trig2 is not None:
+            out += (self.run or SeqRunInfo()).pack()
+        if self.trig2 is not None:
+            out += self.trig2.pack()
         return out
 
     @classmethod
@@ -981,6 +1092,8 @@ class CaptureInfo:
             ci.has_decim = True
         if len(data) >= 96:
             ci.run = SeqRunInfo.unpack(data[76:96])
+        if len(data) >= 112:
+            ci.trig2 = CaptureTrig2.unpack(data[96:112])
         return ci
 
     @property
@@ -989,11 +1102,18 @@ class CaptureInfo:
         return self.run is not None and self.run.mode != SEQ_OFF
 
     @property
+    def peak(self) -> bool:
+        """1.26: a peak-detect record (byte 79 bit 1 CAPINFO_PEAK, or the shift byte's peak bit)."""
+        return bool(self.run is not None and self.run.wide & CAPINFO_PEAK) or \
+            bool(self.decim_mode & DECIM_WIDE and self.decim_shift & DECIM_PEAK_ACT)
+
+    @property
     def decim(self) -> "DecimConfig | None":
-        """The capture's decimation (None for a legacy 8-bit capture)."""
+        """The capture's decimation (None for a legacy 8-bit capture; ``peak`` set for a 1.26 peak record)."""
         if not self.decim_mode & DECIM_WIDE:
             return None
-        return DecimConfig.from_status(self.decim_mode, self.decim_shift, self.decim_n)
+        shift = self.decim_shift | (DECIM_PEAK_ACT if self.peak else 0)
+        return DecimConfig.from_status(self.decim_mode, shift, self.decim_n)
 
     def channel_config(self, ch: int) -> "ChannelConfig":
         """The capture-time channel settings as a CHANNEL_CONFIG (dcoffset / center_cal are not carried)."""
@@ -1005,9 +1125,11 @@ class CaptureInfo:
     def trigger(self) -> "Trigger":
         h = self.header
         per = 1 if self.decim is not None else 2  # 1.9: one 16-bit sample per ring word
+        t2 = self.trig2.trigger2(h.trig_edge, h.trig_source, h.trig_level) if self.trig2 is not None else None
         return Trigger(source=h.trig_source, edge=h.trig_edge, level=h.trig_level, mode=h.trig_mode,
                        pretrigger_samples=h.pretrigger_samples, total_samples=h.total_samples,
-                       pretrigger_words=h.pretrigger_samples // per, total_words=h.total_samples // per)
+                       holdoff=self.trig2.holdoff if self.trig2 is not None else 0,
+                       pretrigger_words=h.pretrigger_samples // per, total_words=h.total_samples // per, trigger2=t2)
 
     def timebase(self) -> "Timebase":
         d = self.decim
@@ -1022,6 +1144,9 @@ class CaptureInfo:
         d: dict[str, Any] = {"divider": h.divider, "trig_source": h.trig_source, "trig_edge": h.trig_edge,
                              "trig_level": h.trig_level, "trig_mode": h.trig_mode,
                              "pretrigger_samples": h.pretrigger_samples, "total_samples": h.total_samples}
+        if self.trig2 is not None:  # 1.26: part of the fingerprint
+            d["trig2"] = f"type {self.trig2.type} flags {self.trig2.flags} N {self.trig2.n} H {self.trig2.h} " \
+                         f"holdoff {self.trig2.holdoff}"
         for i, c in enumerate(self.channels):
             for k in ("enable", "range", "coupling", "invert", "probe_index", "offset_pwm"):
                 d[f"CH{i + 1}.{k}"] = getattr(c, k)
@@ -1045,6 +1170,8 @@ SEQ_LEGACY_MAX_N = 257  # legacy 16-bit lane sums are exact up to 255 x 257 = 65
 SEQ_MAX_N = 65536
 #: GET_CAPTURE_INFO 77 / GET_SEQ 47 run flags
 SEQ_RUN_CIRCULAR, SEQ_RUN_STOPPED, SEQ_RUN_WRAPPED = 0x01, 0x02, 0x04
+#: GET_CAPTURE_INFO byte 79 (SeqRunInfo.wide): bit 0 16-bit records, bit 1 (1.26) a peak-detect record
+CAPINFO_WIDE, CAPINFO_PEAK = 0x01, 0x02
 #: FPGA 0x2A byte 0 (GET_SEQ byte 24)
 SEQ_ST_DONE, SEQ_ST_OVERFLOW, SEQ_ST_RUNNING, SEQ_ST_FMT16, SEQ_ST_RAW, SEQ_ST_CIRCULAR = 0x80, 0x40, 0x20, 0x10, 8, 4
 #: READ_SEQ what
@@ -1055,6 +1182,8 @@ SEQ_SHIFT_SUMS = 0xFF
 SEQ_FMT_WIDE, SEQ_FMT_U32 = 0x01, 0x02
 #: GET_SEQ byte 16 / SET_SEQ refusals: why a setting does not fit the next arm's geometry
 SEQ_FIT_OK, SEQ_FIT_MODE, SEQ_FIT_FLAGS, SEQ_FIT_M, SEQ_FIT_COUNT, SEQ_FIT_TOTAL, SEQ_FIT_PRE, SEQ_FIT_N = range(8)
+#: 1.26: SET_SEQ mode 2 (averaging) while peak detect is on: E_STATE detail 7 (the sums would mix max and min)
+SEQ_FIT_PEAK = 7
 SEQ_FIT_NAMES = {
     SEQ_FIT_OK: "fits",
     SEQ_FIT_MODE: "unknown mode",
@@ -1064,9 +1193,13 @@ SEQ_FIT_NAMES = {
     SEQ_FIT_TOTAL: "record too long: segments need total words <= 2^m - 2, averaging total words <= 2046",
     SEQ_FIT_PRE: "pretrigger must be shorter than the record",
     SEQ_FIT_N: "records per position N outside 1..65536 (at most 257 with 8-bit records)",
+    # SEQ_FIT_PEAK shares the code 7 as an E_STATE detail (SET_SEQ only; GET_SEQ's fit byte never reads it)
 }
-#: UI hardware averaging (pc_seq_ui_plan)
+SEQ_PEAK_TEXT = "peak detect: averaging is refused (the sums would mix max and min); set the filter first"
+#: UI averaging (pc_seq_ui_plan_n, pc_seq_ui_plan, pc_seq_ui_plan_mcu): N records plus their dead time (and the MCU
+#: path's readout, 4 bus bytes per ring word at about 300 ns each) fit the budget
 SEQ_UI_BUDGET_US, SEQ_UI_MAX_N, SEQ_UI_MIN_N = 40000, 64, 2
+SEQ_UI_READ_NS, SEQ_UI_READ_BYTES = 300, 4
 
 
 @dataclass
@@ -1103,7 +1236,8 @@ class SeqRunInfo(Payload):
     #: SEQ_RUN_CIRCULAR / STOPPED / WRAPPED
     flags: int = 0
     m: int = 0
-    #: 1 = 16-bit records
+    #: bit 0 (CAPINFO_WIDE) 16-bit records; bit 1 (CAPINFO_PEAK, 1.26) peak-detect records; also set for single captures
+    #: since 1.26 (0 before: the byte belonged to the run)
     wide: int = 0
     #: segments completed / records accumulated at DONE (a circular run counts beyond the slots)
     count: int = 0
@@ -1293,18 +1427,51 @@ def seq_dead_ns(total_words: int, pre_words: int, word_ns: int) -> int:
     return total_words * 5 + 40 + (2 + pre_words) * word_ns + 100
 
 
-def seq_ui_plan(total_words: int, pre_words: int, divider: int) -> tuple[int, int]:
-    """pc_seq_ui_plan: (records N per UI averaging run, run time in us rounded up); N 0 = software averaging."""
-    word_ns = 10 * (divider + 1)
-    if total_words == 0 or total_words > SEQ_AVG_MAX_TOTAL or pre_words >= total_words or word_ns > 1_000_000:
+def seq_ui_plan_n(per_record_ns: int) -> tuple[int, int]:
+    """pc_seq_ui_plan_n (fw 0.2.102, one rule for both UI Average paths): the largest power of two N in 2..64 with
+    N x per_record_ns <= the 40 ms budget, and N x per_record_ns in us rounded up; (0, 0) when two do not fit (the
+    UI then shows single records, GET_STATUS 47 = 0)."""
+    if per_record_ns <= 0:
         return 0, 0
-    rec_ns = total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns)
     n = SEQ_UI_MAX_N
-    while n >= SEQ_UI_MIN_N and n * rec_ns > SEQ_UI_BUDGET_US * 1000:
+    while n >= SEQ_UI_MIN_N and n * per_record_ns > SEQ_UI_BUDGET_US * 1000:
         n >>= 1
     if n < SEQ_UI_MIN_N:
         return 0, 0
-    return n, (n * rec_ns + 999) // 1000
+    return n, (n * per_record_ns + 999) // 1000
+
+
+def seq_ui_plan(total_words: int, pre_words: int, divider: int) -> tuple[int, int]:
+    """pc_seq_ui_plan, the hardware path (GET_STATUS 46 = 2): a legacy record (one word = 10 (D + 1) ns) costed at the
+    record plus the sequencer's dead time; (0, 0) also when it does not fit the accumulator (> 2046 words) or
+    pre >= total."""
+    word_ns = 10 * (divider + 1)
+    if total_words == 0 or total_words > SEQ_AVG_MAX_TOTAL or pre_words >= total_words or word_ns > 1_000_000:
+        return 0, 0
+    return seq_ui_plan_n(total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns))
+
+
+def seq_ui_plan_mcu(total_words: int, pre_words: int, divider: int, wide: bool) -> tuple[int, int]:
+    """pc_seq_ui_plan_mcu, the MCU path (GET_STATUS 46 = 1, fw 0.2.102): any record (``wide``: the 16-bit layout, one
+    word = 5 (D + 1) ns, else 10 (D + 1)) costed at the record, the dead time and its readout (SEQ_UI_READ_BYTES bus
+    bytes per word at SEQ_UI_READ_NS); (0, 0) when pre >= total or two do not fit."""
+    word_ns = (5 if wide else 10) * (divider + 1)
+    if total_words == 0 or pre_words >= total_words or word_ns > 1_000_000:
+        return 0, 0
+    return seq_ui_plan_n(total_words * word_ns + seq_dead_ns(total_words, pre_words, word_ns) +
+                         total_words * SEQ_UI_READ_BYTES * SEQ_UI_READ_NS)
+
+
+def ui_average_plan(total_words: int, pre_words: int, divider: int, wide: bool) -> tuple[int, int]:
+    """What GET_STATUS 46 / 47 report with Average on (fw 0.2.102, pc_seq_hw.c): the hardware path for a legacy record
+    that fits the accumulator, the MCU path for every other record; (state, log2 N) with state 2 hardware, 1 MCU (log2 N
+    0 when two records do not fit the budget: single records)."""
+    hw = not wide and total_words <= SEQ_AVG_MAX_TOTAL
+    n, _us = seq_ui_plan(total_words, pre_words, divider) if hw else seq_ui_plan_mcu(total_words, pre_words, divider,
+                                                                                      wide)
+    if not n:
+        return 1, 0
+    return (2 if hw else 1), n.bit_length() - 1
 
 
 def seq_avg_code(lane_sum: int, c: int, gain: int, off: int) -> int:
@@ -1641,8 +1808,111 @@ class SetTimebaseReq(Payload):
     value: int = 0
 
 
+#: SET_TRIGGER2 / GET_TRIGGER 28 byte 0 (FPGA 0x5E bits 2..0): the trigger type
+TRIG_EDGE, TRIG_PULSE_WIDTH, TRIG_NTH_EDGE, TRIG_TIMEOUT, TRIG_RUNT, TRIG_WINDOW = 0, 1, 2, 3, 4, 5
+TRIG_TYPE_NAMES = ("edge", "pulse_width", "nth_edge", "timeout", "runt", "window")
+#: polarity (0x16) names per type: index 0 = polarity 0, 1 = polarity 1
+TRIG_POLARITY_NAMES = {
+    TRIG_EDGE: ("rising", "falling"),
+    TRIG_PULSE_WIDTH: ("positive", "negative"),  # the pulse; the trigger is its trailing edge
+    TRIG_NTH_EDGE: ("rising", "falling"),  # the counted edge
+    TRIG_TIMEOUT: ("high", "low"),  # the level that is held
+    TRIG_RUNT: ("positive", "negative"),
+    TRIG_WINDOW: ("leaving", "entering"),
+}
+#: SET_TRIGGER2 flags (byte 2)
+TRIG2_F_LONGER = 0x01  # pulse width only: "longer than N" (0 = shorter than N); FPGA 0x5E bit 3
+TRIG2_F_RANGE = 0x02  # 0x153E: pulse width inside [N, N2] (outside with LONGER); 0x5E bit 4. E_BAD_ARG on 1.26
+TRIG2_F_BOTH_CORES = 0x04  # 0x153E: trigger on both ADC cores (legacy D = 0); 0x5E bit 5. E_BAD_ARG on 1.26
+#: limits: N and H are u24 in the FPGA (0x5F / 0x60), the Nth-edge count 16 bits, the hold-off a u32 of 5 ns units
+TRIG2_MAX_N = (1 << 24) - 1
+TRIG2_MAX_NTH = 65535
+TRIG2_MAX_HOLDOFF_UNITS = (1 << 32) - 1
+TRIG2_HOLDOFF_UNIT_NS = 5
+#: SET_TRIGGER2 E_BAD_ARG detail = the byte offset of the refused field (row 66)
+TRIG2_D_TYPE, TRIG2_D_POLARITY, TRIG2_D_FLAGS, TRIG2_D_SOURCE, TRIG2_D_N, TRIG2_D_H, TRIG2_D_LEVEL, TRIG2_D_LEVEL2 = \
+    0, 1, 2, 3, 4, 8, 12, 14
+TRIG2_DETAIL_NAMES = {0: "type", 1: "polarity", 2: "flags", 3: "source", 4: "N", 8: "H", 12: "level", 14: "level2",
+                      16: "holdoff", 20: "reserved"}
+
+
+def holdoff_units(seconds: float) -> int:
+    """A hold-off in seconds -> 0x1B units of 5 ns, rounded to the nearest, clamped to the u32."""
+    return max(0, min(TRIG2_MAX_HOLDOFF_UNITS, int(round(seconds * 1e9 / TRIG2_HOLDOFF_UNIT_NS))))
+
+
+@dataclass
+class Trigger2(Payload):
+    """SET_TRIGGER2 request (24 bytes, protocol 1.26, FPGA 0x153C, cap TRIG_TYPES, docs/protocol.md row 66), also
+    GET_TRIGGER bytes 28..51 with the values in effect. Every field is written (no mask): a host reads GET_TRIGGER,
+    changes fields and writes the block back; the geometry, mode and auto time-out stay SET_TRIGGER's.
+
+    0 u8 type (TRIG_*; 4 runt / 5 window are 0x153E: E_BAD_ARG detail 0), 1 u8 polarity per type
+    (TRIG_POLARITY_NAMES; = GET_TRIGGER ``edge``, FPGA 0x16), 2 u8 flags (TRIG2_F_LONGER, pulse width only; RANGE /
+    BOTH_CORES and other bits: detail 2), 3 u8 source (0 CH1, 1 CH2, 2 EXT), 4 u32 n (pulse width / timeout: samples
+    of the trigger stream 1..16777215; Nth edge: the count 1..65535; edge: 0; detail 4. The firmware converts nothing:
+    a sample is one memory word on CH1 / CH2 (10 (D + 1) ns legacy, N x 5 ns with the filter or peak detect), one 5 ns
+    clock on EXT), 8 u32 h (Nth edge: idle samples 0..16777215, 0 = count from the arm; other types 0; detail 8),
+    12 u16 level (the raw 8-bit code 0..255 as SET_TRIGGER; detail 12), 14 u16 level2 (0; detail 14), 16 u32 holdoff
+    (the trigger hold-off in 5 ns units, 0 = off: the raw 0x1B as GET_TRIGGER byte 12), 20 u32 0."""
+
+    FIELDS = [("type", "B"), ("polarity", "B"), ("flags", "B"), ("source", "B"), ("n", "I"), ("h", "I"),
+              ("level", "H"), ("level2", "H"), ("holdoff", "I"), ("reserved", "I")]
+    type: int = TRIG_EDGE
+    polarity: int = 0
+    flags: int = 0
+    source: int = 0
+    n: int = 0
+    h: int = 0
+    level: int = 128
+    level2: int = 0
+    holdoff: int = 0
+    reserved: int = 0
+
+    @property
+    def type_name(self) -> str:
+        return TRIG_TYPE_NAMES[self.type] if self.type < len(TRIG_TYPE_NAMES) else str(self.type)
+
+    @property
+    def polarity_name(self) -> str:
+        names = TRIG_POLARITY_NAMES.get(self.type, ("0", "1"))
+        return names[self.polarity] if self.polarity < 2 else str(self.polarity)
+
+    @property
+    def longer(self) -> bool:
+        return bool(self.flags & TRIG2_F_LONGER)
+
+    @property
+    def holdoff_s(self) -> float:
+        return self.holdoff * TRIG2_HOLDOFF_UNIT_NS * 1e-9
+
+    def describe(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"type": self.type_name, "polarity": self.polarity_name}
+        if self.type == TRIG_PULSE_WIDTH:
+            d["width_samples"] = self.n
+            d["condition"] = "longer" if self.longer else "shorter"
+            if self.flags & TRIG2_F_RANGE:
+                d["width2_samples"] = self.h
+                d["condition"] = "outside" if self.longer else "inside"
+        elif self.type == TRIG_NTH_EDGE:
+            d["n"] = self.n
+            d["idle_samples"] = self.h
+        elif self.type == TRIG_TIMEOUT:
+            d["held_samples"] = self.n
+        if self.type in (TRIG_RUNT, TRIG_WINDOW):
+            d["level2_code"] = self.level2
+        if self.flags & TRIG2_F_BOTH_CORES:
+            d["both_cores"] = True
+        d["holdoff_units"] = self.holdoff
+        d["holdoff_s"] = self.holdoff_s
+        return d
+
+
 @dataclass
 class Trigger(Payload):
+    """GET_TRIGGER / SET_TRIGGER response: 28 bytes; 52 since protocol 1.26 (``trigger2`` = the SET_TRIGGER2 block at
+    28..51, None in a 28-byte answer)."""
+
     FIELDS = [("source", "B"), ("edge", "B"), ("level", "B"), ("mode", "B"), ("pretrigger_samples", "I"),
               ("total_samples", "I"), ("holdoff", "I"), ("auto_timeout", "I"), ("pretrigger_words", "H"),
               ("total_words", "H"), ("reserved", "I")]
@@ -1652,11 +1922,31 @@ class Trigger(Payload):
     mode: int = 0
     pretrigger_samples: int = 0
     total_samples: int = 0
+    #: raw 0x1B value: a trigger hold-off in 5 ns units since 0x153C (caps HOLDOFF), stored and unused before
     holdoff: int = 0
     auto_timeout: int = 0
     pretrigger_words: int = 0
     total_words: int = 0
     reserved: int = 0
+    trigger2: "Trigger2 | None" = None
+
+    def pack(self) -> bytes:
+        out = super().pack()
+        if self.trigger2 is not None:
+            out += self.trigger2.pack()
+        return out
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "Trigger":
+        t = super().unpack(data[:28])
+        if len(data) >= 28 + Trigger2.size():
+            t.trigger2 = Trigger2.unpack(data[28:28 + Trigger2.size()])
+        return t
+
+    @property
+    def type(self) -> int:
+        """The trigger type (TRIG_EDGE before 1.26)."""
+        return self.trigger2.type if self.trigger2 is not None else TRIG_EDGE
 
 
 TRIG_MODES = ("auto", "normal", "single")
@@ -1714,10 +2004,12 @@ class ReadRawReq(Payload):
     ADDR_TRIGGER: ClassVar[int] = 2
     #: 1.17: segment-relative, address = segment << 16 | word offset from the segment's record start
     ADDR_SEGMENT: ClassVar[int] = 3
-    #: layouts: 0 per core, 1 both cores of a channel interleaved, 2 (1.9) u16 per word (low byte core A)
+    #: layouts: 0 per core, 1 both cores of a channel interleaved, 2 (1.9) u16 per word (low byte core A), 3 (1.26)
+    #: peak records: per selected channel ``count`` u8 minima (the core A slot) then ``count`` u8 maxima (core B slot)
     LAYOUT_CORES: ClassVar[int] = 0
     LAYOUT_INTERLEAVED: ClassVar[int] = 1
     LAYOUT_WIDE: ClassVar[int] = 2
+    LAYOUT_PEAK: ClassVar[int] = 3
 
 
 #: core_mask bits in ascending order: CH1 A, CH1 B, CH2 A, CH2 B.
@@ -1788,13 +2080,22 @@ class TraceChannelMeta(Payload):
 # Decimation filter (protocol 1.9, FPGA 0x1534, section 14 row 47; mirrors firmware/scope/pc_decim.c)
 
 #: SET_DECIM filter / GET_DECIM byte 0 (the UI's acquisition Filter setting)
-DECIM_FILTERS = ("off", "boxcar", "cic2", "cic3")
-#: filter choices with the 1.11 FIR (GET_DECIM byte 1 bit 3 / SET_DECIM flags bit 3), as the UI's Filter box steps
-DECIM_FILTER_CHOICES = ("off", "boxcar", "boxcar+fir", "cic2", "cic2+fir", "cic3", "cic3+fir")
+DECIM_FILTERS = ("off", "boxcar", "cic2", "cic3", "peak")
+#: SET_DECIM filter 4 (protocol 1.26, FPGA 0x153C, caps PEAK_DETECT): peak detect, each stored word = { max, min } of
+#: the window's raw samples (the firmware writes 0x53 K = 1 and 0x56 bit 1; the FIR is off, the shift unused)
+DECIM_PEAK = 4
+#: filter choices with the 1.11 FIR (GET_DECIM byte 1 bit 3 / SET_DECIM flags bit 3), as the UI's Filter box steps,
+#: plus 1.26 "peak" (the ACQ menu's Sample row)
+DECIM_FILTER_CHOICES = ("off", "boxcar", "boxcar+fir", "cic2", "cic2+fir", "cic3", "cic3+fir", "peak")
+#: the shift byte (0x29 byte 1; GET_DECIM 3 / 25 / 27, GET_CAPTURE_INFO 69, READ_TRACE 31) since 1.26: bit 7 peak
+#: active (0x56 bit 1 and K >= 1), bit 6 peak as written, bits 5..0 S
+DECIM_PEAK_ACT = 0x80
+DECIM_PEAK_EN = 0x40
+DECIM_SHIFT_MASK = 0x3F
 
 
 def parse_decim_filter(name: str) -> tuple[int, bool]:
-    """'cic2+fir' -> (2, True); 'off' -> (0, False)."""
+    """'cic2+fir' -> (2, True); 'off' -> (0, False); 'peak' -> (4, False)."""
     n = name.strip().lower()
     if n not in DECIM_FILTER_CHOICES:
         raise ValueError(f"unknown filter {name!r}; use one of {', '.join(DECIM_FILTER_CHOICES)}")
@@ -1889,6 +2190,10 @@ class DecimConfig:
     fir: bool = False
     #: 1.24: FPGA 0x153A+ capture stages (DECIM_HAS_CAPSTAGES): the EXT shifts are longer
     cap: bool = False
+    #: 1.26: peak detect active (k = 1, each word = { max, min } raw codes of the N-sample window, gain 1, shift 0)
+    peak: bool = False
+    #: 1.26: 0x56 bit 1 as written (the firmware writes it only for a peak record: never at divider 0 / long records)
+    peak_en: bool = False
 
     @property
     def mode(self) -> int:
@@ -1901,24 +2206,36 @@ class DecimConfig:
         return self.mode | (DECIM_WIDE if self.k else 0) | (DECIM_FIR_EN if self.fir_en else 0) | \
             (DECIM_FIR_ACT if self.fir else 0)
 
+    @property
+    def shift_byte(self) -> int:
+        """The 0x29 byte 1 (1.26 layout): S in bits 5..0, bit 7 peak active, bit 6 peak as written."""
+        return (self.shift & DECIM_SHIFT_MASK) | (DECIM_PEAK_ACT if self.peak else 0) | \
+            (DECIM_PEAK_EN if self.peak_en else 0)
+
     @classmethod
     def from_status(cls, status: int, shift: int, n: int, gain: int | None = None, why: int = 0) -> "DecimConfig":
-        """From a 0x29 byte 0 (GET_DECIM, GET_CAPTURE_INFO, READ_TRACE); the gain is (N/2)^K with the FIR active."""
+        """From a 0x29 byte 0 and the shift byte (GET_DECIM, GET_CAPTURE_INFO, READ_TRACE); the gain is (N/2)^K with
+        the FIR active, 1 with peak detect (shift byte bit 7, 1.26)."""
         k = status & 3 if status & DECIM_WIDE else 0
-        fir = bool(status & DECIM_FIR_ACT) and k > 0
+        peak = bool(shift & DECIM_PEAK_ACT) and k > 0
+        peak_en = bool(shift & DECIM_PEAK_EN)
+        s = shift & DECIM_SHIFT_MASK
+        fir = bool(status & DECIM_FIR_ACT) and k > 0 and not peak
+        if peak:
+            gain, s = 1, 0
         if gain is None:
             gain = decim_gain(n // 2 if fir else n, k) if k else 1
-        return cls(k, status & DECIM_FLAGS, shift, why, n if k else 0, gain if k else 1, bool(status & DECIM_FIR_EN),
-                   fir)
+        return cls(k, status & DECIM_FLAGS, s, why, n if k else 0, gain if k else 1, bool(status & DECIM_FIR_EN),
+                   fir, peak=peak, peak_en=peak_en)
 
     @property
     def scale_q24(self) -> int:
-        return decim_scale_q24(self.gain, self.shift) if self.k else 0
+        return decim_scale_q24(self.gain, self.shift) if self.k and not self.peak else 0
 
     @property
     def code_per_count(self) -> float:
-        """ADC codes (mean of the filter window) per stored count: 2^S / gain."""
-        return (1 << self.shift) / self.gain if self.k else 1.0
+        """ADC codes (mean of the filter window) per stored count: 2^S / gain (1 for peak records: raw codes)."""
+        return (1 << self.shift) / self.gain if self.k and not self.peak else 1.0
 
     def rate(self, divider: int) -> int:
         if self.k and self.n:
@@ -1945,18 +2262,23 @@ class DecimConfig:
 
     @property
     def settle_us(self) -> int:
-        """Filter settling after a change: (K + 2) output periods, us, rounded up; with the FIR (K + 10) N 5 ns + 1 us."""
+        """Filter settling after a change: (K + 2) output periods, us, rounded up; with the FIR (K + 10) N 5 ns + 1 us;
+        peak detect 11 N 5 ns + 1 us (pc_decim_settle_us)."""
         if not self.k:
             return 0
+        if self.peak:  # 1.26 (fw-c6): after the 0x56 write as after a filter write, K counted as 1
+            return min((11 * self.n + 199) // 200 + 1, 0xFFFFFFFF)
         if self.fir:
             return min(((self.k + 10) * self.n + 199) // 200 + 1, 0xFFFFFFFF)
         return min(((self.k + 2) * self.n + 199) // 200, 0xFFFFFFFF)
 
     @property
     def filter_name(self) -> str:
-        """Effective filter: 'cic2+fir' only while the FIR is active."""
+        """Effective filter: 'cic2+fir' only while the FIR is active; 'peak' (1.26) while peak detect is active."""
         if not self.k:
             return "off"
+        if self.peak:
+            return "peak"
         return DECIM_FILTERS[self.k] + ("+fir" if self.fir else "")
 
 
@@ -1965,16 +2287,20 @@ def decim_fir_eligible(n: int) -> bool:
 
 
 def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: int = DECIM_HAS_CIC) -> DecimConfig:
-    """pc_decim_config: the configuration an arm writes for the Filter setting ``k_req`` (0-3), ``flags``
-    (DECIM_FLAGS bits, plus DECIM_SET_FIR), the 0x0D divider, the capture length and the bitstream's level
-    (DECIM_HAS_*, | DECIM_HAS_CAPSTAGES on 0x153A+). With the FIR active the CIC decimates by M = N / 2: gain M^K,
-    S one higher, exactness on M."""
-    k, n = k_req & 3, decim_n(divider)
+    """pc_decim_config: the configuration an arm writes for the Filter setting ``k_req`` (0-3; 4 = peak detect since
+    1.26), ``flags`` (DECIM_FLAGS bits, plus DECIM_SET_FIR), the 0x0D divider, the capture length and the bitstream's
+    level (DECIM_HAS_*, | DECIM_HAS_CAPSTAGES on 0x153A+). With the FIR active the CIC decimates by M = N / 2: gain
+    M^K, S one higher, exactness on M. Peak detect runs the 16-bit path as K = 1 with the same legacy cases (divider 0,
+    records over 8190 samples) and no FIR, shift 0, gain 1; the FIR request is dropped, and 0x56 bit 1 (``peak_en``,
+    shift byte bit 6) is written only when the record is a peak record (fw-c6: not at divider 0 / long records)."""
+    peak = k_req == DECIM_PEAK
+    k, n = (1 if peak else k_req & 3), decim_n(divider)
     cap = bool(has & DECIM_HAS_CAPSTAGES)
     has &= ~DECIM_HAS_CAPSTAGES
     if has == DECIM_HAS_NONE:
         return DecimConfig(why=6, cap=cap)
-    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR), cap=cap)
+    c = DecimConfig(flags=flags & DECIM_FLAGS, fir_en=has >= DECIM_HAS_FIR and bool(flags & DECIM_SET_FIR) and not peak,
+                    cap=cap)
     if cap:  # 0x153A: bits 3 / 4 select nothing (they read back in 0x29), kept 0
         c.flags &= ~(DECIM_NEG_A | DECIM_NEG_B)
     if k == 0:
@@ -1985,6 +2311,9 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: 
         return c
     if total_samples > DECIM_MAX_TOTAL:
         c.why = 3
+        return c
+    if peak:
+        c.k, c.n, c.gain, c.shift, c.peak, c.peak_en = 1, n, 1, 0, True, True
         return c
     c.fir = c.fir_en and decim_fir_eligible(n)
     m = n // 2 if c.fir else n
@@ -1999,8 +2328,8 @@ def decim_config(k_req: int, flags: int, divider: int, total_samples: int, has: 
 
 @dataclass
 class SetDecimReq(Payload):
-    """SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3), u8 flags (bit 0 core-order swap, bit 1 / 2 capture the
-    A / B cores on the falling edge), u16 0."""
+    """SET_DECIM: u8 filter (0 off, 1 boxcar, 2 CIC2, 3 CIC3, 4 peak detect since 1.26), u8 flags (bit 0 core-order
+    swap, bit 1 / 2 capture the A / B cores on the falling edge, bit 3 FIR), u16 0."""
 
     FIELDS = [("filter", "B"), ("flags", "B"), ("_r", "2x")]
     filter: int = 0
@@ -2055,8 +2384,119 @@ class DecimState(Payload):
 
     @property
     def filter_setting(self) -> str:
-        """The setting as the UI's Filter box names it ('cic2+fir')."""
+        """The setting as the UI's Filter box names it ('cic2+fir'; 'peak' for the 1.26 Sample row)."""
+        if self.filter == DECIM_PEAK:
+            return "peak"
         return DECIM_FILTERS[self.filter & 3] + ("+fir" if self.flags & SetDecimReq.FIR and self.filter else "")
+
+
+# Hardware counter (protocol 1.26, FPGA 0x153C read 0x35, docs/plans/fpga-0x153c.md section 5)
+
+#: GET_COUNTER gate (0x61 bits 1..0): seconds, 0 = off
+COUNTER_GATES = (0.0, 10e-3, 100e-3, 1.0)
+#: GET_COUNTER source (0x61 bits 3..2): 0 follows the trigger source (0x15)
+COUNTER_SOURCES = ("trigger", "CH1", "CH2", "EXT")
+COUNTER_CLOCK_HZ = BASE_CLOCK_HZ  # E, T and W count 5 ns clocks
+COUNTER_F_NEW = 0x01  # a gate ended since the last read
+COUNTER_F_VALID = 0x02  # E >= 1: at least two edges in the gate
+COUNTER_F_EXT = 0x04  # the effective source is EXT
+COUNTER_F_CH2 = 0x08  # the effective source is CH2 (neither: CH1)
+#: the firmware's boot thresholds (0x62): level 128 until the first main-loop pass, then the UI trigger level
+#: followed (fw-c7: configured level 0), hysteresis 6 codes (about 3 x the 2 LSB noise)
+COUNTER_DEFAULT_LEVEL, COUNTER_DEFAULT_HYST = 128, 6
+#: GET_COUNTER level 0: follow the trigger level (clamped to 0..255) instead of pinning a code
+COUNTER_LEVEL_FOLLOW = 0
+
+
+@dataclass
+class CounterReq(Payload):
+    """GET_COUNTER request (8 bytes): u8 what (0 read the snapshot, 1 write the configuration then read), u8 gate
+    (COUNTER_GATES index), u8 source (COUNTER_SOURCES index), u8 level (raw code, Schmitt high at >= level; 0 =
+    follow the trigger level, the boot state), u8 hysteresis (codes below the level for low), 3 x 0. With what = 0
+    the other fields are ignored. E_BAD_ARG detail 0 what, 1 gate, 2 source, 4 hysteresis > a non-zero level."""
+
+    FIELDS = [("what", "B"), ("gate", "B"), ("source", "B"), ("level", "B"), ("hysteresis", "B"), ("_r", "3x")]
+    what: int = 0
+    gate: int = 0
+    source: int = 0
+    level: int = 0
+    hysteresis: int = 0
+
+    READ: ClassVar[int] = 0
+    CONFIG: ClassVar[int] = 1
+
+
+@dataclass
+class CounterResp(Payload):
+    """GET_COUNTER response (24 bytes): 0 u8 flags (COUNTER_F_*), 1 u8 seq (gate sequence number), 2 u8 gate, 3 u8
+    source as configured (0 = the trigger source), 4 u32 E (periods between the first and the last rising edge in
+    the gate; 0 = fewer than two edges), 8 u32 T (5 ns clocks between them), 12 u32 W (high clocks in them), 16 u8
+    min, 17 u8 max (the source's raw codes over the gate; 255 / 0 when no sample), 18 u8 level, 19 u8 hysteresis (the
+    thresholds in effect: the trigger level while following), 20 u32 freq_mHz (the firmware's E / (T x 5 ns) in millihertz, saturating; 0 when invalid).
+    Derived: frequency = E / (T x 5 ns), period = T x 5 ns / E, width = W x 5 ns / E, duty = W / T; resolution one
+    clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy on top."""
+
+    FIELDS = [("flags", "B"), ("seq", "B"), ("gate", "B"), ("source", "B"), ("e", "I"), ("t", "I"), ("w", "I"),
+              ("min", "B"), ("max", "B"), ("level", "B"), ("hysteresis", "B"), ("freq_mhz", "I")]
+    flags: int = 0
+    seq: int = 0
+    gate: int = 2
+    source: int = 0
+    e: int = 0
+    t: int = 0
+    w: int = 0
+    min: int = 255
+    max: int = 0
+    level: int = COUNTER_DEFAULT_LEVEL
+    hysteresis: int = COUNTER_DEFAULT_HYST
+    freq_mhz: int = 0
+
+    @property
+    def new(self) -> bool:
+        return bool(self.flags & COUNTER_F_NEW)
+
+    @property
+    def valid(self) -> bool:
+        return bool(self.flags & COUNTER_F_VALID) and self.e >= 1 and self.t > 0
+
+    @property
+    def gate_s(self) -> float:
+        return COUNTER_GATES[self.gate] if self.gate < len(COUNTER_GATES) else 0.0
+
+    @property
+    def effective_source(self) -> str:
+        """The channel the counter looked at ('CH1', 'CH2' or 'EXT' from the flags)."""
+        if self.flags & COUNTER_F_EXT:
+            return "EXT"
+        return "CH2" if self.flags & COUNTER_F_CH2 else "CH1"
+
+    @property
+    def frequency_hz(self) -> float | None:
+        return self.e * COUNTER_CLOCK_HZ / self.t if self.valid else None
+
+    @property
+    def period_s(self) -> float | None:
+        return self.t / COUNTER_CLOCK_HZ / self.e if self.valid else None
+
+    @property
+    def width_s(self) -> float | None:
+        return self.w / COUNTER_CLOCK_HZ / self.e if self.valid else None
+
+    @property
+    def duty(self) -> float | None:
+        return self.w / self.t if self.valid else None
+
+    @property
+    def resolution(self) -> float | None:
+        """Relative resolution of the frequency: one clock in T."""
+        return 1.0 / self.t if self.valid else None
+
+
+def counter_freq_mhz(e: int, t: int) -> int:
+    """The firmware's byte 20: round(E x 200e6 x 1000 / T), saturating at 2^32 - 1; 0 without a valid count."""
+    if e < 1 or t <= 0:
+        return 0
+    return min((e * COUNTER_CLOCK_HZ * 1000 + t // 2) // t, 0xFFFFFFFF)
 
 
 @dataclass
@@ -3024,16 +3464,21 @@ LAST_END = ("unknown (no life record)", "settings saved at power-off",
             "ended without a power-off save (warm restart, power lost, a viewer open at power-off or the write failed)")
 
 
-#: GET_HEALTH 88 (protocol 1.19): how the firmware checks full-rate captures
+#: GET_HEALTH 88 (protocol 1.19): how the firmware checks full-rate captures. Since fw 0.2.102 (one bitstream) the
+#: mode is 2 on the built-for bitstream and 1 only when the boot 0x33 reported an unknown encode convention (the
+#: firmware then judges the records by their data); 0 was the stock / EF2 / EP4 bitstreams up to fw 0.2.101.
 ENC_MODES = {0: "none", 1: "record data", 2: "FPGA read 0x33"}
-ENC_MODE_TEXT = {0: "no check (stock, EF2 or EP4 bitstream)",
-                 1: "record data: core B against its core A neighbours over the first 250 words (AL3 0x1532..0x1537)",
-                 2: "FPGA self-check, read 0x33 after every capture (AL3 0x1538+)"}
+ENC_MODE_TEXT = {0: "no check (firmware before 0.2.102 on a stock, EF2 or EP4 bitstream)",
+                 1: "record data: core B against its core A neighbours over the first 250 words (the boot 0x33 "
+                    "reported an unknown encode convention; AL3 0x1532..0x1537 before fw 0.2.102)",
+                 2: "FPGA self-check, read 0x33 after every capture"}
 #: GET_HEALTH 90 flags (protocol 1.19)
 ENC_READ = 0x01  # a 0x33 byte was read since boot
 ENC_CONVENTION_BAD = 0x02  # 0x33 bits 3:2 at boot were not 01
 ENC_LAST_BAD = 0x04  # the last checked capture was accepted garbled after 16 re-arms
-ENC_ORDER_DIFFERS = 0x08  # core order differs from the convention (0x1537: recalibrate after flashing 0x153B)
+#: retired: core order differed from the convention (0x1537, fw 0.2.62..0.2.101); never set since fw 0.2.102 (one
+#: bitstream, the convention is the FPGA's own report), still decoded for older answers
+ENC_ORDER_DIFFERS = 0x08
 #: FPGA read 0x33 bits 7..4: the last pin check {CH2 A, CH2 B, CH1 A, CH1 B}, 1 = right; a good capture reads 0xF6
 ENC33_PINS = ((7, "CH2 A"), (6, "CH2 B"), (5, "CH1 A"), (4, "CH1 B"))
 ENC33_GOOD = 0xF6
@@ -3122,7 +3567,8 @@ class HealthResp(Payload):
     """GET_HEALTH response, 96 bytes (protocol 1.16, row 55), 104 bytes from 1.19 (row 58: the full-rate encode check
     in 88..103; a 96-byte answer reads them as 0 and ``has_enc_check`` is False), 124 bytes and layout 2 from 1.24
     (row 64: the FPGA 0x153A capture stages in 104..123; a shorter answer reads them as 0 and ``has_capture`` is
-    False)."""
+    False), 128 bytes and layout 3 from 1.25 (fw 0.2.102: 124 u16 ``fw_fpga_version``, 126 u8 ``fpga_flags`` as
+    GET_INFO 76..78, 127 0; a shorter answer reads them as 0)."""
 
     FIELDS = [("layout", "B"), ("_r0", "x"), ("length", "H"), ("usb_state", "B"), ("usb_flags", "B"),
               ("usb_power", "B"), ("usb_faddr", "B"), ("suspend_ms", "I"), ("since_config_ms", "I"), ("cp15", "I"),
@@ -3134,9 +3580,9 @@ class HealthResp(Payload):
               ("rec_minutes", "I"), ("enc_mode", "B"), ("enc_last33", "B"), ("enc_flags", "B"),
               ("enc_boot33", "B"), ("enc_bad", "I"), ("enc_recovered", "I"), ("enc_checked", "I"),
               ("cap_value", "H"), ("cap_flags", "B"), ("cap_flagged", "B"), ("cap_counts", "4H"), ("cap_reads", "I"),
-              ("cap_flagged_n", "I")]
-    layout: int = 2
-    length: int = 124
+              ("cap_flagged_n", "I"), ("fw_fpga_version", "H"), ("fpga_flags", "B"), ("_r127", "x")]
+    layout: int = 3
+    length: int = 128
     usb_state: int = 3
     usb_flags: int = 0
     usb_power: int = 0
@@ -3184,10 +3630,33 @@ class HealthResp(Payload):
     cap_counts: tuple[int, ...] = (0, 0, 0, 0)
     cap_reads: int = 0
     cap_flagged_n: int = 0
+    #: protocol 1.25 (bytes 124..126): the bitstream the firmware is built for and the FPGA_F_* flags (as GET_INFO
+    #: 76..78; 0 in a shorter answer)
+    fw_fpga_version: int = 0
+    fpga_flags: int = 0
 
     @property
     def has_enc_check(self) -> bool:
         return self.length >= 104
+
+    @property
+    def has_fpga_version(self) -> bool:
+        """The answer carries the 1.25 bitstream block (layout 3, 128 bytes)."""
+        return self.layout >= 3 and self.length >= 128
+
+    @property
+    def fpga_mismatch(self) -> bool:
+        """1.25: the scope does not run the bitstream the firmware is built for (GET_HEALTH 126 bit 0)."""
+        return bool(self.fpga_flags & FPGA_F_MISMATCH)
+
+    def describe_fpga(self) -> dict[str, Any] | None:
+        """Bytes 124..126 (protocol 1.25) in words; None for an older answer."""
+        if not self.has_fpga_version:
+            return None
+        text = (f"FPGA bitstream mismatch: this firmware needs 0x{self.fw_fpga_version:04X}; captures and settings "
+                "are refused until it is flashed" if self.fpga_mismatch else
+                f"FPGA bitstream 0x{self.fw_fpga_version:04X}, the one this firmware is built for")
+        return {"firmware_bitstream": f"0x{self.fw_fpga_version:04X}", "mismatch": self.fpga_mismatch, "text": text}
 
     @property
     def has_capture(self) -> bool:
@@ -3300,7 +3769,8 @@ class HealthResp(Payload):
                    "registers": {k: f"0x{getattr(self, 'rec_' + k):08X}" for k in
                                  ("exc_lr", "spsr", "exc_sp", "reset_lr", "reset_sp", "reset_cpsr", "fsr", "far")}}
         return {"usb": usb, "cpu": cpu, "life": life, "settings": settings, "restart_record": rec,
-                "encode_check": self.describe_enc(), "capture_stages": self.describe_capture()}
+                "encode_check": self.describe_enc(), "capture_stages": self.describe_capture(),
+                "fpga": self.describe_fpga()}
 
 
 @dataclass
@@ -3659,7 +4129,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_SPECTRUM: ReadSpectrumReq.size(), Cmd.GET_DECIM: 0, Cmd.SET_DECIM: SetDecimReq.size(),
     Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0, Cmd.SET_SEQ: SetSeqReq.size(), Cmd.GET_SEQ: 0,
     Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
-    Cmd.CAL_PROBE: CalProbeReq.size(),
+    Cmd.CAL_PROBE: CalProbeReq.size(), Cmd.GET_COUNTER: CounterReq.size(), Cmd.SET_TRIGGER2: Trigger2.size(),
 }
 
 

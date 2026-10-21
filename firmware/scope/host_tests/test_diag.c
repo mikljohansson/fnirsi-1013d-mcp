@@ -293,7 +293,7 @@ static void test_ident_card(void)
   uint8_t tail[100];
   uint32_t n;
 
-  mock_reset(0x1535);
+  mock_reset(PC_FW_FPGA_VERSION);
 
   //Record image identical to the running one
   card_image(700, NULL, 0, (const uint8_t *)&pc_image_ident, PC_ID_BYTES, 700 * 512 - 128);
@@ -353,7 +353,7 @@ static void test_bodies(void)
   static uint8_t scratch[65536];
   acal_prov p;
 
-  mock_reset(0x1535);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
 
   {
@@ -368,7 +368,7 @@ static void test_bodies(void)
   mock.now = 123456;
 
   pc_health_body(h);
-  T_EQ(h[0], 2); T_EQ(pc_get_u16(h + 2), PC_HEALTH_LEN);
+  T_EQ(h[0], 3); T_EQ(pc_get_u16(h + 2), PC_HEALTH_LEN);
   T_EQ(h[4], PC_USB_CONFIGURED); T_EQ(h[5], PC_USBF_HIGH_SPEED | PC_USBF_CONFIGURED | PC_USBF_DTR | PC_USBF_SOFTCONN);
   T_EQ(h[6], 0x70); T_EQ(h[7], 5); T_EQ(pc_get_u32(h + 8), 0); T_EQ(pc_get_u32(h + 12), 4000);
   T_EQ(pc_get_u32(h + 16), 0x0005107Du);
@@ -445,7 +445,7 @@ static void test_report(void)
   pc_life  l;
   acal_prov p;
 
-  mock_reset(0x1535);
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
   mock.now = 754321;
   layout_life(&l);
@@ -460,9 +460,10 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.24, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.27, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
-  has("FPGA: version word 0x1535, variant 2");
+  has("FPGA: version word 0x153c, variant 2, ring 8192 words, caps 0x");
+  has("; firmware built for 0x153c\r\n");
   has("USB serial: 1013D-0001");
   has("CPU: CP15 control 0x0005107d: MMU on, D-cache on, I-cache on");
   has("uptime: 0 h 12 min 34 s (754321 ms)");
@@ -481,23 +482,22 @@ static void test_report(void)
   has("sector 750: eGON.EXE, length 384000, checksum not checked");
   has("Event log (last ");
   has("Bus-level events (last ");
-  has("Full-rate capture check: record data (B against A neighbours); 0 checked, 0 bad, 0 recovered\r\n");
+  has("Full-rate capture check: FPGA read 0x33, 0x33 at boot 0xf6 (convention 1, B first), last none; 0 checked, 0 bad, 0 recovered\r\n");
   T_TRUE(strstr(mock.report, "[report truncated]") == NULL);
 
-  //fw 0.2.62 (1.19): the check line on 0x1538 and 0x1537
-  mock_reset(0x1538);
+  //fw 0.2.62 (1.19): the check line after captures, and the mismatch line
+  mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);
   mock.enc.last33 = 0x77; mock.enc.flags = PC_ENCF_READ | PC_ENCF_GARBLED;
   mock.enc.checked = 1200; mock.enc.bad = 3; mock.enc.recovered = 2;
   T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
   has("Full-rate capture check: FPGA read 0x33, 0x33 at boot 0xf6 (convention 1, B first), last 0x77; 1200 checked, "
       "3 bad, 2 recovered; the last one was accepted GARBLED\r\n");
-  mock_reset(0x1537);
+  mock_reset(0x1532);
   pc_session_init(&S);
-  mock.enc.flags = PC_ENCF_ORDER;
   T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
-  has("Full-rate capture check: record data (B against A neighbours), core order differs from the convention "
-      "(recalibrate after 0x1538); 0 checked");
+  has("FPGA: version word 0x1532, variant 2, ring 8192 words, caps 0x");
+  has("; firmware built for 0x153c: MISMATCH, the acquisition does not run\r\n");
 
   //Event 21 (1.19): reason, re-arms, value, caller
   {
@@ -568,7 +568,7 @@ int main(int argc, char **argv)
       const pc_card_id *c;
       size_t n;
 
-      mock_reset(0x1535);
+      mock_reset(PC_FW_FPGA_VERSION);
       if(!f)
         return 1;
       n = fread(mock.sd + PC_ID_SECTOR * 512, 1, (MOCK_SD_SECTORS - PC_ID_SECTOR) * 512, f);

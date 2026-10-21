@@ -12,6 +12,7 @@
 
 #include "test_util.h"
 #include "bode_sweep.h"
+#include "pc_decim.h"
 
 #define PI 3.14159265358979323846
 
@@ -40,7 +41,6 @@ typedef struct
   int    splice_untrig;       //fw 0.2.91: a capture whose CH1 does not cross the level ends on the time-out and is
                               //joined from two captures (the samples before total / 3 a 0.37 period off)
   uint32 untrig;              //captures that ended on the time-out
-  uint32 splice_every;        //fw 0.2.97: every splice_every-th capture is marked maybe spliced by the hw layer (0: none)
   uint32 reads;
 
   //State
@@ -293,7 +293,6 @@ static int h_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
   cap->fir = 1;
   cap->check = (uint8)((d->fault_at && (d->reads == d->fault_at)) ? BODE_CHK_FAULT : d->check);
   cap->triggered = (uint8)trig;
-  cap->spliced   = (uint8)(d->splice_every && ((d->reads % d->splice_every) == 0));
   return 0;
 }
 
@@ -1819,41 +1818,19 @@ static void test_constant_never_switches(void)
          (unsigned)D.r2_changes);
 }
 
-//fw 0.2.97: a record the hardware layer marks as maybe spliced (pc_bode.c: forced, or a trigger cut by the time-out on
-//FPGA 0x1532..0x153A) is taken again like an untriggered one; the sweep's results do not change
-static void test_spliced_retake(void)
+//fw-one: the planner's largest divider (1 Hz) stays within the 20 bits the FPGA compares (pc_decim.h PC_DIVIDER_MAX)
+static void test_divider_bound(void)
 {
-  bode_cfg c = cfg(100, 1e6, 25, BODE_SETTLE_NORMAL, BODE_CH2_AUTO);
-  sweep_rec a, b;
-  uint16 nc, nt, nl, no_a, no_b;
-  int i, worst = 0;
+  bode_plan pp;
 
-  dut_rc15(&D);
-  bode_init(&eng, &HW);
-  sweep_once(&c, 0, 3, &a);
-  bode_capture_stats(&eng, &nc, &nt, &nl, &no_a);
-
-  dut_rc15(&D);
-  D.splice_every = 9;
-  bode_init(&eng, &HW);
-  sweep_once(&c, 0, 3, &b);
-  bode_capture_stats(&eng, &nc, &nt, &nl, &no_b);
-  printf("  spliced every 9th capture: other retakes %u (clean %u), %u reads (clean %u)\n", no_b, no_a,
-         (unsigned)b.reads, (unsigned)a.reads);
-  T_TRUE(no_b > no_a);
-  T_TRUE(b.reads > a.reads);
-  T_EQ(b.bad, 0);
-  T_TRUE(same_ranges(&a, &b));
-
-  for(i = 0; i < a.n; i++)
-    if(abs(a.h[i] - b.h[i]) > worst)
-      worst = abs(a.h[i] - b.h[i]);
-  T_TRUE(worst <= 50);
-  D.splice_every = 0;
+  T_TRUE(bode_plan_point(BODE_FMIN_MHZ, &pp) >= 0);
+  T_TRUE(bode_divider(&pp) <= PC_DIVIDER_MAX);
+  T_EQ(bode_divider(&pp), 524287);
 }
 
 int main(void)
 {
+  test_divider_bound();
   test_rc_auto();
   test_hold();
   test_wiring_b();
@@ -1868,6 +1845,5 @@ int main(void)
   test_auto_span();
   test_auto_ch2();
   test_constant_never_switches();
-  test_spliced_retake();
   return t_report("test_bode_sweep");
 }

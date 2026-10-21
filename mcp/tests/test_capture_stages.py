@@ -24,7 +24,7 @@ def frame_payload(name: str) -> bytes:
 
 
 def test_bits_and_version():
-    assert P.PROTO_MINOR == 24
+    assert P.PROTO_MINOR >= 25
     assert P.Caps.CAPTURE_STAGES == 0x80000 and P.Features.CAPTURE_STAGES == 0x0080
     assert P.feature_names(0xFF)[-1] == "capture_stages"
     assert P.EVENT_TYPES[23] == "adc_capture"
@@ -36,7 +36,7 @@ def test_health_1_24_vector():
     assert len(raw) == 124 and (h.layout, h.length) == (2, 124) and h.has_capture and h.has_enc_check
     assert (h.cap_value, h.cap_flags, h.cap_flagged, h.cap_counts) == (0x08DC, 0x0F, 0x04, (0, 0, 37, 2))
     assert (h.cap_reads, h.cap_flagged_n) == (1200, 3)
-    assert h.pack() == raw
+    assert h.pack()[:124] == raw and not h.has_fpga_version and h.describe()["fpga"] is None
     c = h.describe()["capture_stages"]
     assert c["stages"] == "CH1 A4 B3, CH2 A3 B4" and c["source"] == "trained" and c["value"] == "0x08DC"
     assert c["flagged_cores"] == ["CH2 A"] and c["last_counts"]["CH2 A"] == 37
@@ -77,7 +77,7 @@ def test_health_capture_words():
 def test_health_wire_offsets():
     b = P.HealthResp(cap_value=0x1234, cap_flags=5, cap_flagged=6, cap_counts=(7, 8, 9, 10), cap_reads=11,
                      cap_flagged_n=12).pack()
-    assert len(b) == 124 and b[0] == 2 and struct.unpack_from("<H", b, 2) == (124,)
+    assert len(b) == 128 and b[0] == 3 and struct.unpack_from("<H", b, 2) == (128,)  # layout 3 since 1.25
     assert struct.unpack_from("<HBB4HII", b, 104) == (0x1234, 5, 6, 7, 8, 9, 10, 11, 12)
 
 
@@ -166,13 +166,13 @@ def test_ext_shifts_0x153a():
 
 
 def test_simulator_al3c(sim_factory):
-    srv = sim_factory(variant="al3c", signal="sine:freq=10kHz,amp=0.25")
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     d = srv.device
     with Scope.connect(srv.url) as s:
-        assert s.info.caps & P.Caps.CAPTURE_STAGES and s.info.proto_minor == 24
+        assert s.info.caps & P.Caps.CAPTURE_STAGES and s.info.proto_minor >= 25
         assert s.status().features & P.Features.CAPTURE_STAGES
         h = s.health()
-        assert (h.layout, h.length, h.cap_value, h.cap_flags, h.cap_reads) == (2, 124, P.CAP_POWER_ON, P.CAPF_HAS, 0)
+        assert (h.layout, h.length, h.cap_value, h.cap_flags, h.cap_reads) == (3, 128, P.CAP_POWER_ON, P.CAPF_HAS, 0)
         c = s.get_cal(0, cached=False)
         assert c.nbytes == 364 and (c.cap_trailer, c.cap_flags, c.cap_value) == (0, P.CAPF_HAS, P.CAP_POWER_ON)
         s.set_timebase(divider=0)
@@ -194,18 +194,19 @@ def test_simulator_al3c(sim_factory):
         s.capture(["CH1"])
         assert s.health().cap_reads == 4
         assert s.get_decim().ext_shift == 0  # CH1 trigger
-        d.cap_stored = (0x08DC, 0x153A)
+        d.cap_stored = (0x08DC, P.FW_FPGA_VERSION)  # trained on the bitstream the scope runs
         d.cap_boot()
         c = s.get_cal(1, cached=False)
-        assert (c.cap_trailer, c.cap_stored, c.cap_stored_fpga, c.cap_value) == (1, 0x08DC, 0x153A, 0x08DC)
+        assert (c.cap_trailer, c.cap_stored, c.cap_stored_fpga, c.cap_value) == \
+            (1, 0x08DC, P.FW_FPGA_VERSION, 0x08DC)
         assert c.cap_flags == P.CAPF_HAS | P.CAPF_TRAINED
-        d.cap_stored = (0x08DC, 0x153B)
+        d.cap_stored = (0x08DC, 0x153A)  # trained on another bitstream: not applied
         d.cap_boot()
         assert s.health().cap_flags & (P.CAPF_OTHER | P.CAPF_TRAINED) == P.CAPF_OTHER
 
 
 def test_simulator_al3c_ext_shift(sim_factory):
-    srv = sim_factory(variant="al3c", signal="sine:freq=10kHz,amp=0.25")
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     d = srv.device
     s = d.settings
     dec = d.decim_config(s)
@@ -214,7 +215,7 @@ def test_simulator_al3c_ext_shift(sim_factory):
 
 
 def test_simulator_older_protocol_lengths(sim_factory):
-    srv = sim_factory(variant="al3c", proto_minor=23)
+    srv = sim_factory(proto_minor=23)
     with Scope.connect(srv.url) as s:
         assert not s.info.caps & P.Caps.CAPTURE_STAGES
         assert not s.status().features & P.Features.CAPTURE_STAGES
@@ -226,7 +227,7 @@ def test_simulator_older_protocol_lengths(sim_factory):
 def test_tools(sim_factory, tmp_path):
     from test_server import client_for
 
-    srv = sim_factory(variant="al3c", signal="sine:freq=10kHz,amp=0.25")
+    srv = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     d = srv.device
 
     async def main():

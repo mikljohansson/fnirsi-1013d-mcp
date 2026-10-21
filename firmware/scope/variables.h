@@ -303,7 +303,7 @@ int pc_glue_sys_menu_height(void);
 
 #define ACQ_MENU_XPOS                      250//ACQ_BUTTON_XPOS
 #define ACQ_MENU_YPOS                       48//46
-#define ACQ_MENU_WIDTH                     380//304
+#define ACQ_MENU_WIDTH                     478   //ui-sample: x 250 .. 728, the Sample box and the Memory column moved by 98 px (ui_ctrl.h UI_ACQ_W)
 #define ACQ_MENU_HEIGHT                    386   //fw 0.2.56: 1.00o5's height again (the 0.2.51 Display row went to CTRL)
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -330,10 +330,14 @@ int pc_glue_sys_menu_height(void);
 #define TRIGGER_MENU_XPOS      TRIGGER_BUTTON_XPOS-38//28
 #define TRIGGER_MENU_YPOS                       48//46
 #define TRIGGER_MENU_WIDTH                     220//210//166
-//5 rows (no Hold off row: never sent to the FPGA); fw 0.2.71: 24 px more in Frequency response for the line "Not used by
-//the sweep" (bode_ui.h BU_TRIG_NOTE_H)
+//6 rows at a 56 px pitch (no Hold off row: never sent to the FPGA; ui-type: the Type row sixth), 336 px; 94 px more for
+//the type's two parameter rows (Pulse: Width, Shorter / Longer; Nth: N, Idle), none in Frequency response, where the line
+//"Not used by the sweep" adds 24 px (fw 0.2.71, bode_ui.h BU_TRIG_NOTE_H): menu.c scope_trigger_menu_height. The screen
+//under the menu is saved and restored at its largest height (the type changes inside the menu), clipped to the screen
 int bode_view_active(void);
-#define TRIGGER_MENU_HEIGHT                    (280 + (bode_view_active() ? 24 : 0))
+int scope_trigger_menu_height(void);
+#define TRIGGER_MENU_HEIGHT                    scope_trigger_menu_height()
+#define TRIGGER_MENU_SAVE_H                    432
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Signal generator button and menu
@@ -678,7 +682,6 @@ struct tagFPGASettings
   uint16    settriggerpoint;        //Set start triger point in FPGA
   
   
-  uint8     fw_FPGA;              //1- firmware in fpga is fnirsi, 2 is AL3-PECO, 3 is EF2-PECO
 
 };
 
@@ -852,6 +855,7 @@ extern uint8 triggermenuopen;
 extern uint8 genmenuopen;                  
 extern uint8 freqmenuopen;                 
 extern uint8 dutymenuopen;                 
+extern uint8 trignmenuopen;                //ui-type: the keypad for the Nth edge's N, under the trigger menu
 
 extern uint8 keymenuopen; 
 
@@ -901,7 +905,6 @@ extern SCOPESETTINGS    savedscopesettings2;
 
 extern uint32 channel1tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern uint32 channel1tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 //extern uint32 channel1_ref1_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 //extern uint32 channel1_ref2_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
@@ -914,7 +917,6 @@ extern DISPLAYPOINTS channel1pointsbuffer[TRACE_POINTS_MAX];
 //-------------------------------------------------------------
 extern uint32 channel2tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 
-extern uint32 channel2tracebufferAVG[MAX_SAMPLE_BUFFER_SIZE];
 
 //extern uint32 channel2_ref1_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
 //extern uint32 channel2_ref2_tracebuffer[UINT32_SAMPLE_BUFFER_SIZE];
@@ -958,8 +960,6 @@ extern double disp_sample_step;
 
 extern int32 disp_first_sample;
 
-extern uint32 AVG_trigger;
-extern uint32 AVG_trigger1;
 extern uint32 disp_have_trigger;
 extern uint32 disp_trigger_index;
 

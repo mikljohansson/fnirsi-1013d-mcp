@@ -101,6 +101,57 @@ void     pc_hal_trigger_read(pc_hw_trigger *t);
 void     pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask);                    //[UI][FPGA] masked PC_TRG_* fields
 uint32_t pc_hal_auto_timeout_default(uint32_t total_samples);                          //what 1.00o5 writes to 0x0E
 
+//1.26 (fw-c5, FPGA 0x153C): the trigger extension (fpga_bus.h "Trigger types and hold-off"): type, flags, N, H and the
+//hold-off. The polarity is the trigger's edge, the level the trigger's level (pc_hw_trigger). The firmware keeps one
+//copy; the write puts the registers into the FPGA at once and asks for the hold-off clear at the next arm (0x66 = 1).
+//Nothing is converted: N and H are samples of the trigger stream (CH1 / CH2 one per memory word, EXT 5 ns clocks), the
+//hold-off is in 5 ns units.
+#define PC_TRG_T_EDGE     0
+#define PC_TRG_T_PULSE    1       //a pulse shorter (longer with PC_TRG_F_LONGER) than N samples; fires on its trailing edge
+#define PC_TRG_T_NTH      2       //the Nth edge after the arm, or after an idle time of H samples (H = 0: from the arm)
+#define PC_TRG_T_TIMEOUT  3       //the level held for N samples after the edge (or the arm)
+#define PC_TRG_T_RUNT     4       //0x153E: refused by this firmware (E_BAD_ARG)
+#define PC_TRG_T_WINDOW   5       //0x153E: refused
+#define PC_TRG_F_LONGER   0x01    //pulse width: longer than N (0x5E bit 3)
+#define PC_TRG_F_RANGE    0x02    //0x153E: refused
+#define PC_TRG_F_BOTH     0x04    //0x153E: refused
+#define PC_TRG_N_MAX      0xFFFFFFu   //0x5F / 0x60 are 24 bits
+#define PC_TRG_NTH_MAX    0xFFFFu     //the Nth edge count
+
+typedef struct
+{
+  uint8_t  type;                //PC_TRG_T_*
+  uint8_t  flags;               //PC_TRG_F_*
+  uint32_t n;                   //pulse width / timeout: samples; Nth edge: the count
+  uint32_t h;                   //Nth edge: idle samples (0 = count from the arm)
+  uint32_t holdoff;             //5 ns units, 0 = off
+} pc_hw_trig_ext;
+
+void     pc_hal_trig_ext_read(pc_hw_trig_ext *t);                                      //any context (a memory read)
+void     pc_hal_trig_ext_write(const pc_hw_trig_ext *t);                               //[FPGA] 0x5E / 0x5F / 0x60 / 0x1B, 0x66 = 1
+void     pc_hal_trig_status(uint8_t out[4]);                                           //[FPGA] 0x37, then the 3 bytes of 0x34
+
+//C7 counter (fw-c7, FPGA 0x153C, protocol 1.26 row 66; fpga_counter.h): the hardware counter's configuration, the
+//result the main loop's pass holds and what it derived. Both calls are memory only (any context): the pass does every
+//bus access, a configuration is written by the next pass (GET_COUNTER is answered inside menus too).
+typedef struct
+{
+  uint8_t  gate;                //configured: 0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s (0x61 bits 1..0)
+  uint8_t  source;              //configured: 0 the trigger source, 1 CH1, 2 CH2, 3 EXT (0x61 bits 3..2)
+  uint8_t  level, hyst;         //in effect (0x62 as written; the trigger level when it is followed)
+  uint8_t  held;                //a result is held
+  uint8_t  current;             //and it is current: the gate on, the result younger than three gates + 100 ms
+  uint8_t  has_period;          //E >= 1
+  uint8_t  seq;                 //the result's sequence number
+  uint8_t  res_src;             //the result's source: 0 CH1, 1 CH2, 2 EXT
+  uint8_t  res_gate;            //the result's gate code
+  uint32_t e, t, w;             //periods, clocks, high clocks (5 ns clocks)
+  uint8_t  min, max;            //the source's raw codes over the gate (255 / 0 for EXT)
+} pc_hw_counter;
+
+void     pc_hal_counter_read(pc_hw_counter *c);                                        //any context (a memory read)
+void     pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst); //any context; level 0 = follow the trigger level
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Generator (Atlan4 DDS, FPGA 0x50-0x52)
 
@@ -110,24 +161,21 @@ void     pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable
 //----------------------------------------------------------------------------------------------------------------------------------
 // Acquisition [FPGA]
 
-//Reset the sample system, write the geometry while in reset (prog != 0: 0x0B/0x0C; always 0x0E), release.
+//Reset the sample system, write the geometry (0x0B / 0x0C) before and inside the reset and 0x0E inside it, release.
 //normal: trigger mode written to 0x1A (1 normal/single, 0 auto). dc: decimation filter configuration for this capture
-//(bitstream 0x1534+, written and settled before the reset, 16-bit trigger level from the UI level), NULL on bitstreams
-//without the filter (nothing written). sq: sequencer setting for this arm (bitstream 0x1536+, pc_seq.h; written with
-//0x0B / 0x0C before the reset, mode 0 = a single capture), NULL on bitstreams without the sequencer (nothing written).
-//Returns 0, or -1 when 0x05 never became ready.
-int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+//(written and settled before the reset, 16-bit trigger level from the UI level). sq: sequencer setting for this arm
+//(pc_seq.h; written with 0x0B / 0x0C before the reset, mode 0 = a single capture). Returns 0, or -1 when 0x05 never
+//became ready.
+int      pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int normal,
                     const pc_decim_cfg *dc, const pc_seq_cfg *sq);
 void     pc_hal_acq_poll(int *done, int *triggered);                                   //0x0A bit 0, 0x18 bit 0
 uint16_t pc_hal_acq_finish(void);                                                      //post-done writes, returns 0x14 & 0x1FFF
 void     pc_hal_force(void);                                                           //0x1A = 0
-void     pc_hal_force_stop(void);                    //fw 0.2.97: 0x0E = 0, 0x1A = 0 (ends an FPGA-auto capture at once)
-uint8_t  pc_hal_ext_status(void);                                                      //0x28 (0x1533+): bit0 level, bit1 gen on, bit2 edge seen
+uint8_t  pc_hal_ext_status(void);                                                      //0x28: bit0 level, bit1 gen on, bit2 edge seen
 
 //Read count bytes of one core (0..3 = FPGA 0x20..0x23) from ring word start, splitting at the ring end, one dummy read
-//after every 0x1F write, read_lag added to the address written. dst advances by stride per byte.
-void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
-                          uint32_t ring_words, uint8_t read_lag);
+//after every 0x1F write. dst advances by stride per byte.
+void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words);
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). The setting is the UI's acquisition "Filter" selector (saved with
 //the settings): bits 1:0 requested K (0 off, 1 boxcar, 2 CIC2, 3 CIC3), PC_DECIM_SET_FIR (0x1535+), the falling-edge
@@ -328,10 +376,10 @@ void     pc_hal_restart_test(void);                    //PC_DEBUG builds: jump t
 //conversions are checked on the target (enc_heal_hw.c), host ARM captures by the session (pc_acq_service); both count here
 typedef struct
 {
-  uint8_t  mode;            //EH_MODE_* of the running bitstream
+  uint8_t  mode;            //EH_MODE_FLAG, or EH_MODE_DATA when the boot 0x33 reported an unknown encode convention
   uint8_t  last33;          //last FPGA 0x33 byte read (PC_ENCF_READ)
   uint8_t  flags;           //PC_ENCF_*
-  uint8_t  boot33;          //0x33 at boot (0x1538+)
+  uint8_t  boot33;          //0x33 at boot
   uint32_t bad;             //captures found bad (GET_LINK_STATS 62)
   uint32_t recovered;       //of those, recovered by a re-arm (63)
   uint32_t checked;         //full-rate captures checked
@@ -341,12 +389,11 @@ typedef struct
 #define PC_ENCF_READ         0x01  //last33 holds a byte read after a capture
 #define PC_ENCF_CONV_BAD     0x02  //boot: 0x33 bits 3:2 were not 01 (encode convention unknown)
 #define PC_ENCF_GARBLED      0x04  //the last checked capture was accepted bad after EH_MAX_TRIES re-arms
-#define PC_ENCF_ORDER        0x08  //AL3 0x1537: core order differs from the convention (recalibrate after 0x1538)
+                                   //(0x08 was PC_ENCF_ORDER, AL3 0x1537's core order, up to fw 0.2.102)
 
 void     pc_hal_enc_state(pc_hw_enc *e);                     //any context
-uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33 (0x1538+), remembered as last33
+uint8_t  pc_hal_enc_status(void);                            //[FPGA] read 0x33, remembered as last33
 int      pc_hal_enc_written(void);                           //a 0x0D / 0x53 / 0x56 write since the last 0x01 = 1
-void     pc_hal_enc_retry(void);                             //[FPGA] before a re-arm: 0x0D = 1, 0 on 0x1532..0x1536
 void     pc_hal_enc_note(uint8_t why, const eh_note *n);     //count a check, log event 21 when n->done
 
 //fw 0.2.79 (protocol 1.24): FPGA 0x153A capture stages (cap_stage.h, cap_hw.c): GET_HEALTH 104..123, GET_CAL 356..363
@@ -428,5 +475,34 @@ void     pc_hal_screen_rows(uint32_t row, uint32_t nrows, uint8_t *dst);
 #define PC_BODE_CTRL_RESP 58         //row 60: 40, fw 0.2.91 48, 0.2.93 50 (planned switches), 0.2.94 58 (AUTO SET CH2)
 int      pc_hal_bode_ctrl(const uint8_t *req, uint8_t *resp, uint16_t *detail);
 uint32_t pc_hal_bode_read(uint32_t first, uint32_t max_rows, uint8_t *resp);
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger (fw-d4, FPGA 0x153D, protocol 1.27 row 67; fpga_log.h, pc_logring.h). The scope keeps one log: the FPGA side
+//(fpga_log) and the DDR ring of PC_LOG_RING_BYTES in the `.logring` section (fnirsi_1013d.ld). While it runs, the main loop
+//is the log loop (pc_hal_scope.c): drain steps and MAIN polls, the Scope view frozen with a "Logging to the host" line.
+#define PC_LOG_RING_BYTES (8u << 20)     //8 MiB: 16.8 s of the 500 kB/s every tier produces (host stalls)
+
+typedef struct
+{
+  uint8_t  state;               //FPGA_LOG_IDLE .. _ERROR (fpga_log.h): 0 idle, 1 running, 2 ended, 3 stopped, 4 error
+  uint8_t  ch_mask;
+  uint8_t  format;
+  uint8_t  flags;               //FPGA_LOG_FL_*: bit 0 a gap, bit 1 a gap because the DDR ring was full
+  uint64_t produced;            //bytes into the DDR ring since the start
+  uint64_t sent;                //bytes taken by LOG_READ
+  uint32_t gaps;
+  uint32_t ring_bytes;
+  uint32_t ms;                  //since the start, frozen at the end
+} pc_hw_log;
+
+//[FPGA][UI] 0x0D = divider, the decimation registers of dc (settled), the UI's conversions stopped, the stream armed
+//(fpga_log_start) for limit words (0 = until stopped). 0 running, -1 the FPGA never became ready, -2 the bitstream does not
+//stream (0x38). The main loop enters the log loop after this MAIN poll
+int      pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit);
+void     pc_hal_log_stop(uint8_t state);                     //[FPGA] FPGA_LOG_STOPPED (the tail is read) or _ERROR
+void     pc_hal_log_info(pc_hw_log *l);                      //memory, any context
+//MAIN (the drain shares the ring): up to max bytes, whole words, of the oldest unread segment; *word = the FPGA word
+//counter of the first word, *flags = PC_LOG_CF_GAP / _HOST on a segment's first chunk. Returns the bytes
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags);
 
 #endif /* PC_HAL_H */

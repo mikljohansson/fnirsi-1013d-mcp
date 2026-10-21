@@ -55,12 +55,12 @@ means another program has the port: ask the person, do not retry in a loop.
   that capture (`capture_settings`). Changes nothing.
 - `scope_averaged_capture`: when the noise matters (signal features below ~2 LSB, decay tails): averaging n captures
   lowers random noise by about sqrt(n). `align='edge'` with `align_channel` on the TX gate removes trigger jitter.
-  16-64 for a quick look, 256+ for fits. It reports drops (no trigger, clipped) and `restarts`. On a 0x1536
-  bitstream (`scope_status` `features` lists `hw_average`) `hardware=true` sums the records in the FPGA in one run:
+  16-64 for a quick look, 256+ for fits. It reports drops (no trigger, clipped) and `restarts`. `hardware=true`
+  (`scope_status` `features` lists `hw_average`) sums the records in the FPGA in one run:
   much faster for many records, but only with `align='hardware'`, records up to 2046 words (4092 samples 8-bit) and
   n <= 257 for 8-bit samples, and without the per-sample std or clipped-record rejection. It is not yet verified
   on the unit: say so when you report numbers from it.
-- `scope_capture_segments` (0x1536, `features` lists `segments`): many triggers in one go, each record with a 5 ns
+- `scope_capture_segments` (`features` lists `segments`): many triggers in one go, each record with a 5 ns
   timestamp, the FPGA re-arming itself in well under a microsecond plus `holdoff`. Use it for pulse trains, bursts and
   per-pulse detector captures (timing jitter between pulses, the decay of every pulse). Set the record length with
   `scope_set_trigger` first (short records give more segments: 8192 / slot words); `circular=true` keeps the latest
@@ -99,9 +99,9 @@ means another program has the port: ask the person, do not retry in a loop.
 
 ## 3a. Choosing a decimation mode for decay curves
 
-On firmware >= 0.2.30 with the 0x1534 bitstream or later (`scope_info` caps list `DECIM`), `scope_set_decimation`
-(`filter` = `off`, `boxcar`, `cic2`, `cic3`, and on 0x1535 with caps `FIR` also `boxcar+fir`, `cic2+fir`,
-`cic3+fir`) makes the FPGA filter every raw 200 MSa/s sample down to the chosen rate instead of skipping samples,
+`scope_set_decimation` (`scope_info` caps `DECIM` and `FIR`; `filter` = `off`, `boxcar`, `cic2`, `cic3`, `boxcar+fir`,
+`cic2+fir`, `cic3+fir`; `peak` is section 3c) makes the FPGA filter every raw 200 MSa/s sample down to the chosen rate
+instead of skipping samples,
 and store 16 bits.
 Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total of at most 8190 samples (set
 `scope_set_trigger total_samples` first) and that it is the scope's own Filter setting (tell the person, turn it
@@ -112,7 +112,7 @@ Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total o
   edge (TX turn-off, flyback) are smeared. Start the fit at least K samples (`t_start >= K x dt`) past the flyback.
   The sample time is self-consistent with the ADC trigger; with the EXT trigger the firmware corrects the pipeline
   latency to the nearest output sample (`ext_latency_shift_samples`).
-- **FIR (FPGA 0x1535, `+fir`)**: needs the `FIR` capability (on 0x1534 the call is refused). `cic2+fir` flattens the passband to fs / 4 and rejects aliases about 20 dB more,
+- **FIR (`+fir`)**: `cic2+fir` flattens the passband to fs / 4 and rejects aliases about 20 dB more,
   at a little less noise reduction and a longer edge transient (the 15-tap FIR spans 7 output samples on each
   side of a sharp edge: start fits at least 8 samples after it). Use it for spectra and waveform shape; for tau
   fits plain `cic2` keeps the edge transient short. It engages at 10 MSa/s and slower only.
@@ -132,7 +132,7 @@ Below 200 MSa/s that is free resolution and anti-aliasing; the cost is a total o
 - Every capture tool reads the 16-bit samples themselves (READ_RAW layout 2, the same u16 values READ_TRACE WIDE
   returns), so host spectra are not limited by the 8-bit trace the screen uses.
 
-Bench, maintainer's unit, FPGA 0x1534 with fw 0.2.34, 1 MSa/s (N = 200; S = 0 / 8 / 15 as row 47 says):
+Bench, maintainer's unit, 2026-10-18 (FPGA 0x1534 with fw 0.2.34), 1 MSa/s (N = 200; S = 0 / 8 / 15 as row 47 says):
 
 | | legacy | boxcar | CIC2 | CIC3 |
 |---|---|---|---|---|
@@ -160,11 +160,45 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 | 20000 (10 kSa/s) | 15.1 | 15.4 | CIC2: 15.4 |
 | 100000 (2 kSa/s) | 15.6 (storage) | 15.2 (storage) | CIC2: 15.2 |
 
+## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C)
+
+`scope_info` caps `TRIG_TYPES`, `HOLDOFF`, `COUNTER`, `PEAK_DETECT` (`scope_status` features `trig_types`, `counter`,
+`peak`). Not yet benched on the unit when this was written: say so with numbers from them.
+
+- **Trigger on a pulse width or the Nth edge** (`scope_set_trigger`): `type='pulse_width'` with `polarity`
+  (`positive` / `negative` pulse), `width` in seconds and `longer=true` for pulses longer than it (default shorter);
+  the trigger sits on the pulse's trailing edge. `type='nth_edge'` with `polarity` (`rising` / `falling`), `n` and
+  `idle` (seconds; after that long without an edge the count restarts, so `n` counts within a burst; 0 = from the
+  arm). `type='timeout'` with `polarity` (`high` / `low`) and `width`: the level held that long with no edge.
+  `type='edge'` is the plain trigger. Widths and idle times are rounded to one trigger-stream sample: one memory word
+  on CH1 / CH2 (2 / fs legacy, 1 / fs with a filter or peak detect), 5 ns on EXT; the result's `applied.type` shows the
+  samples and the time they stand for, the caveats name a clamp. Use the sample rate the width needs (a 15 us pulse
+  at 10 MSa/s is 75 words: fine; at 1 kSa/s it is below one word). `hold_off` (seconds, 5 ns steps) blocks every
+  trigger for that long after a record's trigger, across re-arms and segments: with `scope_capture_segments` on a
+  pulse train, hold-off 2.5 ms on 1 kHz pulses keeps every third one. Every change through `scope_set_trigger`
+  clears a hold-off still running at the next capture. Runt / window triggers need the 0x153E bitstream.
+- **The counter** (`scope_counter`): frequency, period, positive width, duty and the raw min / max of CH1, CH2 or EXT,
+  counted by the FPGA at 200 MHz over a gate of 10 ms, 100 ms (boot) or 1 s; no capture needed and it does not
+  disturb one. Resolution is one 5 ns clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s); the 50 MHz crystal
+  (about 1e-5, uncalibrated) is the accuracy: quote the `resolution` statement with the number. Reading is tier 0;
+  `gate`, `source`, `level` (volts) and `hysteresis` configure it (tier 1) and the scope's measurement cards follow
+  (at boot the level follows the trigger level, 6 codes hysteresis, the trigger channel; a `level` in volts pins it,
+  `level='trigger'` follows again). A signal that does not cross the level by more than the hysteresis gives no
+  count: put the trigger level (or `level`) mid-swing. `vmin` / `vmax` are raw extremes over the whole gate, noise
+  peaks included; a capture's min / max are a few codes narrower.
+- **Peak detect at slow time bases** (`scope_capture(peak=true)` for one capture, `scope_set_decimation(filter='peak')`
+  to leave it on): below 200 MSa/s every stored sample is the min and max of its window of raw 200 MSa/s samples, so
+  a glitch shorter than the sample period is kept where plain sampling (and the filters) miss it. The result carries
+  `envelope` per channel, `<ch>_min` / `<ch>_max` previews and `<ch>_min_volts` / `<ch>_max_volts` in the `.npz`;
+  `volts` is the midpoint. The envelope is a few codes wider than the signal (noise extremes over N samples): do not
+  read noise from it. Averaging is refused while peak detect is on (the words hold min / max pairs); records are at
+  most 8190 samples as with the filters. `scope_report` draws the envelope as a band.
+
 ## 3b. Frequency response (Bode)
 
 `scope_bode_sweep` measures H(f) = CH2 / CH1 of a passive network driven by the calibration post (filters, RC / RL
-networks, coil plus capacitor tanks fed through a resistor). It needs an AL3 bitstream with the decimation filter
-(0x1534+) and drives the pin, so it is tier 3 with a confirmation token.
+networks, coil plus capacitor tanks fed through a resistor). It uses the decimation filter and drives the pin, so it
+is tier 3 with a confirmation token.
 
 1. **Wiring first, ask the person to do it and confirm.** Post to the DUT input; CH1 tip on the DUT input (not the
    post side of an added resistor unless that is what you want to measure); CH2 tip on the DUT output; **the DUT
@@ -222,7 +256,7 @@ The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V
   through R71 (about 12 mA, calculated) and VRF1 sags (to about 1.1 V, calculated), moving all channels. Ask the
   user to float one side (battery-powered device under test, battery laptop, or an isolated USB link), and check
   by comparing a shorted-input zero (`scope_fetch_waveform` mean) with and without the device connected.
-- EXT trigger (bitstreams 0x1533+): reference the source to the USB ground (connector shell); 3.3 V logic only.
+- EXT trigger (caps `EXT_TRIGGER`): reference the source to the USB ground (connector shell); 3.3 V logic only.
   A source that shares the probe ground idles at ~1.24 V at the pin and is not recognised: insert a red LED or
   3 x 1N4148 in series (anode at the source) and trigger on the rising edge.
 - Never connect the calibration pin to a detector coil, drain or damping resistor: the flyback is hundreds of

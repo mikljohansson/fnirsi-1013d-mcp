@@ -163,6 +163,29 @@ def main():
                 fail(f"decim {c['divider']} {c['k_req']} {c['total']} fir {c['fir_req']}: C gave {f}, expected {exp}")
         print(f"decim: {len(dec['cases'])} cases checked against pc_decim.c")
 
+    # 5b. C6 peak detect (1.26): the configuration and the mean-core correction against pc_decim.c
+    if args.decim_checker and "decim_peak" in data:
+        pk = data["decim_peak"]
+        text = "".join(f"{c['divider']} {c['total']} {c['k_req']} {c['fir_req']}\n" for c in pk["cases"])
+        out = subprocess.run([args.decim_checker, "--peak"], input=text, capture_output=True, text=True,
+                             check=True).stdout.split("\n")
+        for c, ln in zip(pk["cases"], out):
+            f = [int(x) for x in ln.split()]
+            exp = [c["peak"], c["k"], c["n"], c["why"], c["status"], c["shift_byte"], c["cmd56"], c["rate"], c["settle_us"],
+                   c["ext_shift"]]
+            if f != exp:
+                fail(f"decim_peak {c['divider']} {c['total']} {c['k_req']} {c['fir_req']}: C gave {f}, expected {exp}")
+        argv = [args.decim_checker, "--peak-corr"] + [str(r) for r in pk["raws"]] + ["--"] + \
+            [f"{a},{b}" for a, b in pk["pairs"]] + ["--"] + [str(v) for v in pk["levels"]]
+        text = "".join(f"{c['gain_a']} {c['gain_b']} {c['off_a']} {c['off_b']}\n" for c in pk["corr"])
+        out = subprocess.run(argv, input=text, capture_output=True, text=True, check=True).stdout.split("\n")
+        for c, ln in zip(pk["corr"], out):
+            f = [int(x) for x in ln.split()]
+            exp = [c["gain"], c["off"]] + c["codes"] + c["mids"] + c["level"] + c["overload"]
+            if f != exp:
+                fail(f"decim_peak corr {c['gain_a']} {c['gain_b']} {c['off_a']} {c['off_b']}: C gave {f}, expected {exp}")
+        print(f"decim_peak: {len(pk['cases'])} cases and {len(pk['corr'])} corrections checked against pc_decim.c")
+
     # 6. calibration data v3 block (1.12): acal_pack of the same content against the Python layout
     if args.adc_cal_checker and "adc_cal_v3" in data:
         out = subprocess.run([args.adc_cal_checker, "--pack"], capture_output=True, text=True, check=True).stdout.strip()

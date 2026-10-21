@@ -14,9 +14,29 @@ program on the PC has the scope's serial port open or has sent it a request in t
 
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
 - Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
-  mode ({{AVERAGE_TEXT}}) and Filter. The menu also shows the pass time, how long one screen update takes.
-- Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2 or EXT), the position
-  and Always 50 %.
+  mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base), Filter and Sample. The menu also shows the pass time, how long one screen update takes.
+- **Sample** (the fourth box of the row under the sample rates, Scope only): **Normal** stores the samples as before;
+  **Peak** (peak detect) stores, for every sample the record keeps, the lowest and the highest of all the samples the
+  ADC took at 200 MSa/s in that interval, so a spike shorter than the sample interval still shows. A tap toggles; green
+  means Peak. With Peak the **Filter** and **Average** boxes turn grey and keep their values, and the Memory column says
+  why: "Peak:" / "Filter and" / "Average" / "not applied". Back to Normal, both are as they were. A Peak record holds
+  at most 6000 samples, so the depths above 6000 are not offered (as with a filter). At 200 MSa/s every sample is stored
+  anyway, so Peak draws that record as bars. In roll mode the Sample box is grey with its value kept, and the column says
+  "Not in" / "roll mode". The Spectrum analyser's ACQ menu has no Sample box: it always takes normal records. Sample is
+  kept with the saved settings; Restore default settings sets Normal.
+- Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2 or EXT), the position,
+  Always 50 % and the trigger type. The chip's second line shows the source and a symbol of the type and its edge: a
+  rising or falling edge for Edge, one full pulse (positive or negative) for Pulse, two short edges and one tall for Nth.
+- **Trigger type** (the menu's last row): **Edge** triggers on the edge, as always. **Pulse** triggers on the trailing
+  edge of a pulse shorter than, or longer than, a width: the edge row becomes **Pulse polarity** (Positive / Negative),
+  and two rows appear under the type: **Width**, stepped with - / + through 10ns .. 10s (only the steps the sample rate can
+  count are offered), and **Pulse** Shorter / Longer (a tap toggles). **Nth** triggers on the Nth counted edge: the rows
+  are **N** (1 .. 65535; - / + by 1, or tap the number for the keypad) and **Idle**, the time the signal must hold without
+  an edge before the count restarts (Off counts from the start of the acquisition). The Width and Idle times are kept
+  when the sample rate changes; one the new rate cannot count snaps to the nearest step it can, and the plot says
+  "Width set to 5us for this rate" (or "Idle set to ...") after any time/div notice. In the waveform viewer the rows
+  show the stored trigger and are inert. A trigger set from the PC shows here too (a width that is not a step shows as
+  the nearest one).
 - The run-state chip beside the trigger reads STOP, RUN or WAIT (a single shot waiting for its trigger).
 - The sun switches the screen to full brightness and back.
 
@@ -70,7 +90,7 @@ its rate: the zoom goes only as far as that record allows, then says "Stopped: p
 | Button | What it does |
 |---|---|
 | Display | Normal or X-Y, and the Phosphor switch (below) |
-| Trace style | Linear, Dots or Peak. Grey in X-Y |
+| Trace style | Linear, Dots or Bars (called Peak in earlier versions: one vertical line per column from the lowest to the highest sample). Grey in X-Y and while Sample is Peak |
 | Grid | Grid lines on (green) or off (grey) |
 | V+ / CH1 / V- | One V/div step for CH1 |
 | V+ / CH2 / V- | One V/div step for CH2 |
@@ -88,6 +108,11 @@ The picture clears by itself when what a pixel means changes, for example on a V
 available in roll mode ("Not in roll mode"). The scope draws about 30 records per second, so a rare event needs time to
 show.
 
+**A peak-detect record** (ACQ > Sample Peak) is drawn as one vertical bar per screen column, from the lowest to the
+highest value the column covers, in the channel colour (red when either value reached the end of the ADC's range).
+Phosphor adds the bars the same way, each column once per record. X-Y and the measurement cards use the middle of each
+pair (the value the PC also gets as the trace).
+
 ![Phosphor view](screenshot:phosphor)
 
 Phosphor also works with Display X-Y: the figure of CH1 against CH2 accumulates instead of the traces. The picture below
@@ -98,7 +123,8 @@ them.
 ![Phosphor view in X-Y](screenshot:phosphor-xy)
 
 **Warnings.** "No channel enabled: switch on CH1 or CH2", "X-Y needs both channels: switch on CH1 and CH2", "CH1
-overrange: increase V/div" (or CH2), "No trigger: check the trigger level".
+overrange: increase V/div" (or CH2), "No trigger: check the trigger level" (with trigger type Pulse "No trigger: check
+the level and Width", with Nth "No trigger: check the level and N" or "No trigger: check the level, N and Idle").
 
 ## Spectrum analyser
 
@@ -154,7 +180,7 @@ the axis. The 8-bit ADC limits THD to about 0.3 %.
 
 **Warnings.** "CH1 overrange: increase V/div", "Aliasing possible: set Acquisition > Filter" (below 200 MSa/s with
 the filter off), "Stopped: press RUN to fill the view",
-"No trigger: check the trigger level".
+"No trigger: check the trigger level" (or the trigger type's hint, as in the Scope).
 
 ## Frequency response
 
@@ -253,7 +279,8 @@ span; while stopped, one sweep runs there.
 **Top bar in this mode.** The ACQ chip reads "Set by the sweep": the sweep picks the sample rate for each point. While
 a sweep runs, the generator button shows the tone being measured, and a tap on it says "Driven by the frequency response
 sweep". When no sweep runs, the post carries your own generator setting again. The trigger menu says "Not used by the
-sweep".
+sweep" as its last row and shows no Width, N or Idle rows: the sweep's captures use the edge trigger whatever type is
+chosen; the type stays for the Scope.
 
 **Warnings while sweeping.** Among others: "CH2 overrange: increase V/div in CH2 menu or Auto", "CH2 small: decrease
 V/div in CH2 menu or Auto", "N points not settled: choose a longer Settle", "CH1 level low: the DUT loads the 1 kOhm

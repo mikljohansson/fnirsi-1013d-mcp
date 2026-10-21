@@ -35,6 +35,8 @@
 #include "phosphor.h"
 #include "spec_fmt.h"
 #include "acal_live.h"
+#include "trig_ui.h"
+#include "bode_view.h"
 #include "ui_menu.h"
 #include "ui_settings.h"
 #include "ui_fmt.h"
@@ -44,6 +46,8 @@
 #include "acq_view.h"
 #include "bode_view.h"
 #include "fpga_bus.h"
+#include "fpga_counter.h"     //C7 counter
+#include "ui_meas.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -61,6 +65,7 @@ static pc_session    pc_sess;
 static uint8         pc_ready;
 static uint8         pc_rtc_present;        //DS3231 answered its address at boot
 static uint16        pc_fpga_word;
+static uint32        pc_trig_tw5_last;                //ui-type: the word period fpga_trig's words were derived for (0: none yet)
 
 extern DISPLAYDATA   displaydata;           //display_lib.c: current buffer, colours, font
 extern uint32        cardsectors;           //sd_card_interface.c: card size from the CSD, 0 = no card
@@ -362,10 +367,7 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
 
 uint32_t pc_hal_auto_timeout_default(uint32_t total_samples)
 {
-  //fpga_set_time_base: stock uses the time base table, Atlan4 bitstreams the sample count
-  if((fpgasettings.fw_FPGA == 1) && (scopesettings.timeperdiv < (sizeof(timebase_settings) / sizeof(uint32))))
-    return timebase_settings[scopesettings.timeperdiv];
-
+  //fpga_set_time_base: the sample count (Atlan4 bitstreams count samples)
   return total_samples;
 }
 
@@ -410,7 +412,7 @@ static void pc_dec_apply(const pc_decim_cfg *c);
 
 static uint8  pc_ui_auto;                             //defined with the firmware auto mode below
 
-int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int normal,
                const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   fpga_arm_cfg arm;
@@ -421,11 +423,10 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   //The host capture replaces any UI conversion in flight (and its firmware auto time-out)
   pc_ui_auto = 0;
 
-  //Decimation filter mode, shift and 16-bit level, settled before the reset (0x1534+ only)
-  if(dc)
-    pc_dec_apply(dc);
+  //Decimation filter mode, shift and 16-bit level, settled before the reset
+  pc_dec_apply(dc);
 
-  //Trigger enable (dead on Atlan4 bitstreams, meaningful on stock)                    BENCH: T6, T10
+  //Trigger enable (dead on Atlan4 bitstreams)                                          BENCH: T6
   fpga_write_cmd(0x0F);
   fpga_write_byte(0x00);
 
@@ -433,15 +434,11 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
   fpga_write_cmd(0x1A);
   fpga_write_byte(normal ? 0x01 : 0x00);
 
-  //Sequencer (0x1536+): run setting before the reset (pc_seq_hw.c); a host capture ends a UI averaging run
-  if(sq && prog)
-  {
-    pc_seq_ui_conversion(0, dc, 0);
-    pc_seq_hw_pre_reset(sq);
-  }
+  //Sequencer run setting before the reset (pc_seq_hw.c); a host capture ends a UI averaging run
+  pc_seq_ui_conversion(0, dc, 0);
+  pc_seq_hw_pre_reset(sq);
 
   //Sampling reset (fpga_bus.h): geometry before the reset and inside it, bounded ready wait, 0x0E, release
-  arm.geometry     = (uint8_t)(prog != 0);
   arm.pre_words    = pre_words;
   arm.total_words  = total_words;
   arm.write_0e     = 1;
@@ -476,6 +473,94 @@ uint8_t pc_hal_ext_status(void)
   return fpga_read_byte();
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Trigger types and hold-off (fw-c5, FPGA 0x153C, protocol 1.26): the firmware's copy lives in fpga_bus.c (fpga_trig),
+// which every arm (UI conversion or host ARM) re-writes inside the sampling reset window (fpga_arm_reset)
+
+void pc_hal_trig_ext_read(pc_hw_trig_ext *t)
+{
+  t->type    = fpga_trig.type;
+  t->flags   = fpga_trig.longer ? PC_TRG_F_LONGER : 0;
+  t->n       = fpga_trig.n;
+  t->h       = fpga_trig.h;
+  t->holdoff = fpga_trig.holdoff;
+}
+
+void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
+{
+  fpga_trig_ext x;
+
+  x.type    = t->type;
+  x.longer  = (uint8_t)((t->flags & PC_TRG_F_LONGER) ? 1 : 0);
+  x.n       = t->n;
+  x.h       = t->h;
+  x.holdoff = t->holdoff;
+  fpga_trig_write(&x, 1);
+
+  //ui-type: the shared screen: the menu shows the host's type, a width or idle time as the nearest ladder step of the
+  //rate (the host's exact words stay armed until the word period changes or the menu edits the row)
+  pc_trig_tw5_last = pc_glue_trig_tw5();
+  tui_from_hw(&trig_ui, x.type, x.longer, x.n, x.h, pc_trig_tw5_last);
+}
+
+void pc_hal_trig_status(uint8_t out[4])
+{
+  fpga_trig_status(out);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//C7 counter (fw-c7, FPGA 0x153C): the state lives in fpga_counter.c; the main loop's pass (pc_glue_counter_pass) does
+//every bus access, these two are memory only
+
+void pc_hal_counter_read(pc_hw_counter *c)
+{
+  c->gate       = fpga_cnt.cfg_gate;
+  c->source     = fpga_cnt.cfg_source;
+  c->level      = fpga_cnt.level;
+  c->hyst       = fpga_cnt.hyst;
+  c->held       = fpga_cnt.held;
+  c->current    = (uint8_t)fpga_counter_current(timer0ticks);
+  c->has_period = fpga_cnt.has_period;
+  c->seq        = fpga_cnt.seq;
+  c->res_src    = fpga_cnt.res_src;
+  c->res_gate   = fpga_cnt.res_gate;
+  c->e          = fpga_cnt.e;
+  c->t          = fpga_cnt.t;
+  c->w          = fpga_cnt.w;
+  c->min        = fpga_cnt.min;
+  c->max        = fpga_cnt.max;
+}
+
+void pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst)
+{
+  fpga_counter_config(gate, source, level, hyst);
+}
+
+//Main loop, after the capture readout (fnirsi_1013d_scope.c PC_COUNTER_PASS): the 0x35 read, the rate-change rule, the
+//trigger level followed, a pending host configuration; then the measurement cards' copy (ui_meas.c). Built-for
+//bitstream only: on a mismatch the counter was never configured and nothing is read
+void pc_glue_counter_pass(void)
+{
+  ui_ms_counter u;
+  int32 lvl;
+
+  if(pc_fpga_word != PC_FW_FPGA_VERSION)
+    return;
+
+  lvl = (int16)scopesettings.triggerlevel;                 //the UI stores the unclamped level
+  lvl = (lvl < 0) ? 0 : ((lvl > 255) ? 255 : lvl);
+  fpga_counter_pass(timer0ticks, (uint8)lvl);
+
+  u.valid     = (uint8)(fpga_counter_current(timer0ticks) && fpga_cnt.has_period && (fpga_cnt.res_src != FPGA_CNT_RES_EXT));
+  u.ch        = fpga_cnt.res_src;
+  u.freq_mhz  = (fpga_cnt.freq_uhz + 500) / 1000;
+  u.period_ps = fpga_cnt.period_ps;
+  u.width_ps  = fpga_cnt.width_ps;
+  u.low_ps    = fpga_cnt.low_ps;
+  u.duty_ppm  = fpga_cnt.duty_ppm;
+  ui_ms_counter_set(&u);
+}
+
 //EXT selected: the generator drives the same pin, switch it off (UI copy and FPGA) and show it
 static void pc_ext_generator_off(void)
 {
@@ -493,7 +578,7 @@ static void pc_ext_generator_off(void)
 
 void pc_glue_ext_selected(void)
 {
-  if(pc_ready && (pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
+  if(pc_ready)
   {
     fpga_set_trigger_channel();
     pc_ext_generator_off();
@@ -507,19 +592,10 @@ void pc_hal_force(void)
   fpga_write_byte(0x00);
 }
 
-void pc_hal_force_stop(void)
+void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
 {
-  //fw 0.2.97: an FPGA-auto capture armed with the stop geometry has 0x0E far ahead: 0x0E = 0 makes the time-out true now
-  fpga_write_cmd(0x0E);
-  fpga_write_int(0);
-  pc_hal_force();
-}
-
-void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
-                      uint32_t ring_words, uint8_t read_lag)
-{
-  //BENCH: T3 - pointer + read_lag, the dummy strobe(s) of the bitstream's contract (fpga_bus.h), ring end restart
-  fpga_read_lane((uint8_t)(0x20 + core), (start + read_lag) % ring_words, count, dst, stride, ring_words);
+  //BENCH: T3 - the dummy strobe of the bus contract (fpga_bus.h), ring end restart
+  fpga_read_lane((uint8_t)(0x20 + core), start % ring_words, count, dst, stride, ring_words);
 }
 
 void pc_hal_fpga_write_cmd(uint8_t cmd)   { fpga_write_cmd(cmd); }
@@ -535,7 +611,6 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   //BENCH: T3, T4. Its interleave is B before A, so READ_TRACE follows the 1.00o5 convention.
   scopesettings.nofsamples  = total_samples / 2;
   scopesettings.samplecount = total_samples;
-  pc_seq_trace_replaced();
 
   //fw 0.2.83: ADoverload (sticky in fpga_read_adc_data) describes this readout only: the host capture's flags
   //(pc_capture_finish, READ_TRACE meta, GET_STATUS) and the Bode engine's readouts never carry an earlier one (bench
@@ -612,6 +687,13 @@ static uint8         pc_dec_set_mode[2] = { PC_DECIM_DEFAULT_SCOPE, PC_DECIM_DEF
 #define pc_dec_setting (pc_dec_set_mode[spectrum_mode() != SPECTRUM_MODE_SCOPE])
 static uint8         pc_dec_flags = PC_INTERLEAVE_ORDER ? PC_DECIM_SWAP : 0;  //0x53 bits 2-4: swap (host only, not
                                                       //saved), falling-edge capture A / B (hidden, saved)
+//C6 peak detect (0x153C, docs/plans/fpga-0x153c.md section 4; the ACQ Sample row of docs/plans/ui-rows.md section 3): one
+//Scope setting, not per mode (the Spectrum always acquires Normal), saved in word 211 bit 3 (ui-sample). SET_DECIM
+//filter 4 and the ACQ menu's Sample box set it and keep the Filter's K / FIR for the way back; filter 0..3 clears it
+static uint8         pc_dec_peak;
+static uint8         pc_dec_raw_peak[2];              //ui-sample: pc_dec_raw holds that channel's peak pairs
+static uint32        pc_dec_peak_gain[2];             //and the correction their midpoints took (pc_peak_gain / _off)
+static int32         pc_dec_peak_off[2];
 static uint8         pc_dec_ui_arm;                   //the next fpga_do_conversion is the UI acquisition's
 static uint8         pc_dec_last_ui;                  //the last one was (the full-rate check's re-arm repeats it)
 static pc_decim_cfg  pc_dec_cur;                      //what the FPGA runs (k = 0 until written)
@@ -622,13 +704,10 @@ static int16         pc_dec_feed[PC_DEC_RING + 2];    //converted samples for fp
 static int16        *pc_dec_even_src;
 int16               *pc_decim_src;
 
-//PC_DECIM_HAS_*: what the bitstream offers (0 = no filter)
+//PC_DECIM_HAS_*: what the built-for bitstream offers (the filter with the FIR; pc_decim_has adds the capture stages)
 static int pc_dec_has(void)
 {
-  if(!pc_ready || !(pc_sess.var.caps & PC_CAP_DECIM))
-    return PC_DECIM_HAS_NONE;
-
-  return (pc_sess.var.caps & PC_CAP_FIR) ? PC_DECIM_HAS_FIR : PC_DECIM_HAS_CIC;
+  return PC_DECIM_HAS_FIR;
 }
 
 //fw 0.2.87: the divider the FPGA holds (the last 0x0D anyone wrote, tracked by fpga_bus_note_write), the UI table's
@@ -642,11 +721,24 @@ uint32_t pc_hal_divider_now(void)
   return (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ? sample_rate_settings[scopesettings.samplerate] : 0;
 }
 
-//set: bits 1:0 K, PC_DECIM_SET_FIR (pc_dec_setting, or 0 for the legacy path)
+//The UI acquisition's setting: the mode on screen's Filter, plus Sample Peak in the Scope view (C6)
+static uint8 pc_dec_ui_set(void)
+{
+  return ui_acq_decim_set(pc_dec_setting, pc_dec_peak, spectrum_mode() != SPECTRUM_MODE_SCOPE);
+}
+
+//ui-sample: the UI record is 16-bit by its setting (the mode's Filter, or Sample Peak in the Scope view): the memory
+//depth limit of the 16-bit layout applies (pc_dec_fit_memory, the ACQ menu's chips), in roll too as for the Filter
+static int pc_dec_ui_wide(void)
+{
+  return (pc_dec_ui_set() & (3 | PC_DECIM_SET_PEAK)) != 0;
+}
+
+//set: bits 1:0 K, PC_DECIM_SET_FIR, PC_DECIM_SET_PEAK (pc_dec_ui_set, or 0 for the legacy path)
 static void pc_dec_config(pc_decim_cfg *c, uint8 set)
 {
-  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & PC_DECIM_SET_FIR)), pc_hal_divider_now(), fpgasettings.totalsamples,
-                  pc_dec_has() | ((pc_sess.var.caps & PC_CAP_CAPTURE_STAGES) ? PC_DECIM_HAS_CAPSTAGES : 0), c);
+  pc_decim_config(set & 3, (uint8)(pc_dec_flags | (set & (PC_DECIM_SET_FIR | PC_DECIM_SET_PEAK))), pc_hal_divider_now(),
+                  fpgasettings.totalsamples, pc_decim_has(), c);
 }
 
 //Write c to the FPGA and wait for the filter to settle: 0x53 / 0x56 where they differ from what the FPGA holds, 0x54 and
@@ -660,19 +752,35 @@ static void pc_dec_apply(const pc_decim_cfg *c)
   if(!pc_dec_has())
     return;
 
-  settle = fpga_decim_write(pc_decim_mode(c), pc_dec_has() >= PC_DECIM_HAS_FIR, c->fir_en, c->shift);
+  settle = fpga_decim_write(pc_decim_mode(c), pc_dec_has() >= PC_DECIM_HAS_FIR, pc_decim_cmd56(c), c->shift);
 
-  if(c->k)
+  if(pc_decim_wide(c))
   {
 
     //0x17 is ignored while K >= 1: the UI level (8-bit code in the trace domain, as fpga_set_trigger_level computed it)
     //mapped back through the readout's 16-bit transform (fw 0.2.47): the trigger channel's gain16 folded into the
     //scale and its corr16 zero term, so the level sits where the corrected trace shows it (it ignored both before,
     //about 1 % level error at full rate). EXT has no samples: the plain conversion.
+    //C6 peak detect: the FPGA compares the window max (rising) or min (falling) as the high byte, so 0x55 = raw << 8 with
+    //the raw code whose mean-core full-class correction (pc_glue_decim_read's) gives the UI level
     level = (int16)scopesettings.triggerlevel;
     level = (level < 0) ? 0 : ((level > 255) ? 255 : level);
 
-    if(scopesettings.triggerchannel < 2)
+    if(c->peak)
+    {
+      uint16 raw = (uint16)level;
+
+      if(scopesettings.triggerchannel < 2)
+      {
+        acal_corr k;
+
+        fpga_channel_correction_full(scopesettings.triggerchannel ? &scopesettings.channel2 : &scopesettings.channel1, &k);
+        raw = pc_peak_level((uint8)level, pc_peak_gain(k.gain_a, k.gain_b), pc_peak_off(k.off_a, k.off_b));
+      }
+
+      fpga_set_decim_level((uint16)(raw << 8));
+    }
+    else if(scopesettings.triggerchannel < 2)
     {
       acal_corr k;
 
@@ -702,91 +810,149 @@ void pc_glue_decim_rearm(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
+// The trigger menu's Type row (ui-type, docs/plans/ui-rows.md section 2; trig_ui.h). The menu keeps its Width and Idle
+// time as ladder steps (time); fpga_trig holds the words armed. The words are derived whenever the trigger stream's
+// word period changes (a rate, Filter or source change: at the UI arm that follows, or when the menu opens), the step
+// snapped into the rate's range with the notice; a host SET_TRIGGER2's exact words stay armed until then and show as
+// the nearest step (pc_hal_trig_ext_write). A UI edit writes the registers at once through fpga_trig_write, the path
+// SET_TRIGGER2 takes, so GET_TRIGGER reflects the menu and the fingerprint (settings_seq) sees both sides' changes.
+
+uint32 pc_glue_trig_tw5(void)
+{
+  pc_decim_cfg c;
+
+  pc_dec_config(&c, pc_dec_ui_set());                 //ui-sample: Sample Peak runs the 16-bit word period too
+  return tui_tw5(pc_hal_divider_now(), c.k != 0, scopesettings.triggerchannel == 2);
+}
+
+//The words for word period tw5 into fpga_trig when it changed since the last derivation: the chosen type's time
+//parameter snaps into the range (notice: "Width set to 5us for this rate" / "Idle set to ..." queued after the
+//time/div's). Edge has no words; the host's timeout keeps its own N
+static void pc_trig_rate(uint32 tw5, int notice)
+{
+  int    snap;
+  uint32 n, h;
+
+  if(tw5 == pc_trig_tw5_last)
+    return;
+
+  snap             = tui_rate(&trig_ui, tw5);
+  pc_trig_tw5_last = tw5;
+
+  if((trig_ui.type != TUI_PULSE) && (trig_ui.type != TUI_NTH))
+    return;
+
+  tui_hw(&trig_ui, tw5, &fpga_trig.type, &fpga_trig.longer, &n, &h);
+  fpga_trig.n = n;
+  fpga_trig.h = h;
+
+  if(!notice)
+    return;
+
+  if(snap == TUI_SNAP_WIDTH)
+    acq_view_notice_queue(1, "Width set to ", tui_step_text(trig_ui.width_i), " for this rate");
+  else if(snap == TUI_SNAP_IDLE)
+    acq_view_notice_queue(1, "Idle set to ", tui_idle_text(trig_ui.idle_i), " for this rate");
+}
+
+void pc_glue_trig_rate_check(void)
+{
+  //Roll mode does not use the trigger: the rows keep their values until the next armed rate (ui-rows.md 2.4)
+  if(scopesettings.long_mode)
+    return;
+
+  pc_trig_rate(pc_glue_trig_tw5(), 1);
+}
+
+//The registers for the state at the current word period: 0x5E / 0x5F / 0x60 at once, 0x1B kept (the host's hold-off is
+//not the menu's to clear) and 0x66 = 1 (a new definition is a new session, as SET_TRIGGER2)
+static void pc_trig_write(void)
+{
+  fpga_trig_ext x = fpga_trig;
+  uint32        tw5 = pc_glue_trig_tw5(), n, h;
+
+  (void)tui_rate(&trig_ui, tw5);
+  pc_trig_tw5_last = tw5;
+  tui_hw(&trig_ui, tw5, &x.type, &x.longer, &n, &h);
+  x.n = n;
+  x.h = h;
+  fpga_trig_write(&x, 1);
+}
+
+void pc_glue_trig_ui_apply(void)
+{
+  pc_trig_write();
+
+  //The next UI pass arms a fresh conversion with it (a Normal-mode wait armed with the old type would hold the screen)
+  if(scopesettings.runstate)
+    scopesettings.display_data_done = 1;
+}
+
+int pc_glue_trig_params(void)
+{
+  return ((trig_ui.type == TUI_PULSE) || (trig_ui.type == TUI_NTH)) && !bode_view_active();
+}
+
+//Power-on and Restore default settings: the state as restored or reset, the Width / Idle snapped into the rate's range
+//silently (nothing was armed yet), the registers written on the built-for bitstream only
+static void pc_trig_restore_apply(void)
+{
+  uint32 tw5 = pc_glue_trig_tw5();
+
+  (void)tui_rate(&trig_ui, tw5);
+  pc_trig_tw5_last = tw5;
+
+  if(pc_fpga_word == PC_FW_FPGA_VERSION)
+    pc_trig_write();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 // Firmware auto mode (fw 0.2.41). The FPGA's auto time-out (0x0E) counts samples (the record length), so at fast rates
 // it expires in microseconds (3000 samples at 10 MS/s = 0.3 ms), before a slow signal's next edge; and 0x18 keeps
 // watching after sampling stopped, so such a record read "triggered" when an edge came between the stop and the read
-// (bench: flat records flagged triggered). On Atlan bitstreams the UI's auto mode now arms in normal mode and the main
-// loop gives up after max(100 ms, two record lengths): 0x1A = 0 then ends the sampling at once (the time-out is long
-// past) with an untriggered record, which is reported as such. Calibration and auto setup keep 1.00o5's FPGA auto.
+// (bench: flat records flagged triggered). The UI's auto mode arms in normal mode and the main loop gives up after
+// max(100 ms, two record lengths): 0x1A = 0 then ends the sampling at once (the time-out is long past) with an
+// untriggered record, which is reported as such; 0x153B latches the newest total words at that stop, so the record is
+// contiguous. Calibration and auto setup keep 1.00o5's FPGA auto.
 
 static uint8  pc_ui_auto;                             //a UI conversion runs in firmware auto mode
 static uint8  pc_ui_forced;                           //it was ended by the firmware time-out (untriggered)
 static uint32 pc_ui_auto_t0, pc_ui_auto_ms;
-
-//fw 0.2.97 (pc_decim.h "Auto-mode stop geometry"): on AL3 0x1532..0x153A the UI's auto mode arms the FPGA's own auto
-//mode with 0x0E = W - 2, W the first word after the deadline at which the stop leaves the record 0 .. total - 1 to the
-//last ring pass (the firmware time-out above stays as the safety net after W). Every other FPGA-auto conversion there
-//(calibration, auto setup) gets its 0x0E moved to such a word as well. 0x153B+ keeps the firmware time-out.
-static uint8  pc_ui_geom;                             //this conversion runs FPGA auto with the stop geometry
-static uint8  pc_ui_rules;                            //fw 0.2.98: and is the auto mode's (the 0x14 / cut rules apply)
-static uint8  pc_ui_spliced;                          //its record may be spliced (forced on 0x1532..0x153A, EF2, EP4)
-static uint32 pc_ui_stop, pc_ui_stop_ms;              //its stop word W and the time W takes
-static uint32 pc_ui_pre, pc_ui_total;                 //the 0x0B / 0x0C words it wrote
-static uint8  pc_ui_wide;
-static uint32 pc_ui_div;
-
-static int pc_fw_auto_possible(void)
-{
-  return (fpgasettings.fw_FPGA != 1) && !scopesettings.long_mode;
-}
 
 void pc_glue_decim_conversion(void)
 {
   pc_decim_cfg c;
   int          ui = pc_dec_ui_arm, seq_run;
 
-  pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_setting : 0);
+  pc_dec_config(&c, pc_dec_ui_arm ? pc_dec_ui_set() : 0);
   pc_dec_last_ui = pc_dec_ui_arm;
   pc_dec_ui_arm  = 0;
   pc_dec_apply(&c);
 
-  //Average on a 0x1536 bitstream: this UI conversion may be a hardware averaging run, which has its own deadline
-  //(pc_seq_ui_service; the firmware time-out must never end a record between the records of a run). No bus access.
+  //Average: this UI conversion may be a hardware averaging run, which has its own deadline (pc_seq_ui_service; the
+  //firmware time-out must never end a record between the records of a run). No bus access.
   seq_run = pc_seq_ui_conversion(ui, &c, pc_hal_divider_now());
 
   //Trigger mode for this conversion, written before the sampling reset
-  pc_ui_auto    = 0;
-  pc_ui_forced  = 0;
-  pc_ui_geom    = 0;
-  pc_ui_rules   = 0;
-  pc_ui_spliced = 0;
-  fpga_conv_0e  = 0;
+  pc_ui_auto   = 0;
+  pc_ui_forced = 0;
 
-  if(pc_fw_auto_possible())
+  if(!scopesettings.long_mode)
   {
-    int    fw_auto = ui && (scopesettings.triggermode == 0);
-    int    ring0   = (pc_stop_kind(pc_hal_fpga_version()) == PC_STOP_RING0);
-    uint32 d       = pc_hal_divider_now();          //fw 0.2.97: the divider the FPGA holds (was the UI table's)
+    int fw_auto = ui && (scopesettings.triggermode == 0);
 
-    pc_ui_wide  = (uint8)(c.k != 0);
-    pc_ui_div   = d;
-    pc_ui_pre   = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);
-    pc_ui_total = pc_glue_decim_words(fpgasettings.totalsamples);
+    //ui-type: the Width / Idle time in words of this rate's trigger stream (fpga_trig, written inside the arm window)
+    if(ui)
+      pc_trig_rate(tui_tw5(pc_hal_divider_now(), c.k != 0, scopesettings.triggerchannel == 2), 1);
 
     fpga_write_cmd(0x1A);
-    fpga_write_byte((scopesettings.triggermode || (fw_auto && (!ring0 || seq_run))) ? 0x01 : 0x00);
+    fpga_write_byte((scopesettings.triggermode || fw_auto) ? 0x01 : 0x00);
 
     if(fw_auto && !seq_run)
     {
       pc_ui_auto    = 1;
       pc_ui_auto_t0 = timer0ticks;
-      pc_ui_auto_ms = pc_auto_deadline_ms(scopesettings.samplecount, d);
-    }
-
-    if(ring0 && !seq_run && (scopesettings.triggermode == 0) && (fpgasettings.fw_FPGA == 2))
-    {
-      uint32 min = fw_auto ? pc_ms_to_words(pc_ui_auto_ms, d, pc_ui_wide) : scopesettings.samplecount + PC_STOP_LAG;
-
-      pc_ui_stop    = pc_auto_stop_word(min, pc_ui_total, PC_DEC_RING);
-      pc_ui_stop_ms = pc_words_to_ms(pc_ui_stop, d, pc_ui_wide);
-      pc_ui_geom    = 1;
-      pc_ui_rules   = (uint8)fw_auto;   //fw 0.2.98: calibration / auto setup keep 0.2.96's reading (pc_engine_record)
-
-      if(pc_ui_stop - PC_STOP_LAG != scopesettings.samplecount)
-        fpga_conv_0e = pc_ui_stop - PC_STOP_LAG;
-
-      if(fw_auto)
-        pc_ui_auto_ms = pc_auto_net_ms(pc_ui_stop_ms);
+      pc_ui_auto_ms = pc_auto_deadline_ms(scopesettings.samplecount, pc_hal_divider_now());
     }
   }
 }
@@ -803,16 +969,7 @@ static void pc_ui_auto_service(void)
 
   if(!done && !trig)
   {
-    //fw 0.2.97: with the stop geometry the FPGA should have stopped at W already: the last resort, and the record
-    //(ring words 0 .. total - 1 across a random stop) may be spliced; 0x153B+ reads the newest total words
-    if(pc_ui_geom)
-      pc_hal_force_stop();
-    else
-      pc_hal_force();
-
-    if(pc_stop_kind(pc_hal_fpga_version()) != PC_STOP_NEWEST)
-      pc_ui_spliced = 1;
-
+    pc_hal_force();
     pc_ui_forced = 1;
   }
   else
@@ -845,19 +1002,8 @@ uint32 pc_glue_decim_pre_words(uint32 samples)
 
 uint32 pc_glue_ui_read_start(uint32 addr)
 {
-  uint32 ring, pre;
-
-  //The ring and the pretrigger words the conversion wrote to 0x0B (stock: its fixed 750); 16-bit layout: one sample per
-  //word, in the same 8192-word ring
-  switch(fpgasettings.fw_FPGA)
-  {
-    case 1:  ring = 4096;        pre = 750;                                                       break;
-    case 2:  ring = PC_DEC_RING; pre = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);    break;
-    case 3:  ring = 6144;        pre = pc_glue_decim_pre_words(fpgasettings.settriggerpoint);    break;
-    default: return addr;        //not recognised by 1.00o5 (EP4, unknown): the raw address, as before
-  }
-
-  return fpga_ring_start(addr, pre, ring);
+  //The pretrigger words the conversion wrote to 0x0B; 16-bit layout: one sample per word, in the same 8192-word ring
+  return fpga_ring_start(addr, pc_glue_decim_pre_words(fpgasettings.settriggerpoint), PC_DEC_RING);
 }
 
 void pc_glue_decim_read(void *settings, uint32 start)
@@ -875,9 +1021,11 @@ void pc_glue_decim_read(void *settings, uint32 start)
   else
     return;
 
-  pc_dec_raw_n[ch] = 0;
+  pc_dec_raw_n[ch]    = 0;
+  pc_dec_raw_peak[ch] = 0;
 
-  //0x1536 UI averaging run: the corrected codes of the mean, both passes from memory as for the 16-bit path
+  //UI averaging: the corrected codes of the mean (the hardware run's lane sums or the MCU's sums), both passes from
+  //memory as for the 16-bit path
   if(pc_seq_ui_feed(settings, pc_dec_feed, scopesettings.nofsamples * 2))
   {
     pc_decim_src    = &pc_dec_feed[1];
@@ -895,6 +1043,40 @@ void pc_glue_decim_read(void *settings, uint32 start)
     n = PC_DEC_RING;
 
   fpga_read_decim_data(s->adc1command, s->adc2command, start % PC_DEC_RING, n, pc_dec_raw[ch]);
+
+  if(pc_dec_cur.peak)
+  {
+    //C6 peak record: each word = { max (high byte), min (low byte) } raw codes from either core. Both go through the
+    //mean of the two cores' 8-bit corrections in the full clock class (the ADCs run at 200 MSa/s here, as on the filter
+    //path; fpga_channel_correction_full), and the trace takes the corrected midpoint (the host's READ_TRACE too; the
+    //pairs stay in pc_dec_raw for READ_TRACE WIDE and the Scope view's bars). Overload rule: either byte at a rail
+    //(pc_peak_overload; fpga_read_adc_data's own check sees the midpoint only)
+    acal_corr k;
+    uint32    gain;
+    int32     off;
+    uint8     ov = 0;
+
+    fpga_channel_correction_full(s, &k);
+    gain = pc_peak_gain(k.gain_a, k.gain_b);
+    off  = pc_peak_off(k.off_a, k.off_b);
+
+    for(i=0;i<n;i++)
+    {
+      uint8 mn = (uint8)pc_dec_raw[ch][i], mx = (uint8)(pc_dec_raw[ch][i] >> 8);
+
+      pc_dec_feed[i] = (int16)pc_peak_mid(mn, mx, gain, off);
+      ov |= pc_peak_overload(mn, mx);
+    }
+
+    s->ADoverload |= ov;
+    pc_dec_raw_n[ch]     = n;
+    pc_dec_raw_peak[ch]  = 1;
+    pc_dec_peak_gain[ch] = gain;
+    pc_dec_peak_off[ch]  = off;
+    pc_decim_src      = &pc_dec_feed[1];
+    pc_dec_even_src   = &pc_dec_feed[0];
+    return;
+  }
 
   //Into the 8-bit trace domain with the readout's full-class correction (adc_cal.h): gain16 folded into the scale, corr16
   //added (each output sample weighs both cores equally for even N). fpga_read_adc_data then passes the codes through
@@ -926,9 +1108,9 @@ uint16 pc_glue_phosphor_setting_word(void)
 
 uint16 pc_glue_decim_setting_word(void)
 {
-  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (the defaults). Bits
-  //3-4: the hidden falling-edge capture settings (SET_DECIM only); bit 5: FIR (fw 0.2.44)
-  return (uint16)(0xDE00 | (pc_dec_flags & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)) | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
+  //0xDE00 marks a valid word; sectors written before 0.2.30 hold whatever 1.00o5 left there (the defaults). Bits 3-4
+  //held the falling-edge capture settings up to fw 0.2.102 (written 0 now, read back ignored); bit 5: FIR (fw 0.2.44)
+  return (uint16)(0xDE00 | (pc_dec_set_mode[0] & (PC_DECIM_SET_FIR | 3)));
 }
 
 //Word 212 (fw 0.2.64): the Spectrum's Filter, 0xD500 marker (word 207 holds the Scope's)
@@ -951,7 +1133,7 @@ static void pc_dec_follow_mode(void)
 
   pc_dec_mode_seen = m;
 
-  if(pc_dec_has() && (pc_dec_setting & 3))
+  if(pc_dec_has() && pc_dec_ui_wide())
   {
     pc_dec_fit_memory();
     acq_view_fit(0);
@@ -970,22 +1152,116 @@ static uint32 pc_dec_name_index(void)
   return ((pc_dec_has() >= PC_DECIM_HAS_FIR) && (pc_dec_setting & PC_DECIM_SET_FIR) && k) ? k + 4 : k;
 }
 
-//Acquisition menu: Filter box in 1.00o5's Long memory slot, same style as the Roll mode box
-static void pc_dec_draw_box(void)
+//ui-sample (docs/plans/ui-rows.md section 3): the ACQ menu's row as data (ui_ctrl.h ui_acq_row_build)
+static void pc_acq_row(ui_acq_row *r)
 {
-  uint16    fg   = displaydata.fg_color;
-  PFONTDATA font = displaydata.font;
-  int       on   = (pc_dec_setting & 3) != 0;
-  uint32    len  = strlen(pc_dec_names[pc_dec_name_index()]);
+  ui_acq_in in;
 
-  display_set_fg_color(on ? GREEN_COLOR : LIGHTGREY_COLOR);
-  display_fill_rounded_rect(ACQ_MENU_XPOS + 204, ACQ_MENU_YPOS + 163, 90, 40, 3);
+  in.roll         = scopesettings.long_mode != 0;
+  in.average      = scopesettings.average_mode != 0;
+  in.filter_on    = (pc_dec_setting & 3) != 0;
+  in.peak         = pc_dec_peak;
+  in.spectrum     = spectrum_mode() != SPECTRUM_MODE_SCOPE;
+  in.filter_value = pc_dec_names[pc_dec_name_index()];
+  ui_acq_row_build(&in, r);
+}
+
+//A box of the row in the menu's construction (Roll mode's): the label line and the value line centred on their measured
+//widths; a NONE box leaves its slot as the menu's background
+static void pc_acq_box(const ui_acq_row *r, int i)
+{
+  uint32 x = ACQ_MENU_XPOS + UI_ACQ_BOX_X(i), xc = x + UI_ACQ_BOX_W / 2;
+
+  if(r->state[i] == UI_ACQ_BOX_NONE)
+  {
+    display_set_fg_color(DARKGREY_COLOR);
+    display_fill_rect(x, ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H);
+    return;
+  }
+
+  display_set_fg_color((r->state[i] == UI_ACQ_BOX_ON) ? GREEN_COLOR : LIGHTGREY_COLOR);
+  display_fill_rounded_rect(x, ACQ_MENU_YPOS + UI_ACQ_BOX_Y, UI_ACQ_BOX_W, UI_ACQ_BOX_H, 3);
   display_set_font(&font_2);
-  display_set_fg_color(on ? BLACK_COLOR : WHITE_COLOR);
-  display_text(ACQ_MENU_XPOS + 231, ACQ_MENU_YPOS + 168, "Filter");
-  display_text(ACQ_MENU_XPOS + 249 - 3 * len, ACQ_MENU_YPOS + 182, (int8 *)pc_dec_names[pc_dec_name_index()]);
+  display_set_fg_color((r->state[i] == UI_ACQ_BOX_ON) ? BLACK_COLOR : (r->state[i] == UI_ACQ_BOX_GREY) ? LIGHTGREY1_COLOR : WHITE_COLOR);
+  display_text(xc - ui_text_width(&font_2, r->line1[i]) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE1_Y, (int8 *)r->line1[i]);
+  display_text(xc - ui_text_width(&font_2, r->line2[i]) / 2, ACQ_MENU_YPOS + UI_ACQ_BOX_LINE2_Y, (int8 *)r->line2[i]);
+}
+
+//The Average, Filter and Sample boxes and the Memory column's note (Roll mode is pc_glue_roll_label's): on opening, after
+//every tap in the row and after the roll toggle (scope_acquisition_Average_mode_select). Into the current buffer.
+void pc_glue_acq_row_draw(void)
+{
+  uint16     fg   = displaydata.fg_color;
+  PFONTDATA  font = displaydata.font;
+  ui_acq_row r;
+  int        i;
+
+  pc_acq_row(&r);
+
+  for(i = UI_ACQ_AVERAGE; i < UI_ACQ_BOXES; i++)
+    pc_acq_box(&r, i);
+
+  display_set_fg_color(DARKGREY_COLOR);
+  display_fill_rect(ACQ_MENU_XPOS + UI_ACQ_NOTE_X, ACQ_MENU_YPOS + UI_ACQ_NOTE_Y, UI_ACQ_NOTE_W, UI_ACQ_NOTE_LINES * UI_ACQ_NOTE_DY);
+  display_set_font(&font_2);
+  display_set_fg_color(0x00A0A0A0);                   //the pass time label's grey: a note, not a value
+
+  for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+    if(r.note[i])
+      display_text(ACQ_MENU_XPOS + UI_ACQ_NOTE_X, ACQ_MENU_YPOS + UI_ACQ_NOTE_Y + i * UI_ACQ_NOTE_DY, (int8 *)r.note[i]);
+
   displaydata.fg_color = fg;
   displaydata.font     = font;
+}
+
+//A tap in the row is taken by a box that is not grey (and drawn)
+int pc_glue_acq_box_live(int box)
+{
+  ui_acq_row r;
+
+  pc_acq_row(&r);
+  return (box >= 0) && (box < UI_ACQ_BOXES) && ((r.state[box] == UI_ACQ_BOX_ON) || (r.state[box] == UI_ACQ_BOX_OFF));
+}
+
+//Sample Peak applied to the Scope's acquisition (the CTRL page greys Trace style with it: the record is bars)
+int pc_glue_sample_peak(void)
+{
+  ui_acq_in in = { 0 };
+
+  in.roll     = scopesettings.long_mode != 0;
+  in.peak     = pc_dec_peak;
+  in.spectrum = spectrum_mode() != SPECTRUM_MODE_SCOPE;
+  return ui_acq_peak_applied(&in);
+}
+
+//The Sample box: Normal <-> Peak. Peak runs the 16-bit path (the depth limit as with the Filter); Normal brings the
+//Filter back as it was (the setting byte kept it) and the depths it allows. The next UI pass arms with it.
+void pc_glue_sample_tap(void)
+{
+  pc_dec_peak ^= 1;
+
+  if(pc_dec_ui_wide())
+    pc_dec_fit_memory();
+
+  scope_acquisition_memory_deep_select();
+  pc_glue_acq_row_draw();
+  scopesettings.display_data_done = 1;
+}
+
+//ui-sample: the record on screen is a peak-detect record for channel ch: its pairs and the correction their midpoints
+//took (the Scope view's bars and the phosphor map, peak_bars.h); 0 in roll mode and in the waveform viewer
+int pc_glue_peak_record(int ch, const uint16 **pairs, uint32 *n, uint32 *gain, int32 *off)
+{
+  ch &= 1;
+
+  if(!pc_dec_raw_peak[ch] || !pc_dec_raw_n[ch] || scopesettings.long_mode || scopesettings.waveviewmode)
+    return 0;
+
+  *pairs = pc_dec_raw[ch];
+  *n     = pc_dec_raw_n[ch];
+  *gain  = pc_dec_peak_gain[ch];
+  *off   = pc_dec_peak_off[ch];
+  return 1;
 }
 
 //Memory depth for the 16-bit layout: the largest offered step that fits, trigger point kept at the same fraction
@@ -1016,6 +1292,7 @@ void pc_glue_settings_defaults(void)
 {
   pc_dec_set_mode[0] = PC_DECIM_DEFAULT_SCOPE;
   pc_dec_set_mode[1] = PC_DECIM_DEFAULT_SPEC;
+  pc_dec_peak        = 0;                                   //C6: Sample Normal (word 211 bit 3 clear when saved)
 
 #if PC_FORCE_CDC
   //The defaults say mass storage (USB_CH340 0); this build's USB stays CDC, also after Restore default settings (the
@@ -1029,6 +1306,11 @@ void pc_glue_settings_defaults(void)
 
   //fw 0.2.69: the Frequency response settings (words 219, 220, 213..215) back to their defaults
   bode_view_defaults();
+
+  //ui-type: the trigger Type row back to Edge (words 202 / 203); armed when the FPGA is up (the Settings screen's action)
+  tui_defaults(&trig_ui);
+  if(pc_ready)
+    pc_trig_restore_apply();
 
   if(pc_dec_has() && (pc_dec_setting & 3))
     pc_dec_fit_memory();
@@ -1060,21 +1342,22 @@ void pc_glue_decim_tap(void)
   //(owner, 0.2.76: they stayed masked until something else redrew the menu)
   scope_acquisition_memory_deep_select();
 
-  pc_dec_draw_box();
+  pc_glue_acq_row_draw();
   scopesettings.display_data_done = 1;
 }
 
 uint8_t pc_hal_decim_setting(void)
 {
-  return (uint8_t)((pc_dec_setting & (PC_DECIM_SET_FIR | 3)) | pc_dec_flags);
+  return (uint8_t)(pc_dec_ui_set() | pc_dec_flags);
 }
 
 void pc_hal_decim_set(uint8_t setting)
 {
   pc_dec_setting = setting & (PC_DECIM_SET_FIR | 3);
   pc_dec_flags   = setting & PC_DECIM_FLAGS;
+  pc_dec_peak    = (setting & PC_DECIM_SET_PEAK) ? 1 : 0;                  //C6: the Sample row's state
 
-  if(pc_dec_setting & 3)
+  if((pc_dec_setting & 3) || pc_dec_peak)
   {
     pc_dec_fit_memory();
     acq_view_fit(1);
@@ -1159,7 +1442,7 @@ void pc_hal_ui_set_run(int run)
 //rewrites it after every capture; the flag counts instead.
 uint32_t pc_hal_settings_fingerprint(void)
 {
-  uint8  b[40];
+  uint8  b[64];
   uint32 n = 0;
   int    i;
 
@@ -1190,6 +1473,13 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8)fpgasettings.totalsamples;
   b[n++] = (uint8)(fpgasettings.totalsamples >> 8);
   b[n++] = pc_dec_has() ? pc_hal_decim_setting() : 0;
+  //1.26: the trigger extension (a type, N, H or hold-off change is a capture-relevant setting)
+  b[n++] = fpga_trig.type;
+  b[n++] = fpga_trig.longer;
+  b[n++] = (uint8)fpga_trig.n;       b[n++] = (uint8)(fpga_trig.n >> 8);       b[n++] = (uint8)(fpga_trig.n >> 16);
+  b[n++] = (uint8)fpga_trig.h;       b[n++] = (uint8)(fpga_trig.h >> 8);       b[n++] = (uint8)(fpga_trig.h >> 16);
+  b[n++] = (uint8)fpga_trig.holdoff; b[n++] = (uint8)(fpga_trig.holdoff >> 8); b[n++] = (uint8)(fpga_trig.holdoff >> 16);
+  b[n++] = (uint8)(fpga_trig.holdoff >> 24);
 
   return pc_crc32(b, n);
 }
@@ -1454,6 +1744,11 @@ static uint8 pc_probe_ds3231(void)
   return ack;
 }
 
+int pc_glue_fpga_mismatch(void)
+{
+  return pc_ready && pc_sess.var.mismatch;
+}
+
 int pc_glue_ui_has(int feature)
 {
   if(!pc_ready)
@@ -1462,21 +1757,17 @@ int pc_glue_ui_has(int feature)
   switch(feature)
   {
     case PC_FEAT_GEN_DDS:
-      return (pc_sess.var.caps & PC_CAP_GENERATOR_DDS) != 0;
+    case PC_FEAT_EXT_TRIGGER:
+    case PC_FEAT_DECIM:
+      return 1;
 
     case PC_FEAT_RTC:
       return pc_rtc_present;
 
-    case PC_FEAT_EXT_TRIGGER:
-      return (pc_sess.var.caps & PC_CAP_EXT_TRIGGER) != 0;
-
-    case PC_FEAT_DECIM:
-      return pc_dec_has();
-
     default:
-      //With the Filter on, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL (acq_view.h)
+      //With the Filter on or Sample Peak, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
       if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + ACQ_MEM_CHIPS))
-        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_has() && (pc_dec_setting & 3), PC_DECIM_MAX_TOTAL) >>
+        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_has() && pc_dec_ui_wide(), PC_DECIM_MAX_TOTAL) >>
                 (feature - PC_FEAT_MEM_BASE)) & 1;
 
       return 1;
@@ -1509,15 +1800,16 @@ void pc_glue_ui_mask(int menu)
       break;
 
     case PC_MASK_ACQ_FILTER:
-      //1.00o5's Long memory slot holds the decimation Filter selector on 0x1534+ (empty menu background otherwise)
+      //1.00o5's Long memory slot holds the decimation Filter selector; ui-sample: the Average, Filter and Sample boxes
+      //and the Memory column's note, drawn together (Peak greys two of them)
       if(pc_glue_ui_has(PC_FEAT_DECIM))
-        pc_dec_draw_box();
+        pc_glue_acq_row_draw();
       break;
 
     case PC_MASK_ACQ_MEMORY:
       for(i=0;i<5;i++)
         if(!pc_glue_ui_has(PC_FEAT_MEM_BASE + i))
-          pc_mask_rect(ACQ_MENU_XPOS + 313, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
+          pc_mask_rect(ACQ_MENU_XPOS + UI_ACQ_CHIP_X - 2, ACQ_MENU_YPOS + 31 + 36 * i, 58, 29);
 
       //fw 0.2.38 (owner): the main-loop pass time in the Memory column, so the cost of a longer record shows where it
       //is chosen. It is the last pass before the menu opened (the menu is modal, nothing captures while it is open),
@@ -1822,6 +2114,9 @@ void pc_glue_scope_warning(void)
   w.untrig  = pc_scope_untrig;
   w.running = scopesettings.runstate ? 1 : 0;
   w.xy      = scopesettings.xymodedisplay ? 1 : 0;
+  //ui-type: the hint names the settings of the trigger type armed (ui-rows.md 2.6)
+  w.trig_type = fpga_trig.type;
+  w.trig_idle = fpga_trig.h ? 1 : 0;
 
   t = ui_scope_warning(&w);
 
@@ -1844,19 +2139,27 @@ void pc_glue_scope_warning(void)
 }
 
 //Settings sector word 211 (fw 0.2.56): 0xC700 marker, bit 0 Grid, bits 1-2 the spectrum's Display variant. The scope's
-//variants are kept where they were (X-Y: 1.00o5's word; Phosphor: word 210 bit 3).
+//variants are kept where they were (X-Y: 1.00o5's word; Phosphor: word 210 bit 3). ui-sample: bit 3 Sample Peak (the
+//codec is ui_ctrl.c's ui_word_ui, marker check 0xFFF0; a sector written before reads Normal)
 uint16 pc_glue_ui_setting_word(void)
 {
-  return (uint16)(0xC700 | ((spectrum_view() & 3) << 1) | (scopesettings.gridenable ? 1 : 0));
+  return ui_word_ui(scopesettings.gridenable, spectrum_view(), pc_dec_peak);
 }
 
 static void pc_ui_setting_restore(uint16 w)
 {
-  if((w & 0xFFF8) != 0xC700)
+  uint8 grid, view, peak;
+
+  if(!ui_word_ui_restore(w, &grid, &view, &peak))
     return;
 
-  scopesettings.gridenable = w & 1;
-  spectrum_set_view((w >> 1) & 3);
+  scopesettings.gridenable = grid;
+  spectrum_set_view(view);
+  pc_dec_peak = peak;
+
+  //Sample Peak runs the 16-bit layout: the depth limit as for the Filter (fixed up before this for the Filter alone)
+  if(pc_dec_has() && pc_dec_ui_wide())
+    pc_dec_fit_memory();
 }
 
 //System settings menu height (variables.h SYSTEM_MENU_HEIGHT): the fold-out rows of ui_settings.h, Time and date only
@@ -1973,10 +2276,6 @@ static void pc_ui_fix_settings(void)
   if(!pc_rtc_present)
     onoffRTC = 0;
 
-  //EXT trigger only on bitstreams that have it
-  if((scopesettings.triggerchannel > 1) && !(pc_sess.var.caps & PC_CAP_EXT_TRIGGER))
-    scopesettings.triggerchannel = 0;
-
   //Acquisition Filter (decimation, 0x1534+): kept in a spare settings word; a sector without a valid word (new
   //settings, or one written before 0.2.30) keeps the per-mode defaults. With it on the 16-bit layout limits the memory
   //depth.
@@ -1985,8 +2284,6 @@ static void pc_ui_fix_settings(void)
   if((settingsworkbuffer[PC_SETTING_WORD_DECIM] & 0xFFC4) == 0xDE00)
   {
     uint8 old = (uint8)(settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_SET_FIR | 3));
-
-    pc_dec_flags = (uint8)((pc_dec_flags & PC_DECIM_SWAP) | (settingsworkbuffer[PC_SETTING_WORD_DECIM] & (PC_DECIM_NEG_A | PC_DECIM_NEG_B)));
 
     if((settingsworkbuffer[PC_SETTING_WORD_DECIM_SPEC] & 0xFFDC) == 0xD500)
     {
@@ -2022,6 +2319,11 @@ static void pc_ui_fix_settings(void)
                              settingsworkbuffer[PC_SETTING_WORD_BODE2]);
   //fw 0.2.69: its MEASURES list (words 213..215; no marker: the defaults)
   bode_view_ms_restore(&settingsworkbuffer[PC_SETTING_WORD_BODE_MS]);
+
+  //ui-type: the trigger Type row (words 202 / 203, marker 0xA000): Edge on a sector written before it (0 there); the
+  //Width / Idle time snapped into the rate's range silently and the registers written (trig_ui.h, ui-rows.md section 4)
+  (void)tui_restore(&trig_ui, settingsworkbuffer[PC_SETTING_WORD_TRIG], settingsworkbuffer[PC_SETTING_WORD_TRIG + 1]);
+  pc_trig_restore_apply();
 
   //Memory depth: the largest offered step (3000 x n) the bitstream can capture
   if(fpgasettings.totalsamples > max)
@@ -2063,13 +2365,25 @@ void pc_glue_init(void)
     v[9] = pc_fault_info[1];
     pc_diag_boot(pc_restart_info[0] ? v : 0);
   }
-  //fw 0.2.62: the full-rate capture check of this bitstream (enc_heal.h); 0x1538+: the 0x33 encode convention, which
-  //the session reads for its core-order cap (fw 0.2.72, pc_variant_core_order), so first
-  fpga_encode_init(pc_fpga_word);
-  //fw 0.2.79: 0x153A capture stages, the stored value when it was trained on this bitstream (cap_hw.c)
-  fpga_capture_init(pc_fpga_word);
+  //The FPGA features are set up only on the bitstream this firmware is built for (PC_FW_FPGA_VERSION): on a mismatch
+  //nothing is written to registers the firmware does not know, the session refuses the acquisition commands and the main
+  //loop shows the notice screen (ui_fpga_mismatch_pass) instead of the scope
+  if(pc_fpga_word == PC_FW_FPGA_VERSION)
+  {
+    //fw 0.2.62: the full-rate capture check (enc_heal.h): the 0x33 encode convention, which the session reads for its
+    //core-order cap (fw 0.2.72, pc_variant_core_order), so first
+    fpga_encode_init();
+    //fw 0.2.79: the capture stages, the stored value when it was trained on this bitstream (cap_hw.c)
+    fpga_capture_init(pc_fpga_word);
+    //fw-c5 (0x153C): the trigger extension at its power-on state (edge, no hold-off) and the hold-off clear request for
+    //the first arm: a FEL load leaves the FPGA as the previous firmware left it (fpga_bus.h)
+    fpga_trig_write(&fpga_trig, 1);
+    //C7 counter: 0x62 = 128 / 6, 0x61 = gate 100 ms on the trigger source (fpga_counter.h); the timing cards take the
+    //counter's values from here on (ui_meas.c, the pass in pc_glue_counter_pass)
+    fpga_counter_boot();
+    ui_ms_counter_register();
+  }
   pc_session_init(&pc_sess);
-  pc_seq_hw_init((pc_sess.var.caps & PC_CAP_SEQ) != 0);
   pc_ready = 1;
   pc_ui_fix_settings();
 
@@ -2078,6 +2392,180 @@ void pc_glue_init(void)
   if(pc_restart_info[0])
     pc_usb_log_restart((uint8)pc_restart_info[1], (uint16)(pc_restart_info[1] ? pc_restart_info[2] : pc_restart_info[5]));
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger (fw-d4, FPGA 0x153D, protocol 1.27 row 67; pc_hal.h, fpga_log.h). One log: the FPGA side and the DDR ring in the
+//NOLOAD `.logring` section after .bss (fnirsi_1013d.ld: not in the image, not cleared at boot, nothing reads it before a
+//LOG_START resets the ring). While it runs the main loop is pc_log_loop: a drain step and a MAIN poll per iteration (the
+//poll answers LOG_READ, GET_STATUS, ...; the rest E_STATE 9), the Scope view frozen with its notice slot reading "Logging to
+//the host: 12 s, 6.0 MB" (redrawn every 500 ms). No UI pass runs: the FPGA ring holds 16 ms at the fastest tier, a pass
+//takes 15-40 ms. The person at the scope ends a log only through the host (LOG_STOP, or the host going away: pc_cmds.c).
+#include "fpga_log.h"
+
+static fpga_log pc_log;
+static uint8    pc_log_mem[PC_LOG_RING_BYTES] __attribute__((section(".logring"), aligned(64)));
+static uint32   pc_log_ms0, pc_log_ms1;
+static uint32   pc_log_div_saved;          //0x0D the UI had: written back when the log ends
+static uint8    pc_log_open;               //started and not yet finished (the divider to restore)
+
+//Decimal digits of v at p; returns their count
+static uint32 pc_log_u32(char *p, uint32 v)
+{
+  char   d[10];
+  uint32 n = 0, i;
+
+  do
+  {
+    d[n++] = (char)('0' + v % 10);
+    v /= 10;
+  } while(v);
+
+  for(i=0;i<n;i++)
+    p[i] = d[n - 1 - i];
+
+  return n;
+}
+
+//"12 s, 6.0 MB, 3 gaps" into t (at least 48 bytes)
+static void pc_log_stats(char *t)
+{
+  uint32 s  = ((pc_log.state == FPGA_LOG_RUNNING) ? timer0ticks : pc_log_ms1) - pc_log_ms0;
+  uint32 mb = (uint32)(pc_log.ring.wr / 104858);          //tenths of a MiB
+  char  *p  = t;
+
+  p += pc_log_u32(p, s / 1000);
+  *p++ = ' '; *p++ = 's'; *p++ = ','; *p++ = ' ';
+  p += pc_log_u32(p, mb / 10);
+  *p++ = '.';
+  *p++ = (char)('0' + mb % 10);
+  *p++ = ' '; *p++ = 'M'; *p++ = 'B';
+
+  if(pc_log.gaps)
+  {
+    *p++ = ','; *p++ = ' ';
+    p += pc_log_u32(p, pc_log.gaps);
+    memcpy(p, (pc_log.gaps == 1) ? " gap" : " gaps", 6);
+    p += strlen(p);
+  }
+
+  *p = 0;
+}
+
+//The Scope view's notice slot (pc_glue_scope_warning's place), white on black
+static void pc_log_notice(void)
+{
+  DISPLAYDATA save;
+  char t[80] = "Logging to the host: ";
+
+  pc_log_stats(t + strlen(t));
+  pc_draw_begin(&save);
+  display_set_fg_color(BLACK_COLOR);
+  display_fill_rect(146, 66, 440, 18);
+  display_set_font(&font_2);
+  display_set_fg_color(WHITE_COLOR);
+  display_text(366 - ui_text_width(&font_2, t) / 2, 69, (int8 *)t);
+  pc_draw_end(&save);
+}
+
+//The UI's divider back; the end time
+static void pc_log_finish(void)
+{
+  if(!pc_log_open)
+    return;
+
+  pc_log_open = 0;
+  pc_log_ms1  = timer0ticks;
+  fpga_write_cmd(0x0D);
+  fpga_write_int(pc_log_div_saved);
+}
+
+int pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit)
+{
+  pc_seq_cfg off;
+  int r;
+
+  //A UI conversion in flight and its firmware auto time-out are abandoned (the UI is in STOP: pc_cmds.c)
+  pc_ui_auto = 0;
+
+  pc_log_div_saved = fpga_divider;
+  pc_log_open      = 1;
+  fpga_write_cmd(0x0D);
+  fpga_write_int(divider);
+
+  //The filter / peak registers settled before the reset, the sequencer off
+  pc_dec_apply(dc);
+  memset(&off, 0, sizeof(off));
+  pc_seq_ui_conversion(0, dc, 0);
+  pc_seq_hw_pre_reset(&off);
+
+  r = fpga_log_start(&pc_log, ch_mask, format, limit, pc_log_mem, sizeof(pc_log_mem), PC_READY_POLLS);
+  pc_log_ms0 = pc_log_ms1 = timer0ticks;
+
+  if(r)
+    pc_log_finish();
+
+  return r;
+}
+
+void pc_hal_log_stop(uint8_t state)
+{
+  fpga_log_stop(&pc_log, state);
+  pc_log_finish();
+}
+
+void pc_hal_log_info(pc_hw_log *l)
+{
+  memset(l, 0, sizeof(*l));
+  l->state      = pc_log.state;
+  l->ch_mask    = pc_log.ch_mask;
+  l->format     = pc_log.format;
+  l->flags      = pc_log.flags;
+  l->produced   = pc_log.ring.wr;
+  l->sent       = pc_log.ring.rd;
+  l->gaps       = pc_log.gaps;
+  l->ring_bytes = PC_LOG_RING_BYTES;
+  l->ms         = ((pc_log.state == FPGA_LOG_RUNNING) ? timer0ticks : pc_log_ms1) - pc_log_ms0;
+}
+
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags)
+{
+  return pc_logring_read(&pc_log.ring, dst, max, word, flags);
+}
+
+//The log loop (from pc_glue_poll_main after the MAIN poll that started a log)
+static void pc_log_loop(void)
+{
+  uint32 next;
+  uint8  who;
+  char   t[48];
+
+  if(pc_log.state != FPGA_LOG_RUNNING)
+    return;
+
+  who            = fpga_trace_who;
+  fpga_trace_who = FPGA_WHO_HOST;
+  pc_log_notice();
+  next = timer0ticks + 500;
+
+  while(pc_log.state == FPGA_LOG_RUNNING)
+  {
+    fpga_log_drain(&pc_log);
+    pc_poll(&pc_sess, PC_CTX_MAIN);
+
+    if((int32)(timer0ticks - next) >= 0)
+    {
+      pc_log_notice();
+      next += 500;
+    }
+  }
+
+  //Ended (duration, LOG_STOP, an error): the UI's divider back, the summary as the slot's notice for a while
+  pc_log_finish();
+  fpga_trace_who = who;
+  pc_log_stats(t);
+  acq_view_notice_queue(1, "Log ended: ", t, "");
+}
+//D4 logger end
 
 void pc_glue_poll_main(void)
 {
@@ -2088,6 +2576,9 @@ void pc_glue_poll_main(void)
     fpga_trace_who = FPGA_WHO_HOST;
     pc_poll(&pc_sess, PC_CTX_MAIN);
     fpga_trace_who = who;
+
+    //D4 logger: a LOG_START in this poll: the main loop is the log loop until the log ends
+    pc_log_loop();
   }
 
   pc_ui_auto_service();
@@ -2237,27 +2728,12 @@ void pc_glue_ui_capture_addr(uint32 addr)
     if(pc_ui_forced)
       pc_sess.ui_trig = 0;
 
-    //fw 0.2.97, FPGA auto with the stop geometry: 0x18 also counts an edge after the stop, which leaves 0x14 at the
-    //pretrigger; a trigger in the last total - pre words before the stop is cut by it (flagged, as pc_cmds.c's host path)
-    if(pc_ui_rules && !pc_ui_forced)
-    {
-      if((addr & 0x1FFF) == pc_ui_pre)
-        pc_sess.ui_trig = 0;
-      else if(pc_sess.ui_trig && pc_auto_cut(addr, pc_ui_pre, pc_ui_total, pc_ui_stop, PC_DEC_RING) &&
-              ((timer0ticks - pc_ui_auto_t0) + 2 + pc_words_to_ms(pc_ui_total - pc_ui_pre, pc_ui_div, pc_ui_wide) >=
-               pc_ui_stop_ms))
-        pc_ui_spliced = 1;
-    }
-
-    if(pc_ui_spliced)
-      pc_sess.cap_next.flags |= PC_CAPTURE_F_SPLICED;
-
-    //An averaging run is triggered when it holds a record (0x18 is the last record's)
-    pc_seq_ui_done(&pc_sess.ui_trig);
+    //An averaging run is triggered when it holds a record (0x18 is the last record's); the MCU path's further records
+    //are armed and summed here (pc_seq_hw.c)
+    pc_seq_ui_done(&pc_sess.ui_trig, addr);
   }
 
-  pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode) &&
-                     !(pc_ui_rules && ((addr & 0x1FFF) == pc_ui_pre))) ? 0 : 1;
+  pc_scope_untrig = (!pc_ui_forced && (!pc_ready || pc_sess.ui_trig || scopesettings.triggermode)) ? 0 : 1;
   spectrum_capture_info(!pc_scope_untrig);
   phosphor_capture_info(!pc_scope_untrig);
   pc_ui_auto = 0;

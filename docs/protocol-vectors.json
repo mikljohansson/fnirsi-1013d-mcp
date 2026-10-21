@@ -48,6 +48,11 @@
   "READ_SEQ": 528,
   "BODE_CTRL": 529,
   "READ_BODE": 530,
+  "GET_COUNTER": 531,
+  "LOG_START": 532,
+  "LOG_READ": 533,
+  "LOG_STOP": 534,
+  "SET_TRIGGER2": 537,
   "SD_INFO": 1280,
   "SD_READ_SECTORS": 1281,
   "SD_STAGE": 1282,
@@ -3931,6 +3936,923 @@
    "hex": "4657494431303133302e322e353200000000000000000000cdab34121a0a130c22380110"
   }
  },
+ "decim_peak": {
+  "notes": "1.26 peak detect (FPGA 0x153C, fw-c6), checked against pc_decim.c by decim_check --peak / --peak-corr. cases: divider total k_req fir_req -> peak (1 = the record is { max, min } words), k (1), n (the window 2 (floor(D / 2) + 1)), why (0; 2 at divider 0, 3 over 8190 samples: legacy record, the FIR request dropped), status (the mode byte 0x81), shift_byte (0xC0: bit 7 peak active, bit 6 peak written, S 0), cmd56 (0x56 = 2), rate 200 MSa/s / N, settle_us = ceil(11 N / 200) + 1, ext_shift = round((120 ns + (N - 1) 2.5 ns + 40 ns) / (N x 5 ns)) (the K = 1 boxcar's latency with the capture stages). corr: gain_a gain_b off_a off_b (Q16, GET_CAL 92..107 at divider 0: the full clock class) -> gain = round((gain_a + gain_b) / 2), off = (off_a + off_b) / 2 (C division); codes = clamp((raw x gain + off + 2^15) >> 16) for raws, mids = clamp(((min + max) gain + 2 off + 2^16) >> 17) for pairs (the processed trace's sample), level = the raw code whose corrected value is the level (0x55 = level << 8; 0 when the level is at or below the offset), overload = (min == 0) | (max == 255 ? 0xFE) for pairs.",
+  "raws": [
+   0,
+   1,
+   127,
+   128,
+   254,
+   255
+  ],
+  "pairs": [
+   [
+    0,
+    255
+   ],
+   [
+    100,
+    140
+   ],
+   [
+    100,
+    141
+   ],
+   [
+    10,
+    250
+   ],
+   [
+    0,
+    100
+   ],
+   [
+    10,
+    255
+   ]
+  ],
+  "levels": [
+   0,
+   1,
+   64,
+   127,
+   128,
+   200,
+   254,
+   255
+  ],
+  "cases": [
+   {
+    "divider": 0,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 0,
+    "k": 0,
+    "n": 0,
+    "why": 2,
+    "status": 0,
+    "shift_byte": 0,
+    "cmd56": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0
+   },
+   {
+    "divider": 0,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 0,
+    "k": 0,
+    "n": 0,
+    "why": 2,
+    "status": 0,
+    "shift_byte": 0,
+    "cmd56": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0
+   },
+   {
+    "divider": 1,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 2,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 100000000,
+    "settle_us": 2,
+    "ext_shift": 16
+   },
+   {
+    "divider": 1,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 2,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 100000000,
+    "settle_us": 2,
+    "ext_shift": 16
+   },
+   {
+    "divider": 3,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 4,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 50000000,
+    "settle_us": 2,
+    "ext_shift": 8
+   },
+   {
+    "divider": 3,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 4,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 50000000,
+    "settle_us": 2,
+    "ext_shift": 8
+   },
+   {
+    "divider": 9,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 10,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 20000000,
+    "settle_us": 2,
+    "ext_shift": 4
+   },
+   {
+    "divider": 9,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 10,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 20000000,
+    "settle_us": 2,
+    "ext_shift": 4
+   },
+   {
+    "divider": 19,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 20,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 10000000,
+    "settle_us": 3,
+    "ext_shift": 2
+   },
+   {
+    "divider": 19,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 20,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 10000000,
+    "settle_us": 3,
+    "ext_shift": 2
+   },
+   {
+    "divider": 39,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 40,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 5000000,
+    "settle_us": 4,
+    "ext_shift": 1
+   },
+   {
+    "divider": 39,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 40,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 5000000,
+    "settle_us": 4,
+    "ext_shift": 1
+   },
+   {
+    "divider": 99,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 100,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 2000000,
+    "settle_us": 7,
+    "ext_shift": 1
+   },
+   {
+    "divider": 99,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 100,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 2000000,
+    "settle_us": 7,
+    "ext_shift": 1
+   },
+   {
+    "divider": 199,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 200,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 1000000,
+    "settle_us": 12,
+    "ext_shift": 1
+   },
+   {
+    "divider": 199,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 200,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 1000000,
+    "settle_us": 12,
+    "ext_shift": 1
+   },
+   {
+    "divider": 399,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 400,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 500000,
+    "settle_us": 23,
+    "ext_shift": 1
+   },
+   {
+    "divider": 399,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 400,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 500000,
+    "settle_us": 23,
+    "ext_shift": 1
+   },
+   {
+    "divider": 999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 1000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 200000,
+    "settle_us": 56,
+    "ext_shift": 1
+   },
+   {
+    "divider": 999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 1000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 200000,
+    "settle_us": 56,
+    "ext_shift": 1
+   },
+   {
+    "divider": 1999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 2000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 100000,
+    "settle_us": 111,
+    "ext_shift": 1
+   },
+   {
+    "divider": 1999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 2000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 100000,
+    "settle_us": 111,
+    "ext_shift": 1
+   },
+   {
+    "divider": 3999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 4000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 50000,
+    "settle_us": 221,
+    "ext_shift": 1
+   },
+   {
+    "divider": 3999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 4000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 50000,
+    "settle_us": 221,
+    "ext_shift": 1
+   },
+   {
+    "divider": 9999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 10000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 20000,
+    "settle_us": 551,
+    "ext_shift": 1
+   },
+   {
+    "divider": 9999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 10000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 20000,
+    "settle_us": 551,
+    "ext_shift": 1
+   },
+   {
+    "divider": 19999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 20000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 10000,
+    "settle_us": 1101,
+    "ext_shift": 1
+   },
+   {
+    "divider": 19999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 20000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 10000,
+    "settle_us": 1101,
+    "ext_shift": 1
+   },
+   {
+    "divider": 39999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 40000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 5000,
+    "settle_us": 2201,
+    "ext_shift": 1
+   },
+   {
+    "divider": 39999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 40000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 5000,
+    "settle_us": 2201,
+    "ext_shift": 1
+   },
+   {
+    "divider": 99999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 100000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 2000,
+    "settle_us": 5501,
+    "ext_shift": 1
+   },
+   {
+    "divider": 99999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 100000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 2000,
+    "settle_us": 5501,
+    "ext_shift": 1
+   },
+   {
+    "divider": 199999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 200000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 1000,
+    "settle_us": 11001,
+    "ext_shift": 1
+   },
+   {
+    "divider": 199999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 200000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 1000,
+    "settle_us": 11001,
+    "ext_shift": 1
+   },
+   {
+    "divider": 399999,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 400000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 500,
+    "settle_us": 22001,
+    "ext_shift": 1
+   },
+   {
+    "divider": 399999,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 400000,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 500,
+    "settle_us": 22001,
+    "ext_shift": 1
+   },
+   {
+    "divider": 19,
+    "total": 3000,
+    "k_req": 2,
+    "fir_req": 1,
+    "peak": 1,
+    "k": 1,
+    "n": 20,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 10000000,
+    "settle_us": 3,
+    "ext_shift": 2
+   },
+   {
+    "divider": 19,
+    "total": 8190,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 20,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 10000000,
+    "settle_us": 3,
+    "ext_shift": 2
+   },
+   {
+    "divider": 19,
+    "total": 8192,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 0,
+    "k": 0,
+    "n": 0,
+    "why": 3,
+    "status": 0,
+    "shift_byte": 0,
+    "cmd56": 0,
+    "rate": 10000000,
+    "settle_us": 0,
+    "ext_shift": 0
+   },
+   {
+    "divider": 2,
+    "total": 3000,
+    "k_req": 0,
+    "fir_req": 0,
+    "peak": 1,
+    "k": 1,
+    "n": 4,
+    "why": 0,
+    "status": 129,
+    "shift_byte": 192,
+    "cmd56": 2,
+    "rate": 50000000,
+    "settle_us": 2,
+    "ext_shift": 8
+   },
+   {
+    "divider": 0,
+    "total": 3000,
+    "k_req": 3,
+    "fir_req": 1,
+    "peak": 0,
+    "k": 0,
+    "n": 0,
+    "why": 2,
+    "status": 0,
+    "shift_byte": 0,
+    "cmd56": 0,
+    "rate": 200000000,
+    "settle_us": 0,
+    "ext_shift": 0
+   }
+  ],
+  "corr": [
+   {
+    "gain_a": 65536,
+    "gain_b": 65536,
+    "off_a": 131072,
+    "off_b": -65536,
+    "gain": 65536,
+    "off": 32768,
+    "codes": [
+     1,
+     2,
+     128,
+     129,
+     255,
+     255
+    ],
+    "mids": [
+     128,
+     121,
+     121,
+     131,
+     51,
+     133
+    ],
+    "level": [
+     0,
+     1,
+     64,
+     127,
+     128,
+     200,
+     254,
+     255
+    ],
+    "overload": [
+     255,
+     0,
+     0,
+     0,
+     1,
+     254
+    ]
+   },
+   {
+    "gain_a": 66846,
+    "gain_b": 64225,
+    "off_a": -229376,
+    "off_b": 98304,
+    "gain": 65536,
+    "off": -65536,
+    "codes": [
+     0,
+     0,
+     126,
+     127,
+     253,
+     254
+    ],
+    "mids": [
+     127,
+     119,
+     120,
+     129,
+     49,
+     132
+    ],
+    "level": [
+     1,
+     2,
+     65,
+     128,
+     129,
+     201,
+     255,
+     255
+    ],
+    "overload": [
+     255,
+     0,
+     0,
+     0,
+     1,
+     254
+    ]
+   },
+   {
+    "gain_a": 70000,
+    "gain_b": 70000,
+    "off_a": 0,
+    "off_b": 0,
+    "gain": 70000,
+    "off": 0,
+    "codes": [
+     0,
+     1,
+     136,
+     137,
+     255,
+     255
+    ],
+    "mids": [
+     136,
+     128,
+     129,
+     139,
+     53,
+     142
+    ],
+    "level": [
+     0,
+     1,
+     60,
+     119,
+     120,
+     187,
+     238,
+     239
+    ],
+    "overload": [
+     255,
+     0,
+     0,
+     0,
+     1,
+     254
+    ]
+   },
+   {
+    "gain_a": 60000,
+    "gain_b": 61000,
+    "off_a": -200000,
+    "off_b": -100001,
+    "gain": 60500,
+    "off": -150000,
+    "codes": [
+     0,
+     0,
+     115,
+     116,
+     232,
+     233
+    ],
+    "mids": [
+     115,
+     108,
+     109,
+     118,
+     44,
+     120
+    ],
+    "level": [
+     2,
+     4,
+     72,
+     140,
+     141,
+     219,
+     255,
+     255
+    ],
+    "overload": [
+     255,
+     0,
+     0,
+     0,
+     1,
+     254
+    ]
+   },
+   {
+    "gain_a": 65536,
+    "gain_b": 65536,
+    "off_a": 0,
+    "off_b": 0,
+    "gain": 65536,
+    "off": 0,
+    "codes": [
+     0,
+     1,
+     127,
+     128,
+     254,
+     255
+    ],
+    "mids": [
+     128,
+     120,
+     121,
+     130,
+     50,
+     133
+    ],
+    "level": [
+     0,
+     1,
+     64,
+     127,
+     128,
+     200,
+     254,
+     255
+    ],
+    "overload": [
+     255,
+     0,
+     0,
+     0,
+     1,
+     254
+    ]
+   }
+  ]
+ },
  "seq": {
   "notes": "1.17 sequencer (FPGA 0x1536), checked against pc_seq.c by seq_check (check_vectors.py --seq-checker). fit: args mode flags m count n pre_words total_words wide -> fit code (0 ok, 1 mode, 2 flags, 3 m, 4 count, 5 total, 6 pre, 7 N), max count, table slots, 0x57, 0x58, 0x5A. Segments: m 5..12, count <= 8192 >> m, total + 2 <= 2^m, pre < total; averaging: N 1..65536 (legacy <= 257), total <= 2046, count x total <= 2048. hold: ns -> 5 ns units, rounded up. entry: u64 -> timestamp (bits 39..0), offset (52..40), triggered (53), valid (63). segw: m s offset pre j -> sample memory word s 2^m + ((offset - pre + j) mod 2^m). plan (UI averaging): total pre divider -> N (largest power of two 2..64 with N (record + dead) <= 40 ms, word = 10 (D + 1) ns, dead = total x 5 + 40 + (2 + pre) word + 100 ns; 0 = software) and the run in us, rounded up. avg: sum c gain off -> corrected code of the mean: m8 = floor((sum x 256 + floor(c / 2)) / c), code = clamp((m8 x gain + off x 256 + 2^23) >> 24, 0, 255).",
   "cases": [
@@ -6235,6 +7157,136 @@
    ]
   },
   {
+   "name": "req_set_trigger2",
+   "description": "1.26: pulse width shorter than 1500 samples (flags 0), negative pulse (polarity 1), CH2, level 140, hold-off 200000 x 5 ns = 1 ms",
+   "hex": "a51301001902350000001800000082d801010001dc050000000000008c000000400d030000000000e1ce2dde",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01010001dc050000000000008c000000400d030000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01010001dc050000000000008c000000400d030000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_get_counter",
+   "description": "1.26 (fw-c7): read the hardware counter's latest result (what 0; the other fields are ignored)",
+   "hex": "a513010013023600000008000000919f000000000000000069df2265",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 54,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 54,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_start",
+   "description": "1.27 (fw-d4): log CH1, format 0 (legacy 8-bit), divider 399 (500 kS/s: the 1 ch 8-bit tier), until LOG_STOP",
+   "hex": "a513010014023700000010000000dc5a010000008f010000000000000000000095f50e91",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 55,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010000008f0100000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 55,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010000008f0100000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_read",
+   "description": "1.27 (fw-d4): the next chunk of the log, at most 65536 bytes (whole words); returns at once",
+   "hex": "a5130100150238000000080000003f720000010000000000cc0c7eae",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 56,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000010000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 533,
+     "seq": 56,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000010000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_stop",
+   "description": "1.27 (fw-d4): stop the log (the FPGA's tail is read into the DDR ring); the LOG summary",
+   "hex": "a513010016023900000000000000e001",
+   "frames": [
+    {
+     "cmd": 534,
+     "seq": 57,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 534,
+     "seq": 57,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ]
+  },
+  {
    "name": "resp_ping",
    "description": "PING response (spec section 13). The device parser drops frames with RESPONSE set",
    "hex": "a513010101000200000002000000b9ea6869ac2a93d8",
@@ -6897,6 +7949,470 @@
    "device_events": []
   },
   {
+   "name": "req_set_trigger2_nth_edge_ext",
+   "description": "1.26: the 3rd rising edge on EXT after an idle time of 100000 samples (5 ns clocks on EXT: 500 us), level 128 (unused on EXT), no hold-off",
+   "hex": "a513010019024800000018000000ea3e0200000203000000a0860100800000000000000000000000ce76e0eb",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 72,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0200000203000000a0860100800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 72,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0200000203000000a0860100800000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_trigger2_pulse_longer_max",
+   "description": "1.26: pulse width longer than N = 16777215 (the largest u24), positive pulse, CH1, level 100",
+   "hex": "a513010019024900000018000000397901000100ffffff00000000006400000000000000000000008cce08f6",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 73,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100ffffff0000000000640000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 73,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100ffffff0000000000640000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_trigger2_timeout",
+   "description": "1.26: timeout: the level held low (polarity 1) for 20000 samples after a falling edge, CH1",
+   "hex": "a513010019024a000000180000004cb103010000204e000000000000800000000000000000000000894ce2c3",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010000204e000000000000800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010000204e000000000000800000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_set_trigger2_edge",
+   "description": "1.26: back to the edge type (N and H must be 0), rising, CH1, level 128, hold-off off",
+   "hex": "a513010019024b000000180000009ff6000000000000000000000000800000000000000000000000c0a506c3",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 75,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "000000000000000000000000800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 75,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "000000000000000000000000800000000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_get_trigger_1_26",
+   "description": "1.26 GET_TRIGGER response (52 bytes): CH2 falling / negative pulse, level 140, normal, pretrigger 2000, total 16000, 12 hold-off 200000 (5 ns units), auto_timeout 16000, 1000 / 8000 words; 28..51 the SET_TRIGGER2 body: pulse width shorter than 1500 samples, CH2, level 140, hold-off 200000 (the req_set_trigger2 request)",
+   "hex": "a513010104014c000000340000005ba001018c01d0070000803e0000400d0300803e0000e803401f0000000001010001dc050000000000008c000000400d0300000000006647cbe2",
+   "frames": [
+    {
+     "cmd": 260,
+     "seq": 76,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "01018c01d0070000803e0000400d0300803e0000e803401f0000000001010001dc050000000000008c000000400d030000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_status_1_26",
+   "description": "1.26 GET_STATUS tail (52 bytes; 0..43 zero here): 44 features 0x1FF (bit 8 TRIG_TYPES), 46 / 47 Average off, 48 FPGA 0x37 = 0x10 (hold-off running), 49 0x34 byte 0 = 0x22 (counting, type 2 Nth edge, not longer, not EXT), 50 u16 edges still to count 2",
+   "hex": "a513010103004d0000003400000051100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff0100001022020071a5f115",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 77,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff01000010220200"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_capture_info_1_26",
+   "description": "1.26 GET_CAPTURE_INFO tail (112 bytes; 0..95 as 1.17, zero here): 96 trigger type 2 (Nth edge), 97 flags 0, 98 u16 0, 100 u32 N 3, 104 u32 H 100000, 108 u32 hold-off 0",
+   "hex": "a513010109024e00000070000000ef2e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000003000000a086010000000000cfb15761",
+   "frames": [
+    {
+     "cmd": 521,
+     "seq": 78,
+     "status": 0,
+     "flags": 1,
+     "len": 112,
+     "payload": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000003000000a086010000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_set_trigger2_e_bad_arg_runt",
+   "description": "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, 14 level2)",
+   "hex": "a513010119024f0004001c000000ebed000072756e74202f2077696e646f773a2046504741203078313533451ef7e880",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 79,
+     "status": 4,
+     "flags": 1,
+     "len": 28,
+     "payload": "000072756e74202f2077696e646f773a204650474120307831353345"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_set_decim_e_bad_arg_fir_peak",
+   "description": "1.26 SET_DECIM E_BAD_ARG detail 1 for filter 4 with flags bit 3: the FIR is off while peak detect runs (set the filter first); filter 5 and above is detail 0 'filter 0..3, 4 peak'",
+   "hex": "a51301010d025000040016000000955801004649522077697468207065616b2064657465637403909f3a",
+   "frames": [
+    {
+     "cmd": 525,
+     "seq": 80,
+     "status": 4,
+     "flags": 1,
+     "len": 22,
+     "payload": "01004649522077697468207065616b20646574656374"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_set_seq_e_state_peak",
+   "description": "1.26 SET_SEQ mode 2 (averaging) while the next arm is a peak record: E_STATE detail 7 (the lane sums would mix the max and min bytes); GET_SEQ byte 16 reads 9 for an averaging setting that no longer fits, ARM then E_STATE 3",
+   "hex": "a51301010e025100080039000000ca4607007065616b206465746563743a20617665726167696e67207265667573656420285345545f444543494d2066696c74657220666972737429bce71986",
+   "frames": [
+    {
+     "cmd": 526,
+     "seq": 81,
+     "status": 8,
+     "flags": 1,
+     "len": 57,
+     "payload": "07007065616b206465746563743a20617665726167696e67207265667573656420285345545f444543494d2066696c74657220666972737429"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_read_raw_e_bad_arg_peak_layout2",
+   "description": "1.26 READ_RAW layout 2 of a peak-detect record: E_BAD_ARG detail 2 (layout 3 reads it); layout 3 of any other record is detail 2 'layout 3 needs a peak-detect record'",
+   "hex": "a51301010402520004001e000000fe7702007065616b2d646574656374207265636f72643a206c61796f757420335a0061da",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 82,
+     "status": 4,
+     "flags": 1,
+     "len": 30,
+     "payload": "02007065616b2d646574656374207265636f72643a206c61796f75742033"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "req_get_counter_follow_trigger",
+   "description": "1.26 (fw-c7): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 = follow the UI trigger level, hysteresis 6; the configuration is written by the next main-loop pass",
+   "hex": "a513010013025000000008000000e292010200000600000002917c1b",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 80,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0102000006000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 80,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0102000006000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_get_counter_ext_10ms",
+   "description": "1.26 (fw-c7): 10 ms gate on EXT (the level and hysteresis do not apply to EXT: pinned at 128 / 0)",
+   "hex": "a51301001302510000000800000031d501010380000000007f168d38",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 81,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0101038000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 81,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0101038000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_get_counter_1_26_ch2",
+   "description": "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (the trigger level followed), hysteresis 6, freq_mHz 1000000000",
+   "hex": "a513010113025200000018000000aade0a0501001027000080841e0040420f003cc8960600ca9a3bfd119d1d",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 82,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "0a0501001027000080841e0040420f003cc8960600ca9a3b"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_counter_1_26_no_edges",
+   "description": "1.26 (fw-c7) GET_COUNTER response: a new gate with fewer than two edges (the signal under the Schmitt thresholds 60..70 against 128 / 6): NEW set, VALID clear, E = T = W = 0, freq_mHz 0; the cards keep the record's values",
+   "hex": "a5130101130253000000180000007999010902000000000000000000000000003c468006000000007c2837f3",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 83,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "010902000000000000000000000000003c46800600000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_get_counter_e_bad_arg_hyst",
+   "description": "1.26 (fw-c7) GET_COUNTER E_BAD_ARG: detail = the byte offset of the field (0 what, 1 gate, 2 source, 4 hysteresis > a non-zero level), then the text; nothing is configured then",
+   "hex": "a513010113025400040014000000f217040068797374657265736973203e206c6576656ca8b15b75",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 84,
+     "status": 4,
+     "flags": 1,
+     "len": 20,
+     "payload": "040068797374657265736973203e206c6576656c"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "req_log_start_2ch_16bit_10s",
+   "description": "1.27 (fw-d4): CH1 + CH2, format 2 (filtered u16, SET_DECIM filter 1..3 first), divider 1599 (N 1600: 125 kS/s, the 2 ch 16-bit tier), 10 s",
+   "hex": "a513010014025a000000100000000081030200003f0600001027000000000000391b5c95",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 90,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "030200003f0600001027000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 90,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "030200003f0600001027000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "req_log_start_peak",
+   "description": "1.27 (fw-d4): CH1, format 3 (peak min / max pairs, SET_DECIM filter 4 first), divider 799 (window 800: 250 kS/s)",
+   "hex": "a513010014025b00000010000000d3c6010300001f030000000000000000000031a4c0b4",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 91,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010300001f0300000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 532,
+     "seq": 91,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "010300001f0300000000000000000000",
+     "event": "frame"
+    }
+   ]
+  },
+  {
+   "name": "resp_log_start_1_27",
+   "description": "1.27 (fw-d4) LOG_START response (LOG, 48 bytes): state 1 running, CH1, format 0, flags 0, divider 399, 100 ms, 400 clocks per sample (D + 1), 0 bytes produced / sent, 0 gaps, DDR ring 8 MiB, 0 ms",
+   "hex": "a513010114025c00000030000000ccee010100008f010000640000009001000000000000000000000000000000000000000000000000800000000000000000009c80df5b",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 92,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "010100008f01000064000000900100000000000000000000000000000000000000000000000080000000000000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_stop_1_27",
+   "description": "1.27 (fw-d4) LOG_STOP response: state 3 stopped, CH1 + CH2, format 2, flags 3 (a lap gap and a gap because the DDR ring was full), divider 1599, until stopped, 1600 clocks, 20 MB produced, 4000 bytes still unread, 2 gaps, 8 MiB ring, 40.012 s",
+   "hex": "a513010116025d000000300000009577030302033f0600000000000040060000002d310100000000601d31010000000002000000000080004c9c000000000000ccdf1bf8",
+   "frames": [
+    {
+     "cmd": 534,
+     "seq": 93,
+     "status": 0,
+     "flags": 1,
+     "len": 48,
+     "payload": "030302033f0600000000000040060000002d310100000000601d31010000000002000000000080004c9c000000000000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_read_1_27_gap",
+   "description": "1.27 (fw-d4) LOG_READ response: chunk 3, words 150..159 of a CH1 format 0 log (2 bytes per word: core B then core A), 20 bytes, flags 0x03 = running | gap (the counter jumped from 100 to 150: 50 words lost)",
+   "hex": "a513010115025e0000002400000079df030000009600000014000000030000001a1b212228292f3036373d3e44454b4c5253595a80af1898",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 94,
+     "status": 0,
+     "flags": 1,
+     "len": 36,
+     "payload": "030000009600000014000000030000001a1b212228292f3036373d3e44454b4c5253595a"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_read_1_27_ended",
+   "description": "1.27 (fw-d4) LOG_READ response after the end with nothing left: 0 bytes, flags 0x04 ended, format 1",
+   "hex": "a513010115025f00000010000000b27e070000009210000000000000040100000896f0b1",
+   "frames": [
+    {
+     "cmd": 533,
+     "seq": 95,
+     "status": 0,
+     "flags": 1,
+     "len": 16,
+     "payload": "07000000921000000000000004010000"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_log_start_e_bad_arg_rate",
+   "description": "1.27 (fw-d4) LOG_START E_BAD_ARG detail 1: the rate is above the contract's tiers (sample rate x bytes per sample x channels > 500,000 B/s); details 0 channels, 2 format (or the SET_DECIM filter does not fit it), 4 divider",
+   "hex": "a51301011402600004003d0000008086010072617465203e20353030206b422f733a203530306b203163682038622c203235306b20313662206f72203263682c203132356b2032636820313662e02d2cf6",
+   "frames": [
+    {
+     "cmd": 532,
+     "seq": 96,
+     "status": 4,
+     "flags": 1,
+     "len": 61,
+     "payload": "010072617465203e20353030206b422f733a203530306b203163682038622c203235306b20313662206f72203263682c203132356b2032636820313662"
+    }
+   ],
+   "device_events": []
+  },
+  {
+   "name": "resp_e_state_logging",
+   "description": "1.27 (fw-d4) any command outside the F_BUSY / read-only sets and LOG_READ / LOG_STOP while logging: E_STATE detail 9",
+   "hex": "a513010100026100080019000000ac0e09006c6f6767696e673a204c4f475f53544f50206669727374d881760b",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 97,
+     "status": 8,
+     "flags": 1,
+     "len": 25,
+     "payload": "09006c6f6767696e673a204c4f475f53544f50206669727374"
+    }
+   ],
+   "device_events": []
+  },
+  {
    "name": "ascii_ver",
    "description": "#VER probe",
    "hex": "235645520a",
@@ -7402,6 +8918,409 @@
      "flags": 1,
      "len": 29,
      "payload": "02006174206d6f737420343120726f7773207065722072657175657374"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_25",
+   "description": "GET_INFO response, protocol 1.25 (80 bytes): FPGA 0x153B = the built-for word at 76, flags 78 = 0",
+   "hex": "a513010102000400000050000000ee4301190002000401003b1502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b1500004bddf751",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 4,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "01190002000401003b1502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b150000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_25_mismatch",
+   "description": "GET_INFO response, protocol 1.25: the FPGA reports 0x1532, the firmware is built for 0x153B (76), flags 78 bit 0 FPGA_MISMATCH; caps and geometry are the firmware's fixed ones",
+   "hex": "a5130101020005000000500000003d040119000200040100321502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b150100f930ea96",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 5,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "0119000200040100321502080020020200c2eb0b4bec0f0080f0fa02fe3f500000070600302e322e313032000000000000000000164f010a31303133442d303030310000000000002003e0013b150100"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_unsupported_fpga_mismatch",
+   "description": "E_UNSUPPORTED detail 1 with the mismatch text: every command outside the basic set on such a scope",
+   "hex": "a51301010002060005003500000033720100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353342e27655c8",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 6,
+     "status": 5,
+     "flags": 1,
+     "len": 53,
+     "payload": "0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353342"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_1_26",
+   "description": "GET_INFO response, protocol 1.26 (80 bytes): FPGA 0x153C, caps add HOLDOFF (2), TRIG_TYPES (20), PEAK_DETECT (21), COUNTER (22) = 0x7FEC4F",
+   "hex": "a5130101020007000000500000009b8b011a0002000401003c1502080020020200c2eb0b4fec7f0080f0fa02fe3f500000070600302e322e31303400000000000000000026018c0c31303133442d303030310000000000002003e0013c15000020967225",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 7,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "011a0002000401003c1502080020020200c2eb0b4fec7f0080f0fa02fe3f500000070600302e322e31303400000000000000000026018c0c31303133442d303030310000000000002003e0013c150000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_unsupported_fpga_mismatch_1_26",
+   "description": "E_UNSUPPORTED detail 1 with the 1.26 mismatch text (the scope runs another word than 0x153C)",
+   "hex": "a51301010002080005003500000022ec0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353343744652bf",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 8,
+     "status": 5,
+     "flags": 1,
+     "len": 53,
+     "payload": "0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353343"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_pulse_longer",
+   "description": "SET_TRIGGER2 0x0219 (24 bytes): type 1 pulse width, polarity 0 positive pulse, flags LONGER, source CH1, N 1500 samples (15 us at 1 MSa/s legacy words), H 0, level 140, level2 0, hold-off 0",
+   "hex": "a5130100190232000000180000009a1f01000100dc050000000000008c0000000000000000000000e8127203",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 50,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100dc050000000000008c0000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 50,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "01000100dc050000000000008c0000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_nth_edge",
+   "description": "SET_TRIGGER2: type 2 Nth edge, polarity 1 falling edges counted, source CH2, N 3, idle H 20000 samples, level 128",
+   "hex": "a51301001902330000001800000049580201000103000000204e00008000000000000000000000003a558a81",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 51,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0201000103000000204e0000800000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 51,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0201000103000000204e0000800000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_timeout_ext",
+   "description": "SET_TRIGGER2: type 3 timeout, polarity 1 held low, source EXT, N 200000 x 5 ns = 1 ms, level 0",
+   "hex": "a513010019023400000018000000519f03010002400d030000000000000000000000000000000000ea653d6c",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 52,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010002400d030000000000000000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 52,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "03010002400d030000000000000000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_trigger2_edge_holdoff",
+   "description": "SET_TRIGGER2: type 0 edge rising (N, H 0), CH1, level 128, hold-off 500 000 x 5 ns = 2.5 ms (the firmware writes 0x66 with it: the next ARM clears a running hold-off)",
+   "hex": "a51301001902350000001800000082d80000000000000000000000008000000020a1070000000000f42fa9c6",
+   "frames": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0000000000000000000000008000000020a1070000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 537,
+     "seq": 53,
+     "status": 0,
+     "flags": 0,
+     "len": 24,
+     "payload": "0000000000000000000000008000000020a1070000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_trigger_1_26_pulse",
+   "description": "GET_TRIGGER response, protocol 1.26 (52 bytes): the 28-byte TRIGGER (12 hold-off 500000 units) then the SET_TRIGGER2 block at 28..51 (pulse width longer than 1500, level 140, hold-off 500000)",
+   "hex": "a5130101040136000000340000002b8100008c01e8030000a00f000020a10700a00f0000f401d0070000000001000100dc050000000000008c00000020a1070000000000c1c7f868",
+   "frames": [
+    {
+     "cmd": 260,
+     "seq": 54,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "00008c01e8030000a00f000020a10700a00f0000f401d0070000000001000100dc050000000000008c00000020a1070000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_status_1_26_armed",
+   "description": "GET_STATUS response, protocol 1.26 (52 bytes): ARMED (run_state SINGLE), features 0x7FF, 48 0x37 = 0x10 hold-off running, 49 0x34 = 0x22 counting + type 2 Nth edge, 50 edges still to count 2",
+   "hex": "a5130101030037000000340000002131020108002c000000000000000300000040e20100ffff12000000000014002300110000001000000002000000ff070000102202006ba3ddfa",
+   "frames": [
+    {
+     "cmd": 3,
+     "seq": 55,
+     "status": 0,
+     "flags": 1,
+     "len": 52,
+     "payload": "020108002c000000000000000300000040e20100ffff12000000000014002300110000001000000002000000ff07000010220200"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_get_counter_read",
+   "description": "GET_COUNTER 0x0213 request (8 bytes): what 0 = read the snapshot (the other fields ignored)",
+   "hex": "a513010013023c00000008000000ed0e000000000000000069df2265",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 60,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 60,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_get_counter_config",
+   "description": "GET_COUNTER request: what 1 = configure then read: gate 3 (1 s), source 2 (CH2), level 140, hysteresis 6",
+   "hex": "a513010013023d000000080000003e490103028c060000002e66d584",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 61,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0103028c06000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 531,
+     "seq": 61,
+     "status": 0,
+     "flags": 0,
+     "len": 8,
+     "payload": "0103028c06000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_counter",
+   "description": "GET_COUNTER response (24 bytes): flags NEW|VALID, seq 17, gate 2 (100 ms), source 0 (the trigger source, CH1), E 1000, T 20 000 000 clocks, W 4 000 000 (10.000000 kHz, duty 20 %), min 112, max 147, level 128, hysteresis 6, freq_mHz 10 000 000",
+   "hex": "a513010113023c0000001800000003cd03110200e8030000002d310100093d007093800680969800c04fed02",
+   "frames": [
+    {
+     "cmd": 531,
+     "seq": 60,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "03110200e8030000002d310100093d007093800680969800"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_decim_peak",
+   "description": "SET_DECIM filter 4 = peak detect (flags 0)",
+   "hex": "a51301000d023e000000040000001b63040000004b4826ae",
+   "frames": [
+    {
+     "cmd": 525,
+     "seq": 62,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "04000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 525,
+     "seq": 62,
+     "status": 0,
+     "flags": 0,
+     "len": 4,
+     "payload": "04000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_decim_peak",
+   "description": "GET_DECIM / SET_DECIM response (36 bytes) with peak detect at divider 199: filter 4, next mode 0x81 (16-bit, K 1), shift byte 0xC0 (bit 7 peak active, bit 6 peak written, S 0), N 200, gain 1, 1 MSa/s, features 0x7FF (bits 8-10 TRIG_TYPES / PEAK / COUNTER)",
+   "hex": "a51301010c023e0000002400000059e3040081c0c80000000100000000000000c700000040420f00ff000000fe1f0000ff07000010307767",
+   "frames": [
+    {
+     "cmd": 524,
+     "seq": 62,
+     "status": 0,
+     "flags": 1,
+     "len": 36,
+     "payload": "040081c0c80000000100000000000000c700000040420f00ff000000fe1f0000ff070000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_req_read_raw_peak",
+   "description": "READ_RAW CH1 both cores, addr_mode 1 (capture-relative), layout 3 = peak pairs, 4 words",
+   "hex": "a513010004023f0000001000000090d0030103000000000004000000000000006e0fa384",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 63,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "03010300000000000400000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 516,
+     "seq": 63,
+     "status": 0,
+     "flags": 0,
+     "len": 16,
+     "payload": "03010300000000000400000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_read_raw_peak",
+   "description": "READ_RAW response, layout 3: per channel 4 minima (100 101 90 102) then 4 maxima (140 141 170 139)",
+   "hex": "a513010104023f000000180000001a8d4d00000041180020040000000303030064655a668c8daa8be7d03e5c",
+   "frames": [
+    {
+     "cmd": 516,
+     "seq": 63,
+     "status": 0,
+     "flags": 1,
+     "len": 24,
+     "payload": "4d00000041180020040000000303030064655a668c8daa8b"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_capture_info_1_26_peak",
+   "description": "GET_CAPTURE_INFO response (112 bytes) of a peak-detect host capture at divider 199 with a pulse-width trigger: byte 68 mode 0x81, 69 shift byte 0xC0, 72 N 200, 76 run mode 0 (a single capture), 79 = 0x03 (bit 0 16-bit records, bit 1 peak), 96 type 1, 97 flags LONGER, 100 N 1500, 104 H 0, 108 hold-off 500000",
+   "hex": "a513010109024000000070000000feb04d000000140000000001d11941180000c7000000ff00008c01000000e8030000a00f0000010100000100e803b544010000800000010300000100f203e28100000081000081c00000c8000000000000030000000000000000000000000000000001010000dc0500000000000020a10700ade6ee94",
+   "frames": [
+    {
+     "cmd": 521,
+     "seq": 64,
+     "status": 0,
+     "flags": 1,
+     "len": 112,
+     "payload": "4d000000140000000001d11941180000c7000000ff00008c01000000e8030000a00f0000010100000100e803b544010000800000010300000100f203e28100000081000081c00000c8000000000000030000000000000000000000000000000001010000dc0500000000000020a10700"
     }
    ],
    "device_events": [],

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "fpga_bus.h"
+#include "fpga_counter.h"
 #include "fpga_model.h"
 
 fpga_model fm;
@@ -15,9 +16,65 @@ static uint32_t fm_rnd(void)
   return fm.seed >> 8;
 }
 
+//C6 peak detect: the model's 0x56 bit 1 (a register on 0x153C), the 16-bit path and the window
+int fm_peak_on(void)
+{
+  return (fm.version >= 0x153C) && (fm.reg_56 & 0x02);
+}
+
+int fm_dec_on(void)
+{
+  return ((fm.reg_53 & 3) != 0) || fm_peak_on();
+}
+
+uint32_t fm_window(void)
+{
+  return 2u * ((fm.divider >> 1) + 1u);
+}
+
+//Synthetic raw 200 MSa/s stream per channel: a sawtooth 64..191 (period 128 samples, channel 2 offset by 50) with a
+//255 spike every 1000 samples and a 0 dip every 1777, so a window of N >= 2 samples catches what sample skipping misses
+uint8_t fm_raw_sample(uint32_t ch, uint64_t j)
+{
+  if((j % 1000) == 0)
+    return 255;
+  if((j % 1777) == 0)
+    return 0;
+
+  return (uint8_t)(64 + ((j * 7 + (uint64_t)ch * 50) % 128));
+}
+
+void fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx)
+{
+  uint32_t n = fm_window(), i;
+  uint64_t j = (uint64_t)w * n;
+  uint8_t  lo = 255, hi = 0;
+
+  for(i=0;i<n;i++)
+  {
+    uint8_t s = fm_raw_sample(ch, j + i);
+
+    if(s < lo) lo = s;
+    if(s > hi) hi = s;
+  }
+
+  *mn = lo;
+  *mx = hi;
+}
+
+//One word per write clock edge: 10 (D + 1) ns in the legacy layout, N x 5 ns on the 16-bit path (filter or peak)
 static uint64_t fm_period_ps(void)
 {
+  if(fm_dec_on())
+    return (uint64_t)5000 * fm_window();
+
   return (uint64_t)10000 * (fm.divider + 1);
+}
+
+//fw-c5 (0x153C): the hold-off of the last trigger still runs (0x37 bit 4); 0x1B = 0 releases it at once
+int fm_holdoff_running(void)
+{
+  return (fm.version >= 0x153C) && fm.reg_1b && (fm.t_ps < fm.ho_until_ps);
 }
 
 //fw 0.2.97: one write clock edge of the capture logic (fpga_model.h)
@@ -29,19 +86,64 @@ static void fm_capture_edge(void)
   if(!fm.released)
     return;
 
+  //D4 logger: stream mode writes for ever, no trigger, no stop; the lap flag when a word lands on 0x6A
+  if((fm.version >= 0x153D) && (fm.reg_69 & 1) && fm.we)
+  {
+    uint32_t w = fm.n % fm.ring, l;
+
+    if(fm_peak_on())
+    {
+      fm_peak_word(0, fm.n, &fm.mem[w][0], &fm.mem[w][1]);
+      fm_peak_word(1, fm.n, &fm.mem[w][2], &fm.mem[w][3]);
+    }
+    else
+      for(l=0;l<4;l++)
+        fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
+
+    //fpga-d1's detector: the unread count saturates at 8192; a write at 8192 overwrote the oldest unread word
+    if(fm.occ >= 8192)
+    {
+      if(!fm.lap)
+        fm.laps_seen++;
+      fm.lap = 1;
+    }
+    else
+      fm.occ++;
+
+    fm.n++;
+    fm.e++;
+    return;
+  }
+  //D4 logger end
+
   if(fm.we)
   {
     uint32_t w = fm.n % fm.ring, l;
 
-    for(l=0;l<4;l++)
-      fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
+    if(fm_peak_on())
+    {
+      //C6: { max, min } of the window's synthetic raw samples per channel: lanes 0x20 / 0x22 min, 0x21 / 0x23 max
+      fm_peak_word(0, fm.n, &fm.mem[w][0], &fm.mem[w][1]);
+      fm_peak_word(1, fm.n, &fm.mem[w][2], &fm.mem[w][3]);
+    }
+    else
+      for(l=0;l<4;l++)
+        fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
 
     //The trigger compares the word written on this edge (after the pretrigger words, as sampling_half_way)
     if(!fm.triggered && (fm.trig_at >= 0) && ((int64_t)fm.e == fm.trig_at) && (fm.n >= pre))
     {
-      fm.triggered = 1;
-      fm.trig_word = fm.n;
-      fm.taddr     = (uint16_t)(fm.n % fm.ring);
+      if(fm_holdoff_running())
+        fm.ho_blocked++;                                 //0x153C: trigger_check_enable masked by the hold-off
+      else
+      {
+        fm.triggered = 1;
+        fm.trig_word = fm.n;
+        fm.taddr     = (uint16_t)(fm.n % fm.ring);
+
+        if((fm.version >= 0x153C) && fm.reg_1b)
+          fm.ho_until_ps = fm.t_ps + (uint64_t)fm.reg_1b * 5000;
+      }
     }
 
     fm.n++;
@@ -82,9 +184,140 @@ static void fm_edge(void)
   }
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// C7 counter (fpga_model.h): the gate on the synthetic stream
+
+static uint64_t fm_cnt_gate_ps(uint8_t cfg)
+{
+  switch(cfg & 3)
+  {
+    case 1:  return 2000000ull * 5000;
+    case 2:  return 20000000ull * 5000;
+    case 3:  return 200000000ull * 5000;
+    default: return 0;
+  }
+}
+
+//k_cfg_now: { ext, ch2, gate } from 0x61 and the 0x15 copy
+static uint8_t fm_cnt_cfg_now(void)
+{
+  uint8_t gate = (uint8_t)(fm.reg_61 & 3), src = (uint8_t)((fm.reg_61 >> 2) & 3);
+  int ext = (src == 3) || ((src == 0) && (fm.reg_15 == 2));
+  int ch2 = (src == 2) || ((src == 0) && !ext && (fm.reg_15 == 1));
+
+  if(gate == 0)
+    return 0;
+
+  return (uint8_t)((ext ? 0x08 : 0) | (ch2 ? 0x04 : 0) | gate);
+}
+
+//After a 0x61 or 0x15 write: a changed effective configuration restarts the gate (k_on drops for a clock)
+static void fm_cnt_check(void)
+{
+  uint8_t now = fm_cnt_cfg_now();
+
+  if(now == fm.cnt_cfg)
+    return;
+
+  fm.cnt_cfg = now;
+
+  if(now)
+  {
+    fm.cnt_start_ps = fm.t_ps;
+    fm.cnt_end_ps   = fm.t_ps + fm_cnt_gate_ps(now);
+    fm.cnt_restarts++;
+  }
+}
+
+static void fm_cnt_publish(uint64_t g0, uint64_t g1)
+{
+  int      ext = (fm.cnt_cfg & 0x08) != 0, ch2 = (fm.cnt_cfg & 0x04) != 0, si = ext ? 2 : (ch2 ? 1 : 0);
+  uint64_t period = fm.cnt_sig[si].period_ps, high = fm.cnt_sig[si].high_ps, phase = fm.cnt_sig[si].phase_ps;
+  uint8_t  lo = fm.cnt_sig[si].lo, hi = fm.cnt_sig[si].hi;
+  uint64_t n = 0, k0, k1;
+  uint8_t  lo_thr = (fm.reg_62_lvl > fm.reg_62_hys) ? (uint8_t)(fm.reg_62_lvl - fm.reg_62_hys) : 0;
+  int      edges = period != 0;
+
+  //CH1 / CH2: the Schmitt trigger must see both levels
+  if(!ext && edges && !((lo < lo_thr) && (hi >= fm.reg_62_lvl)))
+    edges = 0;
+
+  if(edges && (g1 > phase))
+  {
+    //Rising edges at phase + k x period inside [g0, g1)
+    k0 = (g0 > phase) ? (g0 - phase + period - 1) / period : 0;
+    k1 = (g1 - 1 - phase) / period;
+
+    if(k1 >= k0)
+      n = k1 - k0 + 1;
+  }
+
+  if(n >= 2)
+  {
+    fm.pub_e = (uint32_t)(n - 1);
+    fm.pub_t = (uint32_t)((n - 1) * (period / 5000));
+    fm.pub_w = (uint32_t)((n - 1) * (high / 5000));
+  }
+  else
+    fm.pub_e = fm.pub_t = fm.pub_w = 0;
+
+  if(ext)
+  {
+    fm.pub_min = 255;
+    fm.pub_max = 0;
+  }
+  else
+  {
+    fm.pub_min = lo;
+    fm.pub_max = period ? hi : lo;
+  }
+
+  fm.pub_cfg = fm.cnt_cfg;
+  fm.pub_seq++;
+  fm.cnt_publishes++;
+}
+
+static void fm_cnt_time(uint64_t end)
+{
+  while(fm.cnt_cfg && (fm.cnt_end_ps <= end))
+  {
+    fm_cnt_publish(fm.cnt_start_ps, fm.cnt_end_ps);
+    fm.cnt_start_ps = fm.cnt_end_ps;
+    fm.cnt_end_ps  += fm_cnt_gate_ps(fm.cnt_cfg);
+  }
+}
+
+//The 0x35 command byte: one consistent copy of the published result; new = a publish since the previous snapshot
+static void fm_cnt_snapshot(void)
+{
+  uint8_t *b = fm.snap;
+
+  b[0]  = (uint8_t)(((fm.pub_seq != fm.snap_seq) ? 0x80 : 0) | ((fm.pub_cfg & 0x0C) << 2) | (fm.pub_cfg & 3));
+  b[1]  = fm.pub_seq;
+  b[2]  = (uint8_t)(fm.pub_e >> 24); b[3]  = (uint8_t)(fm.pub_e >> 16); b[4]  = (uint8_t)(fm.pub_e >> 8); b[5]  = (uint8_t)fm.pub_e;
+  b[6]  = (uint8_t)(fm.pub_t >> 24); b[7]  = (uint8_t)(fm.pub_t >> 16); b[8]  = (uint8_t)(fm.pub_t >> 8); b[9]  = (uint8_t)fm.pub_t;
+  b[10] = (uint8_t)(fm.pub_w >> 24); b[11] = (uint8_t)(fm.pub_w >> 16); b[12] = (uint8_t)(fm.pub_w >> 8); b[13] = (uint8_t)fm.pub_w;
+  b[14] = fm.pub_min;
+  b[15] = fm.pub_max;
+  fm.snap_seq = fm.pub_seq;
+}
+
+void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase_ns, uint8_t lo, uint8_t hi)
+{
+  fm.cnt_sig[src].period_ps = (period_ns / 5) * 5000;
+  fm.cnt_sig[src].high_ps   = (high_ns / 5) * 5000;
+  fm.cnt_sig[src].phase_ps  = (phase_ns / 5) * 5000;
+  fm.cnt_sig[src].lo        = lo;
+  fm.cnt_sig[src].hi        = hi;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+
 static void fm_time(uint64_t ps)
 {
   uint64_t end = fm.t_ps + ps;
+
+  fm_cnt_time(end);
 
   while(fm.next_edge_ps <= end)
   {
@@ -100,6 +333,14 @@ static void fm_time(uint64_t ps)
 static void fm_strobe(void)
 {
   fm.strobes++;
+
+  //D4 logger: a fixed strobe time for the drain cost test
+  if(fm.strobe_ns)
+  {
+    fm_time((uint64_t)fm.strobe_ns * 1000);
+    return;
+  }
+
   fm_time((uint64_t)(41000 + fm_rnd() % 257001));
 }
 
@@ -108,10 +349,19 @@ void fm_advance_ns(uint32_t ns)
   fm_time((uint64_t)ns * 1000);
 }
 
+//D4 logger: idle time in ps (the drain cost test's packet and build times)
+void fm_advance_ps(uint64_t ps)
+{
+  fm_time(ps);
+}
+
 void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
 {
   memset(&fm, 0, sizeof(fm));
   memset(&fpga_bus_wr, 0, sizeof(fpga_bus_wr));      //a fresh FPGA holds nothing the firmware wrote
+  memset(&fpga_trig, 0, sizeof(fpga_trig));          //and the firmware's copy of the trigger extension is at power-on too
+  memset(&fpga_cnt, 0, sizeof(fpga_cnt));            //C7 counter: the firmware's counter state too
+  fm.pub_min = 255;                                  //C7: the published min reads 255 before the first gate
   fm.version = version;
   fm.divider = divider;
   fm.seed    = seed;
@@ -144,7 +394,10 @@ static uint32_t fm_len(uint8_t cmd)
   switch(cmd)
   {
     case 0x0B: case 0x0C: case 0x1F: case 0x38: case 0x58: case 0x5A:  return 2;
-    case 0x0D: case 0x0E: case 0x50: case 0x51: case 0x52: case 0x5C:  return 4;
+    case 0x62:                                                          return 2;   //C7 counter: level, hysteresis
+    case 0x6A:                                                          return 2;   //D4 logger: reader position
+    case 0x5F: case 0x60:                                               return 3;   //0x153C: u24 N, H
+    case 0x0D: case 0x0E: case 0x1B: case 0x50: case 0x51: case 0x52: case 0x5C:  return 4;
     default:                                                            return 1;
   }
 }
@@ -168,6 +421,17 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       {
         fm.in_reset       = 1;
         fm.edges_in_reset = 0;
+
+        //D4 logger (0x153D): the reader position and the unread count go to 0 (the lap flag stays)
+        fm.reg_6a = 0;
+        fm.occ    = 0;
+
+        //0x153C: a pending 0x66 request makes this reset clear the hold-off timer (one-shot)
+        if(fm.ho_clr_req)
+        {
+          fm.ho_until_ps = 0;
+          fm.ho_clr_req  = 0;
+        }
       }
       else if(fm.in_reset)
       {
@@ -197,6 +461,56 @@ static void fm_apply(uint8_t cmd, uint32_t v)
       fm.rd_ptr = v % fm.ring;
       fm.rd_q   = fm.rd_ptr;             //the memory's address register samples the pointer on the next strobes
       break;
+
+    //0x153C trigger extension (fw-c5); on older bitstreams the latches exist (0x1B: Atlan4's unused hold-off) or
+    //the writes are ignored, and nothing below acts on them (fm_holdoff_running, the reads check the version)
+    case 0x5E: fm.reg_5e = (uint8_t)v;           break;
+    case 0x5F: fm.reg_5f = v & 0xFFFFFF;         break;
+    case 0x60: fm.reg_60 = v & 0xFFFFFF;         break;
+    case 0x1B: fm.reg_1b = v;                    break;
+    case 0x66: fm.ho_clr_req = (uint8_t)(v & 1); break;
+
+    //C7 counter (0x153C): the latches, and the gate restart on a configuration change
+    case 0x15:
+      fm.reg_15 = (uint8_t)(v & 3);
+      if(fm.version >= 0x153C)
+        fm_cnt_check();
+      break;
+
+    case 0x61:
+      if(fm.version >= 0x153C)
+      {
+        fm.reg_61 = (uint8_t)(v & 0x0F);
+        fm_cnt_check();
+      }
+      break;
+
+    //D4 logger (0x153D): stream, lap clear, reader position
+    case 0x69:
+      if(fm.version >= 0x153D)
+      {
+        fm.reg_69 = (uint8_t)(v & 1);
+        if(v & 2)
+          fm.lap = 0;
+      }
+      break;
+
+    case 0x6A:
+      if(fm.version >= 0x153D)
+      {
+        fm.reg_6a = (uint16_t)(v & 0x1FFF);
+        fm.occ    = ((fm.released ? fm.n : 0) - fm.reg_6a) & 0x1FFF;
+      }
+      break;
+    //D4 logger end
+
+    case 0x62:
+      if(fm.version >= 0x153C)
+      {
+        fm.reg_62_lvl = (uint8_t)(v >> 8);
+        fm.reg_62_hys = (uint8_t)v;
+      }
+      break;
   }
 }
 
@@ -209,6 +523,23 @@ void fpga_write_cmd(uint8_t command)
   fm.nbytes = 0;
   fm.acc    = 0;
   fm_strobe();
+
+  //C7 counter: the snapshot is taken at the 0x35 command byte
+  if((command == 0x35) && (fm.version >= 0x153C))
+    fm_cnt_snapshot();
+
+  //D4 logger: the 0x38 snapshot at the command byte
+  if((command == 0x38) && (fm.version >= 0x153D))
+  {
+    uint32_t w = fm.released ? (fm.n % fm.ring) : 0, c = fm.released ? fm.n : 0;
+    uint32_t av = fm.occ;
+    uint8_t *b = fm.log_snap;
+
+    b[0] = (uint8_t)(((fm.reg_69 & 1) ? 0x80 : 0) | (fm.lap ? 0x40 : 0) | ((w >> 8) & 0x1F));
+    b[1] = (uint8_t)w;
+    b[2] = (uint8_t)(c >> 24); b[3] = (uint8_t)(c >> 16); b[4] = (uint8_t)(c >> 8); b[5] = (uint8_t)c;
+    b[6] = (uint8_t)(av >> 8); b[7] = (uint8_t)av;
+  }
 }
 
 void fpga_write_byte(uint8_t data)
@@ -268,6 +599,61 @@ uint8_t fpga_io_strobe_read(void)
 
     case 0x14:
       out = (uint8_t)((fm.nbytes++ == 0) ? (fm.taddr >> 8) : fm.taddr);
+      break;
+
+    //0x153C: the qualifier status at its reset state (the state machines are not modelled, fpga_model.h) and the
+    //extension status. Older bitstreams have no such read and return the stale bus byte (0 here)
+    case 0x34:
+      if(fm.version >= 0x153C)
+      {
+        uint32_t n16 = fm.reg_5f & 0xFFFF, rem = ((fm.reg_5e & 3) == 2) ? ((n16 ? n16 : 1) - 1) : 0;
+        uint8_t  counting = (uint8_t)(((fm.reg_5e & 3) == 2) && (fm.reg_60 == 0));
+
+        switch(fm.nbytes++)
+        {
+          case 0:  out = (uint8_t)((counting << 5) | ((fm.reg_5e & 0x08) >> 1) | (fm.reg_5e & 0x03)); break;
+          case 1:  out = (uint8_t)(rem >> 8); break;
+          default: out = (uint8_t)rem;        break;
+        }
+      }
+      break;
+
+    case 0x37:
+      if(fm.version >= 0x153C)
+        out = (uint8_t)((fm_holdoff_running() ? 0x10 : 0) | ((fm.reg_5e & 0x04) << 1));
+      break;
+
+    //Decimation state (0x1534+): byte 0 = { dec_on, fir_en, fir_act, 0, 0, swap, K }, byte 1 = the shift; 0x153C (C6):
+    //byte 1 bits 7 / 6 = peak active / peak as written (equal: active whenever written), the FIR off while peak is on
+    case 0x29:
+      if(fm.version >= 0x1534)
+      {
+        uint32_t n   = fm_window();
+        int      fir = (fm.reg_56 & 1) && (fm.reg_53 & 3) && (n >= 16) && ((n & 3) == 0) && !fm_peak_on();
+
+        if(fm.nbytes++ == 0)
+          out = (uint8_t)((fm_dec_on() ? 0x80 : 0) | ((fm.reg_56 & 1) ? 0x40 : 0) | (fir ? 0x20 : 0) | (fm.reg_53 & 0x07));
+        else
+          out = (uint8_t)((fm_peak_on() ? 0xC0 : 0) | (fm.reg_54 & 0x3F));
+      }
+      break;
+
+    //D4 logger: the 8 bytes of the 0x38 snapshot
+    case 0x38:
+      if(fm.version >= 0x153D)
+      {
+        out = fm.log_snap[(fm.nbytes < 8) ? fm.nbytes : 7];
+        fm.nbytes++;
+      }
+      break;
+
+    //C7 counter: the 16 bytes of the snapshot; further strobes repeat the last one
+    case 0x35:
+      if(fm.version >= 0x153C)
+      {
+        out = fm.snap[(fm.nbytes < 16) ? fm.nbytes : 15];
+        fm.nbytes++;
+      }
       break;
   }
 

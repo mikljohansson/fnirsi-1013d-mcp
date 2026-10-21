@@ -25,7 +25,7 @@ The screen lists what the firmware found, one line per check:
 | Line | What it means |
 |---|---|
 | FPGA recognised: AL3A10 bitstream 0x153B: ... | The FPGA bitstream and the features it has |
-| {{BANNER_TEXT}} | The FPGA holds another bitstream than the one this firmware is built for, older or newer. The banner names the one needed; flash it as the [install page](install.md) says. {{BANNER_REACHABLE}} |
+| (no line: the notice screen) | If the FPGA holds another bitstream than this firmware is built for, older or newer, the first-run screen does not appear. The scope shows a full-screen notice instead: "This firmware needs FPGA bitstream 0x153B. This scope has 0x1532. Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the stock firmware." Its three buttons still work: Diagnostics (the version word, Save report to card, the log, Enter FEL; Back returns to the notice), Settings and USB drive (to change the image on the card). The scope, the spectrum analyser, the frequency response, the generator and calibration do not run until the bitstream matches; a PC can still read the version word and the report over USB. |
 | Settings loaded from the card. | The saved settings were read |
 | No saved settings on the card: defaults used. | A new card, or the settings sector could not be read |
 | Calibration missing: readings may be several % off. (amber) | No calibration on the card |

@@ -926,7 +926,7 @@ uint32 cal_wizard_run(void)
   uint32 written = 0, tick;
   int    hit, ev;
 
-  cw_init(&wiz, fpgasettings.fw_FPGA == 2);
+  cw_init(&wiz, 1);
   wiz_abort = 0;
   wiz_usb   = wiz_usb_host();
   wiz_cap_start = fpga_capture_value();
@@ -1050,7 +1050,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     cal_last_r[0] = cal_last_r[1] = 0;
     cal_last_garbled[0] = cal_last_garbled[1] = 0;
 
-    cw_init(&wiz, fpgasettings.fw_FPGA == 2);
+    cw_init(&wiz, 1);
     wiz_abort = 0;
     wiz_usb   = 0;
     ui_dlg_bg_begin();
@@ -1067,7 +1067,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
     wiz_show();
     timer0_delay(500);
     ui_dlg_bg_end();
-    cw_init(&wiz, fpgasettings.fw_FPGA == 2);
+    cw_init(&wiz, 1);
 
     memcpy(pt, cal_last_pt[ch], sizeof(pt));
     fail   = cal_last_fail[ch];

@@ -56,12 +56,12 @@ def test_response_layouts():
                      settings_flags=1, saves=3, last_save_result=-2, settings_eval_ms=700, rec_flags=3, rec_type=4,
                      rec_restarts=2, rec_power_on=12, rec_exc_lr=0x80012348, rec_far=0xDEADBEEF, rec_minutes=2100)
     b = h.pack()
-    assert len(b) == 124 and b[:4] == bytes([2, 0, 124, 0])  # layout 2 since 1.24
+    assert len(b) == 128 and b[:4] == bytes([3, 0, 128, 0])  # layout 3 since 1.25 (2 / 124 in 1.24)
     assert struct.unpack_from("<BBBBII", b, 4) == (4, 0x1D, 0x51, 7, 1500, 9)
     assert struct.unpack_from("<IIII", b, 16) == (0x0005107D, 12, 2225, 60000)
     assert struct.unpack_from("<BBBBiI", b, 32) == (0x0B, 2, 1, 3, -2, 700)
     assert struct.unpack_from("<BBHII", b, 44) == (3, 4, 2, 12, 0x80012348)
-    assert struct.unpack_from("<II", b, 80) == (0xDEADBEEF, 2100) and b[88:] == bytes(36)
+    assert struct.unpack_from("<II", b, 80) == (0xDEADBEEF, 2100) and b[88:] == bytes(40)
     d = h.describe()
     assert d["usb"]["state"] == "suspended" and d["cpu"]["mmu"] and d["cpu"]["dcache"] and d["cpu"]["icache"]
     assert d["restart_record"]["exception"] == "data abort" and d["restart_record"]["from_this_power_on"]
@@ -92,7 +92,7 @@ def test_health_flags_and_restart_record(sim_factory):
     d.restart_record = P.parse_life_record(bytes.fromhex(DIAG["life"]["hex"]))["restart"]
     with Scope.connect(srv.url) as s:
         h = s.health()
-        assert h.layout == 2 and h.length == 124 and h.power_on == 12 and h.cp15 == 0x0005107D
+        assert h.layout == 3 and h.length == 128 and h.power_on == 12 and h.cp15 == 0x0005107D
         assert h.rec_flags == 1 and h.rec_type == 4 and h.rec_far == 0xDEADBEEF
         d.ui_busy = True  # GET_HEALTH answers in any poll context, also with a menu open
         assert s.health(clear_restart=True).rec_flags == 1  # the answer still shows it

@@ -115,9 +115,82 @@ int ui_run_view(int runstate, int single_wait, int host_busy);
 extern const char *const ui_run_chip[3];                          //by view: "STOP", "RUN", "WAIT" (16 px, chip)
 extern const char *const ui_run_action[2];                        //[0] stopped: "RUN", [1] running / waiting: "STOP"
 
-//ACQ menu, Memory column (x 305..377 of the menu, under its rule at y 211): the main-loop pass time, a grey label line
-//and the value under it (fw 0.2.63; it sat between the "Memory" header and the first depth chip before)
-#define UI_ACQ_PASS_X         312
+//ACQ menu (ui-sample, docs/plans/ui-rows.md section 3): 478 px wide (x 250 .. 728, clear of the right bar). The row under
+//the sample rates holds four 90 x 40 boxes at y + 163 on a 98 px pitch, Roll, Average, Filter and Sample, each a label
+//line at y + 168 and a value line at y + 182; the Memory column is right of its rule at x + 402 (1.00o5's x + 304 moved by
+//one box pitch): the "Memory" header, the depth chips (54 x 25 at x + 413, y + 33 + 36 i), under the rule at y 211 the
+//pass time and, from y + 254, the note that says why boxes are grey (four 18 px lines, 13 px font). Menu coordinates.
+#define UI_ACQ_W              478
+#define UI_ACQ_COL_X          402
+#define UI_ACQ_MEM_HEAD_X     415
+#define UI_ACQ_CHIP_X         413
+#define UI_ACQ_BOX_Y          163
+#define UI_ACQ_BOX_W          90
+#define UI_ACQ_BOX_H          40
+#define UI_ACQ_BOX_X(i)       (8 + 98 * (i))
+#define UI_ACQ_BOX_LINE1_Y    168
+#define UI_ACQ_BOX_LINE2_Y    182
+#define UI_ACQ_ROW_HIT_BOTTOM 210     //the boxes' hit area runs down to the rule at y 211
+#define UI_ACQ_NOTE_X         410
+#define UI_ACQ_NOTE_Y         254
+#define UI_ACQ_NOTE_DY        18
+#define UI_ACQ_NOTE_LINES     4
+#define UI_ACQ_NOTE_W         66      //x + 410 .. 475, inside the menu's edge at x + 477
+
+#define UI_ACQ_ROLL           0
+#define UI_ACQ_AVERAGE        1
+#define UI_ACQ_FILTER         2
+#define UI_ACQ_SAMPLE         3
+#define UI_ACQ_BOXES          4
+
+//A box's state: NONE not drawn (the Sample slot in the Spectrum: the slot stays empty), OFF light grey with white text,
+//ON green with black text, GREY light grey with grey text: the value is kept but not applied and the box takes no taps
+#define UI_ACQ_BOX_NONE       0
+#define UI_ACQ_BOX_OFF        1
+#define UI_ACQ_BOX_ON         2
+#define UI_ACQ_BOX_GREY       3
+
+typedef struct
+{
+  uint8 roll;                 //the long (roll) time base is on
+  uint8 average;              //Average on (kept in roll and under Peak)
+  uint8 filter_on;            //the mode's Filter is not off
+  uint8 peak;                 //Sample Peak (the Scope's one setting, kept in the Spectrum and in roll)
+  uint8 spectrum;             //the ACQ menu of the Spectrum analyser
+  const char *filter_value;   //the Filter's value line ("off", "CIC2+FIR", ...)
+} ui_acq_in;
+
+typedef struct
+{
+  uint8       state[UI_ACQ_BOXES];
+  const char *line1[UI_ACQ_BOXES];
+  const char *line2[UI_ACQ_BOXES];
+  const char *note[UI_ACQ_NOTE_LINES];     //0 = empty line
+} ui_acq_row;
+
+//Sample Peak is applied to the acquisition: Scope (the Spectrum acquires Normal), not in roll mode (no 16-bit path there)
+int  ui_acq_peak_applied(const ui_acq_in *in);
+
+//The row and the note as the menu draws them: with Peak applied the Filter and Average boxes are grey with their values
+//and the note reads "Peak:" / "Filter and" / "Average" / "not applied"; in roll the Average and Sample boxes are grey and
+//the note reads "Not in" / "roll mode" (ui_phos_note_roll on two lines: 88 px do not fit the column's 66)
+void ui_acq_row_build(const ui_acq_in *in, ui_acq_row *r);
+
+//The UI acquisition's decimation setting byte (pc_decim.h: bits 1:0 K, PC_DECIM_SET_FIR, PC_DECIM_SET_PEAK) from the
+//mode's Filter setting as kept and Sample: the peak bit in the Scope view only, the Filter's K / FIR kept under it, so
+//pc_decim_config arms peak detect (SET_DECIM filter 4's path) and the Filter comes back with Normal
+uint8 ui_acq_decim_set(uint8 filter_set, int peak, int spectrum);
+
+//The box under a touch at menu coordinates x, y: UI_ACQ_ROLL .. UI_ACQ_SAMPLE, or -1 (the drawn box, down to the rule)
+int  ui_acq_box_at(uint32 x, uint32 y);
+
+//Settings word 211 (fw 0.2.56, marker 0xC700): bit 0 Grid, bits 1-2 the Spectrum's Display variant, bit 3 Sample Peak
+//(ui-sample). Restore: 0 and nothing written when the marker (mask 0xFFF0) does not match
+uint16 ui_word_ui(int grid, int spec_view, int peak);
+int    ui_word_ui_restore(uint16 w, uint8 *grid, uint8 *spec_view, uint8 *peak);
+
+//The pass time in the Memory column, under its rule at y 211: a grey label line and the value under it (fw 0.2.63)
+#define UI_ACQ_PASS_X         410
 #define UI_ACQ_PASS_Y         218
 #define UI_ACQ_PASS_W         62
 extern const char *const ui_acq_pass_label;                      //"Pass time"
@@ -129,7 +202,7 @@ extern const char *const ui_acq_pass_label;                      //"Pass time"
 #define UI_SPEC_VIEW_COUNT    3
 #define UI_PERSIST_COUNT      4
 
-extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Peak (scopesettings.ACQ_trace)
+extern const char *const ui_trace_names[UI_TRACE_COUNT];         //Linear, Dots, Bars (scopesettings.ACQ_trace)
 extern const char *const ui_view_names[2];                        //Normal, X-Y
 extern const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT];  //Spectrum, Waterfall, Density
 extern const char *const ui_spec_chan_names[3];                   //CH1, CH2, CH1 + CH2
@@ -151,8 +224,13 @@ typedef struct
   uint8 untrig;               //the latest record ended on the auto time-out
   uint8 running;
   uint8 xy;                   //X-Y view
+  uint8 trig_type;            //ui-type: the trigger type armed (fpga_bus.h FPGA_TRIG_*: 0 edge, 1 pulse width, 2 Nth edge)
+  uint8 trig_idle;            //Nth edge with an idle time (H != 0)
 } ui_warn_in;
 
 const char *ui_scope_warning(const ui_warn_in *w);
+
+//The "No trigger" hint per trigger type (ui-type): the settings to check
+const char *ui_no_trigger_hint(uint8 trig_type, uint8 idle_on);
 
 #endif

@@ -167,9 +167,6 @@ int main(void)
   //fpga_set_generator_freq(103456);  //in Hz
   //fpga_set_generator_duty(70);
 
-  //Some initialization of the FPGA??. Data written with command 0x3C
-  //fpga_set_battery_level();      //Only called here and in hardware check
-  
   //Set screen brightness
   fpga_set_translated_brightness();
   
@@ -190,8 +187,6 @@ int main(void)
   //memset(channel1tracebuffer, 128, sizeof(channel1tracebuffer));
   //memset(channel2tracebuffer, 128, sizeof(channel2tracebuffer));
   
-  memset(channel1tracebufferAVG, 128, sizeof(channel1tracebufferAVG));
-  memset(channel2tracebufferAVG, 128, sizeof(channel2tracebufferAVG));
    
   //Set the number of samples in use
 //  scopesettings.nofsamples  = SAMPLES_PER_ADC;
@@ -245,9 +240,14 @@ int main(void)
   //scope_open_measures_menu();
   //while(1);
 
-  //fw 0.2.59: an uncalibrated unit starts with the first-run screen (what was found, Calibrate now or Later); the
-  //1.00o5 "Load default settings value" screen is gone
-  ui_first_run(restore);
+  //fw-one: a scope whose FPGA runs another bitstream than this firmware is built for shows the notice instead of the
+  //scope (ui_fpga_mismatch_pass below takes every pass); the acquisition never starts. Else, fw 0.2.59: an uncalibrated
+  //unit starts with the first-run screen (what was found, Calibrate now or Later); the 1.00o5 "Load default settings
+  //value" screen is gone
+  if(pc_glue_fpga_mismatch())
+    ui_fpga_mismatch_open();
+  else
+    ui_first_run(restore);
 
   //scope_open_keyboard_menu();
   
@@ -259,8 +259,9 @@ int main(void)
     pc_glue_poll_main();
     pc_glue_ui_service();
 
-    //fw 0.2.59: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope
-    if(ui_diag_pass())
+    //fw 0.2.59: while Diagnostics shows (a display mode, ui_diag_view.c) it does this pass instead of the scope;
+    //fw-one: so does the FPGA mismatch notice, for good
+    if(ui_diag_pass() || ui_fpga_mismatch_pass())
       continue;
 
     //Handle the touch panel input
@@ -340,9 +341,12 @@ int main(void)
         //Go through the trace data and display the trace data
         scope_acquire_trace_data();
     }
-    
+
+    //C7 counter (fw-c7): one 0x35 read per pass after the capture readout; the cards show it from the next pass
+    PC_COUNTER_PASS();
+
     //--------------------------------------------------------------------------
-    
+
     PC_PASS_MARK(1);
 
     //Check developer mode and show DEV_mode on the screen

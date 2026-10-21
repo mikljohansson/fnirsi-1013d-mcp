@@ -59,6 +59,7 @@ void scope_display_channel_linear_trace(PCHANNELSETTINGS settings);
 void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings);
 void scope_display_channel_dots_trace(PCHANNELSETTINGS settings);
 void scope_display_channel_peak_trace(PCHANNELSETTINGS settings);
+int  scope_display_channel_bars(PCHANNELSETTINGS settings, int ch);   //ui-sample: a peak record as bars, 0 = not one
 
 void scope_display_channel_sinx_trace(PCHANNELSETTINGS settings);
 

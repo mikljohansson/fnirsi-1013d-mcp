@@ -29,4 +29,10 @@ uint16 *ui_diag_scope_buffer(void);
 //Boot, before the main loop: the first-run screen on an uncalibrated unit (settings_defaults: no valid settings sector)
 void    ui_first_run(int settings_defaults);
 
+//fw-one: the FPGA runs another bitstream than the firmware is built for (PC_FW_FPGA_VERSION). Opened at boot instead of
+//the first-run screen; the pass then replaces the scope's for good (after ui_diag_pass in the main loop): the notice
+//with Diagnostics (a display mode over it, Back returns here), Settings and USB drive (modal screens, redrawn after)
+void    ui_fpga_mismatch_open(void);
+int     ui_fpga_mismatch_pass(void);
+
 #endif /* UI_DIAG_VIEW_H */

@@ -21,16 +21,16 @@ def anyio_backend():
 
 
 def ext_sim(sim_factory, **kw):
-    srv = sim_factory(variant="al3x", signal=GATE, **kw)
+    srv = sim_factory(signal=GATE, **kw)
     srv.device.cfg.ext_signal = parse_signal(GATE)  # the same TX gate on CH1 and on the pin
     return srv
 
 
 def test_caps_and_variant(sim_factory):
     with Scope.connect(ext_sim(sim_factory).url) as s:
-        assert s.info.fpga_version == 0x1533 and s.profile().variant == "al3"
+        assert s.info.fpga_version == P.FW_FPGA_VERSION and s.profile().variant == "al3"
         assert s.info.caps & P.Caps.EXT_TRIGGER
-    with Scope.connect(sim_factory().url) as s:
+    with Scope.connect(sim_factory(caps_clear=int(P.Caps.EXT_TRIGGER)).url) as s:  # a firmware without the cap
         assert not s.info.caps & P.Caps.EXT_TRIGGER
         with pytest.raises(Exception) as e:
             s.set_trigger(source=2)
@@ -59,12 +59,14 @@ def test_ext_trigger_point_lags_the_pin(sim_factory):
 def test_legacy_ext_shift_puts_the_edge_at_the_pretrigger(sim_factory):
     """1.22 (fw 0.2.72): in the legacy layout the ADC pipeline delays the data 4 words behind the EXT trigger; the
     firmware writes that many fewer pretrigger words (2 at divider 0) and reports the shift in GET_CAPTURE_INFO 70
-    and GET_DECIM 31, so the pin edge lands at the pretrigger as it does at 200 MS/s."""
+    and GET_DECIM 31, so the pin edge lands at the pretrigger as it does at 200 MS/s. On 0x153A+ (the capture stages,
+    1.24) the shift is 12 / 14 samples (P.ext_shift_legacy(d, True))."""
     srv = ext_sim(sim_factory, noise_lsb=0.3)
     with Scope.connect(srv.url) as s:
         assert s.info.proto_minor >= 22
         s.set_channel(0, range_index=1)
-        for div, shift in ((199, 8), (9, 8), (0, 4)):
+        for div, shift in ((199, 14), (9, 14), (0, 12)):
+            assert P.ext_shift_legacy(div, True) == shift
             s.set_timebase(divider=div)
             s.set_trigger(source=2, edge=0, mode=1, pretrigger_samples=200, total_samples=1000)
             cap = s.capture(["CH1"], 1.0)
@@ -83,7 +85,7 @@ def test_legacy_ext_shift_puts_the_edge_at_the_pretrigger(sim_factory):
 async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
     async with client_for(ext_sim(sim_factory), tmp_path) as c:
         prof = await c.call("scope_profile")
-        assert prof["live"]["ext_trigger"] is True and "0x1533" in prof["static"]["trigger"]
+        assert prof["live"]["ext_trigger"] is True and "caps EXT_TRIGGER" in prof["static"]["trigger"]
         r = await c.call("scope_set_trigger", source="EXT", edge="rising", level=1.0, mode="normal")
         assert r["applied"]["source"] == "EXT" and r["applied"]["level_volts"] is None
         assert any("3.3 V logic" in x for x in r["caveats"]) and any("level is ignored" in x for x in r["caveats"])
@@ -100,8 +102,8 @@ async def test_ext_and_generator_are_exclusive(sim_factory, tmp_path):
         cap = await c.call("scope_capture", channels=["CH1"])
         assert cap["trigger"] == "fired" and cap["ext_edge_seen"] is True
         assert (await c.call("scope_status"))["ext"]["edge_seen_since_arm"] is True
-    async with client_for(sim_factory(), tmp_path) as c:
-        assert "0x1532" in await c.fails("scope_set_trigger", source="EXT")
+    async with client_for(sim_factory(caps_clear=int(P.Caps.EXT_TRIGGER)), tmp_path) as c:
+        assert "caps EXT_TRIGGER" in await c.fails("scope_set_trigger", source="EXT")
 
 
 def test_device_refuses_gen_while_ext(sim_factory):

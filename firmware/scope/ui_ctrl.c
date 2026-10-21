@@ -4,6 +4,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "ui_ctrl.h"
+#include "pc_decim.h"
 
 int ui_p1_shown(int slot, int spectrum)
 {
@@ -143,7 +144,7 @@ int ui_run_view(int runstate, int single_wait, int host_busy)
   return host_busy ? UI_RUN_RUN : UI_RUN_STOP;
 }
 
-const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Peak" };
+const char *const ui_trace_names[UI_TRACE_COUNT]         = { "Linear", "Dots", "Bars" };   //ui-sample: was "Peak"
 const char *const ui_view_names[2]                       = { "Normal", "X-Y" };
 const char *const ui_spec_view_names[UI_SPEC_VIEW_COUNT] = { "Spectrum", "Waterfall", "Density" };
 const char *const ui_spec_chan_names[3]                  = { "CH1", "CH2", "CH1 + CH2" };
@@ -152,6 +153,81 @@ const char *const ui_spec_avg_names[5]                   = { "Off", "4", "16", "
 const char *const ui_persist_names[UI_PERSIST_COUNT]     = { "0.2 s", "1 s", "5 s", "Infinite" };
 const char *const ui_palette_names[2]                    = { "Mono", "Heat" };
 const char *const ui_phos_note_roll                      = "Not in roll mode";
+
+//----------------------------------------------------------------------------------------------------------------------------------
+// The ACQ menu's row and note (ui-sample, docs/plans/ui-rows.md section 3)
+
+int ui_acq_peak_applied(const ui_acq_in *in)
+{
+  return in->peak && !in->spectrum && !in->roll;
+}
+
+void ui_acq_row_build(const ui_acq_in *in, ui_acq_row *r)
+{
+  static const char *const peak_note[UI_ACQ_NOTE_LINES] = { "Peak:", "Filter and", "Average", "not applied" };
+  static const char *const roll_note[UI_ACQ_NOTE_LINES] = { "Not in", "roll mode", 0, 0 };
+  int peak = ui_acq_peak_applied(in), i;
+
+  r->line1[UI_ACQ_ROLL]    = "Roll";
+  r->line2[UI_ACQ_ROLL]    = "mode";
+  r->state[UI_ACQ_ROLL]    = in->roll ? UI_ACQ_BOX_ON : UI_ACQ_BOX_OFF;
+
+  //Average: not in roll (1.00o5), not with Peak (averaging max and min words would mix them; SET_SEQ refuses it too)
+  r->line1[UI_ACQ_AVERAGE] = "Average";
+  r->line2[UI_ACQ_AVERAGE] = "mode";
+  r->state[UI_ACQ_AVERAGE] = (in->roll || peak) ? UI_ACQ_BOX_GREY : (in->average ? UI_ACQ_BOX_ON : UI_ACQ_BOX_OFF);
+
+  //Filter: kept behind Peak and back as it was with Normal (the setting byte keeps K / FIR, pc_hal_scope.c)
+  r->line1[UI_ACQ_FILTER]  = "Filter";
+  r->line2[UI_ACQ_FILTER]  = in->filter_value ? in->filter_value : "";
+  r->state[UI_ACQ_FILTER]  = peak ? UI_ACQ_BOX_GREY : (in->filter_on ? UI_ACQ_BOX_ON : UI_ACQ_BOX_OFF);
+
+  //Sample: a Scope setting; the Spectrum's menu has no box (a peak record is pairs of codes, not a signal)
+  r->line1[UI_ACQ_SAMPLE]  = "Sample";
+  r->line2[UI_ACQ_SAMPLE]  = in->peak ? "Peak" : "Normal";
+  r->state[UI_ACQ_SAMPLE]  = in->spectrum ? UI_ACQ_BOX_NONE :
+                             (in->roll ? UI_ACQ_BOX_GREY : (in->peak ? UI_ACQ_BOX_ON : UI_ACQ_BOX_OFF));
+
+  for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+    r->note[i] = peak ? peak_note[i] : ((in->roll && !in->spectrum) ? roll_note[i] : 0);
+}
+
+uint8 ui_acq_decim_set(uint8 filter_set, int peak, int spectrum)
+{
+  return (uint8)((filter_set & (PC_DECIM_SET_FIR | 3)) | ((peak && !spectrum) ? PC_DECIM_SET_PEAK : 0));
+}
+
+int ui_acq_box_at(uint32 x, uint32 y)
+{
+  uint32 i;
+
+  if((y < UI_ACQ_BOX_Y) || (y > UI_ACQ_ROW_HIT_BOTTOM))
+    return -1;
+
+  for(i = 0; i < UI_ACQ_BOXES; i++)
+    if((x >= UI_ACQ_BOX_X(i)) && (x < UI_ACQ_BOX_X(i) + UI_ACQ_BOX_W))
+      return (int)i;
+
+  return -1;
+}
+
+uint16 ui_word_ui(int grid, int spec_view, int peak)
+{
+  return (uint16)(0xC700 | (peak ? 8 : 0) | ((spec_view & 3) << 1) | (grid ? 1 : 0));
+}
+
+int ui_word_ui_restore(uint16 w, uint8 *grid, uint8 *spec_view, uint8 *peak)
+{
+  if((w & 0xFFF0) != 0xC700)
+    return 0;
+
+  *grid      = (uint8)(w & 1);
+  *spec_view = (uint8)((w >> 1) & 3);
+  *peak      = (uint8)((w >> 3) & 1);
+  return 1;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
 
 const char *ui_display_value(int spectrum, int view, int phosphor)
 {
@@ -183,7 +259,24 @@ const char *ui_scope_warning(const ui_warn_in *w)
     return "CH2 overrange: increase V/div";
 
   if(w->untrig && w->running)
-    return "No trigger: check the trigger level";
+    return ui_no_trigger_hint(w->trig_type, w->trig_idle);
 
   return "";
+}
+
+//ui-type (docs/plans/ui-rows.md 2.6): the firmware knows only that no trigger came, so the hint names the settings
+//of the trigger type to check; the Spectrum's own warning line takes it too (spectrum.c)
+const char *ui_no_trigger_hint(uint8 trig_type, uint8 idle_on)
+{
+  switch(trig_type)
+  {
+    case 1:
+      return "No trigger: check the level and Width";
+
+    case 2:
+      return idle_on ? "No trigger: check the level, N and Idle" : "No trigger: check the level and N";
+
+    default:
+      return "No trigger: check the trigger level";
+  }
 }

@@ -398,10 +398,10 @@ static void test_ctrl_page(void)
     cur = 250; ui_bright_load(0, &cur, &back);  T_EQ(cur, UI_BRIGHT_DEFAULT);
   }
 
-  //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule at x 304 and left of the menu's edge at
-  //380, below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
-  T_TRUE(UI_ACQ_PASS_X > 304);
-  T_TRUE(UI_ACQ_PASS_X + UI_ACQ_PASS_W < 378);
+  //ACQ menu pass time (fw 0.2.63): inside the Memory column right of its rule (ui-sample: x 402) and left of the menu's
+  //edge (478), below the rule at y 211 and above the bottom edge (386 - 8); the label and the widest value fit its width
+  T_TRUE(UI_ACQ_PASS_X > UI_ACQ_COL_X);
+  T_TRUE(UI_ACQ_PASS_X + UI_ACQ_PASS_W < UI_ACQ_W - 2);
   T_TRUE(UI_ACQ_PASS_Y > 211);
   T_TRUE(UI_ACQ_PASS_Y + 32 <= 378);
   T_TRUE(ui_text_width(&font_2, ui_acq_pass_label) <= UI_ACQ_PASS_W);
@@ -535,6 +535,27 @@ static void test_warnings(void)
   w.running = 0;
   T_STR(ui_scope_warning(&w), "");                 //stopped: the frozen record is not a live problem
   w.running = 1;
+
+  //ui-type (docs/plans/ui-rows.md 2.6): the hint names the settings of the trigger type to check; every one fits the
+  //420 px warning box in the 13 px font it is drawn with (and in the 16 px font the note measured)
+  w.trig_type = 1;
+  T_STR(ui_scope_warning(&w), "No trigger: check the level and Width");
+  w.trig_type = 2;
+  T_STR(ui_scope_warning(&w), "No trigger: check the level and N");
+  w.trig_idle = 1;
+  T_STR(ui_scope_warning(&w), "No trigger: check the level, N and Idle");
+  w.trig_type = 3;                                 //the host's timeout: the plain hint
+  T_STR(ui_scope_warning(&w), "No trigger: check the trigger level");
+  T_STR(ui_no_trigger_hint(0, 1), "No trigger: check the trigger level");
+  T_STR(ui_no_trigger_hint(1, 1), "No trigger: check the level and Width");
+  T_STR(ui_no_trigger_hint(2, 0), "No trigger: check the level and N");
+  T_STR(ui_no_trigger_hint(2, 1), "No trigger: check the level, N and Idle");
+  T_TRUE(ui_text_width(&font_3, ui_no_trigger_hint(2, 1)) <= 420);
+  T_TRUE(ui_text_width(&font_2, ui_no_trigger_hint(2, 1)) <= 420);
+  printf("hint \"%s\": %u px in font_3, %u px in font_2\n", ui_no_trigger_hint(2, 1),
+         ui_text_width(&font_3, ui_no_trigger_hint(2, 1)), ui_text_width(&font_2, ui_no_trigger_hint(2, 1)));
+  w.trig_type = 0;
+  w.trig_idle = 0;
 
   w.over[1] = 1;                                   //CH2 off: its flag means nothing
   T_STR(ui_scope_warning(&w), "No trigger: check the trigger level");
@@ -868,7 +889,83 @@ static void test_meas_spectrum_maths(void)
 }
 
 //Card sources: none by default; a registered one is returned for its item only
-static void test_src_fn(int ch, char *text) { strcpy(text, ch ? "2" : "1"); }
+static int test_src_fn(int ch, char *text) { strcpy(text, ch ? "2" : "1"); return 1; }
+
+//C7 counter: the card rule (ui_meas.h): the six timing cards of the result's channel take the counter's values when
+//the result is current and has a period, formatted as the record's; everything else answers 0 (the record's value)
+static void test_counter_cards(void)
+{
+  ui_ms_counter c;
+  char t[UI_MS_TEXT_MAX];
+  int i, ch;
+
+  //ui_fmt_ps: four significant digits at the prefix that fits
+  ui_fmt_ps(t, 1000000);          T_STR(t, "1.000us");
+  ui_fmt_ps(t, 500000);           T_STR(t, "500.0ns");
+  ui_fmt_ps(t, 5000);             T_STR(t, "5.00ns");
+  ui_fmt_ps(t, 33333);            T_STR(t, "33.33ns");
+  ui_fmt_ps(t, 999999995000ull);  T_STR(t, "1.000s");
+  ui_fmt_ps(t, 1000000000ull);    T_STR(t, "1.000ms");
+  ui_fmt_ps(t, 0);                T_STR(t, "0s");
+
+  //No copy yet: nothing for any card
+  memset(&c, 0, sizeof(c));
+  ui_ms_counter_set(&c);
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    for(ch = 0; ch < 2; ch++)
+      T_EQ(ui_ms_counter_text(i, ch, t), 0);
+
+  //1 MHz 50 % on CH1: the six timing cards of CH1, the record for CH2's and for every voltage card
+  c.valid = 1; c.ch = 0; c.freq_mhz = 1000000000ull; c.period_ps = 1000000; c.width_ps = 500000; c.low_ps = 500000;
+  c.duty_ppm = 500000;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 0, t), 1);   T_STR(t, "1.000MHz");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PERIOD, 0, t), 1); T_STR(t, "1.000us");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PWIDTH, 0, t), 1); T_STR(t, "500.0ns");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NWIDTH, 0, t), 1); T_STR(t, "500.0ns");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PDUTY, 0, t), 1);  T_STR(t, "50.00%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NDUTY, 0, t), 1);  T_STR(t, "50.00%");
+  for(i = 0; i < UI_MEAS_FREQ; i++)
+    T_EQ(ui_ms_counter_text(i, 0, t), 0);
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    T_EQ(ui_ms_counter_text(i, 1, t), 0);
+
+  //1 kHz 20 % on CH2, as the record would print it
+  c.ch = 1; c.freq_mhz = 1000000; c.period_ps = 1000000000ull; c.width_ps = 200000000ull; c.low_ps = 800000000ull;
+  c.duty_ppm = 200000;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 1, t), 1);   T_STR(t, "1.000kHz");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PERIOD, 1, t), 1); T_STR(t, "1.000ms");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PWIDTH, 1, t), 1); T_STR(t, "200.0us");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NWIDTH, 1, t), 1); T_STR(t, "800.0us");
+  T_EQ(ui_ms_counter_text(UI_MEAS_PDUTY, 1, t), 1);  T_STR(t, "20.00%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NDUTY, 1, t), 1);  T_STR(t, "80.00%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 0, t), 0);
+
+  //Duty rounding: 333333 ppm -> 33.33 %, 666667 -> 66.67 %; a 12.345678 MHz value keeps four digits
+  c.duty_ppm = 333333; c.freq_mhz = 12345678000ull;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_PDUTY, 1, t), 1); T_STR(t, "33.33%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_NDUTY, 1, t), 1); T_STR(t, "66.67%");
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 1, t), 1);  T_STR(t, "12.35MHz");
+
+  //Not valid (no current result, no period, or EXT): the record everywhere
+  c.valid = 0;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_counter_text(UI_MEAS_FREQ, 1, t), 0);
+
+  //The registered sources: the six timing items and nothing else; they answer through the same rule
+  ui_ms_counter_register();
+  for(i = 0; i < UI_MEAS_COUNT; i++)
+    T_EQ(ui_ms_get_source(i) != 0, (i >= UI_MEAS_FREQ) && (i <= UI_MEAS_NDUTY));
+  c.valid = 1;
+  ui_ms_counter_set(&c);
+  T_EQ(ui_ms_get_source(UI_MEAS_FREQ)(1, t), 1);   T_STR(t, "12.35MHz");
+  T_EQ(ui_ms_get_source(UI_MEAS_FREQ)(0, t), 0);
+  T_EQ(ui_ms_get_source(UI_MEAS_NDUTY)(1, t), 1);  T_STR(t, "66.67%");
+  for(i = UI_MEAS_FREQ; i <= UI_MEAS_NDUTY; i++)
+    ui_ms_set_source(i, 0);
+}
 
 static void test_meas_sources(void)
 {
@@ -2167,8 +2264,171 @@ static void test_bode_grid(void)
   T_EQ(bu_slider_x_mhz(1), BU_SL_X);
   T_EQ(bu_slider_x_mhz(20000000000ull), BU_SL_X + BU_SL_W);
 }
+//ui-sample: the ACQ menu's row of four boxes and the Memory column's note (docs/plans/ui-rows.md section 3, the
+//AcqMenuSample / AcqMenuPeak mockups), the Trace style rename, settings word 211
+static const ui_acq_row *acq(int roll, int average, int filter_on, int peak, int spectrum, const char *fv)
+{
+  static ui_acq_row r;
+  ui_acq_in in;
+
+  in.roll = (uint8)roll; in.average = (uint8)average; in.filter_on = (uint8)filter_on; in.peak = (uint8)peak;
+  in.spectrum = (uint8)spectrum; in.filter_value = fv;
+  ui_acq_row_build(&in, &r);
+  return &r;
+}
+
+static void test_acq_row(void)
+{
+  static const char *fv[] = { "off", "boxcar", "CIC2", "CIC3", "boxcar+FIR", "CIC2+FIR", "CIC3+FIR" };
+  const ui_acq_row *r;
+  uint8 g, v, p;
+  int i;
+  uint32 j;
+
+  //Geometry: 478 px (x 250 .. 728, left of the right bar at 739); four boxes on the 98 px pitch, the fourth at x + 302,
+  //all left of the Memory column's rule at x + 402, which is 1.00o5's x + 304 moved by one pitch; chips and the pass
+  //time in the column; the note's four lines under the pass time and above the bottom edge
+  T_EQ(UI_ACQ_W, 478);
+  T_TRUE(250 + UI_ACQ_W <= UI_BAR_X - 10);
+  T_EQ(UI_ACQ_BOX_X(UI_ACQ_SAMPLE), 302);
+  T_EQ(UI_ACQ_COL_X, 304 + 98);
+  T_TRUE(UI_ACQ_BOX_X(UI_ACQ_SAMPLE) + UI_ACQ_BOX_W < UI_ACQ_COL_X);
+  T_EQ(UI_ACQ_CHIP_X, 315 + 98);
+  T_TRUE(UI_ACQ_CHIP_X + 54 < UI_ACQ_W - 1);
+  T_TRUE(UI_ACQ_NOTE_X > UI_ACQ_COL_X);
+  T_TRUE(UI_ACQ_NOTE_X + UI_ACQ_NOTE_W <= UI_ACQ_W - 2);
+  T_TRUE(UI_ACQ_NOTE_Y >= UI_ACQ_PASS_Y + 32);
+  T_EQ(UI_ACQ_NOTE_Y + UI_ACQ_NOTE_LINES * UI_ACQ_NOTE_DY, 326);
+  T_TRUE(UI_ACQ_NOTE_Y + UI_ACQ_NOTE_LINES * UI_ACQ_NOTE_DY <= 386 - 8);
+
+  //Hit areas: each box's drawn area down to the rule at y 211; between the boxes and above them nothing
+  T_EQ(ui_acq_box_at(8, 163), UI_ACQ_ROLL);
+  T_EQ(ui_acq_box_at(97, 210), UI_ACQ_ROLL);
+  T_EQ(ui_acq_box_at(98, 180), -1);
+  T_EQ(ui_acq_box_at(106, 180), UI_ACQ_AVERAGE);
+  T_EQ(ui_acq_box_at(250, 180), UI_ACQ_FILTER);
+  T_EQ(ui_acq_box_at(302, 163), UI_ACQ_SAMPLE);
+  T_EQ(ui_acq_box_at(391, 203), UI_ACQ_SAMPLE);
+  T_EQ(ui_acq_box_at(392, 180), -1);
+  T_EQ(ui_acq_box_at(350, 162), -1);
+  T_EQ(ui_acq_box_at(350, 211), -1);
+
+  //Normal (AcqMenuSample): Filter off, Sample "Normal" grey-box white text, no note
+  r = acq(0, 0, 0, 0, 0, "off");
+  T_STR(r->line1[UI_ACQ_ROLL], "Roll");       T_STR(r->line2[UI_ACQ_ROLL], "mode");
+  T_STR(r->line1[UI_ACQ_AVERAGE], "Average"); T_STR(r->line2[UI_ACQ_AVERAGE], "mode");
+  T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "off");
+  T_STR(r->line1[UI_ACQ_SAMPLE], "Sample");   T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");
+  for(i = 0; i < UI_ACQ_BOXES; i++)
+    T_EQ(r->state[i], UI_ACQ_BOX_OFF);
+  for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+    T_TRUE(r->note[i] == 0);
+
+  //Average on, Filter CIC2: green boxes
+  r = acq(0, 1, 1, 0, 0, "CIC2");
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_OFF);
+
+  //Peak (AcqMenuPeak): Sample green "Peak"; Filter and Average grey with their values kept; the four-line note
+  r = acq(0, 1, 1, 1, 0, "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_ON);
+  T_STR(r->line2[UI_ACQ_SAMPLE], "Peak");
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
+  T_STR(r->line2[UI_ACQ_FILTER], "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_GREY);
+  T_EQ(r->state[UI_ACQ_ROLL], UI_ACQ_BOX_OFF);
+  T_STR(r->note[0], "Peak:");
+  T_STR(r->note[1], "Filter and");
+  T_STR(r->note[2], "Average");
+  T_STR(r->note[3], "not applied");
+  r = acq(0, 0, 0, 1, 0, "off");
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_GREY);
+  T_STR(r->line2[UI_ACQ_FILTER], "off");
+
+  //Back to Normal: both boxes as they were, the note gone
+  r = acq(0, 1, 1, 0, 0, "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
+  T_TRUE(r->note[0] == 0);
+
+  //Spectrum: no Sample box (the slot stays empty), Peak kept but not applied there: Filter and Average as normal
+  r = acq(0, 1, 1, 1, 1, "CIC2+FIR");
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_NONE);
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_ON);
+  T_TRUE(r->note[0] == 0);
+  T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 0, 0, 0, 1, 1, 0 }), 0);
+
+  //Roll: Sample grey with its kept value, Average grey, the note "Not in" / "roll mode"
+  r = acq(1, 1, 1, 1, 0, "CIC2");
+  T_EQ(r->state[UI_ACQ_ROLL], UI_ACQ_BOX_ON);
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_GREY);
+  T_STR(r->line2[UI_ACQ_SAMPLE], "Peak");
+  T_EQ(r->state[UI_ACQ_AVERAGE], UI_ACQ_BOX_GREY);
+  T_EQ(r->state[UI_ACQ_FILTER], UI_ACQ_BOX_ON);
+  T_STR(r->note[0], "Not in");
+  T_STR(r->note[1], "roll mode");
+  T_TRUE(r->note[2] == 0);
+  r = acq(1, 0, 0, 0, 0, "off");
+  T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");
+  T_EQ(r->state[UI_ACQ_SAMPLE], UI_ACQ_BOX_GREY);
+  T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 1, 0, 0, 1, 0, 0 }), 0);
+  T_EQ(ui_acq_peak_applied(&(ui_acq_in){ 0, 0, 0, 1, 0, 0 }), 1);
+
+  //Fit: every box text in its 90 px box (13 px font, 4 px in), every note line in the column (and the roll note's one
+  //line would not: why it is two)
+  for(j = 0; j < sizeof(fv) / sizeof(fv[0]); j++)
+  {
+    r = acq(0, 0, 1, 1, 0, fv[j]);
+    for(i = 0; i < UI_ACQ_BOXES; i++)
+    {
+      T_TRUE(ui_text_width(&font_2, r->line1[i]) <= UI_ACQ_BOX_W - 8);
+      T_TRUE(ui_text_width(&font_2, r->line2[i]) <= UI_ACQ_BOX_W - 8);
+    }
+    for(i = 0; i < UI_ACQ_NOTE_LINES; i++)
+      T_TRUE(ui_text_width(&font_2, r->note[i]) <= UI_ACQ_NOTE_W);
+  }
+  r = acq(1, 0, 0, 0, 0, "off");
+  T_TRUE(ui_text_width(&font_2, r->note[0]) <= UI_ACQ_NOTE_W);
+  T_TRUE(ui_text_width(&font_2, r->note[1]) <= UI_ACQ_NOTE_W);
+  T_TRUE(ui_text_width(&font_2, ui_phos_note_roll) > UI_ACQ_NOTE_W);
+  T_EQ(ui_text_width(&font_2, "not applied"), 63);
+
+  //Trace style: "Peak" renamed "Bars" (one word, one meaning: Peak is the Sample state)
+  T_STR(ui_trace_names[0], "Linear");
+  T_STR(ui_trace_names[1], "Dots");
+  T_STR(ui_trace_names[2], "Bars");
+  for(i = 0; i < UI_TRACE_COUNT; i++)
+    T_TRUE(strcmp(ui_trace_names[i], "Peak") != 0);
+
+  //Word 211: Grid, the Spectrum's variant, Sample Peak (bit 3) round trip; a word written before ui-sample (bit 3 clear)
+  //reads Normal; a wrong marker restores nothing
+  for(j = 0; j < 16; j++)
+  {
+    uint16 w = ui_word_ui(j & 1, (j >> 1) & 3, (j >> 3) & 1);
+
+    T_EQ(w & 0xFFF0, 0xC700);
+    g = v = p = 9;
+    T_TRUE(ui_word_ui_restore(w, &g, &v, &p));
+    T_EQ(g, j & 1);
+    T_EQ(v, (j >> 1) & 3);
+    T_EQ(p, (j >> 3) & 1);
+  }
+  T_EQ(ui_word_ui(1, 2, 0), 0xC705);                  //what fw 0.2.56 .. 0.2.103 wrote for Grid on, Density
+  T_EQ(ui_word_ui(1, 2, 1), 0xC70D);
+  g = v = p = 9;
+  T_TRUE(ui_word_ui_restore(0xC705, &g, &v, &p));
+  T_EQ(p, 0);
+  g = v = p = 9;
+  T_FALSE(ui_word_ui_restore(0xC715, &g, &v, &p));
+  T_FALSE(ui_word_ui_restore(0x0000, &g, &v, &p));
+  T_EQ(p, 9);
+}
+
 int main(void)
 {
+  test_acq_row();
   test_sig4();
   test_cards();
   test_menu();
@@ -2189,6 +2449,7 @@ int main(void)
   test_meas_fit();
   test_meas_spectrum_maths();
   test_meas_sources();
+  test_counter_cards();
   test_meas_menu();
   test_bode_scales();
   test_bode_readout();

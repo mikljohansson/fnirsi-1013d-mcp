@@ -60,15 +60,21 @@ void mock_clear_resps(void)
   mock_nresps = 0;
 }
 
+uint32_t mock_sr_div(uint32_t i)
+{
+  return (i < 29) ? sr_div[i] : 0;
+}
+
 void mock_reset(uint16_t fpga_version)
 {
   int i;
 
   mock_clear_resps();
   memset(&mock, 0, sizeof(mock));
+  mock_log_reset();                                  //D4 logger
   mock.now        = 5000;
   mock.version    = fpga_version;
-  mock.ring_words = ((fpga_version & 0xFFF0) == 0x1530) ? 8192 : ((fpga_version == 0x1632 || fpga_version == 0x1732) ? 6144 : 4096);
+  mock.ring_words = 8192;
   mock.polls_to_trigger = 2;
   mock.polls_to_done    = 3;
   mock.trigger_addr     = 100;
@@ -97,6 +103,12 @@ void mock_reset(uint16_t fpga_version)
   mock.tb.divider    = sr_div[tpd_sr[24]];
   mock.fpga_divider  = mock.tb.divider;
 
+  //C7 counter: the boot configuration, no result yet
+  mock.cnt.gate   = 2;
+  mock.cnt.level  = 128;
+  mock.cnt.hyst   = 6;
+  mock.cnt.min    = 255;
+
   mock.trg.source     = 0;
   mock.trg.edge       = 0;
   mock.trg.level      = 128;
@@ -109,15 +121,12 @@ void mock_reset(uint16_t fpga_version)
   mock.ui_samples = 3000; mock.ui_pre = 1500; mock.ui_sw = 1502;
   mock.ui_run = 1; mock.last_run_set = -1; mock.indicator = -1;
   mock.enc33_bad  = 0x77;           //CH2 A wrong, check failed
-  mock.enc.mode   = (uint8_t)eh_mode(fpga_version);
-  mock.enc.boot33 = (mock.enc.mode == EH_MODE_FLAG) ? EH_33_GOOD : 0;
+  mock.enc.mode   = EH_MODE_FLAG;   //the built-for bitstream's check (enc_heal_hw.c at boot)
+  mock.enc.boot33 = EH_33_GOOD;
 
-  //0x153A+: the power-on stages in effect, nothing stored (cap_hw.c at boot)
-  if(cs_has(fpga_version))
-  {
-    mock.cap.flags = PC_CAPF_HAS;
-    mock.cap.value = CS_PO;
-  }
+  //The power-on capture stages in effect, nothing stored (cap_hw.c at boot)
+  mock.cap.flags = PC_CAPF_HAS;
+  mock.cap.value = CS_PO;
 
   fill_ring();
 
@@ -256,7 +265,7 @@ void pc_hal_trigger_write(const pc_hw_trigger *t, uint8_t mask)
 
 uint32_t pc_hal_auto_timeout_default(uint32_t total_samples)
 {
-  return (mock.version == 0x1432) ? 1800 : total_samples;
+  return total_samples;
 }
 
 void pc_hal_gen_read_ui(uint8_t *enable, uint32_t *freq_hz, uint8_t *duty_pct)
@@ -279,7 +288,7 @@ void pc_hal_gen_write(uint32_t phase_inc, uint32_t threshold, uint8_t enable)
 
 static int mock_polls;
 
-int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int prog, int normal,
+int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, int normal,
                const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   mock.fpga_ops++;
@@ -300,7 +309,7 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
     //As pc_hal_scope.c: written (and settled) before the reset
     mock.decim_cur     = *dc;
     mock.decim_written = 1;
-    mock.decim_rb      = (uint16_t)((pc_decim_status(dc) << 8) | dc->shift);
+    mock.decim_rb      = (uint16_t)((pc_decim_status(dc) << 8) | pc_decim_shift_byte(dc));
     mock.decim_arms++;
   }
 
@@ -317,7 +326,7 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
 
   mock.arms++;
   mock.arm_pre = pre_words; mock.arm_total = total_words; mock.arm_auto = auto_timeout;
-  mock.arm_prog = prog; mock.arm_normal = normal;
+  mock.arm_normal = normal;
   mock_polls = 0;
   fill_ring();
   return 0;
@@ -333,11 +342,35 @@ void pc_hal_acq_poll(int *done, int *triggered)
 
 uint16_t pc_hal_acq_finish(void) { mock.fpga_ops++; return mock.trigger_addr; }
 uint8_t  pc_hal_ext_status(void) { mock.fpga_ops++; mock.ext_reads++; return mock.ext_status; }
-void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
-void     pc_hal_force_stop(void) { mock.force_stops++; pc_hal_force(); }
 
-void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
-                      uint32_t ring_words, uint8_t read_lag)
+//1.26: the trigger extension (fpga_bus.c fpga_trig on the scope)
+void pc_hal_trig_ext_read(pc_hw_trig_ext *t) { *t = mock.trig_ext; }
+void pc_hal_trig_ext_write(const pc_hw_trig_ext *t)
+{
+  mock.fpga_ops++;
+  mock.under_screen += mock.ui_screen;
+  mock.trig_ext = *t;
+  mock.trig_ext_writes++;
+}
+void pc_hal_trig_status(uint8_t out[4]) { mock.fpga_ops++; mock.trig_status_reads++; memcpy(out, mock.trig_st, 4); }
+
+//C7 counter (fw-c7): memory only on the scope too (the main loop's pass does the bus work); a configuration is echoed
+//into the answer as the firmware's pass would write it (level 0 = the trigger level is followed: the level in effect
+//stays what it was)
+void pc_hal_counter_read(pc_hw_counter *c) { *c = mock.cnt; }
+void pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst)
+{
+  mock.cnt_cfg[0] = gate; mock.cnt_cfg[1] = source; mock.cnt_cfg[2] = level; mock.cnt_cfg[3] = hyst;
+  mock.cnt_configs++;
+  mock.cnt.gate   = gate;
+  mock.cnt.source = source;
+  mock.cnt.hyst   = hyst;
+  if(level)
+    mock.cnt.level = level;
+}
+void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
+
+void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
 {
   uint32_t i;
 
@@ -345,7 +378,6 @@ void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst
   assert(start < ring_words);
   assert(count <= ring_words);
   assert(ring_words == mock.ring_words);
-  (void)read_lag;
 
   mock.read_calls++;
   mock.fpga_ops++;
@@ -420,6 +452,30 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
 
     mock.trace16_n[ch] = 0;
 
+    //C6 peak record (as pc_glue_decim_read): { max, min } per word, the trace = the corrected midpoint with the mean-core
+    //correction (the mock has 1.00o5 compensations only: gain 65536, off = (comp A + comp B) / 2 codes), the pairs in
+    //trace16; overload when either byte is at a rail
+    if(mock.decim_cur.peak)
+    {
+      uint32_t gain = 65536;
+      int32_t  off  = (mock.ch[ch].adc_a_comp + mock.ch[ch].adc_b_comp) * 32768;
+      uint8_t  ov   = 0;
+
+      for(k=0;k<total_samples;k++)
+      {
+        uint32_t a  = (start_word + k) % mock.ring_words;
+        uint8_t  mn = mock.ring[2 * ch][a], mx = mock.ring[2 * ch + 1][a];
+
+        mock.trace16[ch][k] = (uint16_t)(mn | (mx << 8));
+        mock.trace[ch][k]   = (uint8_t)pc_peak_mid(mn, mx, gain, off);
+        ov |= pc_peak_overload(mn, mx);
+      }
+
+      mock.trace16_n[ch]   = total_samples;
+      mock.ch[ch].overload = ov;
+      continue;
+    }
+
     //16-bit layout (as pc_glue_decim_read): one sample per word, low byte core A, high byte core B
     if(mock.decim_cur.k)
     {
@@ -462,7 +518,7 @@ void pc_hal_trace_ui_info(uint32_t *sample_count, uint32_t *pretrigger, int32_t 
 uint32_t pc_hal_trace_capacity(void) { return sizeof(mock.trace[0]); }
 
 uint8_t  pc_hal_decim_setting(void)        { return mock.decim_setting; }
-void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & 0x3F; mock.fpga_ops++; }
+void     pc_hal_decim_set(uint8_t setting) { mock.decim_setting = setting & PC_DECIM_SET_MASK; mock.fpga_ops++; }
 uint16_t pc_hal_decim_readback(void)       { mock.fpga_ops++; return mock.decim_rb; }
 
 void pc_hal_decim_current(pc_decim_cfg *c, int *written)
@@ -521,6 +577,11 @@ uint32_t pc_hal_settings_fingerprint(void)
   b[n++] = (uint8_t)mock.trg.total; b[n++] = (uint8_t)(mock.trg.total >> 8);
   b[n++] = mock.long_mode;
   b[n++] = mock.decim_setting;
+  b[n++] = mock.trig_ext.type; b[n++] = mock.trig_ext.flags;                     //1.26, as pc_hal_scope.c
+  b[n++] = (uint8_t)mock.trig_ext.n; b[n++] = (uint8_t)(mock.trig_ext.n >> 8); b[n++] = (uint8_t)(mock.trig_ext.n >> 16);
+  b[n++] = (uint8_t)mock.trig_ext.h; b[n++] = (uint8_t)(mock.trig_ext.h >> 8); b[n++] = (uint8_t)(mock.trig_ext.h >> 16);
+  b[n++] = (uint8_t)mock.trig_ext.holdoff; b[n++] = (uint8_t)(mock.trig_ext.holdoff >> 8);
+  b[n++] = (uint8_t)(mock.trig_ext.holdoff >> 16); b[n++] = (uint8_t)(mock.trig_ext.holdoff >> 24);
   return pc_crc32(b, n);
 }
 
@@ -781,7 +842,6 @@ void     pc_hal_usb_watch(uint32_t *v) { v[0] = 7000; v[1] = 7001; }
 void     pc_hal_enc_state(pc_hw_enc *e) { *e = mock.enc; }
 void     pc_hal_cap_state(pc_hw_cap *c) { *c = mock.cap; }
 void     pc_hal_cap_check(void) { mock.cap_checks++; mock.cap.reads++; mock.cap.flags |= PC_CAPF_READ; }
-void     pc_hal_enc_retry(void)         { mock.fpga_ops++; mock.enc_retries++; }
 int      pc_hal_enc_written(void)       { return mock.enc_written; }
 
 void pc_hal_fpga_writes(uint32_t *v)
@@ -918,4 +978,92 @@ uint8_t *pc_hal_sd_stage(uint32_t *capacity)
 {
   *capacity = sizeof(mock_stage);
   return mock_stage;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//D4 logger: the log behind pc_hal_log_* (mock_hal.h). Words are appended by the test (mock_log_feed), byte k of word w is
+//(w * 7 + k) & 0xFF; start answers mock_log.start_rc
+mock_log_state mock_log;
+static uint8_t mock_log_mem[1u << 16];
+
+void mock_log_reset(void)
+{
+  memset(&mock_log, 0, sizeof(mock_log));
+}
+
+int pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc_decim_cfg *dc, uint64_t limit)
+{
+  uint8_t nch = (uint8_t)((ch_mask & 1) + ((ch_mask >> 1) & 1));
+  uint8_t bpw = (uint8_t)(nch * ((format == FPGA_LOG_F_HIGH) ? 1 : 2));
+
+  mock_log.starts++;
+  mock_log.ch_mask = ch_mask;
+  mock_log.format  = format;
+  mock_log.divider = divider;
+  mock_log.dc      = *dc;
+  mock_log.limit   = limit;
+  mock_log.next    = 0;
+  mock_log.gaps    = 0;
+  mock_log.flags   = 0;
+  mock_log.ms0     = mock.now;
+  pc_logring_reset(&mock_log.ring, mock_log_mem, sizeof(mock_log_mem), bpw);
+  mock_log.state   = (mock_log.start_rc == 0) ? FPGA_LOG_RUNNING : FPGA_LOG_ERROR;
+  mock_log.ms1     = mock.now;
+  return mock_log.start_rc;
+}
+
+void pc_hal_log_stop(uint8_t state)
+{
+  mock_log.stops++;
+  mock_log.stop_state = state;
+
+  if(mock_log.state == FPGA_LOG_RUNNING)
+  {
+    mock_log.state = state;
+    mock_log.ms1   = mock.now;
+  }
+}
+
+void pc_hal_log_info(pc_hw_log *l)
+{
+  memset(l, 0, sizeof(*l));
+  l->state      = mock_log.state;
+  l->ch_mask    = mock_log.ch_mask;
+  l->format     = mock_log.format;
+  l->flags      = mock_log.flags;
+  l->produced   = mock_log.ring.wr;
+  l->sent       = mock_log.ring.rd;
+  l->gaps       = mock_log.gaps;
+  l->ring_bytes = PC_LOG_RING_BYTES;
+  l->ms         = ((mock_log.state == FPGA_LOG_RUNNING) ? mock.now : mock_log.ms1) - mock_log.ms0;
+}
+
+uint32_t pc_hal_log_read(uint8_t *dst, uint32_t max, uint64_t *word, uint8_t *flags)
+{
+  mock_log.reads++;
+  return pc_logring_read(&mock_log.ring, dst, max, word, flags);
+}
+
+void mock_log_feed(uint32_t words, uint64_t skip, uint8_t flags)
+{
+  uint32_t room, i, k, bpw = mock_log.ring.bpw;
+  uint8_t *p;
+
+  if(skip)
+  {
+    mock_log.next += skip;
+    mock_log.gaps++;
+    mock_log.flags |= FPGA_LOG_FL_LAP;
+    flags |= PC_LOG_CF_GAP;
+  }
+
+  p = pc_logring_wptr(&mock_log.ring, mock_log.next, flags, &room);
+  assert(room >= words);
+
+  for(i=0;i<words;i++)
+    for(k=0;k<bpw;k++)
+      p[i * bpw + k] = (uint8_t)((mock_log.next + i) * 7 + k);
+
+  pc_logring_commit(&mock_log.ring, words, mock_log.next, flags);
+  mock_log.next += words;
 }

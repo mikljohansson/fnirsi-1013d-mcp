@@ -29,6 +29,10 @@ char *ui_fmt_record_time(char *p, uint32 samples, uint64 fs_mhz);
 //A frequency in mHz (the spectrum's unit) with four significant digits: 146484 -> "146.5Hz", 1000000 -> "1.000Hz"
 char *ui_fmt_mhz(char *p, uint64 mhz);
 
+//C7 counter: a time in ps with four significant digits (the counter's period / width): 1000000 -> "1.000us",
+//999999995000 -> "1.000s", 5000 -> "5.00ns"
+char *ui_fmt_ps(char *p, uint64 ps);
+
 //A level in centi-dB with one decimal and a sign, then the unit: 270 -> "+2.7dBV", -10000 -> "-100.0dBV", 4 -> "0.0dBV"
 char *ui_fmt_cdb(char *p, int32 cdb, const char *unit);
 
@@ -48,6 +52,11 @@ int    ui_card_fits(const FONTDATA *font, const char *name, const char *value);
 #define UI_MEAS_VAVG       2
 #define UI_MEAS_VPP        4
 #define UI_MEAS_FREQ       6
+#define UI_MEAS_PERIOD     7           //C7 counter: the six timing cards a counter result can feed (ui_meas.h)
+#define UI_MEAS_PWIDTH     8
+#define UI_MEAS_NWIDTH     9
+#define UI_MEAS_PDUTY      10
+#define UI_MEAS_NDUTY      11
 extern const char *measurement_names[UI_MEAS_COUNT];
 
 //The timing measurements need three crossings in the record; with fewer they say so

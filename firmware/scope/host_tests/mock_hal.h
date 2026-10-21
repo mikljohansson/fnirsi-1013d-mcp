@@ -27,14 +27,23 @@ typedef struct
   uint32_t arms;
   uint16_t arm_pre, arm_total;
   uint32_t arm_auto;
-  int      arm_prog, arm_normal;
+  int      arm_normal;
   int      polls_to_trigger;      //acq_poll calls until 0x18 reads 1 (-1 never)
   int      polls_to_done;         //acq_poll calls until 0x0A reads 1
   uint16_t trigger_addr;
   uint32_t forces;
-  uint32_t force_stops;           //fw 0.2.97: pc_hal_force_stop (0x0E = 0, then the force: counted in forces too)
   uint8_t  ext_status;            //FPGA 0x28
   uint32_t ext_reads;
+  //1.26 (fw-c5, FPGA 0x153C): the trigger extension the firmware wrote (every write asks for the hold-off clear), and
+  //what the 0x37 / 0x34 status reads answer
+  pc_hw_trig_ext trig_ext;
+  uint32_t trig_ext_writes;
+  uint8_t  trig_st[4];
+  uint32_t trig_status_reads;
+  //C7 counter (fw-c7): what pc_hal_counter_read answers (a test fills the result), the last configuration asked for
+  pc_hw_counter cnt;
+  uint8_t  cnt_cfg[4];            //gate, source, level, hysteresis of the last pc_hal_counter_config
+  uint32_t cnt_configs;
   uint32_t read_calls;
   uint32_t max_read_start;        //largest start address passed to read_core (must be < ring)
   uint32_t debug_cmds[16];
@@ -140,7 +149,7 @@ typedef struct
   int        enc_bad_arms;          //the next arms whose capture is garbled (-1: every one)
   uint8_t    enc_cur_bad;           //the capture of the last arm is garbled
   uint8_t    enc33_bad;             //0x33 of a garbled capture (0x1538+), else EH_33_GOOD
-  uint32_t   enc_status_reads, enc_retries, enc_notes, enc_events;
+  uint32_t   enc_status_reads, enc_notes, enc_events;
   uint8_t    enc_last_why;
   eh_note    enc_last_note;
   pc_hw_enc  enc;                   //what pc_hal_enc_state answers (counted as the target counts)
@@ -155,6 +164,7 @@ typedef struct
 extern mock_state mock;
 
 void mock_reset(uint16_t fpga_version);
+uint32_t mock_sr_div(uint32_t i);        //the mock's copy of variables.c's sample_rate_settings[i]
 void mock_rx_push(const uint8_t *data, uint32_t len);
 
 //1.23: one iteration of the innermost modal loop (see ui_modal): BUSY poll, then leave by the cancel path when a host
@@ -162,6 +172,24 @@ void mock_rx_push(const uint8_t *data, uint32_t len);
 int  mock_ui_modal_pass(void *session);
 void mock_tx_release(void);
 void mock_sd_image(uint32_t sector, const char *magic, uint32_t sectors);   //eGON header + valid checksum
+
+//D4 logger: the mock's log (mock_hal.c), reset by mock_reset
+#include "pc_logring.h"
+#include "fpga_log.h"
+typedef struct
+{
+  int          start_rc;          //what pc_hal_log_start answers (0, -1, -2)
+  uint32_t     starts, stops, reads;
+  uint8_t      state, ch_mask, format, flags, stop_state;
+  uint32_t     divider, gaps, ms0, ms1;
+  uint64_t     limit, next;
+  pc_decim_cfg dc;
+  pc_logring   ring;
+} mock_log_state;
+extern mock_log_state mock_log;
+void mock_log_reset(void);
+//Append words (bytes (w * 7 + k) & 0xFF) after skipping skip words (a gap: the counter jumps, PC_LOG_CF_GAP)
+void mock_log_feed(uint32_t words, uint64_t skip, uint8_t flags);
 
 //Captured responses (most recent last)
 #define MOCK_MAX_RESP 32

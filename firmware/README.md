@@ -342,6 +342,264 @@ The scope speaks the binary protocol of `docs/protocol.md` on its USB port. The 
 `docs/plans/firmware-usb-protocol.md`. Deviations from the spec are listed in the "Implementation
 notes" section of `docs/protocol.md`.
 
+### One supported FPGA bitstream (fw-one, protocol 1.25)
+
+Every firmware version runs on exactly one FPGA bitstream, the project's latest (owner decision 2026-10-20: "every
+firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner"). The constant is
+`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153B, `fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
+geometry (8192 words, 16382 samples) and every feature decision derive from it, never from the version word the FPGA
+reports. That word is read once at boot (`pc_glue_init`) and compared:
+
+- **Match**: the firmware runs as before. The FPGA's own encode self-check (read 0x33 at boot and after every 200 MSa/s
+  capture, enc_heal.c) and the capture stages (0x63 / 0x36, cap_stage.c) stay: 0x153B needs them.
+- **Mismatch** (older or newer word): the scope boots into a full-screen notice instead of the scope
+  (`ui_diag.c ud_build_fpga_mismatch`, `ui_diag_view.c ui_fpga_mismatch_pass`): "This firmware needs FPGA bitstream
+  0x153B." / "This scope has 0x1532." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
+  stock firmware.", with three buttons: Diagnostics (the version word, Save report, the log, Enter FEL; Back returns to
+  the notice; no Calibrate, DC shift trim or Volts calibration there), Settings and USB drive (the modal screens of the
+  main menu; the notice is redrawn after). The acquisition, the Scope, Spectrum and Frequency response views and the
+  generator never run; nothing is written to the FPGA's feature registers at boot. Over USB: GET_INFO 76 carries the
+  built-for word and 78 bit 0 the mismatch (GET_HEALTH 124 / 126 the same), every command outside the basic set answers
+  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153B", and PING, GET_INFO, GET_STATUS,
+  GET_HEALTH, GET_LINK_STATS, GET_EVENT_LOG, GET_CAL, the SD commands, SAVE_REPORT, READ_SCREEN and ENTER_FEL keep
+  working (`F_BASIC` in pc_cmds.c), so a host can read the version word, save the report and load another image.
+
+Gone with it (fw-one, after fw 0.2.102): the stock 0x1432 / Atlan 0x1532 / EF2 / EP4 arms (`pc_variant_from_version`,
+`fpgasettings.fw_FPGA`, `fpga_check_ready`), the 0x1532..0x1537 encode-heal and core-order workarounds (`eh_mode`,
+`eh_affected`, `eh_order_differs`, the 0x0D re-write before a re-arm, `PC_ENCF_ORDER`), the fw 0.2.97 stop geometry and the
+"may be spliced" flag (`pc_stop_kind`, `pc_auto_stop_word`, `pc_auto_cut`, `pc_engine_record`, `pc_hal_force_stop`), the
+per-bitstream bus contract (`fpga_bus_contract_for`; `FPGA_READ_DUMMY` is the one constant), `cs_has`, and every branch on
+the version word or on a capability bit that cannot be false on 0x153B (62 sites in 11 files). A new bitstream means a new
+firmware: change `PC_FW_FPGA_VERSION`, the bus contract constant if the readout changed, and the notice's text follows.
+fw-c5 did exactly that for 0x153C: the constant, `PC_FW_FPGA_VERSION_TEXT` (the mismatch error's text) and the caps.
+
+### Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26)
+
+Bitstream 0x153C (fpga-c1, `fpga/al3/AGENTS.md` "0x153C C1 triggers"; contract `docs/plans/fpga-0x153c.md` section 3) adds
+a trigger qualifier in front of the edge compare and gives Atlan4's dead 0x1B register its meaning. Registers: 0x5E type
+(bits 2..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and 5 window are 0x153E and act as edge) with bit 3
+"longer than N"; 0x5F u24 N; 0x60 u24 H; 0x16 the polarity per type (the UI's trigger edge); 0x1B u32 hold-off in 5 ns
+clocks (0 = off: from the trigger of a record no trigger is accepted until it elapsed, across sequencer restarts and
+re-arms; 0 written releases a running one at once); 0x66 bit 0 = 1 makes the next 0x01 = 1 clear the hold-off (one-shot);
+reads 0x34 (3 bytes: qualifier status, edges still to count) and 0x37 (hold-off running, type bit 2). Units: N and H are
+samples of the trigger stream, one memory word on CH1 / CH2 (10 (D + 1) ns legacy, N x 5 ns with the filter), one 5 ns
+clock on EXT. The trigger position is the edge type's for the qualifying edge, so 0x14 and the record arithmetic are
+unchanged; power-on (every register 0) is 0x153B behaviour.
+
+- **One copy, one writer** (`fpga_bus.c`): `fpga_trig` is what the firmware believes the FPGA holds. `fpga_trig_write`
+  (SET_TRIGGER2, SET_TRIGGER's hold-off, boot) writes 0x5E, 0x5F / 0x60 for a type other than edge, 0x1B, and 0x66 = 1
+  when asked (a new trigger definition is a new session: the next arm starts with a clean hold-off; ARMs between
+  definitions keep it running across re-arms, the FPGA's rule, which is what skips the pulses of a train). Every arm (UI
+  conversion or host ARM, `fpga_arm_reset`) re-writes 0x5E and, for a qualified type, 0x5F / 0x60 inside the sampling
+  reset window after the second 0x0B / 0x0C and before 0x0E (`fpga_trig_arm`, 2 or 10 strobes): the FPGA holds its
+  qualifier in reset until the first write clock edge after the release, so the registers apply at every rate, and a
+  FEL-loaded firmware's FPGA holds what the firmware believes. Boot (`pc_glue_init`, built-for word only) writes the
+  power-on state (edge, no hold-off) and the clear request once.
+- **Host** (`pc_cmds.c`, `docs/protocol.md` row 66): **SET_TRIGGER2 0x0219** (24 bytes: type, polarity, flags, source,
+  N, H, level, level2, hold-off, 0; no mask, every field written; the firmware converts nothing) and **GET_TRIGGER**
+  52 bytes (12 the hold-off, 28..51 the SET_TRIGGER2 body that reproduces the trigger). Runt / window / range / both
+  cores (0x153E) and out-of-range fields are E_BAD_ARG with the byte offset as detail; nothing is written then. The old
+  SET_TRIGGER keeps the edge type's fields, the geometry and the mode, and now accepts its `holdoff` (5 ns units).
+  GET_STATUS 48..51 carries 0x37 / 0x34 read at every MAIN poll while a host capture is in flight (6 strobes), GET_CAPTURE_INFO
+  96..111 the extension the capture was armed with. Caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8.
+- **The UI's Type row** (ui-type, `docs/plans/ui-rows.md` section 2): the trigger menu's sixth row Edge / Pulse / Nth
+  with its parameter rows (Pulse: Width on the 1-2-5 ladder 10ns .. 10s and Shorter / Longer; Nth: N 1 .. 65535 with the
+  generator's keypad, Idle with Off below the ladder; under Pulse the edge row reads Pulse polarity Positive /
+  Negative). `trig_ui.c` (pure, `host_tests/test_trig_ui.c`) keeps the times as ladder steps and converts them to words
+  of the trigger stream in 5 ns units (words = round(t / Tw), Tw = 10 (D + 1) ns legacy, N x 5 ns on the 16-bit path,
+  5 ns on EXT; Width 2 .. 2^24 - 1 words, Idle 1 ..), so a rate offers only the steps it can count and a step outside
+  the new rate's range snaps to the nearest inside it with the notice "Width set to 5us for this rate" / "Idle set to ..."
+  queued after the time/div's (acq_view.c, two notice slots). The menu writes the registers through `fpga_trig_write`,
+  the path SET_TRIGGER2 takes, and every UI arm re-derives the words when the word period changed; a host SET_TRIGGER2
+  shows in the menu as the nearest step and keeps its exact words until then. Settings words 202 / 203 (marker 0xA000)
+  hold the row; the chip's edge symbol slot shows the type's glyph; the "No trigger" hint names the type's settings. The
+  Frequency response sweep arms the edge type whatever the menu holds. Peak detect (C6) and the counter (C7) are separate.
+- **Host tests**: `test_fpga_bus.c` `test_trig_ext` (every type's write and arm sequence against `fpga_model.c`, the
+  0x66 one-shot, the hold-off masking a trigger across a re-arm, released by 0x66 + arm, by 0x1B = 0 or by running out,
+  the status reads), `test_session.c` `test_trigger2` (the commands, the refusals, settings_seq, the status bytes, the
+  capture info), the 1.26 vectors in `docs/protocol-vectors.json`.
+
+### Peak detect (FPGA 0x153C, fw-c6, protocol 1.26)
+
+Bitstream 0x153C (fpga-c2, `fpga/al3/AGENTS.md` "0x153C C2 peak detect"; contract `docs/plans/fpga-0x153c.md` section 4)
+makes 0x56 bit 1 a one-register peak-detect switch: the 16-bit path runs whatever 0x53 holds, the ADCs and the write clock
+at 200 MSa/s, and every word written per channel is { max (high byte, 0x21 / 0x23), min (low byte, 0x20 / 0x22) } of the
+window's N = 2 (floor(D / 2) + 1) raw 8-bit codes, the K = 1 boxcar's window and latency (12 write clocks). The FIR is off
+while peak is on, the shift 0x54 is not applied, 0x53 / 0x54 keep their values for the way back; 0x29 byte 1 reads { peak
+active, peak written, S } (both bits set on 0x153C whenever written). The 16-bit trigger compare takes the window max
+(rising) or min (falling) as its high byte, so the level is written as raw << 8. A 6 ns spike that sample skipping at
+5 MSa/s caught 31 times in 405 is caught 202 times in 204 by the windows (tb_peak). The firmware (this item, C6 of the
+contract's section 10) drives it as follows.
+
+- **Configuration** (`pc_decim.c`): `PC_DECIM_SET_PEAK` (bit 6 of the setting byte) wins over K: `pc_decim_config`
+  gives `peak` 1, `k` 1 (0x53 = 1 is written, the contract's register value; the one-bit switch would not need it, but
+  the FPGA's 0x29 byte 0 then reads the same K the firmware reports), `n` = the window, gain 1, shift 0, scale 0, no
+  FIR (`fir_en` 0: 0x56 = 2, `pc_decim_cmd56`), why 0; the status byte reads 0x81 and the shift byte 0xC0
+  (`pc_decim_shift_byte`: bits 7 / 6 above the 6-bit S, as the FPGA's 0x29 byte 1). The filter's eligibility rules
+  apply unchanged: divider 0 (200 MSa/s stores every sample; peak would only halve the word rate) and totals over 8190
+  give a legacy record (why 2 / 3) with the Sample setting kept. EXT shift: the boxcar's 120 ns + (N - 1) 2.5 ns + 40 ns
+  of the capture stages; settle after the 0x56 write (1 + 10) N x 5 ns + 1 us (fpga-c2's note).
+- **The setting** (`pc_hal_scope.c`): `pc_dec_peak`, one Scope setting (the ACQ Sample row of `docs/plans/ui-rows.md`
+  section 3; the Spectrum view always acquires Normal, `pc_dec_ui_set`), saved in settings word 211 bit 3 (ui-sample,
+  below; `pc_glue_settings_defaults` resets it). SET_DECIM filter 4 sets it and keeps
+  the Filter's K / FIR for the way back; filter 0..3 clears it. It is in the settings fingerprint (`settings_seq`).
+- **The arm** (`pc_dec_apply`): `fpga_decim_write(mode = 1 | flags, cmd56 = 2, shift 0)` (0x53 / 0x54 / 0x56 only where
+  they differ from what the FPGA holds, 0x54 at every 16-bit arm as before), then 0x55 = raw << 8 with raw =
+  `pc_peak_level(level, gain, off)`, the inverse of the mean-core correction below, for CH1 / CH2 (EXT: level << 8).
+- **The readout** (`pc_glue_decim_read`): the 16-bit words into `pc_dec_raw` as for the filter; then, instead of the
+  filter's scale, the **mean-core 8-bit correction in the full clock class**: `fpga_channel_correction_full` (acal_correction
+  at divider 0 plus the v4 tracking, since the ADCs run at 200 MSa/s under peak detect exactly as on the filter path; the
+  divider's own class would be the gated one) gives gain_a / gain_b / off_a / off_b, `pc_peak_gain` / `pc_peak_off` take
+  their means, and both bytes of every word go through code = (raw x gain + off) / 2^16. The processed trace (the screen,
+  the measurements, the software trigger, READ_TRACE's 8-bit samples) takes the **corrected midpoint** `pc_peak_mid`
+  (the contract's `samples` for the host; a spike shows at half its height there, the UI item's Scope bars draw the
+  pairs from `pc_dec_raw`, READ_TRACE WIDE returns them as u16 min | max << 8). **Overload** when either byte is 0 or 255
+  (`pc_peak_overload` into `ADoverload`; the readout loop's own check sees only the midpoint). The tracking never sees a
+  peak record (`acal_live_record` skips 16-bit readouts).
+- **Average** is not applied while Sample is Peak (`pc_seq_ui_conversion`: GET_STATUS 46 = 0): an averaging run's lane
+  sums would add max and min bytes. Host: SET_SEQ mode 2 with peak on is E_STATE detail 7, a stale averaging setting reads
+  GET_SEQ 16 = 9 (`PC_SEQ_FIT_PEAK`, `pc_seq_fit_rec`) and ARM answers E_STATE 3; segments are fine.
+- **Host** (`pc_cmds.c`, `docs/protocol.md` row 66 "Peak detect"): SET_DECIM filter 4 (flags bit 3 with it E_BAD_ARG 1),
+  GET_DECIM 0 = 4 / 2 = 0x81 / 3 = 0xC0 / 30 = 0, GET_CAPTURE_INFO 68 / 69 the same bytes and 79 = bit 1 peak | bit 0
+  16-bit (the latter now for single captures too), READ_RAW layout 3 (per channel the minima then the maxima; layout 2 on
+  a peak record and layout 3 on any other record E_BAD_ARG 2), READ_TRACE 30 / 31. Caps bit 21 PEAK_DETECT, features
+  bit 9. The bytes match mcp-c8's host vectors byte for byte (the coordinator's wire format).
+- **Not here**: the counter (C7). GET_CAL 92..107 report the correction of the current divider's class: a host wanting the firmware's exact
+  midpoint codes needs the full-class values (at divider 0, or from the sector); the difference is the class zero of a
+  code or so.
+- **Host tests**: `test_fpga_bus.c` `test_peak` (the writes and the 0x29 read-back against `fpga_model.c`, whose 0x56 bit 1
+  turns the capture into { max, min } words of synthetic windows with spikes and dips the windows never miss, the way
+  back, an older model ignoring the bit), `test_session.c` `test_peak_math` (the configuration, every maths function, the
+  trigger inverse round trip) and `test_peak_protocol` (the commands, the refusals, a capture's info / READ_RAW / READ_TRACE
+  / overload, the way back, the legacy fallback at 200 MSa/s), `test_seq.c` the fit; the `decim_peak` vectors section.
+- **Bench** (nothing verified; needs C4's 0x153C bitstream): GET_DECIM 26 / 27 = 0x81 / 0xC0 after a peak arm; a DC level
+  reads the same code in Normal and Peak (the midpoint); the generator's 1 kHz square at 10 kSa/s in Peak shows min / max
+  pairs spanning the square (READ_RAW layout 3) where Normal aliases; a short glitch (the Bode output stepped by the host)
+  at 500 kSa/s caught in Peak and missed in Normal; the trigger level on the rising max; Average greyed / GET_STATUS 46 = 0.
+- **The ACQ Sample row and the bars** (ui-sample, `docs/plans/ui-rows.md` section 3, mockups `docs/mockups/ui-rows/
+  AcqMenu*.png`, `ScopePeak.png`): the ACQ menu is 478 px wide (x 250 .. 728), the Memory column (rule, header, chips,
+  pass time) one 98 px box pitch right of 1.00o5's, and **Sample** ("Sample" / "Normal" or "Peak") is the row's fourth
+  90 x 40 box at x + 302, y + 163; the row and the column's note are data (`ui_ctrl.c` `ui_acq_row_build`, drawn by
+  `pc_glue_acq_row_draw`): with Peak the Filter and Average boxes are grey with their values kept and the note reads
+  "Peak:" / "Filter and" / "Average" / "not applied" (y + 254, four 18 px lines); in roll the Sample (and Average) box is
+  grey and the note reads "Not in" / "roll mode"; the Spectrum's menu has no Sample box. A tap toggles `pc_dec_peak`
+  (`pc_glue_sample_tap`): the UI conversion arms SET_DECIM filter 4's path (`ui_acq_decim_set`: the peak bit in the Scope
+  view, the Filter's K / FIR kept and back with Normal), the 16-bit depth limit (chips 3000 / 6000, `pc_dec_ui_wide`), no
+  Average while the setting is Peak (also at 200 MSa/s, where the record stays 8-bit). The Scope view draws a peak record
+  as **one vertical bar per column** (`peak_bars.c`: the linear trace's step as Q16 samples per column, the column's
+  lowest min to highest max through the midpoint's correction, inverted with the channel; `scope_display_channel_bars`)
+  in the caller's colour, red on overload (either byte at 0 or 255); at 200 MSa/s the 8-bit record's per-column min / max.
+  Phosphor adds the bars (`pb_phos_record`, each column's rows once per record); X-Y and the cards use the midpoints;
+  Trace style greys while Peak (its "Peak" value is now "Bars"). Host tests: `test_peak_bars.c`, `test_ui.c`
+  `test_acq_row`.
+### Hardware counter (FPGA 0x153C, fw-c7, protocol 1.26 row 66)
+
+Bitstream 0x153C (fpga-c3, `fpga/al3/AGENTS.md` "0x153C C3 counter"; contract `docs/plans/fpga-0x153c.md` section 5) counts
+the trigger stream reciprocally at 200 MHz: 0x61 bits 1..0 gate (0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s, exactly 2e6 / 2e7 /
+2e8 clocks), bits 3..2 source (0 the trigger source as 0x15 was written, 1 CH1, 2 CH2, 3 EXT); 0x62 level (the Schmitt
+trigger is high at code >= level) and hysteresis (low below level - hysteresis); read 0x35 = 16 bytes from one snapshot
+taken at the command byte: { new, 0, EXT, CH2, 0, 0, gate }, seq, E, T, W (u32 each, 28 bits used), min, max. From the
+first rising edge of the gate to the last: E periods, T clocks, W high clocks; E = 0 = fewer than two edges; a gate or
+source change restarts the gate, a same-value write and a level change do not. The counter never touches the capture.
+
+- **What the cards show and when** (`ui_meas.c`, "the card rule"): the counter follows the trigger source, one channel
+  at a time. The **Freq, Period, +Width, -Width, +Duty and -Duty** cards of that channel show the counter's values
+  (frequency E / (T x 5 ns), period T x 5 ns / E, high and low time, duty W / T; four significant digits in the record's
+  formats, so the text never changes shape) while the counter holds a **current result with a period**: the gate on, the
+  result younger than three gates + 100 ms, E >= 1. Everything else shows the record's measurement as before: the other
+  channel's timing cards, every voltage card (Vmax .. Vp), the reference traces, an EXT-source result, and a result
+  without edges (the signal under the Schmitt thresholds, or slower than two edges per gate: at 100 ms that is below
+  about 20 Hz, where the record at a slow time base measures it). The cards show a result from the pass after the one
+  that read it (at most one pass, 15..40 ms, after the gate ended); at the 100 ms gate they update ten times a second.
+- **Level**: the counter's level follows the UI's trigger level (the marker the user placed inside the signal, so what
+  triggers is what is counted) with hysteresis 6 codes (about three times the 2 LSB noise); boot writes 128 / 6 and the
+  first pass follows the marker. A host configuration with a non-zero level pins it (GET_COUNTER `what` = 1); level 0
+  returns to following.
+- **One reader, one copy** (`fpga_counter.c`, host-buildable; `fpga_cnt`): boot (`pc_glue_init`, built-for word only)
+  writes 0x62 = 128 / 6 then 0x61 = gate 100 ms, source 0 (5 strobes). The main loop reads 0x35 once per pass after the
+  capture readout (`PC_COUNTER_PASS` in fnirsi_1013d_scope.c, `pc_glue_counter_pass`): the command byte plus 16 data
+  strobes, **17 x 0.3 us = about 5 us** against a 15..40 ms pass; a snapshot with "new" set is taken, derived and
+  time-stamped (64-bit integer arithmetic: frequency in uHz through a two-stage division, times in ps, duty in ppm,
+  rounded to nearest; no floating point). The copy for the cards (`ui_ms_counter_set`) and GET_COUNTER's answer are
+  memory reads.
+- **Rate changes** (fpga-c3's note: a 0x0D / 0x53 write while a gate runs puts a few pairs of mixed age into the stream
+  and adds or drops one edge in the gate that spans it): the pass that sees such a write (`fpga_bus_wr.wclk`, counted
+  by `fpga_bus_note_write`) writes **0x61 = 0 before its read** (the running gate is aborted, nothing can be published
+  after this), reads 0x35 and **drops the result it carries** (the gate that spanned the write, or one read late), then
+  writes **0x61 = the value** again: the next result is one clean full gate. 4 strobes on such passes only; the pass runs
+  milliseconds after the write, long past the transient (at most 5 x 41 us at D 4095). The alternative, skipping the
+  first result by `seq`, was not taken: a clean result published just before the write and read after it would be
+  skipped while the contaminated gate's result became the second. A level change writes 0x62 (3 strobes) and restarts
+  the gate the same way, so no result mixes two levels; a trigger source change (0x15) restarts the FPGA's gate by
+  itself and the result carries its source. During a Frequency response sweep the 0x0D writes restart the gate every
+  pass and no result is published (the cards are not shown there).
+- **Host** (`pc_cmds.c`, `docs/protocol.md` GET_COUNTER): **GET_COUNTER 0x0213** (cap COUNTER bit 22, features bit 10;
+  the bytes fixed with the mcp: `what` 0 read / 1 configure, gate, source, level, hysteresis; 24-byte response flags
+  NEW / VALID / EXT / CH2, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz round half up saturating).
+  It is answered from the firmware's copy (F_MODAL: inside menus too); a configuration is written by the next pass.
+- **Host tests**: `test_fpga_bus.c` `test_counter` / `test_counter_derive` (the boot writes, the 17-strobe pass, the
+  derived values against `fpga_model.c`'s synthetic square waves at every gate and source, the rate-change rule's write
+  order and the dropped result, the level follow, a host configuration, the 0x15 restart, the current / stale rule, the
+  arithmetic's corners: 100 MHz, 1 Hz over 1 s, the 28-bit maxima), `test_session.c` `test_counter` (caps, features,
+  the body byte-exact with the mcp's `host_resp_get_counter`, the NEW bit, the refusals, the answer inside a modal
+  screen, the mismatch refusal), `test_ui.c` `test_counter_cards` (the card rule and the texts), the 1.26 counter
+  vectors in `docs/protocol-vectors.json`.
+
+### Streaming logger (FPGA 0x153D, fw-d4, protocol 1.27 row 67)
+
+Contract `docs/plans/fpga-0x153c.md` section 6 (item D4), register semantics as fpga-d1 built them (tb_stream.v): 0x69 bit 0
+stream (the capture never stops or triggers), bit 1 clear the lap flag; 0x6A the next ring word the MCU reads; read 0x38 = 8
+bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread count (0..8192); a word written while
+8192 are unread sets the lap flag; 0x01 = 1 zeroes the reader, the count and the counter, not the flag.
+
+- **Rates** (the contract's documented specification, owner 2026-10-20 22:38): sample rate x bytes per sample x channels
+  <= 500,000 B/s: 500 kS/s for one 8-bit channel (format 0 legacy or 1 the filtered word's high byte), 250 kS/s for one
+  16-bit (format 2) or peak (3) channel or two 8-bit channels, 125 kS/s for two 16-bit channels. LOG_START refuses more
+  (E_BAD_ARG detail 1 with the tiers as the hint). The format must match the SET_DECIM setting at the divider (0: filter
+  off; 1 / 2: a filter; 3: peak).
+- **The log loop** (`pc_hal_scope.c` `pc_log_loop`, entered from `pc_glue_poll_main` after the MAIN poll that ran
+  LOG_START): one drain step (`fpga_log_drain`) and one MAIN poll per iteration until the log ends; no UI pass runs (the
+  FPGA ring holds 16.4 ms at 500 kwords/s, a UI pass takes 15-40 ms). The Scope view stays frozen, its notice slot reads
+  "Logging to the host: 12 s, 6.0 MB, 1 gap" (redrawn every 500 ms); at the end the UI's 0x0D is written back and "Log
+  ended: ..." shows as the slot's notice. While logging every command outside the F_BUSY and read-only sets and
+  LOG_READ / LOG_STOP answers E_STATE detail 9 (`pc_dispatch`); acq_state reads 5. The person at the scope cannot stop a
+  log on the screen (no new control, decided): the host does (LOG_STOP), or the firmware when the host is gone (a link
+  reset or DTR drop, or no LOG_READ for 10 s: state 4).
+- **Start** (`fpga_log_start`): 0x0D = divider, the filter / peak registers through `pc_dec_apply` (settled), the
+  sequencer off (`pc_seq_hw_pre_reset` and 0x57 = 0), 0x69 = 1, 0x1A = 0, the sampling reset with 0x0B = 0x0C = 0x0E = 0,
+  a 0x38 snapshot (bit 7 clear: no stream, E_FPGA detail 1; base = (W - count) mod 8192), 0x6A = base, 0x69 = 3.
+- **Drain step**: up to 2048 words from the next unread one, one pass per lane as READ_RAW (0x1F, the read command, the
+  dummy strobe; `fpga_read_lane`) straight into the DDR ring at the word's byte offset, then a second 0x38: the chunk is
+  kept when the lap flag is clear and the counter is at most 8176 words ahead of the chunk's first word, else it is a gap;
+  then 0x6A. Per step one 0x38 read (9 strobes), 5 + n strobes per lane, the 0x6A write (3). Wire layout per word: the
+  enabled channels CH1, CH2; format 0 core B then core A (0x21, 0x20), 1 the high byte (0x21), 2 u16 little-endian (0x20,
+  0x21), 3 min then max (0x20, 0x21); CH2 + 2.
+- **Gaps** (the overflow): the words between the last one read and the counter are lost, the drain resumes at the newest
+  word (0x6A, 0x69 = 3 clears the flag), the next chunk carries the gap flag and its counter jumps; the log continues. A
+  full DDR ring stops the drain (the words wait in the FPGA ring); if the host does not read in time the FPGA ring laps
+  and that gap also carries the DDR flag (bit 3).
+- **DDR ring** (`pc_logring.c`, host-buildable): **8 MiB** in the NOLOAD section `.logring` right after `.bss` (fnirsi_1013d.ld;
+  not in the image, not cleared at boot; 0x80882000..0x81082000 on the GCC 10 build of 2101a2c, 9.5 MiB below the
+  restart record section at 0x81A00000, which the linker asserts). Why 8 MiB: every tier produces the same 500 kB/s, so
+  the ring rides out 16.8 s of host stall (Windows transport stalls of several seconds were seen on the bench,
+  hardware-status 2026-10-17), the contract's proposal, a power of two (masking), and it leaves 9.5 MiB of growth room for
+  image and `.bss` (17.5 MiB were free). Whole words only, segments at gaps (64 unread at most), so every chunk is
+  contiguous and its counter exact. Readable after the end until the next LOG_START.
+- **Duration**: the drain never reads past ceil(duration_ms x 200,000 / word clocks) words and ends there (state 2).
+  LOG_STOP writes 0x69 = 0; the FPGA stops writing at the next write clock edge (auto mode, 0x0E = 0) and the tail is
+  read into the ring (state 3).
+- **Cost** (`host_tests/test_log.c` against `fpga_model.c`'s stream; strobes at the measured 0.30 / 0.35 us per bus byte,
+  the USB side as CPU time at 0.43 / 1.0 us per byte in 512-byte packets between drain steps, a 25 ns per byte build,
+  a 1 ms host turnaround per LOG_READ): every tier delivers 500 kB/s for 2 s without a gap at the worst case; CPU duty
+  52-60 % best, 78-82 % worst (the contract's per-byte sum: 0.73 .. 1.35 us per byte = 37-68 %, plus the per-chunk
+  overheads). Twice the 1 ch 8-bit tier (1 MS/s) with a 256 KiB ring falls behind and logs gaps with the DDR flag,
+  every delivered byte right.
+- **Host tests**: `test_log` (above, plus every format and channel mask byte for byte, the DDR wrap, a 40 ms stall's gap,
+  a lap flag with nothing lost, the DDR-full gap, the duration limit, the start's write order, a leftover lap flag, the
+  0x153C refusal, the bounded ready wait, the tail after a stop), `test_session` `test_logger` (caps, features, every
+  refusal and tier boundary, the 48-byte LOG and a gap chunk byte for byte, the E_STATE 9 gate and what still answers,
+  ENDED, the host watchdog and DTR drop), the 1.27 vectors.
+
 ### Build options
 
 | make variable | default | effect |
@@ -372,7 +630,7 @@ Files:
 | `scope/pc_transport.c/.h` | USB RX ring, TX pump, ZLP, link events | no |
 | `scope/pc_rx_ring.h` | RX ring copies and the one-FIFO-read-per-packet store | yes (`test_rx_ring`) |
 | `scope/pc_hooks.h` | the hooks in the 1.00o5 files (macros that mark each place) | |
-| `scope/fpga_bus.c/.h` | fw 0.2.72: the bus contract per bitstream, the readout start (dummy strobe), the sampling reset order, the record of rate / filter writes | yes (`test_fpga_bus`, against `host_tests/fpga_model.c`) |
+| `scope/fpga_bus.c/.h` | fw 0.2.72: the bus contract (one dummy strobe, `FPGA_READ_DUMMY`), the readout start, the sampling reset order, the record of rate / filter writes | yes (`test_fpga_bus`, against `host_tests/fpga_model.c`) |
 | `scope/build_id.c` | the build identity as data: commit hash and commit time (section 1, "Reproducible images") | |
 | `scope/host_tests/` | `test_protocol`, `test_rx_ring`, `test_session` (mock FPGA and UI), `check_vectors.py` | |
 | `../docs/protocol-vectors.json` | shared frame vectors (`gen_vectors.py`; the MCP server merges its own) | |
@@ -427,11 +685,8 @@ screen save/restore and the touch area. What depends on the running hardware is 
 
 | item | where | hidden when | why |
 |---|---|---|---|
-| the generator menu itself (top-bar button does not open it) | top bar | stock bitstream 0x1432 (no DDS) | the stock core has a fixed 1 kHz square wave |
-| memory depth boxes above the bitstream's maximum | acquisition menu | 6000+ on stock (3000), 15000 on EF2/EP4 (12286) | the FPGA cannot capture more |
-| Filter selector (in 1.00o5's Long memory slot) | acquisition menu | bitstream without DECIM (all but AL3 0x1534+) | the decimation filter exists only in fpga/al3 0x1534 (fw 0.2.30, "Decimation filter" below) |
-| memory depth 9000, 12000, 15000 | acquisition menu | Filter on (0x1534+) | the 16-bit layout holds one sample per ring word: at most 8190 samples |
-| EXT trigger source | trigger menu | bitstream without EXT_TRIGGER (all but AL3 0x1533+) | the input exists only in fpga/al3 0x1533 (calibration pin, 3.3 V logic referenced to the scope's USB ground, not the probe ground, which sits ~1.24 V above it); selecting it switches the generator off |
+| memory depth 9000, 12000, 15000 | acquisition menu | Filter on | the 16-bit layout holds one sample per ring word: at most 8190 samples |
+| (history, fw 0.2.6..0.2.102) the generator menu, the memory depths above the bitstream's maximum, the Filter selector and the EXT trigger source | top bar, acquisition and trigger menus | the running bitstream lacked the feature | since fw-one the firmware runs on one bitstream that has them all; a mismatched scope shows the notice screen instead |
 | Time & Date settings (RTC submenu) | system settings | no DS3231 answers at boot | the clock, file stamps and FAT times would read garbage |
 | Temperature (Diagnostics Battery tile) | Diagnostics | no DS3231 answers at boot | it is the DS3231's temperature register; without the module it read "99" |
 
@@ -554,22 +809,35 @@ triggered record (pretrigger included) into a 2048 x 64 accumulator. Writes 0x57
   at 1 MSa/s) the reset window can pass without an edge. The 0x05 poll guarantees edges in reset. 0x57 = 0 is written
   for every capture that is not a run while the FPGA may hold another mode (always the first arm after boot: an MCU
   restart leaves the FPGA running). Bitstreams before 0x1536 keep the 0.2.51 order byte for byte.
-- **UI hardware averaging.** The acquisition menu's Average (1.00o5: auto or normal trigger mode, not the waveform viewer,
-  not roll) used to average every display pass, trace = (trace + previous) / 2, whether a new record came or not. On
-  0x1536 a UI conversion whose record is legacy (filter off, or 200 MSa/s) and fits the accumulator (the 3000-sample
-  depth = 1500 words; total <= 2046 words) is one averaging run of N records: the largest power of two in 2..64 with
-  N x (record + dead time) <= 40 ms (`pc_seq_ui_plan`; 64 at 200 MSa/s, 8 at 1 MSa/s, none at 100 kSa/s and slower).
-  The readout takes the four lane sums of the channel (S = 0, 4 bus passes of 1500 words, about 1.8 ms) and feeds
-  `fpga_read_adc_data` the corrected code of the mean per core (`pc_seq_avg_code`: mean in Q8 by an exact reciprocal,
-  then the core's gain / offset, rounded), so trace, measurements, software trigger, spectrum and phosphor take it as a
-  normal record; the software average is skipped for it (`pc_seq_sw_average`). 16-bit records (always 3000+ samples,
-  over the 2046-word accumulator) and slow rates keep the software average. GET_STATUS byte 46 tells which (0 off,
-  1 software, 2 hardware), byte 47 log2 N.
-- Deadline (`pc_seq_ui_service`, main loop): a run not done after max(100 ms, two records) + its run time is stopped
-  (0x5D = 1, then 0x1A = 0) once it holds a record, and shows the mean of what it has. Auto mode without any trigger:
-  the run is stopped empty, the record shown is the sample memory's (untriggered, as the firmware auto mode of 0.2.41
-  shows), and the next UI conversions are single records until one triggers. Normal mode with no record yet keeps
-  waiting, as a normal-mode capture does. The firmware auto time-out never runs during a UI run (it would end a record
+- **UI averaging: one behaviour (fw-one; owner 2026-10-20 "consistency matters").** The acquisition menu's Average
+  (1.00o5: auto or normal trigger mode, not the waveform viewer, not roll) used to average every display pass, trace =
+  (trace + previous) / 2, whether a new record came or not; fw 0.2.58 replaced that by a hardware run for legacy
+  records that fit the accumulator and kept the running average for the rest. Since fw-one every displayed record is the
+  mean of N records, N from one planner for both paths (`pc_seq_ui_plan_n`, pc_seq.c): the largest power of two in 2..64
+  whose N records fit the 40 ms budget, a record costed at its acquisition time plus the sequencer's dead time and, on
+  the MCU path, its readout (4 bus bytes per ring word at 0.3 us). A legacy record (filter off, or 200 MSa/s) that fits
+  the accumulator (total <= 2046 words: the 3000-sample depth = 1500 words) is one hardware averaging run of N records
+  (64 at 200 MSa/s, 8 at 1 MSa/s); the readout takes the four lane sums of the channel (S = 0, 4 bus passes of 1500
+  words, about 1.8 ms) and feeds `fpga_read_adc_data` the corrected code of the mean per core (`pc_seq_avg_code`: mean
+  in Q8 by an exact reciprocal, then the core's gain / offset, rounded). Every other record (16-bit, or deeper than 4092
+  samples) is averaged by the MCU (`pc_seq_hw.c` `ui_mcu_collect`): the main loop's conversion is record 1; once it is
+  done and triggered, `pc_seq_ui_done` arms the same conversion N - 1 times within the pass, reads each record's lanes
+  (`pc_hal_read_core` / `fpga_read_decim_data`) into 32-bit sums per sample and feeds the exact mean (legacy per core as
+  above; 16-bit the rounded mean through the readout's scale / corr16 conversion, as a single record). So trace,
+  measurements, software trigger, spectrum and phosphor take the mean as a normal record on either path. Numbers: 3000
+  16-bit samples at 1 MSa/s N = 4 (3 ms record + 3.6 ms readout each, about 27 ms per pass), 6000 legacy samples at 200
+  MSa/s N = 8, 16382 legacy N = 4, 10 kSa/s and slower N = 1 (single records: two do not fit the budget). GET_STATUS byte
+  46 tells the path (0 off, 1 the MCU's mean, 2 hardware), byte 47 log2 N (0 = single records). READ_RAW of a UI capture
+  reads the last of the N records (the ring), READ_TRACE the mean.
+- Deadline, both paths: a hardware run not done after max(100 ms, two records) + its run time is stopped
+  (`pc_seq_ui_service`, main loop: 0x5D = 1, then 0x1A = 0) once it holds a record, and shows the mean of what it has.
+  Auto mode without any trigger: the run is stopped empty, the record shown is the sample memory's (untriggered, as the
+  firmware auto mode of 0.2.41 shows), and the next UI conversions are single records until one triggers. Normal mode
+  with no record yet keeps waiting, as a normal-mode capture does. On the MCU path record 1 is the main loop's
+  conversion with exactly those semantics (the auto time-out ends it untriggered: shown alone, the next conversion tries
+  again; normal mode waits); records 2..N wait at most the same deadline from record 1's arrival, then 0x1A = 0 discards
+  the partial record and the pass shows the mean of the records it holds. The pass never stalls longer than the
+  planned run time plus that deadline. The firmware auto time-out never runs during a UI run (it would end a record
   between the records of a run).
 - Host (protocol row 56): SET_SEQ sets a run for the next host ARM (segments: m, count, circular, hold-off; averaging:
   positions, N, hold-off), checked against the trigger geometry at SET_SEQ and at ARM; DONE is the end of the run;
@@ -861,7 +1129,7 @@ at its ends and each half of the row steps that way. The plot under the panel is
 | fold-out | rows |
 |---|---|
 | Display (Scope) | Normal, X-Y (with icons: a clean trace, a Lissajous loop) / a line / Phosphor switch (graded-trace icon; second line the records per second "55 wfm/s", or "Not in roll mode" greyed) and, while it is on, Persistence (0.2 s, 1 s, 5 s, Infinite; a step clears), Palette (Mono, Heat), Clear (clears and closes) |
-| Trace style (Scope) | Linear, Dots, Peak (1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu; Pro removed in 0.2.63) |
+| Trace style (Scope) | Linear, Dots, Bars ("Peak" until ui-sample; 1.00o5's `ACQ_trace`, saved as before; it left the acquisition menu; Pro removed in 0.2.63) |
 | Display (Spectrum) | Spectrum, Waterfall, Density (icons: bars, colour stripes, graded dots); saved in word 211; in Waterfall and Density a line and Channel (CH1 / CH2, since 0.2.63) |
 | Analyse (Spectrum) | Analyse (CH1, CH2, CH1 + CH2: the shown channel, the dBV / dBA unit and Auto's channel), FFT length, Window, Average / a line / Scale, Ref level (- / +), Reset |
 

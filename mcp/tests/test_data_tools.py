@@ -188,7 +188,7 @@ async def test_mask_test_stops_when_settings_change(sim_factory, tmp_path):
 
 
 async def test_export_csv_capture_raw_and_segments(sim_factory, tmp_path):
-    srv = sim_factory(variant="al3s", signal="square:freq=10kHz,amp=0.3", noise_lsb=1.0)
+    srv = sim_factory(signal="square:freq=10kHz,amp=0.3", noise_lsb=1.0)
     async with client_for(srv, tmp_path) as c:
         await c.call("scope_set_channel", channel="CH1", volts_per_div=0.1, coupling="DC")
         await c.call("scope_set_timebase", sample_rate="20MS/s")

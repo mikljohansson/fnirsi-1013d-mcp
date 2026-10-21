@@ -36,6 +36,7 @@
 #include "tb_view.h"
 #include "slider_ov_draw.h"
 #include "acq_view.h"
+#include "trig_ui.h"
 
 //USB drive screen: the Exit button (fw 0.2.51)
 #define USB_EXIT_X     610
@@ -2302,7 +2303,7 @@ void scope_trigger_settings(int mode)
   //Clear the area first light gray
   display_set_fg_color(LIGHTGREY_COLOR); 
   //Draw the trigger edge symbol
-  scope_trigger_symbol(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS); 
+  scope_trigger_symbol(TRIGGER_BUTTON_XPOS, TRIGGER_BUTTON_YPOS, WHITE_COLOR);
   
   //============================================================================
   //Check on which channel is used for triggering
@@ -4896,6 +4897,7 @@ void scope_open_keyboard_menu(void)
 
   if(freqmenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set frequency");//117
   else if(dutymenuopen)   display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "GENERATOR                 Set duty");//117
+  else if(trignmenuopen)  display_text(KEY_MENU_XPOS + 20, KEY_MENU_YPOS + 7, "TRIGGER                       Set N");   //ui-type
   
   //display_text(KEY_MENU_XPOS +  97, KEY_MENU_YPOS + 216, "Time per Division");//166
   
@@ -4941,6 +4943,13 @@ void scope_open_keyboard_menu(void)
     display_text(KEY_MENU_XPOS + 40,  KEY_MENU_YPOS +  293, "0 %"); //38-300
     display_text(KEY_MENU_XPOS + 137, KEY_MENU_YPOS +  293, "50 %"); //135
     display_text(KEY_MENU_XPOS + 230, KEY_MENU_YPOS +  293, "100 %"); //230
+  }
+  else if(trignmenuopen)
+  {
+    //ui-type: the Nth edge's N, 1 .. 65535 (ui-rows.md 2.3)
+    display_text(KEY_MENU_XPOS + 47,  KEY_MENU_YPOS +  293, "1");
+    display_text(KEY_MENU_XPOS + 145, KEY_MENU_YPOS +  293, "2");
+    display_text(KEY_MENU_XPOS + 230, KEY_MENU_YPOS +  293, "65535");
   }
   
   
@@ -5010,8 +5019,12 @@ void scope_keyboard_select(void)
   
     display_fill_rect(KEY_MENU_XPOS + x, KEY_MENU_YPOS + y + 68, 55, 50);//35
     
-    //Selected texts in white
-    if(((i == 13)||(i == 14)||(i > 15))&&(genmenuopen==1)) display_set_fg_color(GREY_COLOR); else display_set_fg_color(WHITE_COLOR);
+    //Selected texts in white; the keys that do not apply in grey (ui-type: for N the prefixes and the sign too)
+    if((((i == 13)||(i == 14)||(i > 15))&&(genmenuopen==1)) ||
+       (trignmenuopen && ((i == 3)||(i == 8)||(i == 13)||(i == 14)||(i > 15))))
+      display_set_fg_color(GREY_COLOR);
+    else
+      display_set_fg_color(WHITE_COLOR);
       
     //o = x + keyboard_texts_x_offsets[i];
     //Display the text from the table
@@ -5045,7 +5058,8 @@ void scope_open_acquisition_menu(void)
   //display_set_fg_color(BLACK_COLOR);
   display_draw_horz_line(ACQ_MENU_YPOS +  211, ACQ_MENU_XPOS + 8, ACQ_MENU_XPOS + ACQ_MENU_WIDTH - 8);//-84
   
-  display_draw_vert_line(ACQ_MENU_XPOS +  304, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
+  //ui-sample: the Memory column's rule one box pitch right of 1.00o5's x + 304 (the Sample box is the row's fourth)
+  display_draw_vert_line(ACQ_MENU_XPOS + UI_ACQ_COL_X, ACQ_MENU_YPOS + 8, ACQ_MENU_YPOS + ACQ_MENU_HEIGHT - 8);
 
   //Main texts in white
   display_set_fg_color(WHITE_COLOR);
@@ -5059,7 +5073,7 @@ void scope_open_acquisition_menu(void)
   display_text(ACQ_MENU_XPOS + 111, ACQ_MENU_YPOS +   8, "Sample Rate");
   display_text(ACQ_MENU_XPOS +  97, ACQ_MENU_YPOS + 216, "Time per Division");//166
   
-  display_text(ACQ_MENU_XPOS + 317, ACQ_MENU_YPOS +   8, "Memory"); //tab +6   
+  display_text(ACQ_MENU_XPOS + UI_ACQ_MEM_HEAD_X, ACQ_MENU_YPOS +   8, "Memory");
   //display_text(ACQ_MENU_XPOS + 324, ACQ_MENU_YPOS +   20, "deep"); //tab +6 
 
   
@@ -5099,8 +5113,7 @@ void scope_open_acquisition_menu(void)
   scope_acquisition_speed_select();
   scope_acquisition_timeperdiv_select();
   //scope_acquisition_ACQ_mode_select();
-  scope_acquisition_Average_mode_select();
-  PC_UI_MASK(PC_MASK_ACQ_FILTER);    //the decimation Filter box (bitstream 0x1534+) in 1.00o5's Long memory slot
+  scope_acquisition_Average_mode_select();    //ui-sample: Average, Filter, Sample and the Memory column's note
 
   scope_acquisition_memory_deep_select();
   //fw 0.2.56: acquisition only; Trace style and the Display variants are on the CTRL page
@@ -5314,34 +5327,12 @@ void scope_acquisition_ACQ_mode_select(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//ui-sample: the Average box is one of the row's boxes drawn from ui_acq_row_build (grey in roll and with Sample Peak,
+//its value kept); the Filter and Sample boxes and the Memory column's note come with it, so the roll toggle and every
+//tap in the row redraw them together
 void scope_acquisition_Average_mode_select(void)
-{                  
-    if ((scopesettings.average_mode)&&(!scopesettings.long_mode))
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(GREEN_COLOR);
-        //Clear the boxes for the not selected items (Average)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in black
-        display_set_fg_color(BLACK_COLOR);        
-    }
-    else
-    {
-        //Set dark grey color for the boxes behind the not selected texts
-        display_set_fg_color(LIGHTGREY_COLOR);
-        //Clear the boxes for the not selected items (Average)
-        display_fill_rounded_rect(ACQ_MENU_XPOS + 106, ACQ_MENU_YPOS + 163, 90, 40, 3);
-        //Texts in white
-        display_set_fg_color(WHITE_COLOR); 
-    }
-    
-    //Select the font for the texts
-    display_set_font(&font_2);
-  
-    //Display average text
-    display_text(ACQ_MENU_XPOS + 128, ACQ_MENU_YPOS +  168, "Average");
-    display_text(ACQ_MENU_XPOS + 136, ACQ_MENU_YPOS +  182, "mode");       
-
+{
+  PC_UI_MASK(PC_MASK_ACQ_FILTER);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -5367,7 +5358,7 @@ void scope_acquisition_memory_deep_select(void)
   for(i=0;i<(sizeof(memory_deep_texts) / sizeof(int8 *));i++)
   { 
     //Get the position of the item
-    x = 315 + ACQ_MENU_XPOS;
+    x = UI_ACQ_CHIP_X + ACQ_MENU_XPOS;
     y = (i * 36) + 33 + ACQ_MENU_YPOS;
 
     //Set yellow color for the box behind the selected text
@@ -5394,7 +5385,7 @@ void scope_acquisition_memory_deep_select(void)
     }
 
     //Calculate the position of this text
-    x = 315 + memory_deep_texts_x_offsets[c];
+    x = UI_ACQ_CHIP_X + memory_deep_texts_x_offsets[c];
     y = (c * 36) +  38;
 
     //Display the text from the table
@@ -5408,87 +5399,166 @@ void scope_acquisition_memory_deep_select(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_open_trigger_menu(void)
+int scope_trigger_menu_height(void)
 {
-  uint32 xstart;
-  uint32 xend;
-  
-  //Setup the menu in a separate buffer to be able to slide it onto the screen
-  display_set_screen_buffer(displaybuffertmp);//1
+  return 336 + (pc_glue_trig_params() ? 94 : 0) + (bode_view_active() ? BU_TRIG_NOTE_H : 0);
+}
 
-  //Draw the background in dark grey
-  display_set_fg_color(DARKGREY_COLOR);
+//ui-type: text placed by its measured width (ui_fmt.h), in the font set
+static void trig_text_c(uint32 xc, uint32 y, const char *s)
+{
+  display_text(xc - ui_text_width(&font_3, s) / 2, y, (int8 *)s);
+}
 
-  //Fill the background
-  //display_fill_rect(560, 46, 166, 246);//186
-  display_fill_rect(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_HEIGHT);
+static void trig_text_r(uint32 xr, uint32 y, const char *s)
+{
+  display_text(xr - ui_text_width(&font_3, s), y, (int8 *)s);
+}
 
-  //Draw the edge in a lighter grey
-  display_set_fg_color(LIGHTGREY_COLOR);
-
-  //Draw the edge
-  //display_draw_rect(560, 46, 166, 246);//186
-  display_draw_rect(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_HEIGHT);
-  
-    //Line start and end x positions
-  xstart = TRIGGER_MENU_XPOS + 10;//14
-  xend   = TRIGGER_MENU_XPOS + TRIGGER_MENU_WIDTH - 10;//-4
-
-  //Two black lines between the settings step 56
-  display_set_fg_color(BLACK_COLOR);
-  display_draw_horz_line(102, xstart, xend);//102//716//61
-  display_draw_horz_line(158, xstart, xend);//158//716
-  display_draw_horz_line(214, xstart, xend);////214 716
-  display_draw_horz_line(270, xstart, xend);////270 716
-
-  //Main texts in white
-  display_set_fg_color(WHITE_COLOR);
-
-  //Select the font for the texts
+//A choice box in the menu's construction (22 px, radius 2): chosen is filled in `color` with black text, the others are
+//the dark box with a grey edge and white text (grey in the waveform viewer, where the rows are inert). tx: the text's
+//x as 1.00o5 placed it, 0 for centred
+static void trig_box(uint32 x, uint32 y, uint32 w, const char *text, int chosen, uint32 color, uint32 tx)
+{
   display_set_font(&font_3);
 
-  //Display the texts
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+10,  "Trigger");//56
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+29,  "mode");//57
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+66,  "Trigger");//112
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+85,  "edge");//131
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+122, "Trigger");//168
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+141, "channel");//187
-  
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+178, "Trigger");//224
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+197, "position");//243 position 
-  
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Always");//224
-  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "50%");//243
+  if(chosen)
+  {
+    display_set_fg_color(color);
+    display_fill_rounded_rect(x, y, w, 22, 2);
+    display_set_fg_color(BLACK_COLOR);
+  }
+  else
+  {
+    display_set_fg_color(DARKGREY_COLOR);
+    display_fill_rounded_rect(x, y, w, 22, 2);
+    display_set_fg_color(GREY_COLOR);
+    display_draw_rounded_rect(x, y, w, 22, 2);
+    display_set_fg_color(scopesettings.waveviewmode ? LIGHTGREY1_COLOR : WHITE_COLOR);
+  }
 
-  //fw 0.2.71 (bode-ui.md 7): Frequency response does not use the trigger (its captures run in the FPGA's auto mode)
+  if(tx)
+    display_text(tx, y + 2, (int8 *)text);
+  else
+    trig_text_c(x + w / 2, y + 2, text);
+}
+
+//The fold-out's value row (bode_view.c ROW_VALUE2, the Frequency response Sweep's Start and Stop) inside the trigger
+//menu, 204 x 44 at x + 8: - and + keys at the ends, the label, the value in pale yellow (grey in the viewer). value_box:
+//the value stands in an outlined box of its own (N: a tap on it opens the keypad). Without keys the two-state row
+//(Pulse Shorter / Longer: a tap toggles)
+static void trig_row(uint32 ry, const char *label, const char *value, int keys, int value_box)
+{
+  uint32 rx = TRIGGER_MENU_XPOS + 8, rw = 204, ty = ry + 14;
+  uint32 fg = scopesettings.waveviewmode ? LIGHTGREY1_COLOR : WHITE_COLOR;
+  uint32 vc = scopesettings.waveviewmode ? LIGHTGREY1_COLOR : PALEYELLOW_COLOR;
+
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_fill_rounded_rect(rx, ry, rw, 44, 3);
+  display_set_font(&font_3);
+
+  if(!keys)
+  {
+    display_set_fg_color(fg);
+    display_text(rx + 10, ty, (int8 *)label);
+    display_set_fg_color(vc);
+    trig_text_r(rx + rw - 10, ty, value);
+    return;
+  }
+
+  display_set_fg_color(GREY_COLOR);
+  display_fill_rounded_rect(rx + 4, ry + 4, 30, 36, 2);
+  display_fill_rounded_rect(rx + rw - 34, ry + 4, 30, 36, 2);
+  display_set_fg_color(fg);
+  trig_text_c(rx + 19, ty, "-");
+  trig_text_c(rx + rw - 19, ty, "+");
+  display_text(rx + 40, ty, (int8 *)label);
+  display_set_fg_color(vc);
+
+  if(value_box)
+  {
+    display_draw_rounded_rect(rx + rw - 112, ry + 7, 72, 30, 3);
+    trig_text_c(rx + rw - 76, ty, value);
+  }
+  else
+    trig_text_r(rx + rw - 40, ty, value);
+}
+
+//The menu into the current screen buffer: on opening (into the slide buffer) and again in place when the type changes
+//and the height with it (statemachine.c)
+void scope_draw_trigger_menu(void)
+{
+  uint32 xstart = TRIGGER_MENU_XPOS + 10, xend = TRIGGER_MENU_XPOS + TRIGGER_MENU_WIDTH - 10, h = TRIGGER_MENU_HEIGHT;
+  int    pulse = trig_ui.type == TUI_PULSE;
+
+  //The background in dark grey with a lighter edge
+  display_set_fg_color(DARKGREY_COLOR);
+  display_fill_rect(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, h);
+  display_set_fg_color(LIGHTGREY_COLOR);
+  display_draw_rect(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, h);
+
+  //Black lines between the rows, 56 px apart
+  display_set_fg_color(BLACK_COLOR);
+  display_draw_horz_line(TRIGGER_MENU_YPOS + 54, xstart, xend);
+  display_draw_horz_line(TRIGGER_MENU_YPOS + 110, xstart, xend);
+  display_draw_horz_line(TRIGGER_MENU_YPOS + 166, xstart, xend);
+  display_draw_horz_line(TRIGGER_MENU_YPOS + 222, xstart, xend);
+  display_draw_horz_line(TRIGGER_MENU_YPOS + 278, xstart, xend);
+
+  //The row labels in white; under Type Pulse the edge row is the pulse's polarity (ui-rows.md 2.2)
+  display_set_fg_color(WHITE_COLOR);
+  display_set_font(&font_3);
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+10,  "Trigger");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+29,  "mode");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+66,  pulse ? "Pulse" : "Trigger");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+85,  pulse ? "polarity" : "edge");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+122, "Trigger");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+141, "channel");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+178, "Trigger");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+197, "position");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+234, "Always");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+253, "50%");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+290, "Trigger");
+  display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+309, "type");
+
+  //fw 0.2.71 (bode-ui.md 7): Frequency response does not use the trigger (its captures run in the FPGA's auto mode);
+  //the note is the last row, under the Type row (its parameter rows are not drawn there, ui-rows.md 2.7)
   if(bode_view_active())
   {
     display_set_font(&font_2);
     display_set_fg_color(0x00A0A0A0);
-    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS+282, (int8 *)bu_trig_note);
+    display_text(TRIGGER_MENU_XPOS+10, TRIGGER_MENU_YPOS + h - 22, (int8 *)bu_trig_note);
     display_set_font(&font_3);
     display_set_fg_color(WHITE_COLOR);
   }
-  
+
   //Display the icon with the set colors
-  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+238, 24, 24);//296 //184
+  display_copy_icon_use_colors(trigger_50_percent_icon, TRIGGER_MENU_XPOS+75, TRIGGER_MENU_YPOS+238, 24, 24);
 
   //Display the actual settings
   scope_trigger_mode_select();
   scope_trigger_edge_select();
   scope_trigger_channel_select();
   scope_trigger_position_select();
-  scope_hold_off_select();
   scope_always_trigger50_select();
-  //scope_hold_off_select();
+  scope_trigger_type_select();
+  scope_trigger_param_select();
+}
+
+void scope_open_trigger_menu(void)
+{
+  //ui-type: the Width / Idle time into the rate's range before the rows show (the notice when one snapped)
+  pc_glue_trig_rate_check();
+
+  //Setup the menu in a separate buffer to be able to slide it onto the screen
+  display_set_screen_buffer(displaybuffertmp);
+  scope_draw_trigger_menu();
 
   //Set source and target for getting it on the actual screen
-  display_set_source_buffer(displaybuffertmp);//1
+  display_set_source_buffer(displaybuffertmp);
   display_set_screen_buffer((uint16 *)maindisplaybuffer);
 
   //Slide the image onto the actual screen. The speed factor makes it start fast and end slow, Smaller value makes it slower.
-  //display_slide_top_rect_onto_screen(560, 46, 166, 246, 56415);//186
   display_slide_top_rect_onto_screen(TRIGGER_MENU_XPOS, TRIGGER_MENU_YPOS, TRIGGER_MENU_WIDTH, TRIGGER_MENU_HEIGHT, 56415);
 }
 
@@ -5643,95 +5713,58 @@ void scope_trigger_mode_select(void)
 
 void scope_trigger_edge_select(void)
 {
-  //Select the font for the texts
-  display_set_font(&font_3);
+  int rising = scopesettings.triggeredge == 0;
 
-  //Set dark grey color for the box behind the not selected text
+  //ui-type (ui-rows.md 2.2): under Type Pulse the row is the pulse's polarity, the same setting (0x16): Positive is
+  //Rising, Negative is Falling, in their colours
+  if(trig_ui.type == TUI_PULSE)
+  {
+    trig_box(TRIGGER_MENU_XPOS+66,  TRIGGER_MENU_YPOS+74, 62, "Positive", rising,  LIGHTRED_COLOR,  0);
+    trig_box(TRIGGER_MENU_XPOS+147, TRIGGER_MENU_YPOS+74, 62, "Negative", !rising, LDARKBLUE_COLOR, 0);
+  }
+  else
+  {
+    trig_box(TRIGGER_MENU_XPOS+70,  TRIGGER_MENU_YPOS+74, 55, "Rising",  rising,  LIGHTRED_COLOR,  TRIGGER_MENU_XPOS+78);
+    trig_box(TRIGGER_MENU_XPOS+150, TRIGGER_MENU_YPOS+74, 55, "Falling", !rising, LDARKBLUE_COLOR, TRIGGER_MENU_XPOS+156);
+  }
+
+  //The symbol of the type and its edge / polarity in the slot between the boxes
   display_set_fg_color(DARKGREY_COLOR);
+  scope_trigger_symbol(TRIGGER_MENU_XPOS+66, TRIGGER_MENU_YPOS+59, scopesettings.waveviewmode ? LIGHTGREY1_COLOR : WHITE_COLOR);
+}
 
-  //Check which trigger edge is selected
-  if(scopesettings.triggeredge == 0)
+//==============================================================================
+
+//ui-type: the sixth row, Trigger type: Edge, Pulse (width), Nth (edge); the chosen one in the trigger's green
+void scope_trigger_type_select(void)
+{
+  trig_box(TRIGGER_MENU_XPOS+65,  TRIGGER_MENU_YPOS+297, 44, "Edge",  trig_ui.type == TUI_EDGE,  TRIGGER_COLOR, 0);
+  trig_box(TRIGGER_MENU_XPOS+113, TRIGGER_MENU_YPOS+297, 50, "Pulse", trig_ui.type == TUI_PULSE, TRIGGER_COLOR, 0);
+  trig_box(TRIGGER_MENU_XPOS+167, TRIGGER_MENU_YPOS+297, 40, "Nth",   trig_ui.type == TUI_NTH,   TRIGGER_COLOR, 0);
+}
+
+//==============================================================================
+
+//ui-type: rows seven and eight, the type's parameters (ui-rows.md 2.3): Pulse has the Width (a ladder step the rate can
+//arm) and Shorter / Longer; Nth has N (in its value box, the keypad on a tap) and the Idle time (Off, or a step)
+void scope_trigger_param_select(void)
+{
+  char n[8];
+
+  if(!pc_glue_trig_params())
+    return;
+
+  if(trig_ui.type == TUI_PULSE)
   {
-    //Rising so dark grey box behind falling
-    display_fill_rounded_rect(TRIGGER_MENU_XPOS+150, TRIGGER_MENU_YPOS+74, 55, 22, 2);//110 74 47 22 2
-    display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(TRIGGER_MENU_XPOS+150, TRIGGER_MENU_YPOS+74, 55, 22, 2);
+    trig_row(TRIGGER_MENU_YPOS + 334, "Width", tui_step_text(trig_ui.width_i), 1, 0);
+    trig_row(TRIGGER_MENU_YPOS + 380, "Pulse", trig_ui.longer ? "Longer" : "Shorter", 0, 0);
   }
   else
   {
-    //Falling so dark grey box behind rising
-    display_fill_rounded_rect(TRIGGER_MENU_XPOS+70, TRIGGER_MENU_YPOS+74, 55, 22, 2);//65 74 42 22 2
-    display_set_fg_color(GREY_COLOR);//GREY_COLOR
-    display_draw_rounded_rect(TRIGGER_MENU_XPOS+70, TRIGGER_MENU_YPOS+74, 55, 22, 2);
+    tui_n_text(n, trig_ui.n);
+    trig_row(TRIGGER_MENU_YPOS + 334, "N", n, 1, 1);
+    trig_row(TRIGGER_MENU_YPOS + 380, "Idle", tui_idle_text(trig_ui.idle_i), 1, 0);
   }
-
-  //Check which trigger edge is selected
-  if(scopesettings.triggeredge == 0)
-  {
-    //Set trigger color for the box behind the selected text
-    display_set_fg_color(LIGHTRED_COLOR);
-    //Rising so trigger color box behind rising
-    display_fill_rounded_rect(TRIGGER_MENU_XPOS+70, TRIGGER_MENU_YPOS+74, 55, 22, 2);//626 125 40 22
-  }
-  else
-  {   
-    //Set trigger color for the box behind the selected text
-    display_set_fg_color(LDARKBLUE_COLOR);
-    //Falling so trigger color box behind falling
-    display_fill_rounded_rect(TRIGGER_MENU_XPOS+150, TRIGGER_MENU_YPOS+74, 55, 22, 2);//671 125 45 22
-  }
-
-  //Check which trigger edge is selected
-  if(scopesettings.triggeredge == 0)
-  {
-    //Rising so black rising text
-    display_set_fg_color(BLACK_COLOR);
-  }
-  else
-  {
-    //For falling edge trigger check if in normal view mode
-    if(scopesettings.waveviewmode)
-    {
-      //Grey text when in waveform view mode
-      display_set_fg_color(LIGHTGREY1_COLOR);        
-    }
-    else
-    {
-      //White text if in normal mode
-      display_set_fg_color(WHITE_COLOR);
-    }
-  }
-
-  //Display the rising text
-  display_text(TRIGGER_MENU_XPOS+78, TRIGGER_MENU_YPOS+76, "Rising");//629 127
-
-  //Check which trigger edge is selected
-  if(scopesettings.triggeredge == 0)
-  {
-    //For rising edge trigger check if in normal view mode
-    if(scopesettings.waveviewmode)
-    {
-      //Grey text when in waveform view mode
-      display_set_fg_color(LIGHTGREY1_COLOR);        
-    }
-    else
-    {
-      //White text if in normal mode
-      display_set_fg_color(WHITE_COLOR);
-    }
-  }
-  else
-  {
-    //Falling so black falling text
-    display_set_fg_color(BLACK_COLOR);
-  }
-
-  //Display the falling text
-  display_text(TRIGGER_MENU_XPOS+156, TRIGGER_MENU_YPOS+76, "Falling");//160//112//672//674
-  
-  
-  display_set_fg_color(DARKGREY_COLOR);
-  scope_trigger_symbol(TRIGGER_MENU_XPOS+66, TRIGGER_MENU_YPOS+59);
 }
 
 //==============================================================================
@@ -6046,36 +6079,21 @@ void scope_always_trigger50_select(void)
 
 //==============================================================================
 
-void scope_trigger_symbol(int x, int y)
+void scope_trigger_symbol(int x, int y, uint32 color)
 {
-  //Falling so black falling text
-  //display_set_fg_color(DARKGREY_COLOR);
-  //display_fill_rect(x+68, y+19, 8, 13);
-  display_fill_rect(x+66, y+19, 11, 14);
-  
-  //White text if in normal mode
-  display_set_fg_color(WHITE_COLOR);
-  
-  //Draw the trigger edge symbol
-  display_draw_vert_line(x+71, y+20, y+31);
+  tui_rect r[TUI_GLYPH_RECTS];
+  uint32   n, i;
 
-  //Draw the arrow based on the selected edge
-  if(scopesettings.triggeredge == 0)
-  {
-    //rising edge
-    display_draw_horz_line(y+20, x+71, x+74);
-    display_draw_horz_line(y+31, x+68, x+71);
-    display_draw_horz_line(y+25, x+70, x+72);
-    display_draw_horz_line(y+26, x+69, x+73);
-  }
-  else
-  {
-    //falling edge
-    display_draw_horz_line(y+20, x+68, x+71);
-    display_draw_horz_line(y+31, x+71, x+74);
-    display_draw_horz_line(y+25, x+69, x+73);
-    display_draw_horz_line(y+26, x+70, x+72);
-  }
+  //ui-type (ui-rows.md 2.5): the slot, 14 x 14 at x + 65, y + 19, in the colour the caller set (the chip's grey box, the
+  //menu's background), then the type's glyph (trig_ui.c, the mockups' pixels): the rising / falling edge for Edge, one
+  //full pulse of the polarity for Pulse, two short edges and one tall for Nth
+  display_fill_rect(x+65, y+19, TUI_GLYPH_SIZE, TUI_GLYPH_SIZE);
+  display_set_fg_color(color);
+
+  n = tui_glyph_rects(tui_glyph_kind(trig_ui.type, scopesettings.triggeredge), r);
+
+  for(i = 0; i < n; i++)
+    display_fill_rect(x + 65 + r[i].x, y + 19 + r[i].y, r[i].w, r[i].h);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -15,6 +15,8 @@
 #define PC_FEAT_MEM_BASE      16    //+ i: memory depth box i (3000 x (i + 1) samples) fits the bitstream
 
 //Settings sector word for the acquisition Filter setting: FPGA_SETTING_OFFSET (192) + 15, unused by 1.00o5
+#define PC_SETTING_WORD_TRIG  202   //ui-type: the trigger Type row, words 202 / 203 (marker 0xA000; trig_ui.h), the retired
+                                    //1.00o5 hold-off slots
 #define PC_SETTING_WORD_DECIM 207
 #define PC_SETTING_WORD_SPEC0 208   //fw 0.2.39: spectrum view FFT length, window, scale (0x5E00 marker)
 #define PC_SETTING_WORD_SPEC1 209   //fw 0.2.39: spectrum view ref level, dBV (int16)
@@ -57,7 +59,10 @@ int  pc_glue_host_busy(void);         //fw 0.2.68: a host acquisition in progres
 void pc_glue_host_stop(void);         //fw 0.2.68: the RUN/STOP button's STOP during a host acquisition: abort it
 int  pc_glue_rtc_allowed(void);       //0 while the MCP chip occupies the RTC clock slot
 void pc_glue_pass_mark(int n);        //main loop stage reached (first-pass timing, GET_LINK_STATS)
+void pc_glue_counter_pass(void);      //C7 counter: main loop after the capture readout: the 0x35 read (fpga_counter.h)
+#define PC_COUNTER_PASS()       pc_glue_counter_pass()
 int  pc_glue_ui_has(int feature);     //PC_FEAT_*: 1 when the running hardware supports it
+int  pc_glue_fpga_mismatch(void);     //fw-one: the FPGA runs another bitstream than PC_FW_FPGA_VERSION (the notice screen)
 void pc_glue_topbar_drawn(void);      //the top bar / RUN-STOP chip was (re)drawn: put the MCP chip back with it
 void pc_glue_ext_selected(void);      //EXT trigger chosen in the trigger menu
 void pc_glue_roll_label(void);        //acquisition menu: the long (roll) time base box as a state toggle
@@ -89,12 +94,23 @@ uint32 pc_glue_ui_read_start(uint32 addr);        //UI record start word: (0x14 
 void   pc_glue_decim_read(void *settings, uint32 start);   //fpga_read_sample_data: 16-bit read + convert, odd pass
 void   pc_glue_decim_even(void);      //fpga_read_sample_data: second pass takes the even samples
 void   pc_glue_decim_tap(void);       //acquisition menu: Filter box touched
+//ui-sample: the ACQ menu's Sample row and the peak-detect record on screen (docs/plans/ui-rows.md section 3)
+void   pc_glue_acq_row_draw(void);    //the Average, Filter and Sample boxes and the Memory column's note (ui_acq_row_build)
+int    pc_glue_acq_box_live(int box); //1 when that box of the row takes a tap (drawn and not grey; UI_ACQ_* in ui_ctrl.h)
+void   pc_glue_sample_tap(void);      //the Sample box touched: Normal <-> Peak
+int    pc_glue_sample_peak(void);     //1 while Sample Peak is applied (Scope view, not roll): Trace style greys
+int    pc_glue_peak_record(int ch, const uint16 **pairs, uint32 *n, uint32 *gain, int32 *off); //its pairs, or 0
 void   pc_glue_settings_defaults(void); //fw 0.2.44: scope_reset_config_data (DEFAULT button, sector load failure)
 uint16 pc_glue_decim_setting_word(void);         //settings sector word 207, the Scope Filter (scope_save_config_data)
 uint16 pc_glue_decim_spec_setting_word(void);    //fw 0.2.64: word 212, the Spectrum Filter
 uint16 pc_glue_spectrum_setting_word(int i);     //settings sector words 208, 209 (scope_save_config_data)
 uint16 pc_glue_phosphor_setting_word(void);      //settings sector word 210 (scope_save_config_data)
 uint16 pc_glue_ui_setting_word(void);            //settings sector word 211 (scope_save_config_data)
+//ui-type: the trigger menu's Type row (trig_ui.h; docs/plans/ui-rows.md section 2)
+uint32 pc_glue_trig_tw5(void);                   //the trigger stream's word period for the UI acquisition now, 5 ns units
+void   pc_glue_trig_ui_apply(void);              //the menu changed the row: the registers through fpga_trig_write (SET_TRIGGER2's path)
+void   pc_glue_trig_rate_check(void);            //the menu opens: the Width / Idle snapped into the rate's range, with the notice
+int    pc_glue_trig_params(void);                //1 when the menu shows the type's parameter rows (Pulse / Nth, not in Frequency response)
 
 //fw 0.2.66: the Bode plot (bode_view.c), a mode opened from the generator menu
 int    pc_glue_bode_pass(void);                  //scope_acquire_trace_data: 1 = the Bode plot shows (no UI acquisition)
@@ -132,9 +148,7 @@ void   pc_glue_view_opening(void);               //the picture / waveform viewer
 //fw 0.2.58 (0x1536 sequencer, pc_seq_hw.h): fpga_do_conversion writes the geometry and the sequencer registers before
 //the sampling reset; the software average is skipped while the traces hold a hardware average
 void   pc_seq_ui_pre_reset(void);
-int    pc_seq_sw_average(void);
 #define PC_SEQ_PRE_RESET()      pc_seq_ui_pre_reset()
-#define PC_SW_AVERAGE()         && pc_seq_sw_average()
 
 
 //Protocol 1.3 has no snapshot to restore: the power-off save stores the live settings as 1.00o5 does. fw 0.2.52: the

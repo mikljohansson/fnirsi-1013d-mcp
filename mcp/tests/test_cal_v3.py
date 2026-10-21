@@ -66,14 +66,14 @@ def test_v3_volts_on_both_cores_and_classes(sim_factory, divider, filt):
     """0.25 V reads 0.25 V through READ_RAW (host model), READ_TRACE (corrected on the scope) and the 16-bit path,
     on both cores and in both clock classes; the same unit without v3 is several codes off."""
     for v3 in (False, True):
-        srv = sim_factory(variant="al3d", signal="dc:v=0.25", cal_v3=v3, **UNIT)
+        srv = sim_factory(signal="dc:v=0.25", cal_v3=v3, **UNIT)
         with Scope.connect(srv.url) as s:
             s.set_trigger(total_samples=4000, mode=0)
             s.set_timebase(divider=divider)
             s.set_decim(filt)
             cal = s.get_cal(0)
             assert cal.cal_version == (3 if v3 else 1)
-            assert bool(cal.cal_flags & P.CAL_GATED) == (divider > 0 and filt == "off")
+            assert bool(cal.cal_flags & P.CAL_GATED) == (divider > 0)  # the 8-bit readout's class, filter or not
             cap = s.capture(["CH1"])
             c = cap.channels["CH1"]
             lsb = c.volts_per_lsb
@@ -94,7 +94,7 @@ def test_v3_volts_on_both_cores_and_classes(sim_factory, divider, filt):
 
 def test_get_cal_current_correction_matches_the_host_model(sim_factory):
     """GET_CAL's next-readout gain / offset (Q16) are what the host's ChannelScale reproduces for the live class."""
-    srv = sim_factory(variant="al3d", signal="dc:v=0", cal_v3=True, **UNIT)
+    srv = sim_factory(signal="dc:v=0", cal_v3=True, **UNIT)
     with Scope.connect(srv.url) as s:
         s.set_timebase(divider=19)
         cal = s.get_cal(0, cached=False)
@@ -106,7 +106,7 @@ def test_get_cal_current_correction_matches_the_host_model(sim_factory):
 
 def test_unit_file_contributes_gated_gains_only(sim_factory):
     """With v3 a unit file's zeros (here 5 codes wrong) are ignored; its gated gains are carried to the class."""
-    srv = sim_factory(variant="al3d", signal="dc:v=0.25", cal_v3=True, **UNIT)
+    srv = sim_factory(signal="dc:v=0.25", cal_v3=True, **UNIT)
     with Scope.connect(srv.url) as s:
         cfg = s.get_channel(0)
         cal = s.get_cal(0)
@@ -130,7 +130,7 @@ def test_unit_file_contributes_gated_gains_only(sim_factory):
 
 def test_calibration_info_shows_gains(sim_factory, tmp_path):
     from test_server import client_for
-    srv = sim_factory(variant="al3d", cal_v3=True, **UNIT)
+    srv = sim_factory(cal_v3=True, **UNIT)
 
     async def main():
         async with client_for(srv, tmp_path) as c:

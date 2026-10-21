@@ -24,7 +24,7 @@ def test_ver_probe_and_info(sim, transport):
     line = transport.ascii("#VER")
     assert line.startswith("#OK,FNIRSI-1013D-AI,")
     v = parse_ver(line)
-    assert v["proto"] == f"1.{P.PROTO_MINOR}" and v["fpga"] == "0x1532"
+    assert v["proto"] == f"1.{P.PROTO_MINOR}" and v["fpga"] == f"0x{P.FW_FPGA_VERSION:04X}"
     info = P.InfoResp.unpack(transport.request(P.Cmd.GET_INFO).payload)
     assert info.ring_words == 8192 and info.max_total_samples == 16382
     assert transport.ascii("#WHAT") == "#ERR,UNKNOWN"

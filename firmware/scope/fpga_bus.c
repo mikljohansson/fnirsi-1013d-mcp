@@ -4,24 +4,6 @@
 
 #include "fpga_bus.h"
 
-fpga_bus_contract fpga_bus = { 1, 0, 0 };
-
-void fpga_bus_contract_for(uint16_t version, fpga_bus_contract *c)
-{
-  //Every known read path latches on i_mcu_clk: one dummy strobe after 0x1F (stock measured, AL3 simulated through
-  //0x1539, EF2 / EP4 by their shared Atlan4 Verilog). A future bitstream that drops the lag gets its own entry here.
-  c->read_dummy = 1;
-
-  //Programmable geometry: AL3 family, EF2, EP4 (protocol.md 5.1); written before the reset on all of them
-  c->prog = (uint8_t)((((version & 0xFFF0) == 0x1530) && (version >= 0x1532)) || (version == 0x1632) || (version == 0x1732));
-  c->geometry_early = c->prog;
-}
-
-void fpga_bus_init(uint16_t version)
-{
-  fpga_bus_contract_for(version, &fpga_bus);
-}
-
 void fpga_read_start(uint8_t cmd, uint16_t start_word)
 {
   uint32_t i;
@@ -32,7 +14,7 @@ void fpga_read_start(uint8_t cmd, uint16_t start_word)
 
   fpga_io_read_mode();
 
-  for(i=0;i<fpga_bus.read_dummy;i++)
+  for(i=0;i<FPGA_READ_DUMMY;i++)
     (void)fpga_io_strobe_read();
 }
 
@@ -90,12 +72,9 @@ static void fpga_arm_geometry(const fpga_arm_cfg *c)
 int fpga_arm_reset(const fpga_arm_cfg *c)
 {
   uint32_t n = 0;
-  int geometry = c->geometry && fpga_bus.prog;
 
-  //Before the reset: the write clock edges the 0x05 poll waits for load 0x0B into the trigger read address (0x1532..0x1536
-  //load it only on edges while 0x01 = 1)
-  if(geometry && fpga_bus.geometry_early)
-    fpga_arm_geometry(c);
+  //Before the reset: the write clock edges the 0x05 poll waits for load 0x0B into the trigger read address
+  fpga_arm_geometry(c);
 
   //Reset the sample system and wait for ready
   fpga_write_cmd(0x01);
@@ -120,8 +99,10 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   }
 
   //Inside the window as 1.00o5 ("send when the system is in reset")
-  if(geometry)
-    fpga_arm_geometry(c);
+  fpga_arm_geometry(c);
+
+  //0x153C: the trigger type registers, applied by the qualifier at the first write clock edge after the release
+  fpga_trig_arm();
 
   if(c->write_0e)
   {
@@ -135,6 +116,59 @@ int fpga_arm_reset(const fpga_arm_cfg *c)
   return 0;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+// Trigger types and hold-off (0x153C, fw-c5): fpga_bus.h
+
+fpga_trig_ext fpga_trig;
+
+static void fpga_write_u24(uint8_t cmd, uint32_t v)
+{
+  fpga_write_cmd(cmd);
+  fpga_write_byte((uint8_t)(v >> 16));
+  fpga_write_byte((uint8_t)(v >> 8));
+  fpga_write_byte((uint8_t)v);
+}
+
+void fpga_trig_arm(void)
+{
+  fpga_write_cmd(0x5E);
+  fpga_write_byte((uint8_t)((fpga_trig.type & 0x07) | (fpga_trig.longer ? 0x08 : 0x00)));
+
+  //The edge type looks at neither; the qualified types take N and H at the first write clock edge after the release
+  if(fpga_trig.type != FPGA_TRIG_EDGE)
+  {
+    fpga_write_u24(0x5F, fpga_trig.n & FPGA_TRIG_N_MAX);
+    fpga_write_u24(0x60, fpga_trig.h & FPGA_TRIG_N_MAX);
+  }
+}
+
+void fpga_trig_write(const fpga_trig_ext *t, int clear)
+{
+  fpga_trig = *t;
+  fpga_trig_arm();
+
+  fpga_write_cmd(0x1B);
+  fpga_write_int(fpga_trig.holdoff);
+
+  if(clear)
+  {
+    fpga_write_cmd(0x66);
+    fpga_write_byte(0x01);
+  }
+}
+
+void fpga_trig_status(uint8_t out[4])
+{
+  fpga_write_cmd(0x37);
+  out[0] = fpga_read_byte();
+  fpga_write_cmd(0x34);
+  out[1] = fpga_read_byte();
+  out[2] = fpga_read_byte();
+  out[3] = fpga_read_byte();
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+
 fpga_bus_writes fpga_bus_wr;
 
 int fpga_bus_note_write(uint8_t cmd, uint32_t value)
@@ -143,12 +177,14 @@ int fpga_bus_note_write(uint8_t cmd, uint32_t value)
   {
     case 0x0D:
       fpga_bus_wr.rate++;
+      fpga_bus_wr.wclk++;                            //C7 counter
       fpga_bus_wr.divider = value;
       fpga_bus_wr.held   |= FPGA_HELD_DIVIDER;
       break;
 
     case 0x53:
       fpga_bus_wr.filter++;
+      fpga_bus_wr.wclk++;                            //C7 counter
       fpga_bus_wr.mode  = (uint8_t)value;
       fpga_bus_wr.held |= FPGA_HELD_MODE;
       break;
@@ -189,14 +225,14 @@ int fpga_bus_note_write(uint8_t cmd, uint32_t value)
 //The divider at the previous fpga_decim_write (0xFFFFFFFF: none yet, or no 0x0D written then)
 static uint32_t fpga_decim_div = 0xFFFFFFFF;
 
-int fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift)
+int fpga_decim_write(uint8_t mode, int has_fir, uint8_t cmd56, uint8_t shift)
 {
   uint32_t div = (fpga_bus_wr.held & FPGA_HELD_DIVIDER) ? fpga_bus_wr.divider : 0xFFFFFFFF;
   int      settle = (div != fpga_decim_div);
 
   fpga_decim_div = div;
   mode &= 0x1F;
-  fir_en = fir_en ? 1 : 0;
+  cmd56 &= 0x03;                        //bit 0 FIR enable, bit 1 peak detect (0x153C, C6); bits 7..2 write 0
   shift &= 0x3F;
 
   if(!(fpga_bus_wr.held & FPGA_HELD_MODE) || (fpga_bus_wr.mode != mode))
@@ -206,11 +242,11 @@ int fpga_decim_write(uint8_t mode, int has_fir, uint8_t fir_en, uint8_t shift)
     settle = 1;
   }
 
-  //0x1535+: FIR enable; older bitstreams never get the command
-  if(has_fir && (!(fpga_bus_wr.held & FPGA_HELD_FIR) || (fpga_bus_wr.fir != fir_en)))
+  //0x1535+: FIR enable (and the 0x153C peak detect bit); older bitstreams never get the command
+  if(has_fir && (!(fpga_bus_wr.held & FPGA_HELD_FIR) || (fpga_bus_wr.fir != cmd56)))
   {
     fpga_write_cmd(0x56);
-    fpga_write_byte(fir_en);
+    fpga_write_byte(cmd56);
     settle = 1;
   }
 

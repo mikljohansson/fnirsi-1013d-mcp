@@ -58,7 +58,7 @@ def test_scale_v4_round_trips():
 
 
 def _sim(sim_factory, v: float, **kw):
-    srv = sim_factory(variant="al3f", cal_v3=True, v4=DRIFT, noise_lsb=0.5, **kw)
+    srv = sim_factory(cal_v3=True, v4=DRIFT, noise_lsb=0.5, **kw)
     srv.device.cfg.signals = (parse_signal(f"dc:v={v}"), parse_signal(f"dc:v={-v}"))
     return srv
 
@@ -140,7 +140,7 @@ def test_calibration_info_shows_the_tracker_in_words(sim_factory, tmp_path):
             assert t["records"] == 512 and t["cm_probes"] == 6 and t["age_s"] == 0.0
             assert any(w.startswith("tracking: 512 records") for w in t["in_words"])
             assert any(w.startswith("common mode +0.75 code from 6 probes") for w in t["in_words"])
-        srv = sim_factory(variant="al3f", cal_v3=True)
+        srv = sim_factory(cal_v3=True)
         async with client_for(srv, tmp_path) as c:
             t = (await c.call("scope_calibration_info"))["scope_calibration"]["CH1"]["tracking"]
             assert t["state"] == "idle" and t["age_s"] is None

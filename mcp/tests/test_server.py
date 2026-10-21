@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 
+from fnirsi1013d import protocol as P
 from fnirsi1013d.server import ServerConfig, build_server
 
 pytestmark = pytest.mark.anyio
@@ -22,7 +23,7 @@ ALL_TOOLS = {
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel", "scope_report", "scope_cal_probe", "scope_decode", "scope_export_csv", "scope_mask_test",
-    "scope_dvm",
+    "scope_dvm", "scope_counter",
 }
 
 
@@ -117,7 +118,7 @@ async def test_tiers_limit_registration(sim, tmp_path):
 
 async def test_info_profile_status_config_cal(client):
     info = await client.call("scope_info")
-    assert info["fpga_variant"] == "al3" and info["fpga_version"] == "0x1532" and "GENERATOR_DDS" in info["caps"]
+    assert info["fpga_variant"] == "al3" and info["fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}" and "GENERATOR_DDS" in info["caps"]
     prof = await client.call("scope_profile")
     assert "200 MS/s" in prof["static"]["max_sample_rate"] and prof["live"]["max_total_samples"] == 16382
     assert any("T3" in u for u in prof["unverified"])
@@ -301,7 +302,7 @@ async def test_set_trigger_volts_and_validation(client):
     assert any("single" in x for x in r["caveats"])
     msg = await client.fails("scope_set_trigger", pretrigger_samples=8000, total_samples=8000)
     assert "Lower pretrigger_fraction" in msg
-    assert "EXT" in await client.fails("scope_set_trigger", source="EXT")
+    assert (await client.call("scope_set_trigger", source="EXT"))["applied"]["source"] == "EXT"
     assert "16382" in await client.fails("scope_set_trigger", total_samples=20000)
 
 
@@ -490,12 +491,6 @@ async def test_generator_confirmation_flow(sim_factory, tmp_path):
         assert any('"scope_generator"' in ln and '"ok"' in ln for ln in lines)
 
 
-async def test_generator_unavailable_on_stock(sim_factory, tmp_path):
-    async with client_for(sim_factory(variant="stock"), tmp_path) as c:
-        assert "no programmable generator" in await c.fails("scope_generator", enabled=True, frequency=1e3)
-        assert "fixed geometry" in await c.fails("scope_set_trigger", total_samples=8000)
-
-
 async def test_self_test_loopback(sim_factory, tmp_path):
     srv = sim_factory(signal="gen", noise_lsb=1.0)
     async with client_for(srv, tmp_path) as c:
@@ -522,12 +517,12 @@ async def test_raw_fpga_and_enter_fel(client):
     r = await client.call("scope_raw_fpga", ops=[{"cmd": 6}, {"read": 2}])
     assert r["confirmation_required"]
     r = await client.call("scope_raw_fpga", ops=[{"cmd": 6}, {"read": 2}], confirm_token=r["token"])
-    assert r["read"] == [0x15, 0x32]
+    assert r["read"] == [P.FW_FPGA_VERSION >> 8, P.FW_FPGA_VERSION & 0xFF]
     r = await client.call("scope_enter_fel")
     r = await client.call("scope_enter_fel", confirm_token=r["token"])
     assert r["ok"]
     info = await client.call("scope_info")  # the server reconnects (the simulator keeps listening)
-    assert info["fpga_version"] == "0x1532"
+    assert info["fpga_version"] == f"0x{P.FW_FPGA_VERSION:04X}"
 
 
 async def test_user_tap_makes_next_call_fail_legacy(sim_factory, tmp_path):

@@ -30,6 +30,7 @@ CMDS = {
     "READ_TRACE": 0x0205, "READ_LIVE": 0x0206, "ACQUIRE_AVG": 0x0207,
     "SET_ACQ_STATE": 0x0208, "GET_CAPTURE_INFO": 0x0209, "GET_DECIM": 0x020C, "SET_DECIM": 0x020D,
     "SET_SEQ": 0x020E, "GET_SEQ": 0x020F, "READ_SEQ": 0x0210, "BODE_CTRL": 0x0211, "READ_BODE": 0x0212,
+    "GET_COUNTER": 0x0213, "LOG_START": 0x0214, "LOG_READ": 0x0215, "LOG_STOP": 0x0216, "SET_TRIGGER2": 0x0219,
     "SD_INFO": 0x0500, "SD_READ_SECTORS": 0x0501, "SD_STAGE": 0x0502, "SD_WRITE_SECTORS": 0x0503,
     "SAVE_REPORT": 0x0504,
     "GET_GEN": 0x0300, "SET_GEN": 0x0301, "GET_CAL": 0x0400, "READ_SCREEN": 0x0401, "CAL_PROBE": 0x0402,
@@ -113,6 +114,20 @@ REQUESTS = [
     # appended (fw 0.2.67)
     ("CAL_PROBE", bytes([1, 0, 0, 0, 0]),
      "1.21 (provisional): the wizard's zero measurement of CH2, hardware range 0 (5 V/div), wizard readout, one range"),
+    # appended (fw-c5, protocol 1.26, FPGA 0x153C)
+    ("SET_TRIGGER2", struct.pack("<BBBBIIHHII", 1, 1, 0, 1, 1500, 0, 140, 0, 200000, 0),
+     "1.26: pulse width shorter than 1500 samples (flags 0), negative pulse (polarity 1), CH2, level 140, hold-off "
+     "200000 x 5 ns = 1 ms"),
+    # appended (fw-c7, protocol 1.26, FPGA 0x153C counter)
+    ("GET_COUNTER", struct.pack("<BBBBB3x", 0, 0, 0, 0, 0),
+     "1.26 (fw-c7): read the hardware counter's latest result (what 0; the other fields are ignored)"),
+    # appended (fw-d4, protocol 1.27, FPGA 0x153D streaming logger)
+    ("LOG_START", struct.pack("<BBHIII", 1, 0, 0, 399, 0, 0),
+     "1.27 (fw-d4): log CH1, format 0 (legacy 8-bit), divider 399 (500 kS/s: the 1 ch 8-bit tier), until LOG_STOP"),
+    ("LOG_READ", struct.pack("<II", 65536, 0),
+     "1.27 (fw-d4): the next chunk of the log, at most 65536 bytes (whole words); returns at once"),
+    ("LOG_STOP", b"",
+     "1.27 (fw-d4): stop the log (the FPGA's tail is read into the DDR ring); the LOG summary"),
 ]
 
 
@@ -156,6 +171,73 @@ def decim_case(divider, k_req, total, fir_req=0):
     case.update({"n": n, "gain": gain, "shift": shift, "rate": 200000000 // n, "settle_us": settle, "ext_shift": ext,
                  "level16": lv})
     return case
+
+
+# C6 peak detect (FPGA 0x153C, protocol 1.26, docs/plans/fpga-0x153c.md section 4; fw-c6), independent of pc_decim.c.
+# The firmware's capability level is PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES (the 0x153A+ stages add 40 ns to the EXT lag).
+def decim_peak_case(divider, total, k_req, fir_req):
+    n = 2 * (divider // 2 + 1)
+    case = {"divider": divider, "total": total, "k_req": k_req, "fir_req": fir_req}
+    if divider == 0 or total > DECIM_MAX_TOTAL:
+        # legacy record, the filter's own rules (why 2 at 200 MSa/s, 3 for a long record); the FIR request is dropped too
+        case.update({"peak": 0, "k": 0, "n": 0, "why": 2 if divider == 0 else 3, "status": 0, "shift_byte": 0, "cmd56": 0,
+                     "rate": 200000000 // (divider + 1), "settle_us": 0, "ext_shift": 0})
+        return case
+    # K = 1 to 0x53, 0x56 = 2, shift 0, gain 1; the boxcar's latency 120 ns + (N - 1) 2.5 ns + 40 ns (0.5 ns units),
+    # settle (1 + 10) N x 5 ns + 1 us
+    case.update({"peak": 1, "k": 1, "n": n, "why": 0, "status": 0x81, "shift_byte": 0xC0, "cmd56": 2,
+                 "rate": 200000000 // n, "settle_us": -(-(11 * n) // 200) + 1,
+                 "ext_shift": (240 + (n - 1) * 5 + 80 + 5 * n) // (10 * n)})
+    return case
+
+
+PEAK_RAWS = [0, 1, 127, 128, 254, 255]
+PEAK_PAIRS = [(0, 255), (100, 140), (100, 141), (10, 250), (0, 100), (10, 255)]
+
+
+def c_div2(v):
+    """C integer division by 2 (toward zero)."""
+    return -((-v) // 2) if v < 0 else v // 2
+
+
+def clamp8(v):
+    return 0 if v < 0 else (255 if v > 255 else v)
+
+
+def peak_corr_case(gain_a, gain_b, off_a, off_b):
+    gain = (gain_a + gain_b + 1) // 2
+    off = c_div2(off_a + off_b)
+
+    def code(raw):
+        return clamp8((raw * gain + off + (1 << 15)) >> 16)
+
+    def mid(mn, mx):
+        return clamp8(((mn + mx) * gain + 2 * off + (1 << 16)) >> 17)
+
+    def level(c):
+        num = (c << 16) - off
+        if gain == 0 or num <= 0:
+            return 0
+        return min(255, (num + gain // 2) // gain)
+
+    return {"gain_a": gain_a, "gain_b": gain_b, "off_a": off_a, "off_b": off_b, "gain": gain, "off": off,
+            "codes": [code(r) for r in PEAK_RAWS], "mids": [mid(a, b) for a, b in PEAK_PAIRS],
+            "level": [level(v) for v in DECIM_LEVELS],
+            "overload": [(1 if a == 0 else 0) | (0xFE if b == 255 else 0) for a, b in PEAK_PAIRS]}
+
+
+def decim_peak_cases():
+    cases = [decim_peak_case(d, 3000, k, 0) for d in SAMPLE_RATE_DIVIDERS for k in (0, 2)]
+    cases += [decim_peak_case(19, 3000, 2, 1), decim_peak_case(19, 8190, 0, 0), decim_peak_case(19, 8192, 0, 0),
+              decim_peak_case(2, 3000, 0, 0), decim_peak_case(0, 3000, 3, 1)]
+    return cases
+
+
+def peak_corr_cases():
+    # 1.00o5 compensations (gain 1, offsets in whole codes), the calibration v3 example (1.02 / 0.98, -3.5 / +1.5 codes),
+    # a strong gain, a negative mean offset
+    return [peak_corr_case(65536, 65536, 2 * 65536, -1 * 65536), peak_corr_case(66846, 64225, -3 * 65536 - 32768, 65536 + 32768),
+            peak_corr_case(70000, 70000, 0, 0), peak_corr_case(60000, 61000, -200000, -100001), peak_corr_case(65536, 65536, 0, 0)]
 
 
 def decim_cases():
@@ -556,6 +638,177 @@ def build():
         "last 0x36 counts CH1 A 0, CH1 B 0, CH2 A 37, CH2 B 2, 116 u32 captures read 1200, 120 u32 of those flagged 3",
         [decoded(CMDS["GET_HEALTH"], 71, hb, flags=FLAG_RESPONSE)])
 
+    # 5f. Protocol 1.26 (fw-c5, section 14 row 66): FPGA 0x153C trigger types and hold-off. SET_TRIGGER2 24 bytes: 0 u8
+    # type (0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt, 5 window refused), 1 u8 polarity, 2 u8 flags (bit 0
+    # longer; bits 1 range, 2 both cores refused), 3 u8 source, 4 u32 N, 8 u32 H, 12 u16 level (0..255), 14 u16 level2
+    # (0), 16 u32 hold-off (5 ns units), 20 u32 0. GET_TRIGGER 52 bytes = the 28 of 1.0 (12 = the hold-off) + the same
+    # 24 bytes as a SET_TRIGGER2 request that reproduces the trigger
+    p = struct.pack("<BBBBIIHHII", 2, 0, 0, 2, 3, 100000, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 72, p)
+    add("req_set_trigger2_nth_edge_ext", f, [ev_frame(CMDS["SET_TRIGGER2"], 72, p)],
+        "1.26: the 3rd rising edge on EXT after an idle time of 100000 samples (5 ns clocks on EXT: 500 us), level 128 "
+        "(unused on EXT), no hold-off", [decoded(CMDS["SET_TRIGGER2"], 72, p)])
+    p = struct.pack("<BBBBIIHHII", 1, 0, 0x01, 0, 0xFFFFFF, 0, 100, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 73, p)
+    add("req_set_trigger2_pulse_longer_max", f, [ev_frame(CMDS["SET_TRIGGER2"], 73, p)],
+        "1.26: pulse width longer than N = 16777215 (the largest u24), positive pulse, CH1, level 100",
+        [decoded(CMDS["SET_TRIGGER2"], 73, p)])
+    p = struct.pack("<BBBBIIHHII", 3, 1, 0, 0, 20000, 0, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 74, p)
+    add("req_set_trigger2_timeout", f, [ev_frame(CMDS["SET_TRIGGER2"], 74, p)],
+        "1.26: timeout: the level held low (polarity 1) for 20000 samples after a falling edge, CH1",
+        [decoded(CMDS["SET_TRIGGER2"], 74, p)])
+    p = struct.pack("<BBBBIIHHII", 0, 0, 0, 0, 0, 0, 128, 0, 0, 0)
+    f = frame(CMDS["SET_TRIGGER2"], 75, p)
+    add("req_set_trigger2_edge", f, [ev_frame(CMDS["SET_TRIGGER2"], 75, p)],
+        "1.26: back to the edge type (N and H must be 0), rising, CH1, level 128, hold-off off",
+        [decoded(CMDS["SET_TRIGGER2"], 75, p)])
+    tb = struct.pack("<BBBBIIIIHH", 1, 1, 140, 1, 2000, 16000, 200000, 16000, 1000, 8000) + bytes(4) + \
+        struct.pack("<BBBBIIHHII", 1, 1, 0, 1, 1500, 0, 140, 0, 200000, 0)
+    assert len(tb) == 52
+    f = frame(CMDS["GET_TRIGGER"], 76, tb, flags=FLAG_RESPONSE)
+    add("resp_get_trigger_1_26", f, [],
+        "1.26 GET_TRIGGER response (52 bytes): CH2 falling / negative pulse, level 140, normal, pretrigger 2000, total "
+        "16000, 12 hold-off 200000 (5 ns units), auto_timeout 16000, 1000 / 8000 words; 28..51 the SET_TRIGGER2 body: "
+        "pulse width shorter than 1500 samples, CH2, level 140, hold-off 200000 (the req_set_trigger2 request)",
+        [decoded(CMDS["GET_TRIGGER"], 76, tb, flags=FLAG_RESPONSE)])
+    st = bytes(44) + struct.pack("<HBB", 0x1FF, 0, 0) + bytes([0x10, 0x22]) + struct.pack("<H", 2)
+    f = frame(CMDS["GET_STATUS"], 77, st, flags=FLAG_RESPONSE)
+    add("resp_get_status_1_26", f, [],
+        "1.26 GET_STATUS tail (52 bytes; 0..43 zero here): 44 features 0x1FF (bit 8 TRIG_TYPES), 46 / 47 Average off, "
+        "48 FPGA 0x37 = 0x10 (hold-off running), 49 0x34 byte 0 = 0x22 (counting, type 2 Nth edge, not longer, not EXT), "
+        "50 u16 edges still to count 2",
+        [decoded(CMDS["GET_STATUS"], 77, st, flags=FLAG_RESPONSE)])
+    ci = bytes(96) + struct.pack("<BBHIII", 2, 0, 0, 3, 100000, 0)
+    f = frame(CMDS["GET_CAPTURE_INFO"], 78, ci, flags=FLAG_RESPONSE)
+    add("resp_get_capture_info_1_26", f, [],
+        "1.26 GET_CAPTURE_INFO tail (112 bytes; 0..95 as 1.17, zero here): 96 trigger type 2 (Nth edge), 97 flags 0, "
+        "98 u16 0, 100 u32 N 3, 104 u32 H 100000, 108 u32 hold-off 0",
+        [decoded(CMDS["GET_CAPTURE_INFO"], 78, ci, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 0) + b"runt / window: FPGA 0x153E"
+    f = frame(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_set_trigger2_e_bad_arg_runt", f, [],
+        "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, "
+        "then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, "
+        "14 level2)",
+        [decoded(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)])
+
+    # 5h. Protocol 1.26, C6 peak detect (fw-c6, section 14 row 66): the firmware's refusals. The host-side request /
+    # response vectors (host_req_set_decim_peak, host_resp_get_decim_peak, host_req_read_raw_peak, host_resp_read_raw_peak,
+    # host_resp_get_capture_info_1_26_peak) are mcp-c8's (mcp/src/fnirsi1013d/vectors.py --merge) and are kept by main()
+    ep = struct.pack("<H", 1) + b"FIR with peak detect"
+    f = frame(CMDS["SET_DECIM"], 80, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_set_decim_e_bad_arg_fir_peak", f, [],
+        "1.26 SET_DECIM E_BAD_ARG detail 1 for filter 4 with flags bit 3: the FIR is off while peak detect runs (set the "
+        "filter first); filter 5 and above is detail 0 'filter 0..3, 4 peak'",
+        [decoded(CMDS["SET_DECIM"], 80, ep, status=4, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 7) + b"peak detect: averaging refused (SET_DECIM filter first)"
+    f = frame(CMDS["SET_SEQ"], 81, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_set_seq_e_state_peak", f, [],
+        "1.26 SET_SEQ mode 2 (averaging) while the next arm is a peak record: E_STATE detail 7 (the lane sums would mix "
+        "the max and min bytes); GET_SEQ byte 16 reads 9 for an averaging setting that no longer fits, ARM then E_STATE 3",
+        [decoded(CMDS["SET_SEQ"], 81, ep, status=8, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 2) + b"peak-detect record: layout 3"
+    f = frame(CMDS["READ_RAW"], 82, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_read_raw_e_bad_arg_peak_layout2", f, [],
+        "1.26 READ_RAW layout 2 of a peak-detect record: E_BAD_ARG detail 2 (layout 3 reads it); layout 3 of any other "
+        "record is detail 2 'layout 3 needs a peak-detect record'",
+        [decoded(CMDS["READ_RAW"], 82, ep, status=4, flags=FLAG_RESPONSE)])
+    # 5g. Protocol 1.26 (fw-c7, section 14 row 66): the FPGA 0x153C hardware counter. GET_COUNTER 0x0213 request 8
+    # bytes: 0 u8 what (0 read, 1 configure then read), 1 u8 gate (0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s), 2 u8 source
+    # (0 the trigger source, 1 CH1, 2 CH2, 3 EXT), 3 u8 level (0 = follow the UI trigger level), 4 u8 hysteresis, 3 x 0.
+    # Response 24 bytes: 0 flags (bit 0 NEW, 1 VALID, 2 EXT, 3 CH2), 1 seq, 2 gate, 3 source (configured), 4 u32 E, 8 u32
+    # T, 12 u32 W, 16 min, 17 max, 18 level, 19 hysteresis (in effect), 20 u32 freq_mHz (round half up, saturating, 0
+    # when not VALID). The mcp's own host_ vectors (host_req_get_counter_read / _config, host_resp_get_counter) are kept
+    # beside these
+    p = struct.pack("<BBBBB3x", 1, 2, 0, 0, 6)
+    f = frame(CMDS["GET_COUNTER"], 80, p)
+    add("req_get_counter_follow_trigger", f, [ev_frame(CMDS["GET_COUNTER"], 80, p)],
+        "1.26 (fw-c7): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 = follow the "
+        "UI trigger level, hysteresis 6; the configuration is written by the next main-loop pass",
+        [decoded(CMDS["GET_COUNTER"], 80, p)])
+    p = struct.pack("<BBBBB3x", 1, 1, 3, 128, 0)
+    f = frame(CMDS["GET_COUNTER"], 81, p)
+    add("req_get_counter_ext_10ms", f, [ev_frame(CMDS["GET_COUNTER"], 81, p)],
+        "1.26 (fw-c7): 10 ms gate on EXT (the level and hysteresis do not apply to EXT: pinned at 128 / 0)",
+        [decoded(CMDS["GET_COUNTER"], 81, p)])
+    cb = struct.pack("<BBBBIIIBBBBI", 0x0A, 5, 1, 0, 10000, 2000000, 1000000, 60, 200, 150, 6, 1000000000)
+    assert len(cb) == 24
+    f = frame(CMDS["GET_COUNTER"], 82, cb, flags=FLAG_RESPONSE)
+    add("resp_get_counter_1_26_ch2", f, [],
+        "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous "
+        "GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 "
+        "clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (the trigger level followed), "
+        "hysteresis 6, freq_mHz 1000000000",
+        [decoded(CMDS["GET_COUNTER"], 82, cb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<BBBBIIIBBBBI", 0x01, 9, 2, 0, 0, 0, 0, 60, 70, 128, 6, 0)
+    f = frame(CMDS["GET_COUNTER"], 83, cb, flags=FLAG_RESPONSE)
+    add("resp_get_counter_1_26_no_edges", f, [],
+        "1.26 (fw-c7) GET_COUNTER response: a new gate with fewer than two edges (the signal under the Schmitt thresholds "
+        "60..70 against 128 / 6): NEW set, VALID clear, E = T = W = 0, freq_mHz 0; the cards keep the record's values",
+        [decoded(CMDS["GET_COUNTER"], 83, cb, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 4) + b"hysteresis > level"
+    f = frame(CMDS["GET_COUNTER"], 84, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_get_counter_e_bad_arg_hyst", f, [],
+        "1.26 (fw-c7) GET_COUNTER E_BAD_ARG: detail = the byte offset of the field (0 what, 1 gate, 2 source, 4 "
+        "hysteresis > a non-zero level), then the text; nothing is configured then",
+        [decoded(CMDS["GET_COUNTER"], 84, ep, status=4, flags=FLAG_RESPONSE)])
+
+    # 5h. Protocol 1.27 (fw-d4, section 14 row 67): the FPGA 0x153D streaming logger, byte-exact with test_session.c
+    # test_logger and the mcp's layouts (mcp-d6). LOG_START 16 bytes: u8 channels, u8 format, u16 0, u32 divider, u32
+    # duration_ms, u32 0. LOG (LOG_START / LOG_STOP response) 48 bytes: u8 state, u8 channels, u8 format, u8 flags, u32
+    # divider, u32 duration_ms, u32 sample clocks, u64 bytes produced, u64 bytes sent, u32 gaps, u32 DDR ring bytes, u32 ms,
+    # u32 0. LOG_READ chunk: u32 seq, u32 FPGA word counter of the first word, u32 bytes, u8 flags (bit 0 running, 1 gap,
+    # 2 ended, 3 the gap includes words the full DDR ring refused), u8 format, u16 0, then the bytes
+    p = struct.pack("<BBHIII", 3, 2, 0, 1599, 10000, 0)
+    f = frame(CMDS["LOG_START"], 90, p)
+    add("req_log_start_2ch_16bit_10s", f, [ev_frame(CMDS["LOG_START"], 90, p)],
+        "1.27 (fw-d4): CH1 + CH2, format 2 (filtered u16, SET_DECIM filter 1..3 first), divider 1599 (N 1600: 125 kS/s, "
+        "the 2 ch 16-bit tier), 10 s",
+        [decoded(CMDS["LOG_START"], 90, p)])
+    p = struct.pack("<BBHIII", 1, 3, 0, 799, 0, 0)
+    f = frame(CMDS["LOG_START"], 91, p)
+    add("req_log_start_peak", f, [ev_frame(CMDS["LOG_START"], 91, p)],
+        "1.27 (fw-d4): CH1, format 3 (peak min / max pairs, SET_DECIM filter 4 first), divider 799 (window 800: 250 kS/s)",
+        [decoded(CMDS["LOG_START"], 91, p)])
+    lb = struct.pack("<BBBBIIIQQIIII", 1, 1, 0, 0, 399, 100, 400, 0, 0, 0, 8 << 20, 0, 0)
+    assert len(lb) == 48
+    f = frame(CMDS["LOG_START"], 92, lb, flags=FLAG_RESPONSE)
+    add("resp_log_start_1_27", f, [],
+        "1.27 (fw-d4) LOG_START response (LOG, 48 bytes): state 1 running, CH1, format 0, flags 0, divider 399, 100 ms, "
+        "400 clocks per sample (D + 1), 0 bytes produced / sent, 0 gaps, DDR ring 8 MiB, 0 ms",
+        [decoded(CMDS["LOG_START"], 92, lb, flags=FLAG_RESPONSE)])
+    lb = struct.pack("<BBBBIIIQQIIII", 3, 3, 2, 3, 1599, 0, 1600, 20000000, 19996000, 2, 8 << 20, 40012, 0)
+    f = frame(CMDS["LOG_STOP"], 93, lb, flags=FLAG_RESPONSE)
+    add("resp_log_stop_1_27", f, [],
+        "1.27 (fw-d4) LOG_STOP response: state 3 stopped, CH1 + CH2, format 2, flags 3 (a lap gap and a gap because the "
+        "DDR ring was full), divider 1599, until stopped, 1600 clocks, 20 MB produced, 4000 bytes still unread, 2 gaps, "
+        "8 MiB ring, 40.012 s",
+        [decoded(CMDS["LOG_STOP"], 93, lb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<IIIBBH", 3, 150, 20, 0x03, 0, 0) + bytes(((w * 7 + k) & 0xFF) for w in range(150, 160) for k in range(2))
+    f = frame(CMDS["LOG_READ"], 94, cb, flags=FLAG_RESPONSE)
+    add("resp_log_read_1_27_gap", f, [],
+        "1.27 (fw-d4) LOG_READ response: chunk 3, words 150..159 of a CH1 format 0 log (2 bytes per word: core B then "
+        "core A), 20 bytes, flags 0x03 = running | gap (the counter jumped from 100 to 150: 50 words lost)",
+        [decoded(CMDS["LOG_READ"], 94, cb, flags=FLAG_RESPONSE)])
+    cb = struct.pack("<IIIBBH", 7, 4242, 0, 0x04, 1, 0)
+    f = frame(CMDS["LOG_READ"], 95, cb, flags=FLAG_RESPONSE)
+    add("resp_log_read_1_27_ended", f, [],
+        "1.27 (fw-d4) LOG_READ response after the end with nothing left: 0 bytes, flags 0x04 ended, format 1",
+        [decoded(CMDS["LOG_READ"], 95, cb, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 1) + b"rate > 500 kB/s: 500k 1ch 8b, 250k 16b or 2ch, 125k 2ch 16b"
+    f = frame(CMDS["LOG_START"], 96, ep, status=4, flags=FLAG_RESPONSE)
+    add("resp_log_start_e_bad_arg_rate", f, [],
+        "1.27 (fw-d4) LOG_START E_BAD_ARG detail 1: the rate is above the contract's tiers (sample rate x bytes per sample "
+        "x channels > 500,000 B/s); details 0 channels, 2 format (or the SET_DECIM filter does not fit it), 4 divider",
+        [decoded(CMDS["LOG_START"], 96, ep, status=4, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 9) + b"logging: LOG_STOP first"
+    f = frame(CMDS["ARM"], 97, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_e_state_logging", f, [],
+        "1.27 (fw-d4) any command outside the F_BUSY / read-only sets and LOG_READ / LOG_STOP while logging: E_STATE "
+        "detail 9",
+        [decoded(CMDS["ARM"], 97, ep, status=8, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")
@@ -595,6 +848,24 @@ def build():
         },
         "adc_cal_v3": adc_cal_v3_section(),
         "diag_layouts": diag_layouts_section(),
+        "decim_peak": {
+            "notes": "1.26 peak detect (FPGA 0x153C, fw-c6), checked against pc_decim.c by decim_check --peak / --peak-corr. "
+                     "cases: divider total k_req fir_req -> peak (1 = the record is { max, min } words), k (1), n (the "
+                     "window 2 (floor(D / 2) + 1)), why (0; 2 at divider 0, 3 over 8190 samples: legacy record, the FIR "
+                     "request dropped), status (the mode byte 0x81), shift_byte (0xC0: bit 7 peak active, bit 6 peak "
+                     "written, S 0), cmd56 (0x56 = 2), rate 200 MSa/s / N, settle_us = ceil(11 N / 200) + 1, ext_shift = "
+                     "round((120 ns + (N - 1) 2.5 ns + 40 ns) / (N x 5 ns)) (the K = 1 boxcar's latency with the capture "
+                     "stages). corr: gain_a gain_b off_a off_b (Q16, GET_CAL 92..107 at divider 0: the full clock class) -> "
+                     "gain = round((gain_a + gain_b) / 2), off = (off_a + off_b) / 2 (C division); codes = clamp((raw x gain "
+                     "+ off + 2^15) >> 16) for raws, mids = clamp(((min + max) gain + 2 off + 2^16) >> 17) for pairs (the "
+                     "processed trace's sample), level = the raw code whose corrected value is the level (0x55 = level << 8; "
+                     "0 when the level is at or below the offset), overload = (min == 0) | (max == 255 ? 0xFE) for pairs.",
+            "raws": PEAK_RAWS,
+            "pairs": [list(p) for p in PEAK_PAIRS],
+            "levels": DECIM_LEVELS,
+            "cases": decim_peak_cases(),
+            "corr": peak_corr_cases(),
+        },
         "seq": {
             "notes": "1.17 sequencer (FPGA 0x1536), checked against pc_seq.c by seq_check (check_vectors.py --seq-checker). "
                      "fit: args mode flags m count n pre_words total_words wide -> fit code (0 ok, 1 mode, 2 flags, 3 m, "

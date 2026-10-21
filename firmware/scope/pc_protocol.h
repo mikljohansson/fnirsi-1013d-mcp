@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            24    //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            27   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -51,6 +51,14 @@
                                         //      instead of E_BUSY; E_BUSY details 2-5, GET_LINK_STATS 70 (fw 0.2.78)
                                         //1.24 (provisional numbering): FPGA 0x153A capture stages: caps bit 19,
                                         //      GET_HEALTH 124 bytes (layout 2), GET_CAL 364, event 23 (fw 0.2.79)
+                                        //1.25 (provisional numbering): one built-for bitstream (fw-one): GET_INFO 80
+                                        //      bytes (76 built-for word, 78 mismatch flag), GET_HEALTH 128 (layout 3),
+                                        //      E_UNSUPPORTED detail 1 on a mismatch; caps fixed per firmware
+                                        //1.26 (provisional numbering): FPGA 0x153C trigger types and hold-off (fw-c5):
+                                        //      SET_TRIGGER2, GET_TRIGGER 52 bytes, GET_STATUS 52, GET_CAPTURE_INFO 112,
+                                        //      caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8
+                                        //1.27 (provisional numbering): FPGA 0x153D streaming logger (fw-d4): LOG_START /
+                                        //      LOG_READ / LOG_STOP, acq_state 5, caps bit 23, features bit 11
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -109,6 +117,12 @@
 #define PC_CMD_READ_SEQ           0x0210     //1.17: segment table or averaged record of the latest sequencer run
 #define PC_CMD_BODE_CTRL          0x0211     //1.20: on-device Bode sweep: settings, run / stop, thru calibration
 #define PC_CMD_READ_BODE          0x0212     //1.20: the Bode table of the latest sweep
+#define PC_CMD_GET_COUNTER        0x0213     //1.26 (fw-c7): the 0x153C hardware counter's result, or its configuration (what = 1)
+#define PC_CMD_LOG_START          0x0214     //D4 logger, 1.27: start the streaming logger (FPGA 0x153D)
+#define PC_CMD_LOG_READ           0x0215     //D4 logger, 1.27: the next chunk of the log
+#define PC_CMD_LOG_STOP           0x0216     //D4 logger, 1.27: stop it, the summary
+#define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0214..0x0218
+                                             //      are the contract's LOG_*, SET_PATTERN, docs/plans/fpga-0x153c.md)
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer
@@ -165,6 +179,11 @@
 #define PC_CAP_SEQ                    (1u << 17)   //1.17: sequencer: segmented capture, hardware averaging (FPGA 0x1536+)
 #define PC_CAP_ENC_CHECK              (1u << 18)   //1.19: the FPGA checks the ADC encodes per capture, read 0x33 (0x1538+)
 #define PC_CAP_CAPTURE_STAGES         (1u << 19)   //1.24: per-core ADC capture stage 0x63, outlier counters 0x36 (0x153A+)
+#define PC_CAP_TRIG_TYPES             (1u << 20)   //1.26: trigger types 0x5E / 0x5F / 0x60, read 0x34 / 0x37; SET_TRIGGER2 (0x153C+)
+#define PC_CAP_PEAK_DETECT            (1u << 21)   //1.26 (C6): peak detect 0x56 bit 1; SET_DECIM filter 4, READ_RAW layout 3 (0x153C+)
+                                                   //      (bit 2 HOLDOFF: 0x1B is the trigger hold-off in 5 ns units, 0x153C+)
+#define PC_CAP_COUNTER                (1u << 22)   //1.26 (fw-c7): the hardware counter 0x61 / 0x62, read 0x35; GET_COUNTER (0x153C+)
+#define PC_CAP_LOGGER                 (1u << 23)   //1.27 (D4 logger): 0x69 / 0x6A, read 0x38; LOG_START / LOG_READ / LOG_STOP (0x153D+)
 
 //GET_STATUS bytes 44-45 / GET_DECIM bytes 32-33 (1.17): what the running bitstream has
 #define PC_FEAT_W_EXT_TRIGGER         0x0001       //0x1533+
@@ -175,6 +194,10 @@
 #define PC_FEAT_W_ENC_CHECK           0x0020       //0x1538+ (1.19)
 #define PC_FEAT_W_BODE                0x0040       //1.20: on-device Bode plot (decimation filter and DDS: 0x1534+)
 #define PC_FEAT_W_CAPTURE             0x0080       //1.24: ADC capture stages and outlier counters (0x153A+)
+#define PC_FEAT_W_TRIG_TYPES          0x0100       //1.26: trigger types and hold-off (0x153C+; the contract's bit 5 was taken)
+#define PC_FEAT_W_PEAK                0x0200       //1.26 (C6): peak detect (0x153C+); C7's COUNTER takes 0x0400
+#define PC_FEAT_W_COUNTER             0x0400       //1.26 (fw-c7): the hardware counter (0x153C+; bit 9 is C6's PEAK)
+#define PC_FEAT_W_LOGGER              0x0800       //1.27 (D4 logger): the streaming logger (0x153D+; fw-c5's numbering)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Decoded header

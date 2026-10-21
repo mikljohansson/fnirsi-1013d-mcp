@@ -71,6 +71,11 @@ SRCS += enc_heal.c enc_heal_hw.c
 SRCS += cap_stage.c cap_hw.c
 # fw 0.2.72: bus contract per bitstream, readout start with the dummy strobe, sampling reset order (host_tests/test_fpga_bus.c)
 SRCS += fpga_bus.c
+# fw-c7: the FPGA 0x153C hardware counter: boot configuration, the once-per-pass 0x35 reader, the derived values
+# (host_tests/test_fpga_bus.c test_counter)
+SRCS += fpga_counter.c
+# D4 logger (fw-d4): the 0x153D streaming logger's drain and its DDR ring
+SRCS += fpga_log.c pc_logring.c
 # Calibration v4: interleave tracking and the class probe (pure maths in acal_track.c, host_tests/test_acal_track.c)
 SRCS += acal_track.c acal_live.c
 # Screens (fw 0.2.51): card formatting, main menu rows and mode rule (pure C, host_tests/test_ui.c)
@@ -88,6 +93,10 @@ SRCS += tb_view.c acq_view.c
 SRCS += slider_ov.c slider_ov_draw.c
 # fw 0.2.77: the Spectrum's zoom ladder, span drives the sample rate (pure C, host_tests/test_spec_zoom.c)
 SRCS += spec_ladder.c
+# ui-type: the trigger menu's Type row as data (pure C, host_tests/test_trig_ui.c)
+SRCS += trig_ui.c
+# ui-sample: a peak-detect record as one bar per column (pure C, host_tests/test_peak_bars.c)
+SRCS += peak_bars.c
 # fw 0.2.59: Diagnostics pages and the first-run screen (ui_diag.c pure, host_tests/test_ui.c), their drawing and dialogs
 # (ui_dlg.c) and the display mode (ui_diag_view.c)
 SRCS += ui_diag.c ui_dlg.c ui_diag_view.c

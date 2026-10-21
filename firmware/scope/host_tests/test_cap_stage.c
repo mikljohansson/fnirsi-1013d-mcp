@@ -102,10 +102,6 @@ static void test_fields(void)
   T_EQ(cs_ref_bit(0), 0);
   T_EQ(cs_ref_bit(1), 0x1000);
   T_EQ(cs_ref_bit(3), 0x2000);
-  T_TRUE(cs_has(0x153A));
-  T_TRUE(cs_has(0x153F));
-  T_FALSE(cs_has(0x1539));
-  T_FALSE(cs_has(0x1632));
 
   //cs_pick: the middle of the widest clean run, 3 or 4 before a reserve, the power-on stage when symmetric
   T_EQ(cs_pick(0x2C, 4), 3);          //fw 0.2.81, CH1 A on the owner's unit: 2, 3 clean, 4 bad, 5 clean

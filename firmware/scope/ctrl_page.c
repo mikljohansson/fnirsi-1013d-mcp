@@ -107,9 +107,10 @@ static void cp_analysis_button(int active)
     fmt_str(t + strlen(t), " pt");
     cp_value_button(UI_CTRL_ANALYSIS_Y, "Analyse", 0, t, active);
   }
-  else if(scopesettings.xymodedisplay)
+  else if(scopesettings.xymodedisplay || pc_glue_sample_peak())
   {
-    //X-Y draws the Lissajous with its own line: Trace style does not apply there (fw 0.2.63, owner), grey and inert
+    //X-Y draws the Lissajous with its own line: Trace style does not apply there (fw 0.2.63, owner), grey and inert;
+    //ui-sample: nor with Sample Peak, whose record is bars whatever the style (docs/plans/ui-rows.md 3.3)
     cp_button(UI_CTRL_ANALYSIS_Y, 0);
     display_set_fg_color(LIGHTGREY1_COLOR);
     cp_text_c(&font_2, CP_XC, UI_CTRL_ANALYSIS_Y + 4, "Trace");
@@ -631,7 +632,7 @@ void ctrl_page_touch(void)
       break;
 
     case UI_CTRL_ANALYSIS:
-      if(!sp && scopesettings.xymodedisplay)
+      if(!sp && (scopesettings.xymodedisplay || pc_glue_sample_peak()))
         tp_i2c_wait_for_touch_release();
       else
         cp_fold_run(sp ? CP_F_ANALYSE : CP_F_TRACE, cp_analysis_button);
