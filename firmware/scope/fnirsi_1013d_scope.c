@@ -27,6 +27,7 @@
 #include "PC_interface.h"
 #include "pc_hooks.h"
 #include "ui_diag_view.h"
+#include "roll_view.h"
 
 #include "arm32.h"
 
@@ -330,7 +331,8 @@ int main(void)
   //Select the mode 1-Long time base or 0-short time base
   if(scopesettings.long_mode)
     {
-        scope_get_long_timebase_data();
+        //fw-roll: the roll trace from the 0x153D logger stream (roll_view.c)
+        roll_view_pass();
     }
     else
     {

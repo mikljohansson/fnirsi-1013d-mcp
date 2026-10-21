@@ -689,11 +689,13 @@ static void test_capture_and_raw(void)
     T_EQ(S.duplicates, 1);
   }
 
-  //ARM in the UI long time base mode
+  //fw-roll: ARM while the UI rolls (long time base, running) takes precedence: the UI stops, the capture arms
   setup(PC_FW_FPGA_VERSION);
   mock.long_mode = 1;
+  mock.ui_run = 1;
   r = req(PC_CMD_ARM, 0, 0);
-  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 2); T_EQ(mock.arms, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_ARMED); T_EQ(mock.arms, 1);
+  T_EQ(mock.ui_run, 0); T_EQ(mock.last_run_set, 0);
 }
 
 static void test_auto_timeout_and_stop(void)
@@ -2113,10 +2115,17 @@ static void test_read_raw_hold(void)
   T_EQ(r.h.status, 0);
   p[3] = 0;
 
-  //Long time base mode
+  //fw-roll: rolling (long time base, running): the stream overwrites the ring
   mock.long_mode = 1;
+  mock.ui_run = 1;
   r = req(PC_CMD_READ_RAW, p, 16);
   T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 2);
+
+  //Stopped in the long time base: as stopped in the short ones (the ring was overwritten: detail 1)
+  mock.ui_run = 0;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 1);
+  mock.long_mode = 0;
 }
 
 //MCP chip: steady while DTR is up or traffic within 2 s (no pulse)
@@ -4492,9 +4501,6 @@ static void test_logger(void)
     r = log_start(1, 0, 399, 0); T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_STATE_LOG_VIEW);
     mock_display_mode = 0;
   }
-  mock.long_mode = 1;
-  r = log_start(1, 0, 399, 0); T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 2);
-  mock.long_mode = 0;
   T_EQ(mock_log.starts, 0);
 
   //The FPGA: no ready, no stream (a 0x153C bitstream)
@@ -4505,8 +4511,10 @@ static void test_logger(void)
   T_EQ(status().p[1], PC_ACQ_IDLE);
   mock_log.start_rc = 0;
 
-  //Start: 1 ch legacy 500 kS/s for 100 ms = 25,000 words of 2 samples; the UI's RUN stops; the 48-byte LOG
+  //Start: 1 ch legacy 500 kS/s for 100 ms = 25,000 words of 2 samples; the UI's RUN stops; the 48-byte LOG. fw-roll: the
+  //UI rolls (long time base): the log takes precedence as over the UI's conversions
   mock.ui_run = 1;
+  mock.long_mode = 1;
   r = log_start(1, 0, 399, 100);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_LOG_LEN);
   T_EQ(r.p[0], 1); T_EQ(r.p[1], 1); T_EQ(r.p[2], 0); T_EQ(r.p[3], 0);
@@ -4522,6 +4530,7 @@ static void test_logger(void)
     T_MEM(r.p, want, 48);
   }
   T_EQ(mock.ui_run, 0);
+  mock.long_mode = 0;
   r = status();
   T_EQ(r.p[1], PC_ACQ_LOGGING);
 

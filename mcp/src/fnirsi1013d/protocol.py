@@ -3454,8 +3454,9 @@ LOG_ALLOWED = frozenset({
     Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH, Cmd.GET_CAPTURE_INFO, Cmd.SD_STAGE, Cmd.READ_SCREEN, Cmd.GET_CHANNEL,
     Cmd.GET_TIMEBASE, Cmd.GET_TRIGGER, Cmd.GET_DECIM, Cmd.GET_SEQ, Cmd.GET_GEN, Cmd.GET_CAL, Cmd.READ_BODE,
     Cmd.GET_COUNTER, Cmd.LOG_READ, Cmd.LOG_STOP})
-#: LOG_START E_STATE details (row 67): 0 a host capture is armed, 2 the UI's long time base, 10 not in the Scope view
-LOG_S_ARMED, LOG_S_LONG_TIMEBASE, LOG_S_VIEW = 0, 2, 10
+#: LOG_START E_STATE details (row 67): 0 a host capture is armed, 10 not in the Scope view (fw-roll: a rolling UI no
+#: longer refuses with detail 2, it stops as for a host capture)
+LOG_S_ARMED, LOG_S_VIEW = 0, 10
 #: the log ends in state error when the host does not read for this long (row 67)
 LOG_HOST_TIMEOUT_S = 10.0
 
@@ -3466,8 +3467,8 @@ class LogStartReq(Payload):
     divider (the 0x0D value; the filter K / FIR / shift from the current SET_DECIM), u32 duration_ms (0 = until
     LOG_STOP; the log ends after exactly ceil(duration_ms x 200,000 / word clocks) words), u32 0. E_BAD_ARG detail 0
     channels, 1 rate (over LOG_MAX_BYTES_PER_S), 2 format (0 needs the filter off, 1 / 2 filter 1..3, 3 filter 4 peak;
-    1 / 2 / 3 at divider 0), 4 divider (over 2^20 - 1). E_STATE detail 0 a host capture armed, 2 the UI's long time
-    base, 10 not in the Scope view (GET_STATUS 43 not 0 or 4), 9 while logging."""
+    1 / 2 / 3 at divider 0), 4 divider (over 2^20 - 1). E_STATE detail 0 a host capture armed, 10 not in the Scope
+    view (GET_STATUS 43 not 0 or 4), 9 while logging."""
 
     FIELDS = [("channels", "B"), ("format", "B"), ("_r0", "2x"), ("divider", "I"), ("duration_ms", "I"),
               ("_r1", "4x")]

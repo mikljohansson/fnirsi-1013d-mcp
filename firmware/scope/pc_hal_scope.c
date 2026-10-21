@@ -49,6 +49,7 @@
 #include "fpga_bus.h"
 #include "fpga_counter.h"     //C7 counter
 #include "ui_meas.h"
+#include "roll.h"           //fw-roll
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -493,6 +494,9 @@ int pc_hal_arm(uint16_t pre_words, uint16_t total_words, uint32_t auto_timeout, 
                const pc_decim_cfg *dc, const pc_seq_cfg *sq)
 {
   fpga_arm_cfg arm;
+
+  //fw-roll: the host capture takes the FPGA from the roll's stream
+  pc_glue_roll_release();
 
   //Trigger level from the marker, as every UI conversion does (scope_acquire_trace_data)
   fpga_set_trigger_level();
@@ -2617,7 +2621,9 @@ int pc_hal_log_start(uint8_t ch_mask, uint8_t format, uint32_t divider, const pc
   pc_seq_cfg off;
   int r;
 
-  //A UI conversion in flight and its firmware auto time-out are abandoned (the UI is in STOP: pc_cmds.c)
+  //A UI conversion in flight and its firmware auto time-out are abandoned (the UI is in STOP: pc_cmds.c); fw-roll: so is
+  //the roll's stream
+  pc_glue_roll_release();
   pc_ui_auto = 0;
 
   pc_log_div_saved = fpga_divider;
@@ -2699,6 +2705,101 @@ static void pc_log_loop(void)
   acq_view_notice_queue(1, "Log ended: ", t, "");
 }
 //D4 logger end
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//fw-roll: the roll mode's stream (roll.h, roll_view.c). The long time bases take their columns from the 0x153D logger
+//(fpga_log.c): both channels, legacy 8-bit layout, the divider of roll_plan, into a small ring of its own (the host log's
+//8 MiB ring stays readable after a log). The FPGA has one owner: every arm (fpga_do_conversion, pc_hal_arm,
+//pc_hal_log_start) releases the stream first, so a host ARM or LOG_START, the calibration or AUTO SET take the FPGA from
+//the roll as a host capture takes it from the UI's conversions; the roll pass starts it again while the UI rolls.
+static fpga_log pc_roll;
+static uint8    pc_roll_mem[32768] __attribute__((aligned(64)));     //4 FPGA rings' worth of chunks; read every pass
+static uint8    pc_roll_open;              //started and not yet released (0x0D to restore)
+static uint8    pc_roll_tpd;               //the time base the stream runs for
+static uint32   pc_roll_ui_div;            //fpga_divider at the start: a UI rate write since (it also wrote 0x0D) restarts
+
+int pc_glue_roll_running(uint8 tpd)
+{
+  return pc_roll_open && (pc_roll.state == FPGA_LOG_RUNNING) && (pc_roll_tpd == tpd) && (pc_roll_ui_div == fpga_divider);
+}
+
+void pc_glue_roll_release(void)
+{
+  if(!pc_roll_open)
+    return;
+
+  //0x69 = 0 (no tail: the roll does not need the last words); the UI's divider back
+  fpga_log_stop(&pc_roll, FPGA_LOG_ENDED);
+  fpga_write_cmd(0x0D);
+  fpga_write_int(fpga_divider);
+  pc_roll_open = 0;
+}
+
+int pc_glue_roll_start(uint8 tpd, uint32_t *wpc)
+{
+  pc_decim_cfg dc;
+  pc_seq_cfg   off;
+  uint32_t     div;
+  int          r;
+
+  pc_glue_roll_release();
+
+  if(roll_plan(tpd, &div, wpc))
+    return -3;
+
+  //The UI resets the sample system: a host single in flight ends, the ring no longer holds the last capture
+  pc_glue_ui_capture_start();
+  pc_ui_auto = 0;
+
+  pc_roll_open   = 1;
+  pc_roll_tpd    = tpd;
+  pc_roll_ui_div = fpga_divider;
+  fpga_write_cmd(0x0D);
+  fpga_write_int(div);
+
+  //K = 0 (the legacy layout, two samples per word per channel), the sequencer off
+  pc_decim_config(0, 0, div, 2, pc_decim_has(), &dc);
+  pc_dec_apply(&dc);
+  memset(&off, 0, sizeof(off));
+  pc_seq_ui_conversion(0, &dc, 0);
+  pc_seq_hw_pre_reset(&off);
+
+  r = fpga_log_start(&pc_roll, 3, FPGA_LOG_F_LEGACY, 0, pc_roll_mem, sizeof(pc_roll_mem), PC_READY_POLLS);
+
+  if(r)
+    pc_glue_roll_release();
+
+  return r;
+}
+
+int32 pc_glue_roll_read(uint8 *dst, uint32 max, int *gap)
+{
+  uint64_t w;
+  uint8_t  f;
+  uint32   n, k;
+
+  if(!pc_roll_open)
+    return -1;
+
+  for(k=0;k<4;k++)
+  {
+    n = pc_logring_read(&pc_roll.ring, dst, max, &w, &f);
+
+    if(n)
+    {
+      *gap = (f & PC_LOG_CF_GAP) != 0;
+      return (int32)n;
+    }
+
+    if(pc_roll.state != FPGA_LOG_RUNNING)
+      return -1;
+
+    if(!fpga_log_drain(&pc_roll))
+      return (pc_roll.state == FPGA_LOG_RUNNING) ? 0 : -1;
+  }
+
+  return 0;
+}
 
 void pc_glue_poll_main(void)
 {

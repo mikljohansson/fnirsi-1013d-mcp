@@ -85,6 +85,17 @@ menu holds until the next zoom step. When a rate makes the time/div impossible, 
 that works, and "Time/div set to ... for this rate" shows for a few seconds. While stopped, the record on screen keeps
 its rate: the zoom goes only as far as that record allows, then says "Stopped: press RUN to zoom further".
 
+**Roll mode** (ACQ > Roll, the time bases 100 ms/div to 50 s/div). The trace scrolls: the newest point enters at the
+right edge and older points move left, one screen column per point, both channels at once and without pause. Each
+point is the average of the samples of its column, so a signal faster than the column shows as its mean. The samples
+come from the FPGA's streaming logger, 200 samples per second per channel at 2 s/div and slower, rising to 4000 at
+100 ms/div. The trigger works as before in roll mode. Auto rolls at once. Normal and Single wait until the trigger
+channel crosses the level pointer in the chosen direction, then roll 3000 points. After that, Single stops and Normal
+waits again. EXT does not exist in roll mode: the line "No EXT trigger in roll mode: runs as Auto" says so. A capture
+or a log started from the PC stops the roll, as it stops the normal acquisition. Press RUN to roll again. Roll mode
+needs the FPGA bitstream 0x153D. On an older bitstream it stops at once and says "Roll mode needs FPGA bitstream
+0x153D" (on 0x153C the roll trace of earlier firmware was not valid).
+
 **CTRL page.**
 
 | Button | What it does |

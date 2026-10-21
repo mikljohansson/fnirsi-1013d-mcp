@@ -32,6 +32,26 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
+#### Unnumbered (provisional) - fw-roll (protocol unchanged): roll mode on the streaming logger
+
+Branch `fw-roll`, not benched, not numbered (`PC_FW_VERSION` unchanged). Needs the FPGA bitstream 0x153D. Handoff:
+`firmware/AGENTS.md` section 78.
+
+- **Roll mode shows real samples again, both channels, continuously** (100 ms/div to 50 s/div): every point is the
+  average of the samples of its screen column, taken from the FPGA's streaming logger (200 S/s per channel at 2 s/div and
+  slower, up to 4 kS/s at 100 ms/div). The trace scrolls with the newest point at the right edge, without the old
+  per-point wait. On 0x153C the roll trace was not valid: it read the live ADC registers 0x24 / 0x26, which that
+  bitstream removed. On a bitstream without the logger, roll mode stops with "Roll mode needs FPGA bitstream 0x153D".
+  (8e1458d, 827506f)
+- **The roll trigger is kept** (Auto rolls at once; Normal and Single wait for the trigger channel to cross the level,
+  then take 3000 points; Single then stops). The level now is the trigger pointer's level at every V/div; before it
+  matched the pointer at one setting only. EXT is not available in roll mode: it rolls as Auto and says so. (827506f)
+- **A capture or a log from the PC takes precedence over roll mode**, as over the normal acquisition: ARM and LOG_START
+  stop the roll (STOP) instead of answering E_STATE "UI long time base"; READ_RAW refuses only while the roll runs.
+  (532f8af)
+- `host_tests/check_retired_regs.py` also fails on reads 0x24..0x27, including a command byte kept in the channel
+  settings. (7ca8d78)
+
 #### Unnumbered (provisional) - fw-cruft (protocol 1.27, row 67): what the 0x153C bitstream dropped
 
 Branch `fw-cruft`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handoff: `firmware/AGENTS.md` section 77.
@@ -45,7 +65,7 @@ Branch `fw-cruft`, not benched, not numbered (`PC_FW_VERSION` unchanged). Handof
   status disagree with the FPGA's 0x29; SET_DECIM accepts flags bits 0..2 and drops them, GET_DECIM reports them 0.
   (19618eb)
 - **Known regression, not fixed here**: the roll mode (100 ms/div and slower) reads the live ADC registers 0x24 / 0x26,
-  which 0x153C removed; the trace there is not valid on 0x153C (section 77 "Open").
+  which 0x153C removed; the trace there is not valid on 0x153C (section 77 "Open"; fixed by fw-roll above).
 
 #### Unnumbered (provisional) - fw-small (protocol unchanged): three small fixes
 

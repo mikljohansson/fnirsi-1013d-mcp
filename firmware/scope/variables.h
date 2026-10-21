@@ -552,7 +552,6 @@ struct tagChannelSettings
   uint8 offsetcommand;            //Needs to be set to 0x32 for channel 1 and 0x35 for channel 2
   uint8 adc1command;              //Needs to be set to 0x20 for channel 1 and 0x22 for channel 2
   uint8 adc2command;              //Needs to be set to 0x21 for channel 1 and 0x23 for channel 2
-  uint8 averagecommand;           //Needs to be set to 0x24 for channel 1 and 0x26 for channel 2
   
   //Channel color
   uint32 color;
@@ -563,10 +562,6 @@ struct tagChannelSettings
   uint32 voltdivypos;
   uint32 touchedcolor;
   
-  //long time base
-  uint32    sample1;
-  uint32    sample2;
-    
   int8 *buttontext;
 };
 
@@ -615,10 +610,6 @@ struct tagScopeSettings
 
   
    
-  uint32    count;          //long time base, buffer count
-  uint32    xpos;           //long time base
-  uint32    lastx;          //long time base
-  
   uint8 movespeed;
   //uint8 genmode;
   
@@ -1048,8 +1039,6 @@ extern const VOLTCALCDATA volt_calc_data[7][7];//3-7
 
 extern const int32 signal_adjusters[7];
 
-extern const int32 multiply; 
-//extern int32 multiply; 
 
 extern const FREQCALCDATA freq_calc_data[29];//18
 

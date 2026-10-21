@@ -1542,10 +1542,8 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
     return pc_error(s, PC_E_STATE, 0, "already armed");
 
+  //fw-roll: in the long time bases too: the UI's roll stops like its conversions do (pc_hal_arm releases the stream)
   pc_hal_ui_read(&u);
-
-  if(u.long_mode)
-    return pc_error(s, PC_E_STATE, 2, "UI long time base");
 
   //1.17: the sequencer setting must fit the geometry this arm writes (SET_TRIGGER / SET_DECIM may have changed since)
   if(seq)
@@ -1914,8 +1912,10 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
     pc_hal_ui_read(&u);
 
-    if(u.long_mode)
-      return pc_error(s, PC_E_STATE, 2, "UI long time base");
+    //fw-roll: the roll's stream overwrites the ring while it runs (stopped, the ring holds the last capture as in the
+    //short time bases)
+    if(u.long_mode && u.run)
+      return pc_error(s, PC_E_STATE, 2, "UI rolling (long time base)");
 
     if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
       return pc_error(s, PC_E_STATE, 0, "not done");
@@ -3588,10 +3588,8 @@ static int h_log_start(pc_session *s, const uint8_t *req, uint32_t len, uint8_t 
   if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
     return pc_error(s, PC_E_STATE, 0, "host capture armed: STOP first");
 
+  //fw-roll: in the long time bases too: the UI's roll stops below and pc_hal_log_start takes the stream from it
   pc_hal_ui_read(&u);
-
-  if(u.long_mode)
-    return pc_error(s, PC_E_STATE, 2, "UI long time base");
 
   mode = pc_hal_display_mode();
 
@@ -4456,13 +4454,13 @@ void pc_poll(pc_session *s, int ctx)
     if(s->pending_ev == PC_EV_NONE)
       s->ui_hold = s->hold_active = 0;
 
-    //The long time base acquisition does not use the capture ring
+    //fw-roll: the roll's stream writes the capture ring while the UI rolls
     {
       pc_hw_ui u;
 
       pc_hal_ui_read(&u);
 
-      if(u.long_mode)
+      if(u.long_mode && u.run)
         s->ring_valid = 0;
     }
 

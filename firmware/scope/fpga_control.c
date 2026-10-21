@@ -600,6 +600,9 @@ void fpga_do_conversion(void)
 
   scopesettings.conversion_done = 0;    //flag for conversion, 0-start
 
+  //fw-roll: a conversion takes the FPGA from the roll's stream (calibration, AUTO SET, the short time bases)
+  pc_glue_roll_release();
+
   //fw 0.2.62: a new capture for the full-rate check (unless this is its re-arm)
   fpga_encode_new_conversion();
 
@@ -1407,100 +1410,6 @@ void fpga_read_adc_data(PCHANNELSETTINGS settings)
   //Calculate the raw average
   settings->rawaverage = sum / scopesettings.nofsamples;
 }
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-uint16 fpga_average_trace_data(PCHANNELSETTINGS settings)
-{
-  //Read ten bytes of trace data and average them
-  uint16 data = 0;
-  int16  datatmp = 0;
-  uint32 count = 10;
-  
-  //register uint32 setting = settings->samplevoltperdiv;
-  
-  //Send a command for getting trace data from the FPGA
-  fpga_write_cmd(settings->averagecommand);
-  
-  //Set the bus for reading
-  FPGA_BUS_DIR_IN();
-  
-  //Set the control lines for reading a command
-  FPGA_DATA_READ();
-
-  //Read the data as long as there is count
-  while(count)
-  {
-    //Clock the data to the output of the FPGA
-    FPGA_PULSE_CLK();
- 
-    //Read the data CH1 or CH2
-    datatmp = FPGA_GET_DATA() + settings->adc1compensation; 
-    
-    //Check limits
-    if (datatmp > 255)  datatmp = 255;
-    if (datatmp < 0)    datatmp = 0;
-        
-        
-    data += (uint16)datatmp;
-    
-    //One read done
-    count--;
-  }
-  
-  //Calculate the average and return it
-  //data = data / 10;
-  //data = (data * multiply) >> VOLTAGE_SHIFTER;
-  return(data / 10);
-}
-
-uint16 fpga_average_trace_data_long(PCHANNELSETTINGS settings)
-{
-  //Read ten bytes of trace data and average them
-  uint16 data = 0;
-  int16 datatmp = 0;
-  uint32 count = 100;
-  
-  //register uint32 setting = settings->samplevoltperdiv;
-  
-  //Send a command for getting trace data from the FPGA
-  fpga_write_cmd(settings->averagecommand);
-  
-  
-  //Set the bus for reading
-  FPGA_BUS_DIR_IN();
-  
-  //Set the control lines for reading a command
-  FPGA_DATA_READ();
-
-  //Read the data as long as there is count
-  while(count)
-  {
-    //Clock the data to the output of the FPGA
-    FPGA_PULSE_CLK();
- 
-    //Read the data CH1 or CH2
-    datatmp = FPGA_GET_DATA() + settings->adc1compensation; 
-    
-    //Check limits
-    if (datatmp > 255)  datatmp = 255;
-    if (datatmp < 0)    datatmp = 0;
-        
-        
-    data += (uint16)datatmp;
-    
-    //One read done
-    count--;
-  }
-  
-  //Calculate the average and return it
-  //data = data / 10;
-  //data = (data * multiply) >> VOLTAGE_SHIFTER;
-    
-  return(data);
-}
-
-
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Decimation filter, bitstream 0x1534+ only (pc_decim.h). Callers check the bitstream: older ones do not decode 0x29,

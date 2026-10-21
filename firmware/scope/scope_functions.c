@@ -30,6 +30,7 @@
 #include "trig_ui.h"
 #include "peak_bars.h"
 #include "ref_and_math.h"
+#include "roll_view.h"
 /*
 //sinx
 #include <stdio.h>
@@ -238,25 +239,11 @@ void scope_adjust_timebase_and_voltdiv (void)
     
   if(scopesettings.long_mode) //if set long time base, no drawn.
   {
-      
-    scopesettings.xpos = 4;
-    scopesettings.lastx = 3;
-    scopesettings.count = 0;
-    
-    //scopesettings.lastx=726;
-    
     memset(channel1tracebuffer, 128, sizeof(channel1tracebuffer));
     memset(channel2tracebuffer, 128, sizeof(channel2tracebuffer));
-    
-    
-    //Auto mode - set flag, signal is triggered=1 
-    if(scopesettings.triggermode) triggerlong = 0; else triggerlong = 1;
-    
-    //y position for the channel 1 trace center pointer.
-    scopesettings.channel1.sample1 = 442 - scopesettings.channel1.traceposition;//441
-    //y position for the channel 2 trace center pointer.
-    scopesettings.channel2.sample1 = 442 - scopesettings.channel2.traceposition;//441  
-    
+
+    //fw-roll: an empty record, the trigger state for the mode (roll_view.c); a new time base restarts the stream there
+    roll_view_reset();
   } 
   else //if((scopesettings.runstate))//1-run
   {
@@ -5861,7 +5848,6 @@ void scope_load_configuration_data(void)
   scopesettings.channel1.offsetcommand     = 0x32;
   scopesettings.channel1.adc1command       = 0x20;
   scopesettings.channel1.adc2command       = 0x21;
-  scopesettings.channel1.averagecommand    = 0x24;
   
 
   //Set the menu and button data for channel 1
@@ -5883,7 +5869,6 @@ void scope_load_configuration_data(void)
   scopesettings.channel2.offsetcommand     = 0x35;
   scopesettings.channel2.adc1command       = 0x22;
   scopesettings.channel2.adc2command       = 0x23;
-  scopesettings.channel2.averagecommand    = 0x26;
 
   //Set the menu and button data for channel 2
   scopesettings.channel2.color        = CHANNEL2_COLOR;

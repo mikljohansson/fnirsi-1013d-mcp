@@ -600,6 +600,51 @@ bytes from one snapshot { stream, lap, W }, u32 words since 0x01 = 0, u16 unread
   refusal and tier boundary, the 48-byte LOG and a gap chunk byte for byte, the E_STATE 9 gate and what still answers,
   ENDED, the host watchdog and DTR drop), the 1.27 vectors.
 
+### Roll mode (FPGA 0x153D logger, fw-roll; protocol unchanged)
+
+Owner decision 2026-10-21: the long time bases (timeperdiv 0..8, 50 s/div .. 100 ms/div) draw real decimated samples of
+both channels from the logger stream above. Up to fw 0.2.104 the roll took every point from 10 strobes of the live ADC
+pin reads 0x24 / 0x26 (`fpga_average_trace_data`, `averagecommand`); 0x153C removed those reads (fpga-c4's cruft table),
+so on 0x153C that trace was a stale byte. Code: `roll.c` (pure, `host_tests/test_roll.c`), `roll_view.c` (the pass and the
+drawing), `pc_hal_scope.c` `pc_glue_roll_*` (the stream).
+
+- **Plan** (`roll_plan`): a screen column (50 px per division) is W words of the legacy layout, 2 (D + 1) x 5 ns each:
+
+  | time/div | 0x0D D | words per column | samples per channel per column | per channel rate |
+  |---|---|---|---|---|
+  | 50 s, 20 s, 10 s, 5 s, 2 s | 999,999 | 100, 40, 20, 10, 4 | 200, 80, 40, 20, 8 | 200 S/s |
+  | 1 s | 499,999 | 4 | 8 | 400 S/s |
+  | 500 ms | 249,999 | 4 | 8 | 800 S/s |
+  | 200 ms | 99,999 | 4 | 8 | 2 kS/s |
+  | 100 ms | 49,999 | 4 | 8 | 4 kS/s |
+
+  D stays within the 20-bit compare; at most 2000 words per second (about 2.4 ms of bus time per second); the FPGA ring
+  holds 4.1 s (100 ms/div) to 82 s (2 s/div and slower) before a lap.
+- **Stream**: `pc_glue_roll_start` = the logger's start with 0x0D = D, K = 0 (`pc_decim_config(0, ...)`, `pc_dec_apply`),
+  the sequencer off, `fpga_log_start(3, FPGA_LOG_F_LEGACY)` into a 32 KiB ring of its own (the host log's 8 MiB ring
+  stays readable); it also ends a host single in flight and invalidates the ring as a UI conversion does
+  (`pc_glue_ui_capture_start`). `pc_glue_roll_release` = 0x69 = 0 without the tail, 0x0D = the UI's divider back. Every arm
+  releases first (`fpga_do_conversion`, `pc_hal_arm`, `pc_hal_log_start`): calibration, AUTO SET, a host ARM or LOG_START
+  take the FPGA from the roll. A UI rate write (`fpga_divider` changed) or another time base restarts it.
+- **Columns** (`roll_feed`): each the mean of its 2 W samples per channel, every sample corrected per core as the capture
+  readout does (`fpga_channel_correction`: (raw x gain + off) / 65536), rounded, limited to 0..255, mirrored when inverted
+  (a boxcar over the column). The record holds 3000 columns per channel in the trace buffers, oldest first. A gap (a lap of
+  the FPGA ring, for example a menu open for longer than the ring holds, or a restart of the stream) drops the column
+  being built; the trace goes on from the newest words.
+- **Trigger** (1.00o5's roll trigger, kept, on the stream): Auto rolls at once and slides the record. Single / Normal keep
+  no column until the trigger channel's column crosses the level (`fpga_set_trigger_level`'s code, refreshed while
+  waiting, compared with the columns as drawn) in the edge's direction; then 3000 columns, after which Single stops and
+  Normal empties the record and waits again. 1.00o5 compared two 10-peek averages 5 ms apart against the pointer's
+  screen position + 25 scaled by a constant, a level that matched the pointer at one V/div only. EXT is not in the
+  stream: the roll runs as Auto with the amber line "No EXT trigger in roll mode: runs as Auto".
+- **Screen** (`roll_view_draw`): only when columns came in: the trace area cleared, the grid, both enabled channels with
+  the newest column at x 726 and one column per pixel to the left, the pointers and cursors, copied to the screen. No busy
+  wait (1.00o5 waited in a timer loop per point): at 100 ms/div a pass adds about 20 columns, at 50 s/div one per second.
+- **Failures** say why and stop (STOP shown): "Roll mode needs FPGA bitstream 0x153D" (0x38 bit 7 clear), "FPGA not ready:
+  roll mode stopped" (the bounded 0x05 wait), "FPGA stream stopped: tap RUN to restart" (the FPGA left stream mode).
+- **Host**: ARM and LOG_START in a long time base stop the UI and run (before: E_STATE detail 2); READ_RAW of the latest
+  capture answers E_STATE detail 2 only while the UI rolls.
+
 ### The generator as a pattern, the pattern generator, the chirp (FPGA 0x153D, fw-d5, protocol 1.27 row 67)
 
 Bitstream 0x153D (fpga-d2; contract `docs/plans/fpga-0x153c.md` sections 7.2-7.5) removes Atlan4's DDS (0x51 / 0x52): the
@@ -744,7 +789,8 @@ screen save/restore and the touch area. What depends on the running hardware is 
 
 Relabelled (fw 0.2.10): the acquisition menu's "ACQ / Long mode" box (it named the mode a tap switches to) is drawn
 as a state toggle, "Roll mode" + "on" / "off", green when the long (roll) time base is on, like Average and Long
-memory. It stays: roll mode works on this hardware. System settings (fw 0.2.13): without a DS3231 the Time & Date
+memory. It stays: roll mode works on this hardware (since fw-roll on the 0x153D logger stream, section "Roll mode").
+System settings (fw 0.2.13): without a DS3231 the Time & Date
 row (the last one) is not drawn and the menu box is one row (59 px) shorter; `SYSTEM_MENU_HEIGHT` is a runtime value
 in protocol builds (`pc_glue_sys_menu_height`), feeding the box, separators, slide-in and screen save/restore.
 
