@@ -349,7 +349,7 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_E_GAIN_LEVER    14           //the two levels too close: no probe on the post
 #define ACAL_E_GAIN_SPLIT    15           //core gains differ by more than ACAL_GAIN_MAX_SPLIT
 #define ACAL_E_GAIN_CLASS    16           //full-rate / gated gain outside 0.9..1.1
-#define ACAL_E_GAIN_NONE     17           //no generator in this bitstream (stock FPGA)
+                                          //17: reserved (the stock FPGA's "no generator", gone with fw-one)
 #define ACAL_E_TIMING        18           //full-rate capture still garbled after the retries (enc_heal.h)
 #define ACAL_E_READOUT       19           //fw 0.2.67: samples at 0 / 255 only at full rate with the level near code 128
                                           //(acal_readout_fault); fw 0.2.79: also a 0x153A core with no clean

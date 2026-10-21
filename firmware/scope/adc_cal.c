@@ -880,7 +880,6 @@ const char *acal_reason_text(int reason)
     case ACAL_E_GAIN_LEVER: return "gain: probe on post?";
     case ACAL_E_GAIN_SPLIT: return "gain: cores differ";
     case ACAL_E_GAIN_CLASS: return "gain: clock classes";
-    case ACAL_E_GAIN_NONE:  return "gain: no generator";
     case ACAL_E_TIMING:     return "ADC timing: FPGA race";
     case ACAL_E_READOUT:    return "ADC readout near 128";
     default:                return "no calibration data";

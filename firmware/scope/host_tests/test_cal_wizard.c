@@ -622,8 +622,10 @@ static void test_texts(void)
   T_STR(t, "CH2 calibrated: cores matched to 0.4 code, gains not measured");
 
   //Every failure has words (no "OK" or the short report form)
-  for(rc=ACAL_E_RESPONSE;rc<=ACAL_E_GAIN_NONE;rc++)
+  for(rc=ACAL_E_RESPONSE;rc<=ACAL_E_READOUT;rc++)
   {
+    if(rc == 17)                        //reserved (adc_cal.h)
+      continue;
     T_TRUE(strlen(cw_reason_text(rc)) > 8);
     T_TRUE(strcmp(cw_reason_text(rc), "measurement failed"));
   }
