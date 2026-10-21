@@ -15,8 +15,19 @@ program on the PC has the scope's serial port open or has sent it a request in t
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
 - Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
   mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base) and Filter. The menu also shows the pass time, how long one screen update takes.
-- Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2 or EXT), the position
-  and Always 50 %.
+- Tap the trigger chip for the trigger: Auto, Single or Normal, the edge, the source (CH1, CH2 or EXT), the position,
+  Always 50 % and the trigger type. The chip's second line shows the source and a symbol of the type and its edge: a
+  rising or falling edge for Edge, one full pulse (positive or negative) for Pulse, two short edges and one tall for Nth.
+- **Trigger type** (the menu's last row): **Edge** triggers on the edge, as always. **Pulse** triggers on the trailing
+  edge of a pulse shorter than, or longer than, a width: the edge row becomes **Pulse polarity** (Positive / Negative),
+  and two rows appear under the type: **Width**, stepped with - / + through 10ns .. 10s (only the steps the sample rate can
+  count are offered), and **Pulse** Shorter / Longer (a tap toggles). **Nth** triggers on the Nth counted edge: the rows
+  are **N** (1 .. 65535; - / + by 1, or tap the number for the keypad) and **Idle**, the time the signal must hold without
+  an edge before the count restarts (Off counts from the start of the acquisition). The Width and Idle times are kept
+  when the sample rate changes; one the new rate cannot count snaps to the nearest step it can, and the plot says
+  "Width set to 5us for this rate" (or "Idle set to ...") after any time/div notice. In the waveform viewer the rows
+  show the stored trigger and are inert. A trigger set from the PC shows here too (a width that is not a step shows as
+  the nearest one).
 - The run-state chip beside the trigger reads STOP, RUN or WAIT (a single shot waiting for its trigger).
 - The sun switches the screen to full brightness and back.
 
@@ -98,7 +109,8 @@ them.
 ![Phosphor view in X-Y](screenshot:phosphor-xy)
 
 **Warnings.** "No channel enabled: switch on CH1 or CH2", "X-Y needs both channels: switch on CH1 and CH2", "CH1
-overrange: increase V/div" (or CH2), "No trigger: check the trigger level".
+overrange: increase V/div" (or CH2), "No trigger: check the trigger level" (with trigger type Pulse "No trigger: check
+the level and Width", with Nth "No trigger: check the level and N" or "No trigger: check the level, N and Idle").
 
 ## Spectrum analyser
 
@@ -154,7 +166,7 @@ the axis. The 8-bit ADC limits THD to about 0.3 %.
 
 **Warnings.** "CH1 overrange: increase V/div", "Aliasing possible: set Acquisition > Filter" (below 200 MSa/s with
 the filter off), "Stopped: press RUN to fill the view",
-"No trigger: check the trigger level".
+"No trigger: check the trigger level" (or the trigger type's hint, as in the Scope).
 
 ## Frequency response
 
@@ -253,7 +265,8 @@ span; while stopped, one sweep runs there.
 **Top bar in this mode.** The ACQ chip reads "Set by the sweep": the sweep picks the sample rate for each point. While
 a sweep runs, the generator button shows the tone being measured, and a tap on it says "Driven by the frequency response
 sweep". When no sweep runs, the post carries your own generator setting again. The trigger menu says "Not used by the
-sweep".
+sweep" as its last row and shows no Width, N or Idle rows: the sweep's captures use the edge trigger whatever type is
+chosen; the type stays for the Scope.
 
 **Warnings while sweeping.** Among others: "CH2 overrange: increase V/div in CH2 menu or Auto", "CH2 small: decrease
 V/div in CH2 menu or Auto", "N points not settled: choose a longer Settle", "CH1 level low: the DUT loads the 1 kOhm
