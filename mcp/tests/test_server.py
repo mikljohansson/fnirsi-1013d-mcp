@@ -23,7 +23,7 @@ ALL_TOOLS = {
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel", "scope_report", "scope_cal_probe", "scope_decode", "scope_export_csv", "scope_mask_test",
-    "scope_dvm", "scope_counter", "scope_pattern", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop",
+    "scope_dvm", "scope_counter", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop",
 }
 
 

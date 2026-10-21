@@ -1,6 +1,6 @@
-"""Protocol 1.27 tools (item D6): scope_pattern (with its trigger engine and the marker capture), scope_sweep (the
-host-stepped chirp), scope_generator on the pattern, scope_set_trigger(source='pattern'), scope_log / scope_log_status
-/ scope_log_stop with the files and logfile.load_log, scope_report on the 'log' and 'pattern' kinds."""
+"""Protocol 1.27 tools (item D6): scope_sweep (the host-stepped chirp), scope_generator on the fractional square,
+scope_log / scope_log_status / scope_log_stop with the files and logfile.load_log, scope_report on the 'log' kind. The
+pattern tool and the 'pattern' trigger source were cut (owner 2026-10-21, fw-nopat)."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def test_log_ended_by_a_change_at_the_scope(sim_factory, tmp_path):
     anyio.run(main)
 
 
-def test_generator_tool_reports_the_pattern_square(sim_factory, tmp_path):
+def test_generator_tool_reports_the_square(sim_factory, tmp_path):
     srv = gen_sim(sim_factory)
 
     async def main():
@@ -136,66 +136,10 @@ def test_generator_tool_reports_the_pattern_square(sim_factory, tmp_path):
             tok = (await c.call("scope_generator", enabled=True, frequency="999.5Hz"))["token"]
             r = await c.call("scope_generator", enabled=True, frequency="999.5Hz", confirm_token=tok)
             a = r["applied"]
-            assert a["frequency_exact_hz"] == pytest.approx(999.5, rel=1e-10) and a["source"] == "generator"
+            assert a["frequency_exact_hz"] == pytest.approx(999.5, rel=1e-10) and "source" not in a
             assert a["period_clocks"] == pytest.approx(200_100.05, abs=1e-4) and a["p16"] == P.gen_p16(999_500)
             assert any("5 ns" in x for x in r["caveats"])
-    anyio.run(main)
-
-
-def test_pattern_tool_marker_capture_and_report(sim_factory, tmp_path):
-    srv = gen_sim(sim_factory)
-
-    async def main():
-        async with client_for(srv, tmp_path) as c:
-            await c.call("scope_set_channel", channel="CH1", volts_per_div=2.5)
-            await c.call("scope_set_timebase", sample_rate="1MS/s")
-            r = await c.call("scope_set_trigger", source="pattern", edge="rising", mode="normal",
-                             pretrigger_samples=200, total_samples=4000)
-            assert r["applied"]["source"] == "pattern" and any("marked step" in x for x in r["caveats"])
-            steps = [{"level": 1, "width": "50us", "mark": True}, {"level": 0, "width": "950us"}]
-            r = await c.call("scope_pattern", steps=steps, mode="repeat", repeat=10, capture=True)
-            assert r["confirmation_required"] and "50 us (mark)" in r["summary"] and "x 10" in r["summary"]
-            r = await c.call("scope_pattern", steps=steps, mode="repeat", repeat=10, capture=True,
-                             confirm_token=r["token"])
-            assert r["ok"] and r["applied"]["burst_s"] == pytest.approx(1e-3)
-            cap = r["capture"]
-            assert cap["trigger"] == "fired"
-            z = np.load(cap["file"])
-            v = z["CH1_volts"]
-            first = int(np.argmax(v > 1.5))
-            assert abs(first - 200) <= 2
-            rep = await c.call("scope_report", source=r["timing_file"])
-            assert rep["kind"] == "pattern" and rep["table"][0]["marker"] == "yes" and len(rep["table"]) == 2
-            # off: no token
-            r = await c.call("scope_pattern", steps=steps, mode="off")
-            assert r["ok"] and not r["applied"]["running"]
-            assert "edge source" in await c.fails("scope_set_trigger", type="pulse_width", width="10us")
-            assert "level 0 or 1" in await c.fails("scope_pattern", steps=[{"level": 2, "width": "1us"}],
-                                                   confirm_token="x")
-    anyio.run(main)
-
-
-def test_pattern_tool_with_the_trigger_engine(sim_factory, tmp_path):
-    srv = gen_sim(sim_factory, ch2="square:freq=1kHz,amp=0.3")
-
-    async def main():
-        async with client_for(srv, tmp_path) as c:
-            await c.call("scope_set_channel", channel="CH1", volts_per_div=2.5)
-            await c.call("scope_set_channel", channel="CH2", volts_per_div=0.2)
-            await c.call("scope_set_timebase", sample_rate="500kS/s")
-            await c.call("scope_set_trigger", source="CH1", edge="rising", level=1.5, mode="normal",
-                         pretrigger_samples=1000, total_samples=12000)
-            args = dict(steps=[{"level": 1, "width": "20us"}, {"level": 0, "width": "30us"}], mode="single",
-                        start="trigger", trigger={"source": "CH2", "type": "nth_edge", "n": 3, "polarity": "rising",
-                                                  "level": 0.0})
-            tok = (await c.call("scope_pattern", **args))["token"]
-            r = await c.call("scope_pattern", **args, confirm_token=tok)
-            assert r["engine"]["armed"] and r["engine"]["own_engine"] and r["engine"]["trigger"]["n"] == 3
-            r = await c.call("scope_capture", channels=["CH1", "CH2"], timeout_s=3)
-            z = np.load(r["file"])
-            hi = np.flatnonzero(np.diff((z["CH1_volts"] > 1.5).astype(int)) == 1)
-            assert len(hi) >= 3 and np.allclose(np.diff(hi) * 2e-6, 3e-3, atol=6e-6)
-            assert "continuous" in await c.fails("scope_pattern", **{**args, "mode": "continuous"})
+            assert "pattern" in await c.fails("scope_set_trigger", source="pattern")  # the cut marker source
     anyio.run(main)
 
 

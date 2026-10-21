@@ -48,8 +48,7 @@ FILTERED8_NOTE = ("8-bit filtered: each sample is the high byte of the CIC / FIR
 RAW8_NOTE = ("raw 8-bit: both ADC cores at 200 MSa/s / (D + 1) without the decimation filter: a signal above half the "
              "rate aliases")
 FROZEN_NOTE = ("the scope's screen is frozen ('Logging to the host') and every acquisition command answers 'logging: "
-               "LOG_STOP first' until scope_log_stop or the duration's end; set up the generator / pattern before the "
-               "log")
+               "LOG_STOP first' until scope_log_stop or the duration's end; set up the generator before the log")
 
 
 @dataclass

@@ -1,6 +1,6 @@
 """Host-driven Bode / frequency-response sweep (docs/plans/bode-design.md steps H1-H3).
 
-Stepped single tone: the calibration pin's generator (since FPGA 0x153D the two-step pattern on the 5 ns clock,
+Stepped single tone: the calibration pin's generator (since FPGA 0x153D the two-step square on the 5 ns clock,
 docs/plans/fpga-0x153c.md 7.4) runs a strictly periodic square of an integer period P (n_h = ceil(P / 2), n_l =
 floor(P / 2), no fraction), so f = 200 MHz / P exactly; CH1 sits on the DUT input, CH2 on its output, and H(f) =
 X2 / X1 from a single-bin DFT at f over a coherent record (an integer number of stimulus periods), so the square
@@ -321,7 +321,7 @@ def plan_vectors() -> dict[str, Any]:
     return {"format": "fnirsi1013d-bode-plan", "version": 2,
             "notes": "mcp/src/fnirsi1013d/bode.py plan_point / plan_sweep (docs/plans/bode-design.md 3.1-3.2). "
                      "f_req in Hz to 9 significant digits (sweeps: np.geomspace), period = P in 5 ns clocks (FPGA "
-                     "0x153D pattern), f_mhz = round(200e9 / P), divider = N - 1 (0 = legacy 200 MSa/s), record = "
+                     "0x153D square), f_mhz = round(200e9 / P), divider = N - 1 (0 = legacy 200 MSa/s), record = "
                      "samples analysed, total = the even trigger total. "
                      "Regenerate: python -m fnirsi1013d.bode --write-vectors ../docs/bode-plan-vectors.json",
             "points": [row(plan_point(f)) for f in VECTOR_FREQS],
@@ -751,7 +751,7 @@ class ThruCal:
             raise ValueError(f"{path}: not a thru calibration file")
         if d.get("version", 1) < 2:
             raise ValueError(f"{path}: a thru calibration of the DDS stimulus (protocol 1.26 and older, keyed by M): "
-                             "the generator is the 5 ns pattern since FPGA 0x153D; measure the thru again")
+                             "the generator is the 5 ns square since FPGA 0x153D; measure the thru again")
         pts, r1, r2, fl = {}, {}, {}, {}
         for e in d["points"]:
             k = (int(e["period"]), int(e["n"]))

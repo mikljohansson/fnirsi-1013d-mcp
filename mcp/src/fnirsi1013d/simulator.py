@@ -170,7 +170,7 @@ class Signal:
             return np.where(gen.pin(t) > 0, self.p("high", 3.3), 0.0)
         if k in ("dut_in", "dut_out"):
             off, g = self.p("offset", -1.24), self.p("gain", 1.0)
-            if not gen.enable or not gen.frequency_hz:  # a SET_PATTERN pattern is not modelled through the DUT
+            if not gen.enable or not gen.frequency_hz:
                 return np.full_like(t, off)  # pin tri-stated: the DUT rests at its ground
             y = dut_response(np.asarray(t, np.float64) - self.p("delay", 0.0), gen.frequency_hz, gen.duty,
                              self.p("high", 3.1), *self.dut_params, node=1 if k == "dut_out" else 0,
@@ -445,173 +445,27 @@ class TriggerState:
 
 
 @dataclass
-class PatternState:
-    """The pattern table as SET_PATTERN wrote it (protocol 1.27, FPGA 0x153D, contract 7.2): ``steps`` = (level, mark,
-    duration in 1/65536 clock). One fraction accumulator per pattern: step k of a burst starts at clock
-    floor(B_k / 65536) with B_k the sum of the earlier steps (cleared at every burst start, carried across the wrap of
-    a continuous pattern), so every edge lies within one 5 ns clock of its ideal time."""
-
-    mode: int = P.PAT_OFF
-    flags: int = 0
-    repeat: int = 1
-    gap_clocks: int = 0
-    steps: tuple[tuple[int, int, int], ...] = ()
-
-    @property
-    def idle(self) -> int:
-        return 1 if self.flags & P.PAT_F_IDLE_HIGH else 0
-
-    @property
-    def start_source(self) -> int:
-        return self.flags >> P.PAT_START_SHIFT & 3
-
-    @property
-    def marker_trigger(self) -> bool:
-        return bool(self.flags & P.PAT_F_MARKER_TRIGGER)
-
-    @property
-    def bounds(self) -> np.ndarray:
-        """B_0 = 0 .. B_n = the burst length, in 1/65536 clock."""
-        return np.concatenate(([0], np.cumsum([d for _, _, d in self.steps], dtype=np.int64))).astype(np.int64)
-
-    @property
-    def burst_clocks(self) -> int:
-        return int(self.bounds[-1]) >> 16
-
-    @property
-    def bursts(self) -> int:
-        return self.repeat if self.mode == P.PAT_REPEAT else 1
-
-    def train_clocks(self) -> int | None:
-        """Clocks from a start to the end of its last burst (None: continuous, 0: off)."""
-        if self.mode == P.PAT_OFF or not self.steps:
-            return 0
-        if self.mode == P.PAT_CONTINUOUS:
-            return None
-        return self.bursts * (self.burst_clocks + self.gap_clocks) - self.gap_clocks
-
-    def _locate(self, c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """(valid, step index) at clocks c since a train's start; index n = the gap of a continuous pattern."""
-        B = self.bounds
-        c = np.asarray(c, np.int64)
-        if self.mode == P.PAT_CONTINUOUS:
-            T = int(B[-1]) + self.gap_clocks * 65536
-            x = (c + 1) * 65536 - 1
-            idx = np.searchsorted(B, np.mod(x, T), side="right") - 1
-            return c >= 0, idx
-        lc = self.burst_clocks
-        per = lc + self.gap_clocks
-        k = np.floor_divide(c, per)
-        w = c - k * per
-        valid = (c >= 0) & (k < self.bursts) & (w < lc)
-        idx = np.searchsorted(B, (w + 1) * 65536 - 1, side="right") - 1
-        return valid, idx
-
-    def levels(self, c: np.ndarray) -> np.ndarray:
-        """The pin level (0 / 1) at clocks c since a train's start (idle before it and after it)."""
-        c = np.asarray(c, np.int64)
-        if self.mode == P.PAT_OFF or not self.steps:
-            return np.full(c.shape, self.idle, np.int8)
-        valid, idx = self._locate(c)
-        lv = np.array([lvl for lvl, _, _ in self.steps] + [self.idle], np.int8)
-        return np.where(valid, lv[np.clip(idx, 0, len(self.steps))], self.idle).astype(np.int8)
-
-    def mark_clocks(self, c0: int, c1: int) -> np.ndarray:
-        """The first clock of every marked step in [c0, c1) since a train's start (the marker's 1-clock pulse)."""
-        if self.mode == P.PAT_OFF or not self.steps or c1 <= max(c0, 0):
-            return np.zeros(0, np.int64)
-        B = self.bounds
-        offs = np.array([int(B[k]) for k, (_, m, _) in enumerate(self.steps) if m], np.int64)
-        if not offs.size:
-            return np.zeros(0, np.int64)
-        c0 = max(c0, 0)
-        if self.mode == P.PAT_CONTINUOUS:
-            T = int(B[-1]) + self.gap_clocks * 65536
-            j0 = max(0, (c0 * 65536) // T - 1)
-            j1 = (c1 * 65536) // T + 2
-            if j1 - j0 > 1_000_000:
-                j1 = j0 + 1_000_000
-            js = np.arange(j0, j1, dtype=np.int64)
-            out = ((js[:, None] * T + offs[None, :]) >> 16).ravel()
-        else:
-            per = self.burst_clocks + self.gap_clocks
-            ks = np.arange(max(0, c0 // per - 1), min(self.bursts, c1 // per + 2), dtype=np.int64)
-            out = (ks[:, None] * per + (offs[None, :] >> 16)).ravel()
-        out = np.sort(out)
-        return out[(out >= c0) & (out < c1)]
-
-    def state_at(self, c: int) -> tuple[bool, bool, int, int]:
-        """(running, in gap, step, bursts done) at clock c since the start."""
-        train = self.train_clocks()
-        if c < 0 or train == 0:
-            return False, False, 0, 0
-        if train is not None and c >= train:
-            return False, False, 0, self.bursts
-        valid, idx = self._locate(np.array([c]))
-        n = len(self.steps)
-        if self.mode == P.PAT_CONTINUOUS:
-            T = int(self.bounds[-1]) + self.gap_clocks * 65536
-            return True, int(idx[0]) >= n, int(idx[0]) % max(n, 1), int((c * 65536) // T)
-        per = self.burst_clocks + self.gap_clocks
-        return True, not bool(valid[0]), int(idx[0]) if valid[0] else 0, int(c // per)
-
-
-@dataclass
 class GenState:
-    """The calibration pin's generator (protocol 1.27, FPGA 0x153D): the two-step square of SET_GEN (``p16`` /
-    ``h16`` in 1/65536 of a 5 ns clock, source 0) or a SET_PATTERN table (source 1). ``enable`` = 0x50 (the pin is
-    driven). ``starts`` = the capture-time starts of the pattern's trains, set per simulated capture."""
+    """The calibration pin's generator (protocol 1.27, FPGA 0x153D): the fractional two-step square of SET_GEN
+    (``p16`` / ``h16`` in 1/65536 of a 5 ns clock). ``enable`` = 0x50 (the pin is driven)."""
 
     enable: int = 0
     p16: int = P.gen_p16(1_000_000)
     h16: int = P.gen_p16(1_000_000) // 2
-    source: int = P.GEN_SOURCE_SQUARE
-    pattern: PatternState | None = None
-    starts: tuple[float, ...] = ()
 
     @property
     def frequency_hz(self) -> float:
-        return P.GEN_CLOCK_HZ * 65536 / self.p16 if self.source == P.GEN_SOURCE_SQUARE and self.p16 else 0.0
+        return P.GEN_CLOCK_HZ * 65536 / self.p16 if self.p16 else 0.0
 
     @property
     def duty(self) -> float:
         return self.h16 / self.p16 if self.p16 else 0.0
 
-    @property
-    def pattern_active(self) -> bool:
-        return self.source == P.GEN_SOURCE_PATTERN and self.pattern is not None and self.pattern.mode != P.PAT_OFF
-
     def pin(self, t: np.ndarray) -> np.ndarray:
         """The generator's level (0 / 1) at capture times t, whether or not the pin is driven."""
         t = np.asarray(t, np.float64)
-        if self.source == P.GEN_SOURCE_SQUARE:
-            f = self.frequency_hz
-            return (np.mod(t * f, 1.0) < self.duty).astype(np.int8) if f else np.zeros(t.shape, np.int8)
-        pat = self.pattern
-        if pat is None:
-            return np.zeros(t.shape, np.int8)
-        if not self.starts:
-            return np.full(t.shape, pat.idle, np.int8)
-        st = np.asarray(self.starts, np.float64)
-        i = np.searchsorted(st, t, side="right") - 1
-        rel = t - st[np.clip(i, 0, None)]
-        c = np.floor(rel * P.PAT_CLOCK_HZ).astype(np.int64)
-        return np.where(i >= 0, pat.levels(c), pat.idle).astype(np.int8)
-
-    def mark_times(self, ta: float, tb: float) -> np.ndarray:
-        """Capture times of the marker pulses in [ta, tb)."""
-        pat = self.pattern
-        if not self.pattern_active or not self.starts:
-            return np.zeros(0)
-        out = []
-        st = sorted(self.starts)
-        for j, s in enumerate(st):
-            end = st[j + 1] if j + 1 < len(st) else math.inf
-            c0 = int(math.floor((ta - s) * P.PAT_CLOCK_HZ))
-            c1 = int(math.ceil((min(tb, end) - s) * P.PAT_CLOCK_HZ)) + 1
-            m = s + pat.mark_clocks(c0, c1) / P.PAT_CLOCK_HZ
-            out.append(m[(m >= ta) & (m < tb) & (m < end)])
-        return np.concatenate(out) if out else np.zeros(0)
+        f = self.frequency_hz
+        return (np.mod(t * f, 1.0) < self.duty).astype(np.int8) if f else np.zeros(t.shape, np.int8)
 
 
 @dataclass
@@ -1173,15 +1027,8 @@ class Device:
         self.counter_level = P.COUNTER_LEVEL_FOLLOW  # as configured; counter_level_now() is the one in effect
         self.counter_hyst = P.COUNTER_DEFAULT_HYST
         self.counter_seq_read: int | None = None
-        #: protocol 1.27 (FPGA 0x153D): the pattern's MCU start (device time; None = not started), the commit not yet
-        #: taken (device time it is taken), the pattern trigger engine (a P.Trigger2, armed, re-arm, event seen)
-        self.pat_start_dev: float | None = None
-        self.pat_pending_until = 0.0
-        self.pat_marker_seen = False
-        self.ptrig = P.Trigger2(level=128)
-        self.ptrig_armed = 0
-        self.ptrig_rearm = 0
-        self.ptrig_event = False
+        #: protocol 1.27 (FPGA 0x153D): the square's commit not yet taken (device time it is taken)
+        self.gen_pending_until = 0.0
         #: the streaming logger (dict while a log exists since the last LOG_START; see _cmd_log_start) and the test
         #: hooks: ``log_lap_next`` (the next chunk with unread words follows an FPGA lap of up to that many)
         self.logger: dict | None = None
@@ -1208,8 +1055,8 @@ class Device:
             c |= P.Caps.CAPTURE_STAGES
         if self.trig26_on:  # 1.26 (FPGA 0x153C): trigger types, the hold-off, peak detect, the counter
             c |= P.Caps.TRIG_TYPES | P.Caps.HOLDOFF | P.Caps.PEAK_DETECT | P.Caps.COUNTER
-        if self.d27_on:  # 1.27 (FPGA 0x153D): the logger, the pattern generator and its trigger engine
-            c |= P.Caps.LOGGER | P.Caps.PATTERN_GEN | P.Caps.PATTERN_TRIGGER
+        if self.d27_on:  # 1.27 (FPGA 0x153D): the logger
+            c |= P.Caps.LOGGER
         return int(c) & ~self.cfg.caps_clear
 
     @property
@@ -1220,8 +1067,7 @@ class Device:
 
     @property
     def d27_on(self) -> bool:
-        """Protocol 1.27 (FPGA 0x153D): the logger, the pattern generator, its trigger engine (caps 23, 24, 27,
-        features 11-13)."""
+        """Protocol 1.27 (FPGA 0x153D): the logger (caps 23, features 11) and the generator's square."""
         return not self.cfg.legacy and (self.cfg.proto_minor is None or self.cfg.proto_minor >= 27)
 
     @property
@@ -1244,7 +1090,7 @@ class Device:
                    P.Features.HW_AVERAGE | P.Features.ENC_CHECK | P.Features.BODE |
                    (P.Features.CAPTURE_STAGES if self.cap_on else 0) |
                    (P.Features.TRIG_TYPES | P.Features.PEAK | P.Features.COUNTER if self.trig26_on else 0) |
-                   (P.Features.LOGGER | P.Features.PATTERN | P.Features.PATTERN_TRIGGER if self.d27_on else 0))
+                   (P.Features.LOGGER if self.d27_on else 0))
 
     def ui_average_state(self) -> tuple[int, int]:
         """GET_STATUS 46 / 47 (protocol 1.17, one behaviour since fw 0.2.102): the acquisition menu's Average
@@ -1472,32 +1318,6 @@ class Device:
             t = t0 + 2 * (k + lag_words) * dt + dt - EXT_LATENCY_S
         return np.where(sig.eval(t, settings.gen) > EXT_THRESHOLD_V, 255, 0).astype(np.uint8)
 
-    def _word_times(self, t0: float, k: np.ndarray, dt: float, settings: Settings,
-                    dec: P.DecimConfig | None) -> np.ndarray:
-        """The time each ring word's EXT / marker sample stands for (the EXT apply path, without the pin's latency)."""
-        if dec is not None and dec.k:
-            return t0 + k * dec.n * 5e-9
-        lag_words = P.ext_shift_legacy(settings.divider, True) // 2
-        return t0 + 2 * (k + lag_words) * dt + dt
-
-    def _marker_words(self, t0: float, k0: int, n: int, dt: float, settings: Settings,
-                      dec: P.DecimConfig | None = None) -> np.ndarray:
-        """1.27 trigger source 3: 255 on the word whose write clock takes a marker pulse (the first clock of a marked
-        step, through the EXT apply path), else 0; nothing unless the pattern runs with its marker as a trigger source
-        (SET_PATTERN PAT_F_MARKER_TRIGGER)."""
-        out = np.zeros(n, np.uint8)
-        g = settings.gen
-        if not g.pattern_active or g.pattern is None or not g.pattern.marker_trigger:
-            return out
-        k = np.arange(k0 - 1, k0 + n, dtype=np.float64)
-        tw = self._word_times(t0, k, dt, settings, dec)
-        m = g.mark_times(float(tw[0]), float(tw[-1]))
-        if m.size:
-            idx = np.searchsorted(tw, m + 5e-9, side="left") - 1  # the word after the clock that carries the pulse
-            idx = idx[(idx >= 0) & (idx < n)]
-            out[idx] = 255
-        return out
-
     def decim_config(self, settings: Settings | None = None) -> P.DecimConfig:
         """The decimation an arm with these settings writes (pc_decim_next)."""
         s = settings or self.settings
@@ -1595,9 +1415,6 @@ class Device:
         level; peak (1.26) = the window maximum for a rising detection, the minimum for a falling one (the firmware
         writes level << 8); legacy = core A of the source channel."""
         src = tr.source
-        if src == P.TRIG_SOURCE_PATTERN:
-            tr = replace(tr, level=128)
-            return (lambda k0, n: self._marker_words(t0, k0, n, dt, settings, dec)), tr
         if ext:
             tr = replace(tr, level=128)
             return (lambda k0, n: self._ext_words(t0, k0, n, dt, settings, dec)), tr
@@ -1643,54 +1460,6 @@ class Device:
             step = min(2 * step, 65536)
         return -1
 
-    #: the pattern trigger engine's events searched per capture (the model looks at a window, the FPGA for ever)
-    ENGINE_MAX_EVENTS = 256
-    ENGINE_MAX_WORDS = 1 << 17
-
-    def _pattern_starts(self, settings: Settings, dec: P.DecimConfig, t0: float, dt: float, wp: float, seed: int,
-                        n_words: int, dev_t0: float) -> tuple[float, ...]:
-        """1.27: the capture-time starts of the pattern's trains: the MCU's start (SET_PATTERN start = 1, placed by
-        device time) and, with start source 'trigger' / 'both' and the engine armed, every event of the pattern
-        trigger engine on its own stream (the TrigQual model, the channel signals with the pin not driven), the
-        burst starting one write clock + 20 ns after a CH1 / CH2 event and 20 ns after an EXT one; a start during a
-        train is ignored, one shot takes the first event."""
-        pat = settings.gen.pattern
-        assert pat is not None
-        starts: list[float] = []
-        src = pat.start_source
-        if self.pat_start_dev is not None and src in (P.PAT_START_MCU, P.PAT_START_BOTH):
-            starts.append(t0 + (self.pat_start_dev - dev_t0))
-        if src in (P.PAT_START_TRIGGER, P.PAT_START_BOTH) and self.ptrig_armed:
-            quiet = settings.copy()
-            quiet.gen.enable = 0
-            pt = self.ptrig
-            tr = TriggerState(source=pt.source, edge=pt.polarity, level=pt.level, mode=1, ttype=pt.type,
-                              longer=int(bool(pt.flags & P.TRIG2_F_LONGER)), n=pt.n, h=pt.h)
-            ext = pt.source == P.TRIG_SOURCE_EXT
-            stream, tr = self._trig_stream(tr, dec, dec.k > 0, ext, t0, dt, quiet, seed)
-            train = pat.train_clocks()
-            lat = 20e-9 if ext else wp + 20e-9
-            k = 1
-            end = min(n_words, self.ENGINE_MAX_WORDS)
-            while k < end and len(starts) < self.ENGINE_MAX_EVENTS:
-                ke = self._search_trigger(stream, k, end - k, tr)
-                if ke < 0:
-                    break
-                self.ptrig_event = True
-                s = t0 + ke * wp + lat
-                starts.append(s)
-                if not self.ptrig_rearm or train is None:
-                    break
-                k = ke + 1 + math.ceil(train * 5e-9 / wp)
-        starts.sort()
-        kept: list[float] = []
-        train = pat.train_clocks()
-        for s in starts:
-            if kept and (train is None or s < kept[-1] + train * 5e-9):
-                continue
-            kept.append(s)
-        return tuple(kept)
-
     def holdoff_words(self, tr: TriggerState, wp: float) -> int:
         """The trigger hold-off (0x1B, 5 ns units) in ring words of period ``wp``, rounded up."""
         return math.ceil(tr.holdoff * 5e-9 / wp - 1e-9) if tr.holdoff else 0
@@ -1726,18 +1495,16 @@ class Device:
     def ext_shift_for(self, dec: P.DecimConfig, divider: int, source: int, pre: int) -> int:
         """The EXT shift the firmware applies (pc_ext_shift): the filter latency with K >= 1; 1.22 (fw 0.2.72) also
         the ADC pipeline in the legacy layout. At most the pretrigger, whole words in the legacy layout."""
-        if source not in (2, P.TRIG_SOURCE_PATTERN):  # 1.27: the marker takes the EXT apply path
+        if source != 2:
             return 0
         if not dec.k and self.proto_minor < 22:
             return 0
         v = dec.ext_shift_at(divider)
         return v if v <= pre else (pre if dec.k else pre & ~1)
 
-    def simulate_capture(self, settings: Settings, forced: bool = False, dev_t0: float | None = None) -> dict:
+    def simulate_capture(self, settings: Settings, forced: bool = False) -> dict:
         """Run one capture through the FPGA model. Returns a dict with the new ring, trigger address, the
-        modelled durations and flags. Normal mode without a trigger returns triggered=False, never_done.
-        ``dev_t0``: the device time of the capture's word 0 (default now; the pattern's starts are placed on the
-        capture's timeline from it)."""
+        modelled durations and flags. Normal mode without a trigger returns triggered=False, never_done."""
         R = RING_WORDS
         Pw, Tw, auto_to = self.geometry(settings)
         dt = self.dt(settings.divider)
@@ -1747,13 +1514,6 @@ class Device:
         w0 = self.pyrng.randrange(R)
         seed = self.pyrng.randrange(1 << 62)
         settings = settings.copy()
-        if settings.gen.pattern_active:
-            limit0 = (auto_to if settings.trigger.mode == 0 else (1 << 21)) + Pw + Tw
-            settings.gen.starts = self._pattern_starts(settings, dec, t0, dt, wp, seed, limit0,
-                                                       self.now() if dev_t0 is None else dev_t0)
-            if settings.gen.starts and settings.gen.pattern is not None and settings.gen.pattern.mark_clocks(
-                    0, (settings.gen.pattern.train_clocks() or (1 << 40))).size:
-                self.pat_marker_seen = True
         tr = settings.trigger
         ext = tr.source == 2
         trig_samples, tr = self._trig_stream(tr, dec, dec.k > 0, ext, t0, dt, settings, seed)
@@ -1775,7 +1535,6 @@ class Device:
                      "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples)}
         # did the pin toggle during the capture window (GET_CAPTURE_INFO bit 5)?
         e = self._ext_words(t0, Pw, Tw + Pw, dt, settings, dec)
-        res["gen_starts"] = settings.gen.starts
         res["ext_edge"] = bool(np.any(np.diff(e.astype(np.int16)) != 0))
         if kt >= 0:
             end = kt + (Tw - Pw)
@@ -2594,38 +2353,22 @@ class Device:
                          trigger2=tr.trigger2() if self.trig26_on else None)
 
     def gen(self) -> P.Gen:
-        """GEN (40 bytes, protocol 1.27): the square's P16 / H16 (0 while a SET_PATTERN pattern drives the pin) and
-        the pattern status read live (0x39)."""
+        """GEN (40 bytes, protocol 1.27): the square's P16 / H16 and its status read live (0x39 bytes 0 and 3)."""
         g = self.settings.gen
-        st0, bursts, st3 = self.pattern_status()
-        sq = g.source == P.GEN_SOURCE_SQUARE
-        return P.Gen(enable=g.enable, pat_status=st0, bursts=bursts, pat_status3=st3, source=g.source,
-                     freq_mhz_actual=P.gen_freq_mhz(g.p16) if sq else 0,
-                     duty_bp_actual=P.gen_duty_bp(g.h16, g.p16) if sq else 0,
-                     p16=g.p16 if sq else 0, h16=g.h16 if sq else 0)
+        return P.Gen(enable=g.enable, status=self.gen_status(), freq_mhz_actual=P.gen_freq_mhz(g.p16),
+                     duty_bp_actual=P.gen_duty_bp(g.h16, g.p16),
+                     status3=P.GEN_ST3_ACTIVE if g.enable and g.p16 else 0, p16=g.p16, h16=g.h16)
 
-    def pattern_status(self) -> tuple[int, int, int]:
-        """FPGA 0x39 now: (byte 0 running / in gap / pending / step, bursts done, byte 3 marker seen / mode active).
-        The generator's square runs whenever the pin is driven; a pattern runs from its MCU start (device time)."""
+    def gen_status(self) -> int:
+        """FPGA 0x39 byte 0 now: running, pending, the step (0 high, 1 low). The square runs whenever the pin is
+        driven."""
         now = self.now()
         g = self.settings.gen
-        pend = P.PAT_ST_PENDING if now < self.pat_pending_until else 0
-        if g.source == P.GEN_SOURCE_SQUARE:
-            if not g.enable or not g.p16:
-                return pend, 0, 0
-            f = g.frequency_hz
-            step = 0 if ((now - self.t_boot) * f) % 1.0 < g.duty else 1
-            return P.PAT_ST_RUNNING | pend | step, 0, P.PAT_ST3_ACTIVE
-        pat = g.pattern
-        if pat is None or pat.mode == P.PAT_OFF:
-            return pend, 0, 0
-        st3 = P.PAT_ST3_ACTIVE | (P.PAT_ST3_MARKER if self.pat_marker_seen else 0)
-        if self.pat_start_dev is None:
-            return pend, 0, st3
-        c = int((now - self.pat_start_dev) * P.PAT_CLOCK_HZ)
-        running, gap, step, bursts = pat.state_at(c)  # the marker bit: a marker inside an armed capture (0x01 = 1)
-        return (P.PAT_ST_RUNNING if running else 0) | (P.PAT_ST_GAP if gap else 0) | pend | (step & 0x0F), \
-            min(bursts, 0xFFFF), st3
+        pend = P.GEN_ST_PENDING if now < self.gen_pending_until else 0
+        if not g.enable or not g.p16:
+            return pend
+        step = 0 if ((now - self.t_boot) * g.frequency_hz) % 1.0 < g.duty else P.GEN_ST_STEP
+        return P.GEN_ST_RUNNING | pend | step
 
     # --- readout --------------------------------------------------------------------------------------
 
@@ -3237,10 +2980,8 @@ class Device:
         if r.mask & M.M_SOURCE:
             if r.source == 2 and not (self.caps & P.Caps.EXT_TRIGGER):
                 raise _DevErr(P.Status.E_UNSUPPORTED, 0, "EXT trigger needs an FPGA with EXT_TRIGGER")
-            if r.source > (P.TRIG_SOURCE_PATTERN if self.caps & P.Caps.PATTERN_GEN else 2):
+            if r.source > 2:
                 raise _DevErr(P.Status.E_BAD_ARG, 0, f"source {r.source}")
-            if r.source == P.TRIG_SOURCE_PATTERN and tr.ttype != P.TRIG_EDGE:
-                raise _DevErr(P.Status.E_BAD_ARG, 0, "the pattern marker needs the edge type (SET_TRIGGER2 type 0)")
             if r.source == 2:
                 self.settings.gen.enable = 0  # fw 0.2.9: selecting EXT switches the generator off
             new.source = r.source
@@ -3287,7 +3028,7 @@ class Device:
         r = P.Trigger2.unpack(req.payload)
         tr = self.settings.trigger
         new = replace(tr)
-        self._check_trigger2(r, engine=False)
+        self._check_trigger2(r)
         if r.source == 2 and tr.source != 2:
             self.settings.gen.enable = 0  # as SET_TRIGGER: selecting EXT switches the generator off
         new.ttype, new.edge, new.source, new.level = r.type, r.polarity, r.source, r.level
@@ -3659,10 +3400,9 @@ class Device:
         return self._ok(req, self.gen().pack())
 
     def _cmd_set_gen(self, req: P.Frame) -> P.Frame:
-        """SET_GEN (protocol 1.27): the square as the pattern's two entries (contract 7.4: P16 / H16 from mHz / bp
-        with the firmware's integer formulas, or raw), committed: a change while the square runs is taken at the next
-        step boundary (``pending`` until then). A frequency or duty write makes the square the pin's source again
-        (a SET_PATTERN pattern is replaced); the enable alone switches the pin driver and keeps the pattern."""
+        """SET_GEN (protocol 1.27): the square's two entries (contract 7.4: P16 / H16 from mHz / bp with the
+        firmware's integer formulas, or raw), committed: a change while the square runs is taken at the next step
+        boundary (``pending`` until then)."""
         r = P.SetGenReq.unpack(req.payload)
         cur = self.settings.gen
         g = replace(cur)
@@ -3672,9 +3412,8 @@ class Device:
         if r.duty_mode == 0 and r.duty >> 32:
             raise _DevErr(E, 2, "bytes 16..19 are reserved with duty_mode 0")
         if r.mask & (P.SetGenReq.M_FREQ | P.SetGenReq.M_DUTY):
-            sq = cur.source == P.GEN_SOURCE_SQUARE
-            bp = P.gen_duty_bp(cur.h16, cur.p16) if sq and cur.p16 else 5000
-            p16 = cur.p16 if sq and cur.p16 else P.gen_p16(1_000_000)
+            bp = P.gen_duty_bp(cur.h16, cur.p16) if cur.p16 else 5000
+            p16 = cur.p16 if cur.p16 else P.gen_p16(1_000_000)
             if r.mask & P.SetGenReq.M_FREQ:
                 if r.freq_mode == 1:
                     p16 = r.freq
@@ -3696,12 +3435,10 @@ class Device:
             why = P.gen_check(p16, h16)
             if why:
                 raise _DevErr(E, 1, why)
-            running = cur.enable and sq and cur.p16
-            g.p16, g.h16, g.source, g.pattern = p16, h16, P.GEN_SOURCE_SQUARE, None
-            if running:  # the step in progress completes with its old length
-                n_h, _, n_l, _ = P.gen_steps(cur.p16, cur.h16)
-                self.pat_pending_until = max(self.pat_pending_until, self.now()) + (2 * max(n_h, n_l) + 1) * 5e-9  # taken from step k + 2
-            self.pat_start_dev = None
+            running = cur.enable and cur.p16
+            g.p16, g.h16 = p16, h16
+            if running:  # taken at once (fpga-d3's RTL): pending for about 3 clocks, the step in progress completes
+                self.gen_pending_until = self.now() + 3 * 5e-9
         if r.mask & P.SetGenReq.M_ENABLE:
             g.enable = 1 if r.enable else 0
         if g.enable and not cur.enable and self.settings.trigger.source == P.TRIG_SOURCE_EXT:
@@ -3888,73 +3625,8 @@ class Device:
                 cols.append(y.astype("<u2"))
         return np.stack(cols, axis=1).tobytes()
 
-    # --- the pattern generator and its trigger engine (protocol 1.27) ---------------------------------------
-
-    def _cmd_set_pattern(self, req: P.Frame) -> P.Frame:
-        """SET_PATTERN 0x0217 (fw-d5's checks, detail = the byte offset); the table, then the start."""
-        d = req.payload
-        E = P.Status.E_BAD_ARG
-        h = P.PatternHeader.unpack(d[:P.PAT_HEADER_BYTES])
-        if h.mode > 3:
-            raise _DevErr(E, 0, f"mode {h.mode}")
-        if h.flags & ~P.PAT_F_VALID & 0xFF or h.start_source == 3 or \
-                h.mode == P.PAT_CONTINUOUS and h.start_source == P.PAT_START_TRIGGER:
-            # mode 3 runs as soon as 0x6D is written (fpga-d2), so the engine cannot be its only start source
-            raise _DevErr(E, 1, f"flags 0x{h.flags:02X}")
-        if not 1 <= h.n <= P.PAT_MAX_STEPS:
-            raise _DevErr(E, 8, f"steps {h.n} not in 1..{P.PAT_MAX_STEPS}")
-        if len(d) != P.PAT_HEADER_BYTES + P.PAT_STEP_BYTES * h.n:
-            raise _DevErr(P.Status.E_BAD_LEN, 0, f"{len(d)} bytes for {h.n} steps")
-        if h.commit > 1:
-            raise _DevErr(E, 9, "commit 0 / 1")
-        if h.start > 1 or h.start and (h.mode == P.PAT_OFF or h.start_source == P.PAT_START_TRIGGER):
-            raise _DevErr(E, 10, "start 0 / 1, not with mode 0 or the engine as the only start source")
-        if d[11]:
-            raise _DevErr(E, 11, "byte 11")
-        steps = []
-        for i in range(h.n):
-            o = P.PAT_HEADER_BYTES + P.PAT_STEP_BYTES * i
-            s = P.PatternStep.unpack(d[o:o + P.PAT_STEP_BYTES])
-            if s.flags & ~(P.PAT_STEP_LEVEL | P.PAT_STEP_MARK):
-                raise _DevErr(E, o, f"step {i} flags")
-            if d[o + 1]:
-                raise _DevErr(E, o + 1, f"step {i} byte 1")
-            if s.duration < P.PAT_MIN_CLOCKS:
-                raise _DevErr(E, o + 4, f"step {i}: {s.duration} clocks < {P.PAT_MIN_CLOCKS}")
-            steps.append(s)
-        driven = h.mode != P.PAT_OFF and not h.flags & P.PAT_F_HIZ
-        if driven and (self.settings.trigger.source == P.TRIG_SOURCE_EXT or
-                       self.ptrig_armed and self.ptrig.source == P.TRIG_SOURCE_EXT):
-            raise _DevErr(P.Status.E_STATE, 0, "EXT trigger uses the pin")
-        gap = (h.gap_ns + 2) // 5
-        g = self.settings.gen
-        old = g.pattern if g.pattern_active else None
-        running_old = old is not None and self.pat_start_dev is not None and \
-            old.state_at(int((self.now() - self.pat_start_dev) * P.PAT_CLOCK_HZ))[0]
-        pat = PatternState(h.mode, h.flags, h.repeat or 65536, gap,
-                             tuple((s.level, int(s.mark), s.d16) for s in steps))
-        self.settings.gen = replace(g, source=P.GEN_SOURCE_PATTERN, pattern=pat, enable=int(driven))
-        if h.commit and running_old:
-            self.pat_pending_until = self.now() + 2 * max(dd for _, _, dd in old.steps) / 65536 * 5e-9
-        if h.mode == P.PAT_OFF:
-            self.pat_start_dev = None
-        armed = self.acq_state == P.AcqState.ARMED
-        if h.start or h.mode == P.PAT_CONTINUOUS:  # mode 3 starts at the write of 0x6D
-            if self.pat_start_dev is None or not running_old:
-                # an ARM still waiting out the relay settle holds the main loop: the start comes after it
-                self.pat_start_dev = max(self.now(), self.arm_time if armed else 0.0)
-                self.pat_marker_seen = False
-        st0, bursts, st3 = self.pattern_status()
-        if (h.start or h.mode == P.PAT_CONTINUOUS) and armed and self._pending_capture is not None and \
-                "run" not in self._pending_capture and not self._pending_capture.get("computing"):
-            # the host armed first and starts the pattern now: the pending capture sees it from this moment
-            self._pending_capture = self.simulate_capture(self.settings, dev_t0=self.arm_time)
-        hdr = replace(h, gap_ns=gap * 5)
-        return self._ok(req, P.PatternResp(hdr, st0, st3, bursts, P.pattern_burst16(steps), steps).pack())
-
-    def _check_trigger2(self, r: P.Trigger2, engine: bool) -> None:
-        """SET_TRIGGER2's checks in byte-offset order (E_BAD_ARG detail = the offset); ``engine``: the pattern trigger
-        engine's (SET_PATTERN_TRIGGER: source 0..2 only, no hold-off)."""
+    def _check_trigger2(self, r: P.Trigger2) -> None:
+        """SET_TRIGGER2's checks in byte-offset order (E_BAD_ARG detail = the offset)."""
         E = P.Status.E_BAD_ARG
         if r.type in (P.TRIG_RUNT, P.TRIG_WINDOW):
             raise _DevErr(E, P.TRIG2_D_TYPE, "runt / window: FPGA 0x153E")
@@ -3968,11 +3640,8 @@ class Device:
             raise _DevErr(E, P.TRIG2_D_FLAGS, "flags")
         if r.flags & P.TRIG2_F_LONGER and r.type != P.TRIG_PULSE_WIDTH:
             raise _DevErr(E, P.TRIG2_D_FLAGS, "LONGER is for the pulse width type")
-        top = P.TRIG_SOURCE_PATTERN if not engine and self.caps & P.Caps.PATTERN_GEN else P.TRIG_SOURCE_EXT
-        if r.source > top:
+        if r.source > P.TRIG_SOURCE_EXT:
             raise _DevErr(E, P.TRIG2_D_SOURCE, f"source {r.source}")
-        if r.source == P.TRIG_SOURCE_PATTERN and r.type != P.TRIG_EDGE:
-            raise _DevErr(E, P.TRIG2_D_SOURCE, "the pattern marker is an edge source (type 0)")
         if r.type in (P.TRIG_PULSE_WIDTH, P.TRIG_TIMEOUT) and not 1 <= r.n <= P.TRIG2_MAX_N:
             raise _DevErr(E, P.TRIG2_D_N, f"N {r.n} not in 1..{P.TRIG2_MAX_N}")
         if r.type == P.TRIG_NTH_EDGE and not 1 <= r.n <= P.TRIG2_MAX_NTH:
@@ -3987,36 +3656,6 @@ class Device:
             raise _DevErr(E, P.TRIG2_D_LEVEL, f"level {r.level} > 255")
         if r.level2:
             raise _DevErr(E, P.TRIG2_D_LEVEL2, "level2: FPGA 0x153E")
-        if engine and r.holdoff:
-            raise _DevErr(E, 16, "the pattern trigger engine has no hold-off")
-        if engine and r.reserved:
-            raise _DevErr(E, 20, "reserved")
-
-    def _cmd_set_pattern_trigger(self, req: P.Frame) -> P.Frame:
-        """SET_PATTERN_TRIGGER 0x021A: the engine's configuration (the own engine: GET 0x42 bit 7 = 1)."""
-        r = P.PatternTriggerReq.unpack(req.payload)
-        self._check_trigger2(r.trigger2, engine=True)
-        if r.armed > 1:
-            raise _DevErr(P.Status.E_BAD_ARG, 24, "armed 0 / 1")
-        if r.rearm > 1:
-            raise _DevErr(P.Status.E_BAD_ARG, 25, "rearm 0 / 1")
-        g = self.settings.gen
-        if r.armed and r.trigger2.source == P.TRIG_SOURCE_EXT and g.enable and g.source == P.GEN_SOURCE_PATTERN:
-            raise _DevErr(P.Status.E_STATE, 0, "EXT trigger uses the pin")
-        self.ptrig = replace(r.trigger2)
-        self.ptrig_armed, self.ptrig_rearm = r.armed, r.rearm
-        if r.armed:
-            self.ptrig_event = False  # writing armed = 1 restarts the engine
-        return self._ok(req, self._ptrig_resp().pack())
-
-    def _ptrig_resp(self) -> P.PatternTriggerResp:
-        t = self.ptrig
-        st = P.PTRIG_ST_OWN | (P.PTRIG_ST_EVENT if self.ptrig_event else 0) | (t.type & 3) | \
-            (P.STATUS34_COUNTING if self.ptrig_armed and t.type != P.TRIG_EDGE else 0) | \
-            (P.STATUS34_LONGER if t.flags & P.TRIG2_F_LONGER else 0) | \
-            (P.STATUS34_EXT if t.source == P.TRIG_SOURCE_EXT else 0)
-        left = max(0, (t.n & 0xFFFF) - 1) if t.type == P.TRIG_NTH_EDGE and self.ptrig_armed else 0
-        return P.PatternTriggerResp(replace(t), self.ptrig_armed, self.ptrig_rearm, st, left)
 
     def _cal_resp(self, ch: int) -> P.CalResp:
         """GET_CAL (1.12, 256 bytes). With cfg.cal_v3 the stored block is what a base calibration of this model

@@ -859,14 +859,14 @@ class Scope:
     # --- generator ---------------------------------------------------------------------------------------
 
     def get_gen(self) -> P.Gen:
-        """GET_GEN: the generator (40 bytes since 1.27: P16 / H16, the pattern status with the pending bit)."""
+        """GET_GEN: the generator (40 bytes since 1.27: P16 / H16, the square's status with the pending bit)."""
         return P.Gen.unpack(self._req(P.Cmd.GET_GEN))
 
     def set_gen(self, *, enable: bool | None = None, freq_hz: float | None = None,
                 duty: float | None = None, p16: int | None = None, h16: int | None = None) -> P.Gen:
         """SET_GEN. ``freq_hz`` (sent in mHz) / ``duty`` (a fraction 0..1, sent in basis points), or the raw modes of
         protocol 1.27 (FPGA 0x153D): ``p16`` the period and ``h16`` the high part in 1/65536 of a 5 ns clock
-        (freq_mode / duty_mode 1). The generator is a two-step pattern: the firmware writes both entries and a commit,
+        (freq_mode / duty_mode 1). The generator is a two-step square: the firmware writes both entries and a commit,
         so a change while it runs is glitch-free and phase-continuous; it is taken at the next step boundary (GEN
         ``pending`` until then). The average frequency is exact to 2^-16 / P; every edge lies on the 5 ns grid."""
         r = P.SetGenReq()
@@ -892,14 +892,15 @@ class Scope:
         return P.Gen.unpack(self._req(P.Cmd.SET_GEN, r.pack()))
 
     def restore_gen(self, saved: P.Gen) -> str | None:
-        """Give back a generator state read with get_gen: the square (P16 / H16, enable) as it was. A SET_PATTERN
-        pattern cannot be read back (GET_GEN has no table): the pin is then switched off and a note returned."""
-        if saved.source == P.GEN_SOURCE_SQUARE and saved.p16:
+        """Give back a generator state read with get_gen: the square (P16 / H16, enable) as it was. A static level
+        set on the scope (0 Hz, a duty of 0 or 100 %: GEN P16 = 0) has no SET_GEN form: the pin is then switched off
+        and a note returned."""
+        if saved.p16:
             self.set_gen(enable=bool(saved.enable), p16=saved.p16, h16=saved.h16)
             return None
         self.set_gen(enable=False)
-        return ("a scope_pattern pattern drove the pin before; it was replaced and the pin is off now (run "
-                "scope_pattern again to restore it)")
+        return ("the generator held a static level before (0 Hz, or a duty of 0 or 100 % set on the scope), which "
+                "SET_GEN cannot set; the pin is off now")
 
     def wait_gen_taken(self, timeout_s: float = 1.0, sleep: Callable[[float], None] = time.sleep,
                        clock: Callable[[], float] = time.monotonic) -> tuple[P.Gen, int]:
@@ -963,52 +964,6 @@ class Scope:
                 "achieved_steps_per_s": (sent - 1) / elapsed if sent > 1 and elapsed > 0 else None,
                 "late_steps": late, "worst_late_s": worst_late, "pending_polls": polls,
                 "f_first": fl[0], "f_last": fl[sent - 1] if sent else None}
-
-    # --- pattern generator and its trigger engine (protocol 1.27, FPGA 0x153D) ----------------------------
-
-    def set_pattern(self, steps: Iterable[P.PatternStep], *, mode: int | str = P.PAT_CONTINUOUS, repeat: int = 1,
-                    gap_s: float = 0.0, idle_level: int = 0, marker_trigger: bool = False,
-                    start_source: int | str = P.PAT_START_MCU, start: bool = False, commit: bool = True,
-                    hiz: bool = False) -> P.PatternResp:
-        """SET_PATTERN (cap PATTERN_GEN): up to 8 steps (P.PatternStep, ``PatternStep.from_seconds``), ``mode``
-        ('off', 'single', 'repeat' R = ``repeat`` bursts with ``gap_s`` between them, 'continuous'), the idle level,
-        ``marker_trigger`` (the marked steps' starts are the capture's trigger source 3), ``start_source`` ('mcu',
-        'trigger' = the pattern trigger engine, 'both'), ``start`` (a burst now), ``hiz`` (run without driving the pin:
-        the post stays the EXT input). The pin is the calibration post (logic level, about -1.23 / +1.87 V against the
-        probe ground). The generator's square is replaced; SET_GEN programs it again."""
-        st = list(steps)
-        if not 1 <= len(st) <= P.PAT_MAX_STEPS:
-            raise ValueError(f"a pattern has 1..{P.PAT_MAX_STEPS} steps, not {len(st)}")
-        m = P.PAT_MODES.index(mode) if isinstance(mode, str) else int(mode)
-        src = P.PAT_START_NAMES.index(start_source) if isinstance(start_source, str) else int(start_source)
-        flags = (P.PAT_F_IDLE_HIGH if idle_level else 0) | (P.PAT_F_MARKER_TRIGGER if marker_trigger else 0) | \
-            (P.PAT_F_HIZ if hiz else 0) | (src << P.PAT_START_SHIFT)
-        gap_ns = int(round(gap_s * 1e9))
-        if not 0 <= gap_ns <= 0xFFFFFFFF:
-            raise ValueError(f"gap {gap_s:g} s outside 0 .. 4.29 s")
-        if not 1 <= repeat <= 65536:
-            raise ValueError(f"repeat {repeat} outside 1 .. 65536")
-        req = P.SetPatternReq(P.PatternHeader(m, flags, repeat & 0xFFFF, gap_ns, len(st), int(commit), int(start)), st)
-        return P.PatternResp.unpack(self._req(P.Cmd.SET_PATTERN, req.pack()))
-
-    def set_pattern_trigger(self, *, type: int | str = P.TRIG_EDGE, polarity: int | str = 0, longer: bool = False,
-                            source: int | str = 0, n: int = 0, h: int = 0, level: int = 128, armed: bool = True,
-                            rearm: bool = True) -> P.PatternTriggerResp:
-        """SET_PATTERN_TRIGGER (cap PATTERN_TRIGGER): the pattern generator's own trigger engine, with the capture
-        trigger's vocabulary (P.Trigger2 fields; types edge / pulse width / Nth edge / timeout, source CH1 / CH2 /
-        EXT, N / H in samples of the engine's stream, a raw 8-bit level) plus ``armed`` and ``rearm`` (re-arm after
-        each burst; False = one shot). A burst starts on its event when SET_PATTERN's start source is 'trigger' or
-        'both'."""
-        t = P.TRIG_TYPE_NAMES.index(type) if isinstance(type, str) else int(type)
-        if isinstance(polarity, str):
-            names = P.TRIG_POLARITY_NAMES.get(t, ("0", "1"))
-            if polarity not in names:
-                raise ValueError(f"polarity {polarity!r} is not one of {names} for the {P.TRIG_TYPE_NAMES[t]} type")
-            polarity = names.index(polarity)
-        src = P.TRIG_SOURCE_NAMES.index(source) if isinstance(source, str) else int(source)
-        t2 = P.Trigger2(t, int(polarity), P.TRIG2_F_LONGER if longer else 0, src, int(n), int(h), int(level), 0, 0, 0)
-        req = P.PatternTriggerReq(t2, int(armed), int(rearm))
-        return P.PatternTriggerResp.unpack(self._req(P.Cmd.SET_PATTERN_TRIGGER, req.pack()))
 
     # --- streaming logger (protocol 1.27, FPGA 0x153D) ----------------------------------------------------
 
