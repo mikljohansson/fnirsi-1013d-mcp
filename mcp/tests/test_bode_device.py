@@ -4,6 +4,7 @@ the thru, STOP / abort / a host ARM (reason 5), the view's restore, and scope_bo
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import struct
@@ -44,9 +45,16 @@ def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):
     return srv
 
 
+def _gen_config(g: P.Gen) -> P.Gen:
+    """GET_GEN without the live 0x39 bits (the step, the gap, a commit still pending, the bursts done, the marker
+    seen): they move with the wall clock, so a before / after snapshot compares the configuration only."""
+    return dataclasses.replace(g, pat_status=g.pat_status & P.PAT_ST_RUNNING, bursts=0,
+                               pat_status3=g.pat_status3 & P.PAT_ST3_ACTIVE)
+
+
 def _state(s):
     return (s.get_channel(0, cached=False), s.get_channel(1, cached=False), s.get_timebase(cached=False),
-            s.get_trigger(cached=False), s.get_gen(), s.get_decim().filter, s.get_decim().flags)
+            s.get_trigger(cached=False), _gen_config(s.get_gen()), s.get_decim().filter, s.get_decim().flags)
 
 
 def _wait_done(s, timeout=60.0):

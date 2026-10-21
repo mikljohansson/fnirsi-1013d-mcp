@@ -1184,7 +1184,7 @@ class Device:
         self.ptrig_rearm = 0
         self.ptrig_event = False
         #: the streaming logger (dict while a log exists since the last LOG_START; see _cmd_log_start) and the test
-        #: hooks: ``log_lap_next`` (the next chunk follows an FPGA lap of that many words)
+        #: hooks: ``log_lap_next`` (the next chunk with unread words follows an FPGA lap of up to that many)
         self.logger: dict | None = None
         self.log_lap_next = 0
         self.cap_boot()
@@ -3823,7 +3823,9 @@ class Device:
             # the host's reads stall (cfg.log_stall_s): nothing is answered, the DDR ring keeps filling
             return self._ok(req, P.LogChunkHeader(lg["seq"], lg["read_word"] & 0xFFFFFFFF, 0, P.LOG_CHUNK_RUNNING,
                                                   lg["format"]).pack())
-        if self.log_lap_next:  # test hook: the MCU fell behind the FPGA ring
+        if self.log_lap_next and w > lg["read_word"]:
+            # test hook: the MCU fell behind the FPGA ring (armed until a word is unread: a read in the start's
+            # clock tick would otherwise flag a lap of no words)
             lg["read_word"] = min(w, lg["read_word"] + self.log_lap_next)
             self.log_lap_next = 0
             lg["gaps"] += 1
