@@ -1479,6 +1479,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   real mismatch**: the screen "FPGA bitstream: This firmware needs FPGA bitstream 0x153C. This scope has 0x153B." with
   Diagnostics / Settings / USB drive; GET_INFO fw_fpga 0x153C, fpga_flags 1; ARM -> E_UNSUPPORTED detail 1 "FPGA bitstream
   mismatch: this firmware needs 0x153C". Next: the owner flashes 0x153C.
-- 2026-10-21 17:4x (owner): on the mismatch notice (fw 0.2.104 on 0x153B), Diagnostics and then back hangs the UI (the screen
+- 2026-10-21 17:33 (owner): on the mismatch notice (fw 0.2.104 on 0x153B), Diagnostics and then back hangs the UI (the screen
   stops responding); the owner restarted the scope, which boots fw 0.2.102 from the card again (the FEL load was RAM only).
   Bug handed to fw-diag; the notice itself looks good (owner).
