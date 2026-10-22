@@ -1624,3 +1624,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   as `backups/fpga-flash_pre-0x153D-gate_20261022-1700.bin`; wrote `backups/al3_d3gate_0x153D_fd0be7a2_padded.bin` (69
   sectors, 1104 pages), verified aa252fb7..; independent double read-back aa252fb7... Next: FEL fw 0.2.105 8c70c2fc (main
   f1f3e15), Calibrate with the capture-training readout, the A/B.
+- 2026-10-22 17:03-17:21 (lead, owner present): FEL fw 0.2.105 8c70c2fc (f1f3e15) on the new 0x153D: `#VER` proto=1.28,
+  fpga=0x153d; the single-class card block loaded with gain_flags bit 1 (Calibrate asked), stages 0x08E3, training null.
+  SD 700-710 backed up (double read) as `backups/sd_700-710_20261022-pre-gate.bin` (e698f7cc..). Owner ran the wizard with the
+  inputs open and saved once, then restarted it (reported at 17:21, at the completed zero step). Capture training (q per stage 2..5 /
+  0x36 outliers): CH1 A 1461590 1461590 1461706 1462218 / 0 0 34 0; CH1 B 8958 8972 8992 9024 / 48 0 0 0; CH2 A 2070230
+  2070188 2069209 2069803 / 0 0 1296 0; CH2 B 8082 8113 8179 8263 / 0 0 0 0; result CH1 A3 B4, CH2 A3 B3 (0x06E3). The A
+  cores' q is ~160x the B cores' and flat across stages: the metric does not discriminate on A (suspected firmware read
+  bug; fw-capmetric2 dispatched 17:21). The picks equal the outlier rule's, so the training result is usable.

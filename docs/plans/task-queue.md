@@ -354,6 +354,11 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   `capture_training`; 543 tests). Bench steps `firmware/AGENTS.md` section 92; the open question is whether CH1 A5 and
   CH2 A4 score more than 25 % above stage 3 on the quiet parked input. Pre-existing gcc10 warnings in pc_seq_hw.c:180
   (incompatible pointer type into pc_seq_ui_plan / pc_seq_ui_plan_mcu, since 09dac96): queued, low priority.
+  fw-warn (Sonnet explicitly, dispatched 16:59 on the owner's request, merged before 17:21): run_us uint32_t vs uint32 (same
+  width, no behaviour change) plus the legacy Atlan4 warnings; gcc10 0 warnings.
+  fw-capmetric2 (Opus explicitly, dispatched 17:21, branch fw-capmetric2): the A cores' training residual is ~160x the B
+  cores' and flat across stages on the bench (hardware-status 17:03-17:21): find and fix the A-core data read; review
+  why CH2 B picked 3 over 2.
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
