@@ -188,6 +188,14 @@ sections 74 to 79.
   and the DEFAULT button. (178af30) Saved settings that still hold the old defaults (Scope word 207 CIC2, Spectrum word
   212 CIC2+FIR) move to the new defaults on load, so an existing unit's box shows one of the three modes too; any other
   saved mode loads as it is and shows by name (`ui_filter_migrate`).
+- **Capture stages: no power-on tie-break, a stronger training, a runtime guard** (fw-capstage, firmware/AGENTS.md
+  section 86; bench 2026-10-22 on 0x153D: the quiet training found CH1 A 2..5 clean and kept the power-on 4, which
+  garbled a real signal and made the counter read 2 kHz on 1 kHz). Of two equal centres the training now measures both
+  again (16 captures each at codes 126..130) and takes the one that stays clean, the lower when both do; the band runs
+  every 2 codes with 4 captures (about 1.2 s more for the wizard). The trained clean stages are stored after the
+  stored value (sector 708 bytes 504..511). A core flagged 3 times in a minute moves once per boot to another stage of
+  its trained set, at once and stored; event 23 a bit 5, GET_HEALTH 106 bit 6, Diagnostics "(trained, a flagged core
+  moved)". (76fbaa2)
 
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
