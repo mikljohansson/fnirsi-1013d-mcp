@@ -1521,3 +1521,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   middle row (owner: give the Sample Rate and Time per Division grids five columns instead of four). Cards with Filter Off:
   Freq jumps between 1 and 3 kHz (the counter fault found at 17:53), duty varies by less than 0.5 %; with boxcar Freq is
   steady at 1.000 kHz and duty reads 50.01 %. The 18:00 COM10 loss was the owner switching the scope off (no fault).
+- 2026-10-22 08:29-08:31: fw 0.2.105 (backups/fw-0.2.105_e184e47a.bin) FEL-loaded on 0x153C: the mismatch notice "This firmware
+  needs FPGA bitstream 0x153D. This scope has 0x153C."; GET_INFO fw_fpga 0x153D flags 1, ARM E_UNSUPPORTED detail 1. **The
+  notice's buttons work** (owner: Diagnostics / Back, Settings, USB drive, the tabs; the 0.2.104 hang is fixed). Owner UX
+  request: the USB drive screen gets a Back button in the top-right header like the other screens, and loses its Exit button
+  at the lower right (queued).
+- 2026-10-22 08:32-08:34: **FPGA flash 0x153C -> 0x153D** (owner present, Sipeed FT2232D on J2, scope on battery, USB
+  unplugged). probe ef 40 14. Pre-write double read backups/fpga-flash_pre-0x153D_20261022-0832.bin = 07393bf5.. (the 0x153C
+  padded image, as required). write -i backups/dist-0x153D/fnirsi_1013d-fpga-al3-0x153d-flash1m.bin --yes --confirm-id ef4014:
+  tool backup backups/20261022-083310-pre-write.bin = 07393bf5.., 69 sectors erased, 1104 pages programmed, verified read-back
+  04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7 (the 0x153D padded image). Rollback = the 0x153C image.

@@ -6,6 +6,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [ ] **USB drive screen: Back in the header** (owner 2026-10-22 08:31): a Back button in the top-right header like the other
+  screens, the Exit button at the lower right removed. Small; no mockup round.
 - [ ] **UI tweaks from the 0x153C bench** (owner 2026-10-21 18:38): the trigger menu's - and + buttons with twice the font
   size; the ACQ menu's Sample Rate and Time per Division grids with five columns instead of four (the four boxes of the middle
   row looked odd against them). Bundled with the Filter row item below into fw-acqui (no mockup round).
