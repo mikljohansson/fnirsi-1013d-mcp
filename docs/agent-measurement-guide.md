@@ -369,7 +369,7 @@ How to show them:
 | Symptom | Meaning / fix |
 |---|---|
 | "modal screen", E_BUSY detail 0 | firmware before 0.2.78 with a menu open on the scope: ask the person to close it, retry |
-| E_BUSY "calibration measurement running" / "file save in progress" / "USB drive mode" | the scope is in a step that must finish (0.2.78+): wait and retry, or ask the person (USB drive: Exit) |
+| E_BUSY "calibration measurement running" / "file save in progress" / "USB drive mode" | the scope is in a step that must finish (0.2.78+): wait and retry, or ask the person (USB drive: Back) |
 | the scope restarted, the link dropped, settings look lost, or "is the right firmware on it?" | fw 0.2.52+: `scope_health` (USB state, power-on number, how the previous power-on ended, unsaved settings, a stored restart record with the exception type) and `scope_sd_info` (`card_image`: what the card boots and whether that is the running build, e.g. after a FEL load). For a fault report ask for `scope_save_report` and tell the person the file name on the card; quote `in_words` rather than raw registers |
 | the two ADC cores drift apart (an fs/2 step in 8-bit captures) hours after calibrating | fw 0.2.50+ tracks it: `scope_calibration_info` `tracking` says whether the A - B tracker has run (it learns from 200 MSa/s records with the filter off and applies at every rate); `calibration_provenance` says when and by which build the scope was calibrated |
 | "still starting" | the scope just booted (about 5 s after a FEL load); the server waits up to 10 s |

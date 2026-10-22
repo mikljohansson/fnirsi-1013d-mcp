@@ -408,8 +408,9 @@ defaults until you calibrate again.
 ## USB drive
 
 Makes the SD card a USB drive on the PC. The screen says "The SD card is now a USB drive on the PC." PC control (MCP)
-is disconnected while it shows. Eject the drive on the PC before you tap Exit. Exit with the drive still mounted shows
-"Not allowed!".
+is disconnected while it shows. Eject the drive on the PC before you tap Back, at the top right as on the other
+screens. Back with the drive still mounted shows "Not allowed!". Back returns to where you opened it: the menu, or the
+FPGA mismatch notice.
 
 ## About the screenshots
 

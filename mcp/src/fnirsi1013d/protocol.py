@@ -441,7 +441,8 @@ def busy_hint(detail: int, text: str = "") -> str:
         BusyDetail.CAL: "the scope is measuring for its calibration; wait until the step ends (the person can press "
                         "Cancel on the scope), then retry",
         BusyDetail.SAVE: "the scope is writing a file to its SD card; retry in a moment",
-        BusyDetail.USB_DRIVE: "the scope is in USB drive mode; the person leaves it with Exit on the scope",
+        BusyDetail.USB_DRIVE: "the scope is in USB drive mode; the person leaves it with Back on the scope (Exit on "
+                              "firmware before 0.2.105)",
     }.get(detail, "a menu or dialog is open on the scope (firmware before 0.2.78, protocol < 1.23): ask the person "
                   "to close it, then retry")
 

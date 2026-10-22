@@ -120,6 +120,10 @@ uint32 ui_set_minus_x(int row);
 //A step row answers only on its two buttons; every hit area is the drawn rectangle.
 int ui_set_hit(uint32 x, uint32 y, int *part);
 
+//1 when a touch is on the header's Back button (UI_SET_BACK_*): the full-screen pages that draw their header with
+//ui_page_header (Settings, its time page, USB drive) hit-test Back with this
+int ui_page_back_hit(uint32 x, uint32 y);
+
 //What the screen shows, gathered by the caller from the firmware's variables
 typedef struct
 {
@@ -243,6 +247,14 @@ extern const ui_dlg_text ui_dlg_delete;      //file browsers and the waveform vi
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //On the device (ui_settings_ui.c)
+
+//A full-screen page's header (fw 0.2.63 look, shared by Settings, its time page and USB drive since fw 0.2.105): the
+//whole screen cleared black, the title in 24 px at (12, 14), an optional 13 px subtitle at x 130, Back at UI_SET_BACK_*
+//and the grey rule under the 52 px band. Diagnostics draws the same header through its page model (ui_diag.c).
+void ui_page_header(const char *title, const char *subtitle);
+
+//The header's Back button alone, drawn pressed (light, black text) or not
+void ui_page_back(int pressed);
 
 //The Settings screen, modal until Back; leaves the screen as it found it (rebuilt after Restore default settings)
 void ui_settings_run(void);

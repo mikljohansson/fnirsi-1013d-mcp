@@ -95,6 +95,11 @@ static int inside(uint32 x, uint32 y, uint32 x0, uint32 y0, uint32 w, uint32 h)
   return (x >= x0) && (x < x0 + w) && (y >= y0) && (y < y0 + h);
 }
 
+int ui_page_back_hit(uint32 x, uint32 y)
+{
+  return inside(x, y, UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H);
+}
+
 uint32 ui_set_minus_x(int row)
 {
   return ui_set_rows[row].x + UI_SET_ROW_W - 2 * UI_SET_STEP_W - UI_SET_STEP_GAP - 2;
@@ -108,7 +113,7 @@ int ui_set_hit(uint32 x, uint32 y, int *part)
 
   *part = UI_SET_P_ROW;
 
-  if(inside(x, y, UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H))
+  if(ui_page_back_hit(x, y))
     return UI_SET_BACK;
 
   if(inside(x, y, UI_SET_RESTORE_X, UI_SET_RESTORE_Y, UI_SET_RESTORE_W, UI_SET_RESTORE_H))

@@ -164,6 +164,15 @@ sections 74 to 79.
   capture (fpga-d3), so a garbled capture at a divided rate or with a filter is re-armed like a 200 MSa/s one (UI and
   host ARM); the data check stays at divider 0.
 
+**USB drive: Back in the header (fw-usbback).**
+
+- **USB drive screen: Back at the top right, no Exit button** (owner, 2026-10-22): the screen has the Settings and
+  Diagnostics header (title left, Back at the top right, the grey rule) and its Exit button at the lower right is gone.
+  Back does what Exit did: "Not allowed!" while the PC still holds the drive, else the card leaves the PC, the USB
+  serial port (MCP) comes back and the menu or the FPGA mismatch notice returns. The screen's last line reads "Eject the
+  drive on the PC before tapping Back." (c2694f3) The mcp host's E_BUSY "USB drive mode" hint names Back (Exit on
+  firmware before 0.2.105).
+
 **UI tweaks from the 0x153C bench (fw-acqui).**
 
 - **Trigger menu: larger - and + keys**: the Width / N / Idle keys draw their glyphs in the 24 px font, about twice the

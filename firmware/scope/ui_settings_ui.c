@@ -115,7 +115,12 @@ static void gather(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //The page
 
-static void draw_header(const char *title, const char *subtitle)
+void ui_page_back(int pressed)
+{
+  button(UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H, "Back", C_BTN_FILL, C_BTN_EDGE, pressed);
+}
+
+void ui_page_header(const char *title, const char *subtitle)
 {
   display_set_fg_color(BLACK_COLOR);
   display_fill_rect(0, 0, 800, 480);
@@ -125,7 +130,7 @@ static void draw_header(const char *title, const char *subtitle)
   if(subtitle)
     text_at(130, 20, C_TEXT_DIM, &font_2, subtitle);
 
-  button(UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H, "Back", C_BTN_FILL, C_BTN_EDGE, 0);
+  ui_page_back(0);
 
   display_set_fg_color(C_ROW_EDGE);
   display_draw_horz_line(UI_SET_HDR_H - 1, 0, 799);
@@ -159,7 +164,7 @@ static void draw_page(void)
 {
   int i;
 
-  draw_header("Settings", 0);
+  ui_page_header("Settings", 0);
 
   for(i=0;i<UI_SET_GROUPS;i++)
     text_at(ui_set_groups[i].x + 2, ui_set_groups[i].y, C_TEXT_DIM, &font_2, ui_set_groups[i].title);
@@ -214,7 +219,7 @@ static void draw_time_page(void)
   int    f;
   uint32 y;
 
-  draw_header("Time and date", "Each change is written to the clock module at once.");
+  ui_page_header("Time and date", "Each change is written to the clock module at once.");
 
   for(f=0;f<UI_TIME_FIELDS;f++)
   {
@@ -245,10 +250,9 @@ static void run_time_page(void)
     if(!havetouch)
       continue;
 
-    if((xtouch >= UI_SET_BACK_X) && (xtouch < UI_SET_BACK_X + UI_SET_BACK_W) &&
-       (ytouch >= UI_SET_BACK_Y) && (ytouch < UI_SET_BACK_Y + UI_SET_BACK_H))
+    if(ui_page_back_hit(xtouch, ytouch))
     {
-      button(UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H, "Back", C_BTN_FILL, C_BTN_EDGE, 1);
+      ui_page_back(1);
       tp_i2c_wait_for_touch_release();
       return;
     }
@@ -416,7 +420,7 @@ void ui_settings_run(void)
 
     if(t == UI_SET_BACK)
     {
-      button(UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H, "Back", C_BTN_FILL, C_BTN_EDGE, 1);
+      ui_page_back(1);
       tp_i2c_wait_for_touch_release();
       break;
     }
