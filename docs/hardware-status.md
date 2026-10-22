@@ -1559,3 +1559,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   **Counter on a slow RC edge**: with CH1 on the ladder node (1 kHz, min / max 88 / 183, level 145) the Freq card read 15.23 kHz
   and GET_COUNTER 9.5..13.7 kHz at the default hysteresis 6 codes (0x36 outliers 0, so not the capture stages); hysteresis 16:
   999.999..1000.001 Hz, 32: 999.995..1000.002 Hz. The default hysteresis is too small for noisy slow edges (fw-hyst).
+- 2026-10-22 09:05: device Bode sweep (100 Hz .. 1 MHz, 30 points, CH1 post, CH2 the ladder's second node, ladder fed from
+  the post) refused at once: "ADC readout fault: the capture self-check flagged a core". The earlier CH1 A4 flags set the
+  REPEAT state (3 flags within a minute), which holds until a training is saved; the hand-written stage 3 does not clear it.
+  The Bode sweep and the soak wait for fw-capstage and a wizard run with it.
