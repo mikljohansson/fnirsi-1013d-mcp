@@ -6494,3 +6494,69 @@ docs commit with this section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.
 **Open**
 - The mockup artboard UsbDrive (docs/mockups/gen_ux/boards.py) still draws the Exit button and "tap Exit"; regenerate it
   with the header Back when the mockups are next refreshed.
+
+## 86. fw-stoprate: ACQ rate taps in STOP, the setting for the next RUN (fw 0.2.105, protocol unchanged)
+
+Branch `fw-stoprate` from main a1217d2. Brief: the owner, 2026-10-22 08:56 (queue item "ACQ rate changes in STOP"): the
+Sample Rate grid ignored taps in STOP ("rather unintuitive"); behave like bench scopes. Commit c4025cf (code, test), then
+the docs commit with this section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.**
+
+**What was built**
+- **Pending rate** (acq_view.c/h): `acq_view_rate_tap(r)` running or in Single (`acq_view_rate_free`, unchanged) sets
+  `scopesettings.samplerate` and returns ACQ_SET_RATE (the handler writes 0x0D and runs `acq_view_fit(1)`, as before);
+  stopped it stores r in a static `acq_rate_pending` (cleared when r is the record's rate) and returns 0: nothing
+  written. **`scopesettings.samplerate` stays the record's rate while stopped**, so every record path keeps the capture
+  geometry without change: `scope_display_trace_data` / `tbv_window` (xpps), the slider (menu.c `tbv_slider`), the
+  measurements and cursors (`freq_calc_data` / `time_calc_data[samplerate]`, fpga_control.c frequency maths), the
+  stopped zoom (`acq_view_zoom(dir, 0)`), the wave file header (`scope_prepare_setup_for_file`), GET_TIMEBASE, the
+  phosphor hash. Only the *setting* readers use `acq_view_rate_setting()`: the grid's green cell
+  (`scope_acquisition_speed_select`), the top bar's ACQ chip (`scope_acqusition_settings`) and the settings sector
+  (`scope_save_config_data`; the load's fit snaps the time/div if needed).
+- **Chip / record resolution**: the chip shows the setting (the pending rate), like a bench scope's horizontal readout
+  in STOP; the time/div text beside it stays the record's zoom. The record's rate stays in the trace, cursor and
+  measurement maths. Nothing on screen names the record's rate separately while one is pending (not asked; the
+  measurements are right either way).
+- **Time/div boxes while a rate is pending** (`acq_view_tb_ok`): white = viable for the record's rate (a tap zooms the
+  record, as before) **and** for the pending rate (RUN keeps it without a snap). Both are needed: a box only the new rate
+  allows would draw the frozen record outside what tb_view guarantees (a sliver, or under ten samples per division),
+  and a box only the record allows would snap at RUN. The plot's tap zoom still steps through the record's rate only;
+  a time/div it reaches that the new rate cannot show snaps at RUN with the notice.
+- **Arm** (scope_functions.c `scope_acquire_trace_data`, inside the UI arm's condition, before the conversion):
+  `acq_view_rate_arm()` moves the pending rate into `samplerate`; then `fpga_set_sample_rate`, `acq_view_fit(1)` and the
+  top bar redraw: the state is the one a tap while running leaves (test_acq_view checks it for every record rate,
+  time/div, pending rate and depth). Not in roll (a pending rate waits for the short time bases).
+- **A rate written wins**: `fpga_set_sample_rate` calls `acq_view_rate_drop()` (host SET_TIMEBASE, AUTO SET, settings
+  load / DEFAULT, Diagnostics and the wizard restoring the rate, a time/div box or zoom step that moves the rate in
+  Single), and so does the raw divider path of `pc_hal_timebase_write`. A pending rate is UI-only: the host neither sees
+  nor sets it; a host arm in STOP uses the FPGA's rate.
+- **Roll**: the grid's rule is now `acq_view_rate_live()` = not roll, for drawing and taps alike. Before, the grid was
+  grey in roll but the handler took taps while running (`runstate || triggermode == 1`).
+- **Point 4 of the brief (other ACQ settings locked in STOP)**: none. Roll, Average, Filter, Sample and Memory take taps
+  in STOP today and only change what the next arm uses. Not the same cause, so untouched, but note: Memory, and Filter /
+  Sample through `pc_dec_fit_memory`, change `fpgasettings.totalsamples` at once, which the frozen record's window maths
+  read (a depth tap in STOP re-windows the old record). Single after its shot counts as free (fw 0.2.76's rule), so a
+  rate tap there is applied at once and redraws the held shot at the new rate's geometry, as before.
+- Tests: test_acq_view `test_stopped_rate` (2.49 M checks in the file): no change to the record's rate / time/div /
+  trigger point on a stopped tap, the setting, the boxes as the intersection, the stopped zoom keeping the record's rate,
+  the arm equal to the running tap + fit, tap-back and last-tap-wins, drop, Single, roll, out of range. `make -s test`
+  and the vector check green; GCC 10 build without new warnings in the touched files.
+
+**Bench (coordinator, FEL load; nothing flashed)**. CH1 on the 1 kHz calibration square, Auto trigger, memory 3000.
+1. RUN at 1 MSa/s, 200 us/div, then STOP. ACQ menu: all 18 rates white. Tap 200 MSa/s: it turns green, 1 MSa/s back
+   to grey cell / white text; the chip reads 200MSa/s; the trace behind the menu unchanged. Time/div grid: all grey but
+   the green 200 us (no time/div is viable both for a 3000-sample record at 1 MSa/s and at 200 MSa/s). Close the menu:
+   trace, slider window, T CURSOR readouts and the Frequency / period cards unchanged (1000 Hz).
+2. Tap RUN: within one pass the chip shows 200MSa/s, the time/div snaps to 1us with "Time/div set to 1us for this rate",
+   the trace fills the screen.
+3. STOP at 200 MSa/s 1 us/div; ACQ: tap 50 MSa/s, then 200 MSa/s again: the pending choice goes (200 green). Tap
+   20 MSa/s, close, tap the plot's halves: the zoom steps only through what the 200 MSa/s record shows. AUTO SET (or
+   MCP `scope_set_timebase`): the pending rate is gone, the chip shows the rate written.
+4. STOP, pick a rate, power off through the menu, on: the picked rate is loaded (settings sector), time/div fitted.
+5. Single: after the shot, a rate tap applies at once (as before). Roll (Long mode): rates grey, taps do nothing.
+6. Spectrum view, STOP: tap a rate: the spectrum's axis stays the record's; RUN: the new rate's axis.
+Bug indicators: the stopped trace or the frequency card moving when a rate is tapped; a white time/div that changes
+nothing or draws a sliver; RUN arming at the old rate; a pending rate surviving AUTO SET or a host SET_TIMEBASE.
+
+**Open**
+- Memory / Filter / Sample taps in STOP re-window the frozen record (above); the same pending treatment for the depth
+  would close it if the owner wants it.

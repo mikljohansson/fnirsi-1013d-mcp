@@ -16,7 +16,9 @@ program on the PC has the scope's serial port open or has sent it a request in t
 - Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
   mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base), Filter and Sample. The menu also shows the pass time, how long one screen update takes.
   The Sample Rate and Time per Division choices stand in grids of five columns; a grey time/div cannot show the record
-  at this rate.
+  at this rate. While stopped, a tapped sample rate is the setting for the next RUN: it shows green and in the ACQ chip,
+  the record on screen keeps the rate it was taken at (its trace, cursors and measurements), and RUN starts at the new
+  rate. The white time/divs are then those both the record and the new rate can show. In roll mode the rates are grey.
 - **Filter** (the third box of the row): below 200 MSa/s the FPGA filters the 200 MSa/s samples down to the rate
   instead of skipping them, and the record holds 16-bit samples. A tap steps **Off** -> **Hi-Res** -> **Anti-alias**
   -> Off; green means a filter is on. **Hi-Res** (as Tektronix and Rigol call it; Keysight's High Resolution) is the

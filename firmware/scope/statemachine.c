@@ -2561,29 +2561,24 @@ void handle_acquisition_menu_touch(void)
         //is the drawn cell)
         if(ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_RATE_Y, UI_ACQ_RATE_N) >= 0)
         {
-          //Check if in run state. Changing this setting is only allowed when running or single mode trigger
-          if((scopesettings.runstate)||(scopesettings.triggermode == 1))
+          //fw-stoprate (owner 2026-10-22): every rate takes a tap except in roll. Running or in Single, at once (1.00o5:
+          //the FPGA's rate written, the display stays at the time/div; fw 0.2.64: unless the time/div no longer fits
+          //the record at this rate, then the nearest one that does, with a notice at the top of the plot, acq_view.c).
+          //Stopped, the rate is the pending setting: the record on screen keeps the rate it was captured at and the
+          //next arm after RUN takes the new one the same way (acq_view_rate_arm in scope_acquire_trace_data)
+          i = ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_RATE_Y, UI_ACQ_RATE_N);
+
+          if(acq_view_rate_live())
           {
-            i = ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_RATE_Y, UI_ACQ_RATE_N);
+            if(acq_view_rate_tap(i) == ACQ_SET_RATE)
+            {
+              fpga_set_sample_rate(i);
+              acq_view_fit(1);
+            }
 
-            //Set the new speed
-            scopesettings.samplerate = i;
-
-            //Set the FPGA sample rate setting without changing the current time per div setting
-            //This way the sampling is actually done with the set speed, but the display stays at the set time per div
-            fpga_set_sample_rate(i);
-
-            //fw 0.2.64: unless the time/div no longer fits the record at this rate: then the nearest one that does,
-            //with a notice at the top of the plot (acq_view.c)
-            acq_view_fit(1);
-
-            //Display the new setting
+            //The setting in the grid, the time/divs it leaves, the top bar's chip
             scope_acquisition_speed_select();
-
-            //Update the viable time per div settings
             scope_acquisition_timeperdiv_select();
-
-            //Update the top menu bar display
             scope_acqusition_settings(0);
           }
         }

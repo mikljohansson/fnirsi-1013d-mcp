@@ -54,6 +54,7 @@ static void state(uint32 total, int rate, int tpd, int running)
   scopesettings.runstate       = (uint8)running;
   scopesettings.triggermode    = 0;
   scopesettings.triggerhorizontalposition = 362;
+  acq_view_rate_drop();
   acq_view_clamp_pos();
   //No notice pending or showing from an earlier case: start it, then let its time run out
   (void)acq_view_notice();
@@ -317,6 +318,120 @@ static void test_stopped(void)
       }
 }
 
+//fw-stoprate (owner 2026-10-22): a rate tapped in STOP is the pending setting. The record's rate, time/div and
+//trigger point stay as they are (the frozen record keeps its geometry), the setting reads the tapped rate, the time/div
+//boxes are those both the record and the new rate can show, and the arm takes it with the running tap's rules (the
+//same state as tapping it while running, then acq_view_fit). Running or in Single a tap is applied at once; in roll
+//the grid takes none; a rate written (drop) wins.
+static void test_stopped_rate(void)
+{
+  uint32 k, total;
+  int    rate, tpd, r, t;
+
+  for(k = 0; k < sizeof(totals) / sizeof(totals[0]); k++)
+    for(total = totals[k], rate = 0; rate < ACQ_RATES; rate++)
+      for(tpd = ACQ_TB_FIRST; tpd <= ACQ_TB_LAST; tpd++)
+      {
+        if(!tbv_viable(sample_rate[rate], frequency_per_div[tpd], total))
+          continue;
+
+        for(r = 0; r < ACQ_RATES; r++)
+        {
+          int32 pos, run_tpd, run_pos, fitted;
+
+          //The reference: the same rate tapped while running
+          state(total, rate, tpd, 1);
+          T_EQ(acq_view_rate_tap(r), ACQ_SET_RATE);
+          T_EQ(scopesettings.samplerate, r);
+          fitted  = acq_view_fit(1);
+          run_tpd = scopesettings.timeperdiv;
+          run_pos = scopesettings.triggerhorizontalposition;
+
+          //Stopped: nothing to write, the record's geometry kept, the setting shows the tap
+          state(total, rate, tpd, 0);
+          pos = scopesettings.triggerhorizontalposition;
+          T_EQ(acq_view_rate_tap(r), 0);
+          T_EQ(scopesettings.samplerate, rate);
+          T_EQ(scopesettings.timeperdiv, tpd);
+          T_EQ(scopesettings.triggerhorizontalposition, pos);
+          T_EQ(acq_view_rate_setting(), r);
+
+          //The time/div boxes: what the record shows and the new rate keeps; a box zooms the record at its rate
+          for(t = ACQ_TB_FIRST; t <= ACQ_TB_LAST; t++)
+            T_EQ(acq_view_tb_ok(t), tbv_viable(sample_rate[rate], frequency_per_div[t], total) &&
+                                    tbv_viable(sample_rate[r], frequency_per_div[t], total));
+
+          //The stopped zoom still steps through the record's rate, the pending one kept
+          if(acq_view_zoom(-1, 0) || acq_view_zoom(1, 0))
+          {
+            T_EQ(scopesettings.samplerate, rate);
+            T_TRUE(tbv_viable(sample_rate[rate], frequency_per_div[scopesettings.timeperdiv], total));
+            T_EQ(acq_view_rate_setting(), r);
+          }
+
+          //RUN: the arm takes it as the running tap did (from the same time/div)
+          state(total, rate, tpd, 0);
+          (void)acq_view_rate_tap(r);
+          scopesettings.runstate = 1;
+          T_EQ(acq_view_rate_arm(), r != rate);
+          if(r != rate)
+            T_EQ(acq_view_fit(1), fitted);
+          T_EQ(scopesettings.samplerate, r);
+          T_EQ(scopesettings.timeperdiv, run_tpd);
+          T_EQ(scopesettings.triggerhorizontalposition, run_pos);
+          T_EQ(acq_view_rate_setting(), r);
+          T_EQ(acq_view_rate_arm(), 0);
+        }
+      }
+
+  //Tapping the record's rate again clears the pending one; the last tap wins
+  state(3000, 5, 20, 0);
+  (void)acq_view_rate_tap(9);
+  (void)acq_view_rate_tap(7);
+  T_EQ(acq_view_rate_setting(), 7);
+  (void)acq_view_rate_tap(5);
+  T_EQ(acq_view_rate_setting(), 5);
+  scopesettings.runstate = 1;
+  T_EQ(acq_view_rate_arm(), 0);
+
+  //A rate written (host SET_TIMEBASE, AUTO SET, ...) wins: dropped
+  state(3000, 5, 20, 0);
+  (void)acq_view_rate_tap(9);
+  acq_view_rate_drop();
+  T_EQ(acq_view_rate_setting(), 5);
+  scopesettings.runstate = 1;
+  T_EQ(acq_view_rate_arm(), 0);
+
+  //Single counts as free: applied at once
+  state(3000, 5, 20, 0);
+  scopesettings.triggermode = 1;
+  T_EQ(acq_view_rate_tap(9), ACQ_SET_RATE);
+  T_EQ(scopesettings.samplerate, 9);
+  T_EQ(acq_view_rate_arm(), 0);
+
+  //Roll: the grid takes no tap; a pending rate waits for the short time bases
+  state(3000, 5, 20, 1);
+  scopesettings.long_mode = 1;
+  T_FALSE(acq_view_rate_live());
+  T_EQ(acq_view_rate_tap(9), 0);
+  T_EQ(scopesettings.samplerate, 5);
+  T_EQ(acq_view_rate_setting(), 5);
+  state(3000, 5, 20, 0);
+  T_TRUE(acq_view_rate_live());
+  (void)acq_view_rate_tap(9);
+  scopesettings.long_mode = 1;
+  scopesettings.runstate  = 1;
+  T_EQ(acq_view_rate_arm(), 0);
+  scopesettings.long_mode = 0;
+  T_EQ(acq_view_rate_arm(), 1);
+  T_EQ(scopesettings.samplerate, 9);
+
+  //Out of range: nothing
+  state(3000, 5, 20, 0);
+  T_EQ(acq_view_rate_tap(ACQ_RATES), 0);
+  T_EQ(acq_view_rate_setting(), 5);
+}
+
 //ui-type: two notice slots, the time/div's first, each for its ACQ_NOTICE_MS; nothing lost, a new change replaces the queue
 static void test_notice_queue(void)
 {
@@ -544,6 +659,7 @@ int main(void)
   test_walks();
   test_hand_rate_and_boxes();
   test_stopped();
+  test_stopped_rate();
   test_snap_notice();
   test_notice_queue();
   test_owner_tap();

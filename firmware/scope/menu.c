@@ -2040,11 +2040,11 @@ void scope_acqusition_settings(int mode)
     display_set_fg_color(BLACK_COLOR);
   }
 
-  //Only display the text when in range of the text array
-  if(scopesettings.samplerate < (sizeof(acquisition_speed_texts) / sizeof(int8 *)))
+  //The rate setting (fw-stoprate: in STOP a rate tapped for the next RUN; the record on screen keeps its own)
+  if(acq_view_rate_setting() < (sizeof(acquisition_speed_texts) / sizeof(int8 *)))
   {
     //Display the text from the table
-    display_text(ACQ_BUTTON_XPOS + 38, ACQ_BUTTON_YPOS + 3, (int8 *)acquisition_speed_texts[scopesettings.samplerate]);
+    display_text(ACQ_BUTTON_XPOS + 38, ACQ_BUTTON_YPOS + 3, (int8 *)acquisition_speed_texts[acq_view_rate_setting()]);
   }
 
   //Only display the text when in range of the text array
@@ -5123,18 +5123,15 @@ void scope_acquisition_speed_select(void)
 {
   uint32 i, fg;
 
-  //The rates take a tap when running or in single mode, not in roll (1.00o5's rule): grey text otherwise
-  if(((scopesettings.runstate) && (!scopesettings.long_mode)) || (scopesettings.triggermode == 1))
-    fg = WHITE_COLOR;
-  else
-    fg = LIGHTGREY1_COLOR;
+  //fw-stoprate: the rates take a tap except in roll, stopped too (the setting for the next RUN): grey text in roll
+  fg = acq_view_rate_live() ? WHITE_COLOR : LIGHTGREY1_COLOR;
 
   display_set_font(&font_2);
 
-  //The chosen rate green with black text, on the short time bases only (in roll the rate is off the grid)
+  //The rate setting green with black text, on the short time bases only (in roll the rate is off the grid)
   for(i = 0; i < UI_ACQ_RATE_N; i++)
   {
-    if((i == scopesettings.samplerate) && (scopesettings.timeperdiv > 8))
+    if((i == acq_view_rate_setting()) && (scopesettings.timeperdiv > 8))
       acq_grid_cell(UI_ACQ_RATE_Y, i, (const char *)acquisition_speed_texts[i], GREEN_COLOR, BLACK_COLOR);
     else
       acq_grid_cell(UI_ACQ_RATE_Y, i, (const char *)acquisition_speed_texts[i], MIDLEGREY_COLOR, fg);
@@ -5151,7 +5148,8 @@ void scope_acquisition_timeperdiv_select(void)
 
   //The short time bases from the slowest (200 ms/div, time_div_texts 11) to the fastest (5 ns/div, 34): cell i is
   //time/div 34 - i. The chosen one green with black text; the others white where the record can show them (fw 0.2.64:
-  //derived from the record, acq_view.c), grey where not (a grey one cannot be chosen)
+  //derived from the record, acq_view.c; fw-stoprate: stopped with a rate pending, where that rate can too), grey where
+  //not (a grey one cannot be chosen)
   for(i = 0; i < UI_ACQ_TB_N; i++)
   {
     c = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;

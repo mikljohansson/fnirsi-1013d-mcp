@@ -581,6 +581,15 @@ void scope_acquire_trace_data(void)
   if((scopesettings.runstate)&&(scopesettings.display_data_done)&&(touchstate == 0) PC_UI_ARM_ALLOWED())//runstate ok
   //if((scopesettings.runstate) && (scopesettings.display_data_done))//runstate ok
   {
+    //fw-stoprate: a rate tapped in STOP is taken now, as the ACQ menu takes one while running (the FPGA's rate, the
+    //time/div fitted with its notice); the record shown until now kept the rate it was captured at
+    if(acq_view_rate_arm())
+    {
+      fpga_set_sample_rate(scopesettings.samplerate);
+      acq_view_fit(1);
+      scope_acqusition_settings(0);
+    }
+
     //Set the trigger level
     fpga_set_trigger_level();
 
@@ -6317,7 +6326,7 @@ void scope_save_config_data(void)
   
   //Save trigger settings
   *ptr++ = scopesettings.timeperdiv;
-  *ptr++ = scopesettings.samplerate;
+  *ptr++ = acq_view_rate_setting();             //fw-stoprate: a rate tapped in STOP is the setting
   *ptr++ = scopesettings.triggermode;
   *ptr++ = scopesettings.triggeredge;
   *ptr++ = scopesettings.triggerchannel;
