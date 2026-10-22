@@ -15,6 +15,7 @@
 #include "DS3231.h"
 
 #include "usb_interface.h"
+#include "cdc_class.h"
 #include "PC_interface.h"
 #include "pc_hooks.h"
 #include "variables.h"
@@ -3529,10 +3530,8 @@ void scope_channel_ref_menu_item(PCHANNELSETTINGS settings, int mode)//set
 void scope_channel_open_ref_menu(PCHANNELSETTINGS settings)
 //void scope_channel_open_ref_menu(PCHANNELSETTINGS settings, PCHANNELSETTINGS REFsettings)
 {
-  uint32 xstart;
 //  uint32 xend;
   
-  xstart = settings->menuxpos + CH_REF_MENU_XPOS + 9;//6
   
   //Setup the menu in a separate buffer to be able to slide it onto the screen
   display_set_screen_buffer(displaybuffertmp);//1
@@ -5047,7 +5046,6 @@ void scope_open_acquisition_menu(void)
   //Select the font for the texts
   display_set_font(&font_3);
   
-  extern uint32 a,b,c,d,e,f;
 
   //Display the texts
   //fw-acqui: the grids' headings centred over the five columns

@@ -598,8 +598,6 @@ void scope_test_ADoffset_value(void)
   uint32    min1;    
   uint32    p2p1; 
   uint32    center1x; 
-  uint32    dcoffset;
-  uint32    dcoffsetm;
   
   register uint32 multiply;
   
@@ -738,6 +736,9 @@ void scope_test_longbase_value(void)
       display_decimal(600, 50, timebase_settings[scopesettings.timeperdiv]);      
 }
 //----------------------------------------------------------------------------------------------------------------------------------
+
+#undef positionX
+#undef positionY
 
 void scope_test_trigerposition_value(void)
 {

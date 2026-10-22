@@ -3299,7 +3299,7 @@ void handle_generator_menu_touch(void)
 
 void handle_keyboard_menu_touch(void)
 {
-  uint32 x,y,z;
+  uint32 x,y;
   uint8 number_len = 0;
   extern char numbuffer[NUMBUF_MAX];
   extern uint8 numbuffer_len;
@@ -3347,7 +3347,6 @@ void handle_keyboard_menu_touch(void)
         {
           x = KEY_MENU_XPOS;
           y = KEY_MENU_YPOS;
-          z='0';
           
           //Check if touch within this bounding box
           if((ytouch >= y + 80) && (ytouch <= y + 120))//riadok 1 100
@@ -3355,7 +3354,6 @@ void handle_keyboard_menu_touch(void)
             if((xtouch >= x + 15) &&  (xtouch <= x + 55))   buffer_add_digit('7');//z='7';    //1 cislo z lava 40 35
             if((xtouch >= x + 70) &&  (xtouch <= x + 110))  buffer_add_digit('8');//z='8';    //2 cislo z lava 90  90
             if((xtouch >= x + 130) && (xtouch <= x + 170))  buffer_add_digit('9');//z='9';    //3 cislo z lava 150
-            if((xtouch >= x + 190) && (xtouch <= x + 230))  z='m';    //4 cislo z lava 210
             if((xtouch >= x + 245) && (xtouch <= x + 285))  {buffer_add_digit('0');buffer_add_digit('0');buffer_add_digit('0');}//z='k';    //4 cislo z lava 260 265
           } 
                     //Check if touch within this bounding box
@@ -3364,7 +3362,6 @@ void handle_keyboard_menu_touch(void)
             if((xtouch >= x + 15) &&  (xtouch <= x + 55))   buffer_add_digit('4');//z='4';    //1 cislo z lava 40
             if((xtouch >= x + 70) &&  (xtouch <= x + 110))  buffer_add_digit('5');//z='5';    //2 cislo z lava 90
             if((xtouch >= x + 130) && (xtouch <= x + 170))  buffer_add_digit('6');//z='6';    //3 cislo z lava 150
-            if((xtouch >= x + 190) && (xtouch <= x + 230))  z='u';    //4 cislo z lava 210
             if((xtouch >= x + 245) && (xtouch <= x + 285))  {buffer_add_digit('0');buffer_add_digit('0');buffer_add_digit('0');
                                                              buffer_add_digit('0');buffer_add_digit('0');buffer_add_digit('0');}//z='M';    //4 cislo z lava 260
           }
@@ -3373,16 +3370,12 @@ void handle_keyboard_menu_touch(void)
             if((xtouch >= x + 15) &&  (xtouch <= x + 55))   buffer_add_digit('1');//z='1';    //1 cislo z lava 40
             if((xtouch >= x + 70) &&  (xtouch <= x + 110))  buffer_add_digit('2');//z='2';    //2 cislo z lava 90
             if((xtouch >= x + 130) && (xtouch <= x + 170))  buffer_add_digit('3');//z='3';    //3 cislo z lava 150
-            if((xtouch >= x + 190) && (xtouch <= x + 230))  z='n';    //4 cislo z lava 210
-            if((xtouch >= x + 245) && (xtouch <= x + 285))  z='G';    //4 cislo z lava 260
           }
           else if((ytouch >= y + 235) && (ytouch <= y + 275))//riadok 4 255
           {
             if((xtouch >= x + 15) &&  (xtouch <= x + 55))   buffer_add_digit('0');//z='0';    //1 cislo z lava 40
             if((xtouch >= x + 70) &&  (xtouch <= x + 110))  buffer_set_sign('+');//z=',';    //2 cislo z lava 90
             if((xtouch >= x + 130) && (xtouch <= x + 170))  buffer_set_sign('-');//z='-';    //3 cislo z lava 150
-            if((xtouch >= x + 190) && (xtouch <= x + 230))  z='p';    //4 cislo z lava 210
-            if((xtouch >= x + 245) && (xtouch <= x + 285))  z='T';    //4 cislo z lava 260
           }
         }
         //Check on time per div being set
@@ -3422,7 +3415,6 @@ void handle_keyboard_menu_touch(void)
           }
 
         }
-        extern uint32 a,b,c,d,e,f,g,h,i,j,k;
         
         //Select the font for the texts
         display_set_font(&font_5);//3
