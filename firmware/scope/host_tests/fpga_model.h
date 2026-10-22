@@ -182,6 +182,12 @@ typedef struct
   uint64_t gen_edge[FM_GEN_EDGES];  //clock << 1 | level of every pin level change while running
   uint32_t gen_nedge;
 
+  //fw-relay: the front-end relay registers (zaklad.v: 0x33 / 0x36 range 0..5, 6 and up ignored; 0x34 / 0x37 AC/DC
+  //bit 0) as FPGA_RELAY_INDEX orders them, the writes that reached them and the writes that switched a relay
+  uint8_t  relay[4];
+  uint32_t relay_writes;
+  uint32_t relay_switches;
+
   fm_write trace[FM_TRACE_MAX];
   uint32_t ntrace;
   uint32_t seed;

@@ -720,7 +720,7 @@ void bode_view_service(void)
       }
     }
     else if(scopesettings.runstate && !bv.last_run)
-      bv_start(0, 0);                         //RUN pressed (or SET_ACQ_STATE run)
+      bv_start(0, 0);                         //RUN pressed (a host SET_ACQ_STATE RUN closes the view first)
   }
 
   bv.last_run = scopesettings.runstate;

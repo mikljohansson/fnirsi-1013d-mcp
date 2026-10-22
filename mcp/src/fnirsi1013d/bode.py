@@ -1503,7 +1503,8 @@ def device_sweep(scope: Any, start: float, stop: float, points: int, *, settle: 
         res.meta["view_shown"] = bool(ctrl(P.BODE_CLOSE).hdr.view & P.BodeHeader.V_SHOWN)
     else:
         res.caveats.append("the scope still shows its Bode plot (its own acquisition is off until the person leaves "
-                           "it: Menu > Scope, or close_view=true)")
+                           "it: Menu > Scope, close_view=true, or, fw 0.2.105+, the next host setting or capture, "
+                           "which closes it and gives the scope settings back)")
     return res
 
 

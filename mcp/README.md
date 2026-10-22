@@ -129,8 +129,8 @@ control requests in between; the duplicate-request cache; E_BAD_CRC, E_BAD_LEN, 
 the `#VER` / `#LOCAL` probe; TEST_PATTERN; READ_SCREEN; a DEBUG_FPGA register model with the stale first byte.
 The on-device Bode plot (protocol 1.20, every variant with the filter and the generator): BODE_CTRL / READ_BODE and
 display mode 5 by `SimBode`, which runs the host tool's `BodeRunner` against the device through an in-process link
-(the firmware's engine is a port of it), so a device sweep of `dut_in` / `dut_out` agrees with a host sweep; a host
-ARM during it ends it (reason 5).
+(the firmware's engine is a port of it), so a device sweep of `dut_in` / `dut_out` agrees with a host sweep; an
+acquisition request (`P.BODE_LEAVE_CMDS`) or SET_ACQ_STATE RUN closes the view first, as the firmware does since 0.2.105.
 
 ## MCP server
 
@@ -385,7 +385,9 @@ only; `snr_db` is null). Limits: the four settle presets, `ch2_range` 'auto' or 
 start), DC coupling. Thru: `'measure'` (kept on the scope until power-off and stored here as for the host), `'device'`
 (the scope's copy), a stored name (applied on the host to the raw rows). The Bode view stays on the screen (the
 scope's own acquisition is off; capture tools then add a caveat) unless `close_view=true`, which also gives the
-scope's settings back. A host capture during a device sweep ends it (READ_BODE reason 5). Library:
+scope's settings back. Since fw 0.2.105 the first host request that sets up or runs the scope's acquisition (a
+`scope_set_*` tool, a capture, RUN) closes the view and gives those settings back before it applies; no RUN starts a
+Bode sweep (a sweep in progress ends as stopped, reason 6). Library:
 `bode.device_sweep(scope, start, stop, points, ...)`, `Scope.bode_ctrl` / `read_bode`.
 
 **Plots.** `scope_report` (below) on `files.npz` draws magnitude and phase over log f with the -3 dB marker; flagged

@@ -189,6 +189,15 @@ void mock_tx_release(void)
 
 void pc_hal_channel_read(int ch, pc_hw_channel *c) { *c = mock.ch[ch]; }
 
+static void mock_relay(int ch, int which, uint8_t v)
+{
+  if(mock.relay_held[ch][which] == (uint8_t)(v + 1))
+    return;
+
+  mock.relay_held[ch][which] = (uint8_t)(v + 1);
+  mock.relay_writes++;
+}
+
 void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
 {
   pc_hw_channel *d = &mock.ch[ch];
@@ -201,6 +210,12 @@ void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)
   if(mask & PC_CH_OFFSET)   d->dcoffset = c->dcoffset;
   if(mask & PC_CH_INVERT)   d->invert = c->invert;
   if(mask & PC_CH_PROBE)    d->probe = c->probe;
+
+  if(mask & PC_CH_RANGE)
+    mock_relay(ch, 0, (uint8_t)((c->range > 5) ? 5 : c->range));
+  if(mask & PC_CH_COUPLING)
+    mock_relay(ch, 1, c->coupling);
+
   mock.ch_writes++;
   mock.fpga_ops++;
 }
@@ -564,6 +579,10 @@ void pc_hal_ui_set_run(int run)
   mock.under_screen += mock.ui_screen;
   mock.ui_run = run ? 1 : 0;
   mock.ui_armed = 0;
+
+  //bode_view_service: RUN while the Frequency response view shows starts a sweep
+  if(run && mock.bode_view)
+    mock.bode_sweeps++;
   mock.run_sets++;
   mock.last_run_set = run;
 }
@@ -605,6 +624,18 @@ int pc_hal_ui_leave_screen(void)
 
   mock.ui_screen = 0;
   mock.ui_screen_leaves++;
+  return 1;
+}
+
+int pc_hal_ui_leave_bode(void)
+{
+  if(!mock.bode_view)
+    return 0;
+
+  //As bode_view_close: the run state from before the view comes back; a sweep never starts from here
+  mock.bode_view = 0;
+  mock.bode_leaves++;
+  mock.ui_run = mock.bode_saved_run;
   return 1;
 }
 
