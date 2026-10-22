@@ -11,35 +11,79 @@
 
 //Mock FPGA: per core the stages (bit s) that sit in the data transition, with the own-encode and the A-encode timing.
 //A dirty core counts about every word of the capture, a clean one 0; a quiet input moves no core by itself. fw 0.2.81:
-//a stage at the edge of the transition (edge_stage) garbles only while the input is parked at some band points
-//(edge_points, bit p) and then only in edge_pct % of the captures (deterministic: every capture adds edge_pct to an
-//accumulator, a capture garbles when it reaches 100), as CH1 A4 on the owner's unit (bench 2026-10-20: codes 127..135)
+//a stage at the edge of the transition (edge_stage) garbles only while the input is parked between edge_lo16 and
+//edge_hi16 (1/16 code) and then only in edge_pct % of the captures (deterministic: every capture adds edge_pct to an
+//accumulator, a capture garbles when it reaches 100), as CH1 A4 on the owner's unit (bench 2026-10-20: codes 127..135).
+//
+//fw-capmetric, the data the residual reads (fpga/al3/README.md section 18, sweep 2026-10-22 11:23): a parked input of
+//0.5 code rms noise (code16 + a uniform 0..15, in whole codes: at 8k - 0.5 half the samples read 8k - 1, half 8k).
+//Class (a), a capture error next to the clean stage (mix, bit s): a sample at a carry's upper code 8k reads the bitwise
+//mix of 8k and 8k - 1 with the ones winning in a few of the bits, 8k | ((8k - 1) & 0x0E) (0x60 -> 0x6E, 0x40 -> 0x4E),
+//in mix_pct % of those samples; it jumps under 32 codes, so the 0x36 count stays 0. Class (b), the ADC's own error
+//(floor_pct): at every stage a sample at 8k reads 8k + 4 in floor_pct % of those samples (0x60 -> 0x64)
 typedef struct
 {
   uint8_t  dirty[CS_CORES];
   uint8_t  dirty_ref[CS_CORES];
   uint8_t  edge_stage[CS_CORES];      //0 = none
-  uint8_t  edge_points[CS_CORES];
+  uint32_t edge_lo16[CS_CORES], edge_hi16[CS_CORES];
   uint32_t edge_pct;
   uint32_t edge_acc[CS_CORES];
   uint32_t edge_tries[CS_CORES];      //captures at the edge stage and a bad point
   uint32_t edge_hits[CS_CORES];       //of them garbled
-  uint32_t point, parks, measures;
+  uint8_t  mix[CS_CORES];             //class (a) stages (bit s)
+  uint32_t mix_pct, floor_pct;
+  uint32_t seed;
+  uint32_t code16, parks, measures, resid_reads;
   uint16_t last;
   int      fail_at;                   //measure number that does not complete (0 = none)
   int      park_fail_at;              //park number that does not complete (0 = none)
 } mock_fpga;
 
-static int mock_park(void *ctx, uint32_t p)
+static uint32_t mock_rand(mock_fpga *m)
+{
+  m->seed = m->seed * 1103515245u + 12345u;
+  return (m->seed >> 16) & 0x7FFF;
+}
+
+static int mock_park(void *ctx, uint32_t code16)
 {
   mock_fpga *m = (mock_fpga *)ctx;
 
   m->parks++;
-  m->point = p;
+  m->code16 = code16;
   return (m->park_fail_at && (m->parks == (uint32_t)m->park_fail_at)) ? -1 : 0;
 }
 
-static int mock_measure(void *ctx, uint16_t v, uint16_t cnt[CS_CORES])
+//One core's CS_RESID_WORDS words at stage s (mix: class (a) there) and its residual
+static uint32_t mock_resid(mock_fpga *m, int mix)
+{
+  uint8_t  x[CS_RESID_WORDS];
+  uint32_t j, c;
+
+  for(j=0;j<CS_RESID_WORDS;j++)
+  {
+    c = (m->code16 + (mock_rand(m) & 15)) >> 4;
+
+    if(c > 255)
+      c = 255;
+
+    if(!(c & 7) && c)
+    {
+      if(mix && ((mock_rand(m) % 100) < m->mix_pct))
+        c = c | ((c - 1) & 0x0E);
+      else if((mock_rand(m) % 100) < m->floor_pct)
+        c = c + 4;
+    }
+
+    x[j] = (uint8_t)c;
+  }
+
+  m->resid_reads++;
+  return cs_resid(x, CS_RESID_WORDS);
+}
+
+static int mock_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CORES], uint32_t e[CS_CORES])
 {
   mock_fpga *m = (mock_fpga *)ctx;
   uint32_t   k;
@@ -60,7 +104,8 @@ static int mock_measure(void *ctx, uint16_t v, uint16_t cnt[CS_CORES])
 
     cnt[k] = ((dirty >> s) & 1) ? 7900 : 0;
 
-    if(m->edge_stage[k] && (s == m->edge_stage[k]) && !(v & cs_ref_bit(k)) && ((m->edge_points[k] >> m->point) & 1))
+    if(m->edge_stage[k] && (s == m->edge_stage[k]) && !(v & cs_ref_bit(k)) && (m->code16 >= m->edge_lo16[k]) &&
+       (m->code16 <= m->edge_hi16[k]))
     {
       m->edge_tries[k]++;
       m->edge_acc[k] += m->edge_pct;
@@ -72,6 +117,9 @@ static int mock_measure(void *ctx, uint16_t v, uint16_t cnt[CS_CORES])
         cnt[k] = 60;                  //some rail samples and jumps in 8000 words
       }
     }
+
+    if(resid & (1u << k))
+      e[k] = mock_resid(m, !(v & cs_ref_bit(k)) && ((m->mix[k] >> s) & 1));
   }
 
   return 0;
@@ -134,23 +182,29 @@ static void test_fields(void)
 
 static void test_band_pwm(void)
 {
+  //fw-capmetric: the carries 8k - 0.5, k = 8 .. 24 (63.5 .. 191.5), in 1/16 code
+  T_EQ(CS_BAND_POINTS, 17);
+  T_EQ(cs_band_code16(0), 1016);                  //63.5
+  T_EQ(cs_band_code16(8), 2040);                  //127.5: 0x7F / 0x80
+  T_EQ(cs_band_code16(CS_BAND_POINTS - 1), 3064); //191.5
+
   //600 reads 168 codes, 900 reads 88 codes: 80 codes per 300 counts
-  T_EQ(cs_band_code(0), 120);
-  T_EQ(cs_band_code(4), 128);
-  T_EQ(cs_band_code((CS_TIE_CODE - CS_BAND_FIRST) / CS_BAND_STEP), 126);
-  T_EQ(cs_band_code(CS_BAND_POINTS - 1), 140);
-  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 128), 750);
-  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 120), 780);
-  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 140), 705);
-  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 200), 480);   //beyond the low point: extrapolated (negative numerator)
-  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 169), 596);   //rounded either side
-  T_EQ(cs_band_pwm(600, 100 * 16, 900, 100 * 16, 128), -1);   //no response
-  T_EQ(cs_band_pwm(600, 90 * 16, 900, 100 * 16, 128), -1);    //wrong sign
-  T_EQ(cs_band_pwm(900, 168 * 16, 600, 88 * 16, 128), -1);
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 128 * 16), 750);
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 120 * 16), 780);
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 140 * 16), 705);
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 2040), 752);         //127.5: 751.875 rounded
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 1016), 992);         //63.5: 991.875
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 3064), 512);         //191.5: 511.875
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 200 * 16), 480);   //beyond the low point: extrapolated (negative numerator)
+  T_EQ(cs_band_pwm(600, 168 * 16, 900, 88 * 16, 169 * 16), 596);   //rounded either side
+  T_EQ(cs_band_pwm(600, 100 * 16, 900, 100 * 16, 128 * 16), -1);   //no response
+  T_EQ(cs_band_pwm(600, 90 * 16, 900, 100 * 16, 128 * 16), -1);    //wrong sign
+  T_EQ(cs_band_pwm(900, 168 * 16, 600, 88 * 16, 128 * 16), -1);
 }
 
-//fw 0.2.81: the owner's unit (bench 2026-10-20 on 0x153A): CH1 A bad at 4 only at codes 128..134 (band points 4..7)
-//in 30 % of the captures, CH1 B bad at 2, CH2 A clean, CH2 B bad at 2. The band training picks CH1 A3 B4, CH2 A3 B4
+//fw 0.2.81: the owner's unit (bench 2026-10-20 on 0x153A): CH1 A bad at 4 only at codes 127..135 (band points 127.5
+//and 135.5) in 30 % of the captures, CH1 B bad at 2, CH2 A clean, CH2 B bad at 2. The band training picks CH1 A3 B4,
+//CH2 A3 B4
 static void test_band(void)
 {
   mock_fpga m;
@@ -160,19 +214,23 @@ static void test_band(void)
   uint16_t  v;
 
   mock_init(&m);
-  m.dirty[1]       = 0x07;
-  m.dirty[3]       = 0x07;
-  m.edge_stage[0]  = 4;
-  m.edge_points[0] = 0xF0;
-  m.edge_pct       = 30;
+  m.dirty[1]      = 0x07;
+  m.dirty[3]      = 0x07;
+  m.edge_stage[0] = 4;
+  m.edge_lo16[0]  = 127 * 16;
+  m.edge_hi16[0]  = 136 * 16;
+  m.edge_pct      = 30;
 
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.captures, CS_BAND_POINTS * 4 * CS_BAND_REPS);   //no tie: no tie pass
   T_EQ(m.parks, CS_BAND_POINTS);
-  T_EQ(m.edge_tries[0], 4 * CS_BAND_REPS);               //four points
+  T_EQ(m.edge_tries[0], 2 * CS_BAND_REPS);               //two points
   T_TRUE(m.edge_hits[0] >= 1);
+  T_EQ(m.resid_reads, CS_BAND_POINTS * 4 * CS_BAND_REPS * 2);   //both cores of the parked channel, every capture
   T_EQ(t.clean[0], 0x2C);
   T_EQ(t.clean[1], 0x38);
+  T_EQ(t.quiet[0], 0x2C);             //noise alone: every clean stage is quiet
+  T_EQ(t.quiet[1], 0x38);
   T_EQ(t.set[0], 0x2C);
   T_EQ(t.tie[0], 0);
   T_TRUE(t.sum[0][4 - CS_STAGE_MIN] > 0);
@@ -203,10 +261,11 @@ static void test_band(void)
   //0.2.79's training (one capture per stage at the parked code) on the same unit: the intermittent stage reads clean
   //(2..5), but the pick no longer keeps the power-on 4
   mock_init(&m);
-  m.dirty[1]       = 0x07;
-  m.edge_stage[0]  = 4;
-  m.edge_points[0] = 0x01;            //the one point is the parked code
-  m.edge_pct       = 30;
+  m.dirty[1]      = 0x07;
+  m.edge_stage[0] = 4;
+  m.edge_lo16[0]  = cs_band_code16(0);   //the one point is the parked code
+  m.edge_hi16[0]  = cs_band_code16(0);
+  m.edge_pct      = 30;
   T_EQ(cs_train_run(&one, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.clean[0], 0x3C);             //A4 not seen
   T_EQ(cs_stage(t.value, 0), 3);      //but no longer the power-on 4
@@ -229,8 +288,8 @@ static void test_band(void)
 }
 
 //fw 0.2.105, bench 2026-10-22 on 0x153D: CH1 A4 garbles a real signal but only rarely the quiet input (here: 5 % of the
-//captures at codes 126..130). The band's 3 x 4 tries there see nothing (2..5 clean), the tie pass's 2 x 16 at 4 see it:
-//3. A mirror unit whose lower centre 3 is the weak one gets 4. The 0.2.81 band (6 points every 4 codes, 2 captures)
+//captures at codes 126..130). The band's tries there (one point, 127.5) see nothing (2..5 clean), the tie pass's 3 x 16
+//at 4 see it: 3. A mirror unit whose lower centre 3 is the weak one gets 4. The 0.2.81 band (6 points, 2 captures)
 //missed both
 static void test_tie(void)
 {
@@ -240,12 +299,13 @@ static void test_tie(void)
   cs_train  t;
 
   mock_init(&m);
-  m.edge_stage[0]  = 4;
-  m.edge_points[0] = 0x38;            //points 3..5: codes 126, 128, 130
-  m.edge_pct       = 5;
+  m.edge_stage[0] = 4;
+  m.edge_lo16[0]  = 126 * 16;         //codes 126 .. 130
+  m.edge_hi16[0]  = 130 * 16;
+  m.edge_pct      = 5;
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.clean[0], 0x3C);
-  T_EQ(t.sum[0][4 - CS_STAGE_MIN], 0);   //the band pass: 12 tries at 5 % see nothing
+  T_EQ(t.sum[0][4 - CS_STAGE_MIN], 0);   //the band pass: 2 tries at 5 % see nothing
   T_EQ(t.tie[0], 0x18);
   T_EQ(t.tie[1], 0x18);
   T_EQ(t.tie_sum[0][0], 0);
@@ -254,13 +314,15 @@ static void test_tie(void)
   T_EQ(cs_stage(t.value, 0), 3);
   T_EQ(cs_stage(t.value, 1), 3);      //B: a clean tie, the lower
   T_EQ(m.parks, CS_BAND_POINTS + CS_TIE_POINTS);
-  T_EQ(m.point, 3);                   //the tie pass runs from 130 down to 126
+  T_EQ(m.code16, 126 * 16);           //the tie pass runs from 130 down to 126
+  T_EQ(m.resid_reads, CS_BAND_POINTS * 4 * CS_BAND_REPS * 2);   //the tie pass reads no data
 
   //The weak stage is the lower centre: 3 leaves, {2, 4, 5} gives 4
   mock_init(&m);
-  m.edge_stage[0]  = 3;
-  m.edge_points[0] = 0x38;
-  m.edge_pct       = 5;
+  m.edge_stage[0] = 3;
+  m.edge_lo16[0]  = 126 * 16;
+  m.edge_hi16[0]  = 130 * 16;
+  m.edge_pct      = 5;
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_TRUE(t.tie_sum[0][0] > 0);
   T_EQ(t.tie_sum[0][1], 0);
@@ -269,20 +331,22 @@ static void test_tie(void)
 
   //A weak stage the band pass already sees (50 %): no tie for that core, the other core's tie pass runs anyway
   mock_init(&m);
-  m.edge_stage[0]  = 3;
-  m.edge_points[0] = 0x38;
-  m.edge_pct       = 50;
-  m.dirty[0]       = 0x03;
+  m.edge_stage[0] = 3;
+  m.edge_lo16[0]  = 126 * 16;
+  m.edge_hi16[0]  = 130 * 16;
+  m.edge_pct      = 50;
+  m.dirty[0]      = 0x03;
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.set[0], 0x34);               //3 already dirty in the band pass at 50 %: no tie
   T_EQ(t.tie[0], 0);
   T_EQ(cs_stage(t.value, 0), 4);
 
-  //0.2.81's band on the 5 % unit: 2..5 clean and no tie pass
+  //6 band points of 2 captures without a tie pass on the 5 % unit: 2..5 clean
   mock_init(&m);
-  m.edge_stage[0]  = 4;
-  m.edge_points[0] = 0x04;            //old point 2 = code 128
-  m.edge_pct       = 5;
+  m.edge_stage[0] = 4;
+  m.edge_lo16[0]  = 126 * 16;
+  m.edge_hi16[0]  = 130 * 16;
+  m.edge_pct      = 5;
   T_EQ(cs_train_run(&old, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.clean[0], 0x3C);
   T_EQ(t.captures, 6 * 4 * 2);
@@ -292,6 +356,169 @@ static void test_tie(void)
   m.park_fail_at = CS_BAND_POINTS + 1;
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_IO);
   T_EQ(t.value, CS_PO);
+}
+
+//fw-capmetric: cs_resid, the 3-sample-median residual
+static void test_resid(void)
+{
+  static uint8_t big[4096];
+  uint8_t x[8];
+  uint32_t i;
+
+  T_EQ(cs_resid(x, 0), 0);
+  T_EQ(cs_resid(x, 2), 0);
+
+  //Constant, a ramp, a step: no residual
+  memset(x, 100, sizeof(x));
+  T_EQ(cs_resid(x, 8), 0);
+
+  for(i=0;i<8;i++)
+    x[i] = (uint8_t)(10 * i);
+
+  T_EQ(cs_resid(x, 8), 0);
+
+  memset(x, 0, 4);
+  memset(x + 4, 255, 4);
+  T_EQ(cs_resid(x, 8), 0);
+
+  //One spike of +14 (0x60 -> 0x6E): 196; a spike of -5 at the end is not scored (j stops at n - 2)
+  memset(x, 0x60, sizeof(x));
+  x[3] = 0x6E;
+  T_EQ(cs_resid(x, 8), 196);
+  x[7] = 0x5B;
+  T_EQ(cs_resid(x, 8), 196);
+  x[6] = 0x5B;                        //two in a row are the median's: no residual
+  T_EQ(cs_resid(x, 8), 196);
+
+  //Alternating codes: every inner sample 1 code off its median
+  for(i=0;i<8;i++)
+    x[i] = (uint8_t)(0x7F + (i & 1));
+
+  T_EQ(cs_resid(x, 8), 6);
+
+  //The largest: 0 / 255 alternating over 4096 samples, 4094 x 65025 (fits u32)
+  for(i=0;i<sizeof(big);i++)
+    big[i] = (uint8_t)((i & 1) ? 255 : 0);
+
+  T_EQ(cs_resid(big, sizeof(big)), 4094u * 65025u);
+  T_EQ(CS_RESID_DIV, 127);
+}
+
+//fw-capmetric: cs_quiet on the bench sweep (fpga/al3/README.md section 18, 2026-10-22 11:23): q16 per stage 2..5 as
+//printed by capwin_sweep.py, times 34 (17 points x 2 captures: q is their sum), and the 0x36 sums of the sweep. The
+//quiet sets {3}, {3, 4, 5}, {3}, {3, 4, 5} give 0x08E3, the trained value, and drop CH1 A5 and CH2 A4
+static void test_quiet(void)
+{
+  static const uint32_t q16x10[CS_CORES][CS_STAGES] =
+  {
+    { 150, 28, 4140, 97 }, { 514, 38, 39, 39 }, { 4730, 323, 684, 17700 }, { 1860, 186, 180, 184 }
+  };
+  static const uint32_t sums[CS_CORES][CS_STAGES] = { { 0, 0, 93, 0 }, { 89, 0, 0, 0 }, { 0, 0, 2146, 6528 },
+                                                      { 2462, 0, 0, 0 } };
+  static const uint8_t quiet[CS_CORES] = { 0x08, 0x38, 0x08, 0x38 };
+  uint32_t q[CS_STAGES], sum[CS_STAGES], k, i;
+  uint16_t v = 0;
+
+  for(k=0;k<CS_CORES;k++)
+  {
+    for(i=0;i<CS_STAGES;i++)
+      q[i] = q16x10[k][i] * 34 / 10;
+
+    T_EQ(cs_quiet(sums[k], q), quiet[k]);
+    v = cs_with(v, k, cs_pick(cs_quiet(sums[k], q)));
+  }
+
+  T_EQ(v, 0x08E3);
+
+  //The outlier rule alone kept CH1 A5 (the sweep's 0x36 sums: {2, 3, 5}) and CH2 A2 ({2, 3})
+  for(i=0;i<CS_STAGES;i++)
+    q[i] = 0;
+
+  T_EQ(cs_quiet(sums[0], q), 0x2C);
+  T_EQ(cs_quiet(sums[2], q), 0x0C);
+
+  //Within 25 % plus 4 of the best clean stage: 100 -> 129 quiet, 130 not; a better stage with outliers does not count
+  sum[0] = 5; sum[1] = 0; sum[2] = 0; sum[3] = 0;
+  q[0] = 1;   q[1] = 100; q[2] = 129; q[3] = 130;
+  T_EQ(cs_quiet(sum, q), 0x18);
+
+  //q 0 (no noise at all): +4 still lets equal noise-free stages through
+  sum[0] = 0;
+  q[0] = 0; q[1] = 4; q[2] = 5; q[3] = 0;
+  T_EQ(cs_quiet(sum, q), 0x2C);
+
+  //No outlier-clean stage: none quiet
+  sum[0] = 1; sum[1] = 1; sum[2] = 1; sum[3] = 1;
+  T_EQ(cs_quiet(sum, q), 0);
+}
+
+//fw-capmetric host tests (section 18 "Host tests"): the bench's two error classes on the mock
+static void test_metric(void)
+{
+  mock_fpga m;
+  cs_io     io = { &m, CS_BAND_POINTS, CS_BAND_REPS, CS_TIE_REPS, mock_park, mock_measure };
+  cs_train  t;
+  uint16_t  clean_v;
+
+  //A clean unit with the noise only: CH1 A3 B3 (2..5 quiet, the tie pass keeps both centres), as the outlier rule
+  mock_init(&m);
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.quiet[0], 0x3C);
+  T_EQ(t.quiet[1], 0x3C);
+  T_TRUE(t.q[0][0] > 0);              //the 0.5-code noise is scored
+  clean_v = t.value;
+  T_EQ(clean_v, 0x08DB);
+
+  //Class (a): CH1 A mixes codes at its carries at 3 and 5 (3 % of the samples at 8k), invisible to 0x36. The outlier
+  //rule keeps 2..5 (its pick 3, a mixing stage); the quiet rule keeps {2, 4} and picks 4. CH1 B as before
+  mock_init(&m);
+  m.mix[0]  = 0x28;
+  m.mix_pct = 3;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.clean[0], 0x3C);
+  T_EQ(cs_pick(t.clean[0]), 3);
+  T_TRUE(t.q[0][3 - CS_STAGE_MIN] > 2 * t.q[0][4 - CS_STAGE_MIN]);
+  T_EQ(t.quiet[0], 0x14);
+  T_EQ(t.set[0], 0x14);
+  T_EQ(cs_stage(t.value, 0), 4);
+  T_EQ(cs_stage(t.value, 1), 3);
+
+  //The bench's CH1 A: mixes at 2, 4 and 5, clean at 3 only
+  mock_init(&m);
+  m.mix[0]  = 0x34;
+  m.mix_pct = 3;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.clean[0], 0x3C);
+  T_EQ(t.set[0], 0x08);
+  T_EQ(cs_stage(t.value, 0), 3);
+
+  //Class (b): the ADC's own error at every stage (8k -> 8k + 4 in 9 % of those samples) raises every q alike: the
+  //clean unit's pick and the class (a) unit's pick do not change
+  mock_init(&m);
+  m.floor_pct = 9;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.quiet[0], 0x3C);
+  T_EQ(t.quiet[1], 0x3C);
+  T_EQ(t.value, clean_v);
+
+  mock_init(&m);
+  m.floor_pct = 9;
+  m.mix[0]    = 0x28;
+  m.mix_pct   = 3;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.set[0], 0x14);
+  T_EQ(cs_stage(t.value, 0), 4);
+
+  //The reference pass scores its B core too: CH2 B dirty with its own encode, clean at 2..5 with the A encode
+  mock_init(&m);
+  m.dirty[3]     = 0xFF;
+  m.dirty_ref[3] = 0x03;
+  T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_OK);
+  T_EQ(t.ref, 0x08);
+  T_EQ(t.quiet[3], 0);
+  T_EQ(t.quiet_ref[3], 0x3C);
+  T_TRUE(t.q_ref[3][0] > 0);
+  T_EQ(t.value & CS_REF_CH2B, CS_REF_CH2B);
 }
 
 static void test_watch(void)
@@ -559,6 +786,9 @@ int main(void)
   test_band_pwm();
   test_band();
   test_tie();
+  test_resid();
+  test_quiet();
+  test_metric();
   test_watch();
   test_guard();
   test_selfcheck();

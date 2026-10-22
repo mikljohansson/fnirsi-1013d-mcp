@@ -76,12 +76,12 @@ uint8_t cs_tie(uint8_t clean)
   return tie;
 }
 
-uint32_t cs_band_code(uint32_t i)
+uint32_t cs_band_code16(uint32_t i)
 {
-  return CS_BAND_FIRST + i * CS_BAND_STEP;
+  return (CS_BAND_K0 + i) * 128 - 8;
 }
 
-int32_t cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code)
+int32_t cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code16)
 {
   int32_t resp = mean16_lo - mean16_hi, n;
 
@@ -89,22 +89,70 @@ int32_t cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t m
     return -1;
 
   //Rounded to the nearest count, either sign
-  n = (mean16_lo - (int32_t)(code * 16)) * (pwm_hi - pwm_lo);
+  n = (mean16_lo - (int32_t)code16) * (pwm_hi - pwm_lo);
   return pwm_lo + ((n >= 0) ? (n + resp / 2) / resp : -((-n + resp / 2) / resp));
 }
 
+uint32_t cs_resid(const uint8_t *x, uint32_t n)
+{
+  uint32_t j, e = 0;
+  int32_t  a, b, c, m, d;
+
+  for(j=1;j+1<n;j++)
+  {
+    a = x[j - 1];
+    b = x[j];
+    c = x[j + 1];
+
+    //Median of three
+    if(a > c)
+    {
+      m = a;
+      a = c;
+      c = m;
+    }
+
+    m = (b < a) ? a : ((b > c) ? c : b);
+    d = b - m;
+    e += (uint32_t)(d * d);
+  }
+
+  return e;
+}
+
+uint8_t cs_quiet(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES])
+{
+  uint32_t i, qmin = 0xFFFFFFFFu;
+  uint8_t  quiet = 0;
+
+  for(i=0;i<CS_STAGES;i++)
+    if((sum[i] == 0) && (q[i] < qmin))
+      qmin = q[i];
+
+  if(qmin == 0xFFFFFFFFu)
+    return 0;
+
+  //Within 25 % of the best outlier-clean stage plus 1/4 code^2 (u32: q stays far below 2^32 / 5, section 18 "Range")
+  for(i=0;i<CS_STAGES;i++)
+    if((sum[i] == 0) && (q[i] <= qmin * 5 / 4 + 4))
+      quiet |= (uint8_t)(1u << (i + CS_STAGE_MIN));
+
+  return quiet;
+}
+
 //One pass over the band: at every point, every core in mask at stage s (with ref set as given), s = CS_STAGE_MIN..MAX,
-//io->reps captures each; the counts summed per core and stage, a stage clean when its sum is 0
+//io->reps captures each; the 0x36 counts and E / CS_RESID_DIV summed per core and stage; clean = the stages with sum 0,
+//quiet = cs_quiet
 static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, uint32_t sum[CS_CORES][CS_STAGES],
-                   uint8_t clean[CS_CORES])
+                   uint32_t q[CS_CORES][CS_STAGES], uint8_t clean[CS_CORES], uint8_t quiet[CS_CORES])
 {
   uint16_t cnt[CS_CORES], v;
-  uint32_t k, p, r;
+  uint32_t e[CS_CORES], k, p, r;
   uint8_t  s;
 
   for(p=0;p<io->points;p++)
   {
-    if(io->park(io->ctx, p))
+    if(io->park(io->ctx, cs_band_code16(p)))
       return CS_E_IO;
 
     for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
@@ -119,21 +167,31 @@ static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, ui
       {
         t->captures++;
 
-        if(io->measure(io->ctx, v, cnt))
+        for(k=0;k<CS_CORES;k++)
+          e[k] = 0;
+
+        if(io->measure(io->ctx, v, mask, cnt, e))
           return CS_E_IO;
 
         for(k=0;k<CS_CORES;k++)
           if(mask & (1u << k))
+          {
             sum[k][s - CS_STAGE_MIN] += cnt[k];
+            q[k][s - CS_STAGE_MIN]   += e[k] / CS_RESID_DIV;
+          }
       }
     }
   }
 
   for(k=0;k<CS_CORES;k++)
     if(mask & (1u << k))
+    {
       for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
         if(sum[k][s - CS_STAGE_MIN] == 0)
           clean[k] |= (uint8_t)(1u << s);
+
+      quiet[k] = cs_quiet(sum[k], q[k]);
+    }
 
   return CS_OK;
 }
@@ -163,25 +221,16 @@ static uint8_t cs_high(uint8_t m)
 }
 
 //Tie pass: the cores with a tie (t->tie) at each of their two stages, the others at their pick (in v), io->tie_reps
-//captures per stage and band point CS_TIE_CODE .. (+ CS_TIE_POINTS - 1 points), from the highest point down (the band
-//pass ends at its highest); a candidate that counts leaves the core's set
+//captures per stage at codes CS_TIE_CODE + 2 p (p = CS_TIE_POINTS - 1 .. 0: from the top down), 0x36 counts only; a
+//candidate that counts leaves the core's set
 static int cs_tie_pass(const cs_io *io, cs_train *t, uint16_t v)
 {
   uint16_t cnt[CS_CORES], w;
-  uint32_t k, p, lo, hi, r, j;
+  uint32_t e[CS_CORES], k, p, r, j;
 
-  hi = (CS_TIE_CODE - CS_BAND_FIRST) / CS_BAND_STEP + CS_TIE_POINTS - 1;
-  lo = hi + 1 - CS_TIE_POINTS;
-
-  if(hi >= io->points)
-    hi = io->points - 1;
-
-  if(lo > hi)
-    lo = hi;
-
-  for(p=hi + 1;p-- > lo;)
+  for(p=CS_TIE_POINTS;p-- > 0;)
   {
-    if(io->park(io->ctx, p))
+    if(io->park(io->ctx, (CS_TIE_CODE + 2 * p) * 16))
       return CS_E_IO;
 
     for(j=0;j<2;j++)
@@ -196,7 +245,7 @@ static int cs_tie_pass(const cs_io *io, cs_train *t, uint16_t v)
       {
         t->captures++;
 
-        if(io->measure(io->ctx, w, cnt))
+        if(io->measure(io->ctx, w, 0, cnt, e))
           return CS_E_IO;
 
         for(k=0;k<CS_CORES;k++)
@@ -247,19 +296,20 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
     if(t->cores & (1u << k))
       base = (uint16_t)(base & ~cs_ref_bit(k));
 
-  rc = cs_pass(io, t, base, t->cores, t->sum, t->clean);
+  rc = cs_pass(io, t, base, t->cores, t->sum, t->q, t->clean, t->quiet);
 
   if(rc != CS_OK)
     return rc;
 
+  //fw-capmetric: the pick runs on the quiet set (a core has a quiet stage exactly when it has a clean one)
   for(k=0;k<CS_CORES;k++)
   {
     if(!(t->cores & (1u << k)))
       continue;
 
-    t->set[k] = t->clean[k];
+    t->set[k] = t->quiet[k];
 
-    if((cs_pick(t->clean[k]) == CS_NONE) && cs_ref_bit(k))
+    if((cs_pick(t->quiet[k]) == CS_NONE) && cs_ref_bit(k))
       refmask |= (uint8_t)(1u << k);
   }
 
@@ -274,15 +324,16 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
       if(refmask & (1u << k))
         rbase = (uint16_t)(rbase | cs_ref_bit(k));
 
-    rc = cs_pass(io, t, rbase, refmask, t->sum_ref, t->clean_ref);
+    t->ref = refmask;
+    rc = cs_pass(io, t, rbase, refmask, t->sum_ref, t->q_ref, t->clean_ref, t->quiet_ref);
 
     if(rc != CS_OK)
       return rc;
 
     for(k=0;k<CS_CORES;k++)
-      if((refmask & (1u << k)) && (cs_pick(t->clean_ref[k]) != CS_NONE))
+      if((refmask & (1u << k)) && (cs_pick(t->quiet_ref[k]) != CS_NONE))
       {
-        t->set[k] = t->clean_ref[k];
+        t->set[k] = t->quiet_ref[k];
         v = (uint16_t)(v | cs_ref_bit(k));
       }
   }
