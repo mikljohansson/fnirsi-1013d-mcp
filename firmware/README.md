@@ -509,15 +509,19 @@ source change restarts the gate, a same-value write and a level change do not. T
   at a time. The **Freq, Period, +Width, -Width, +Duty and -Duty** cards of that channel show the counter's values
   (frequency E / (T x 5 ns), period T x 5 ns / E, high and low time, duty W / T; four significant digits in the record's
   formats, so the text never changes shape) while the counter holds a **current result with a period**: the gate on, the
-  result younger than three gates + 100 ms, E >= 1. Everything else shows the record's measurement as before: the other
+  result younger than three gates + 100 ms, E >= 1, the thresholds fitting it. Everything else shows the record's measurement as before: the other
   channel's timing cards, every voltage card (Vmax .. Vp), the reference traces, an EXT-source result, and a result
   without edges (the signal under the Schmitt thresholds, or slower than two edges per gate: at 100 ms that is below
   about 20 Hz, where the record at a slow time base measures it). The cards show a result from the pass after the one
   that read it (at most one pass, 15..40 ms, after the gate ended); at the 100 ms gate they update ten times a second.
-- **Level**: the counter's level follows the UI's trigger level (the marker the user placed inside the signal, so what
-  triggers is what is counted) with hysteresis 6 codes (about three times the 2 LSB noise); boot writes 128 / 6 and the
-  first pass follows the marker. A host configuration with a non-zero level pins it (GET_COUNTER `what` = 1); level 0
-  returns to following.
+- **Thresholds follow the signal** (fw-ctrauto, `fpga_counter.h`): after each gate the pass takes the result's raw min /
+  max and asks for hysteresis h = max(6, round(span / 6)) <= span / 2 and the band centred on the midpoint (level =
+  ceil((min + max + h) / 2), low below level - h). A gate counted at thresholds more than max(2, h / 4) codes off what
+  it asks for is misfit: the cards keep the record's values for it and the pass writes the new thresholds (0x62, gate
+  restarted); within that deadband nothing is written. A span below 12 codes keeps the thresholds and the result is not
+  used. Boot writes 128 / 6 for the first gate. A host configuration with a non-zero level or hysteresis pins that one
+  (GET_COUNTER `what` = 1); 0 returns it to auto. Up to fw-ctrauto the level followed the trigger marker with a fixed
+  hysteresis 6, which counted the noise on slow edges (bench 2026-10-22: 2.6 to 13.7 kHz on 1 kHz).
 - **One reader, one copy** (`fpga_counter.c`, host-buildable; `fpga_cnt`): boot (`pc_glue_init`, built-for word only)
   writes 0x62 = 128 / 6 then 0x61 = gate 100 ms, source 0 (5 strobes). The main loop reads 0x35 once per pass after the
   capture readout (`PC_COUNTER_PASS` in fnirsi_1013d_scope.c, `pc_glue_counter_pass`): the command byte plus 16 data

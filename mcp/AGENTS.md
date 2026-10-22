@@ -176,10 +176,15 @@ path. |
 with the host structs (the device vectors `req_get_counter_*`, `resp_get_counter_*`, `resp_set_decim_e_bad_arg_fir_peak`,
 `resp_set_seq_e_state_peak`, `resp_read_raw_e_bad_arg_peak_layout2` decode with `CounterReq` / `CounterResp` /
 `parse_error_payload`; `decim_config(4, ...)` reproduces all 41 `decim_peak` cases, `simulator.peak_mid_codes` the
-`corr` mids: `test_peak_config_matches_the_firmware_vectors`). Aligned: (1) GET_COUNTER level 0 follows the UI
-trigger level (the boot state; any hysteresis; the response's level is the one in effect): the simulator models it
-(`counter_level` 0 = follow, `counter_level_now()`), `Scope.counter_level_cfg` remembers this client's level so a
-gate / source change does not pin the level read back, `scope_counter(level='trigger')`. (2) Peak detect: the volts of
+`corr` mids: `test_peak_config_matches_the_firmware_vectors`). Aligned: (1) GET_COUNTER level 0 and hysteresis 0
+are auto (fw-ctrauto, 2026-10-22; up to then level 0 followed the UI trigger level): after each gate the band is
+centred on the gate's min / max with hysteresis round(span / 6) >= 6, a gate counted at thresholds outside the
+deadband is not VALID and retunes (`P.counter_auto_target` / `P.counter_auto_fits` mirror `fpga_counter.c`). The
+simulator keeps the thresholds in effect (`counter_level_eff` / `counter_hyst_eff`) and runs the rule once per gate
+(`_counter_gate`; the first read assumes the boot gates ran); its low threshold saturates at code 0 (fw-hyst's fix).
+`Scope.counter_level_cfg` / `counter_hyst_cfg` remember this client's configuration so a gate / source change does
+not pin the values read back; `scope_counter(level='auto', hysteresis='auto')`, `level_auto` / `hysteresis_auto`,
+one misfit first gate skipped, fw-hyst's "does not reach both thresholds" caveat plus one for a span under 12. (2) Peak detect: the volts of
 layout 3 / WIDE pairs use the stored v3 block (one calibration class since fw-fullrate, so GET_CAL 92..107 are the
 same correction at every divider); the simulator's midpoint trace goes through `_peak_corr` (= `fpga_channel_correction_full`);
 at divider 0 / over 8190 samples 0x56 bit 1 is not written (shift byte 0x00), the FIR request is dropped (status 0x81,

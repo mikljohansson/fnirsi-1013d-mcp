@@ -6650,3 +6650,90 @@ the MOVED line; `make -s test`, the vector check and mcp pytest green; GCC 10 wi
 **Open**
 - The guard's trigger is the repeat watch; a capture-count trigger (e.g. 3 flagged captures in a row) would react faster
   on a steady signal. Left as is until the bench shows the minute matters.
+
+## 88. fw-ctrauto: the counter's thresholds follow the signal (fw 0.2.105, protocol 1.27 unchanged)
+
+Branch `fw-ctrauto` from main 449d5de. Brief: the bench of 2026-10-22 (0x153D, CH1 on the RC ladder's input node: a fast
+jump then a slow settle, 89..184 codes, 1 kHz): the counter at the boot default (level following the trigger level 146,
+hysteresis 6) read 2.6 to 4.3 kHz (the coordinator's run; fw-hyst's run read 9.5 to 13.7 kHz, the Freq card 15.23 kHz),
+with hysteresis 16 999.998 Hz, with 32 999.996 Hz; on the bare post 6 was exact. The counter compares every full-rate
+sample, so noise the displayed (filtered) record hides is counted. Commits 241e4d1 (firmware, host tests), 540e75b
+(vectors), f7fa203 (mcp), then the docs commit with this section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.**
+Supersedes branch `fw-hyst` (a fixed boot hysteresis 16, not merged): its simulator fix (the low threshold saturates at
+code 0), its "does not reach both thresholds" caveat and its test idea (a signal too small for the thresholds gives no
+valid count) are reused here.
+
+**The rule** (`fpga_counter.c` `cnt_auto_target` / `cnt_auto_check`, header comment in `fpga_counter.h`)
+- After each CH1 / CH2 result taken by the pass: span = max - min; h = max(6, round(span / 6)) (`(span + 3) / 6`), at
+  most span / 2; level (the upper threshold, 0x62 byte 0) = ceil((min + max + h) / 2), the low threshold level - h, so
+  the band is centred on the midpoint. A pinned field (host GET_COUNTER `what` = 1 with a non-zero level or hysteresis)
+  keeps its value; an auto hysteresis under a pinned level is clamped to the level (GET_COUNTER's refusal rule).
+- **Deadband**: the result fits when the thresholds it was counted at are each within max(2, h / 4) codes of the ones
+  it asks for. A misfit result (`fpga_cnt.misfit`) is not VALID (GET_COUNTER flags bit 1, `pc_hw_counter.misfit`) and
+  does not feed the cards (`fpga_counter_usable`, `pc_glue_counter_pass`), and the pass writes the new 0x62 and restarts
+  the gate (0x61 = 0 / value, as for any threshold change), so the next result is one clean gate at them
+  (`fpga_cnt.retunes`). Inside the deadband nothing is written: the noise moving min / max by a code or two between
+  gates never restarts the gate (fw-hyst's author's warning). Steady state: no writes, every gate valid. After a signal
+  or range change: one misfit gate (the cards show the record's value for about 100 ms), then valid.
+- **No signal**: span below 12 codes (`FPGA_CNT_AUTO_MIN_SPAN`): the thresholds stay; with an auto level the result is
+  misfit (its count would be noise). With a pinned level the host's choice stands (fits).
+- EXT results, results dropped by the rate-change rule and a pinned level + pinned hysteresis never retune.
+- Boot still writes 128 / 6 for the first gate (`FPGA_CNT_LEVEL_BOOT` / `FPGA_CNT_HYST_BOOT`); `cfg_level` and `cfg_hyst`
+  are 0 (auto). The trigger level is no longer an input: `fpga_counter_pass(now_ms)`.
+
+**Why span / 6 (not the brief's span / 8)**: at the bench node span 95 gives span / 8 = 12 and span / 6 = 16 (rounded).
+6 failed badly (3 to 14 counted edges per period), 16 and 32 worked; the noise there is a few codes rms at full rate
+(CH2 range 0 about 3 codes rms, `cap_stage.h`), and on a slow settle the signal dwells thousands of samples in the
+band, so 12 (4 sigma) still sees Gaussian tail crossings while 16 (5.3 sigma) did not on the bench. span / 6 lands on
+the smallest verified value there. The floor 6 keeps small fast-edged signals (the bare post) counted; the cap span / 2
+keeps both thresholds well inside min..max. A band centred on the midpoint delays the rising and the falling crossing
+alike, so a symmetric signal's duty (a sine's 50 %) is not biased by the larger hysteresis.
+
+**Decided**
+- GET_COUNTER level 0 = auto (was: follow the trigger level) and hysteresis 0 = auto (was: no hysteresis). The wire
+  layout is unchanged, so no new protocol minor; the 1.26 / 1.27 rows in protocol.md say so. Following the trigger
+  marker is gone (the auto midpoint is the better default for the cards; a marker at the edge of a signal counted noise
+  or nothing).
+- Misfit folded into VALID rather than a new flag bit: the host sees E / T / W and min / max anyway and can tell
+  (mcp `P.counter_auto_fits`), and a bit would need a new minor.
+- The simulator keeps the thresholds in effect and runs the rule once per gate; its first read assumes the gates since
+  boot already tuned them (the firmware has run seconds before a host reads).
+
+**Host tests**: test_fpga_bus `test_counter` now runs on a pinned 128 / 6 (its first pass applies the configuration:
++4 strobes, the restart counts one higher; the old trigger-level move is a host-pinned 150); `test_counter_auto` (new):
+the boot gate misfit and the 0x62 = 142 / 23 trace, the next gate exact, the deadband (58..203 writes nothing, no
+restart), no signal (span 8) misfit with the thresholds kept, a pinned 128 / 3 counting an 8-code square vs auto level
+calling it misfit, **the bench's slow-settle node sample by sample** (fpga_model.c `fm_cnt_wave`: a per-clock source
+through the Schmitt trigger; `cnt_rc_wave`: 1 kHz, jumps 89 -> 140 / 184 -> 133, settles with tau 100 us, -7..+7 codes
+of periodic noise): pinned 146 / 6 counts at least twice the edges, auto retunes once and then counts 1.000000 kHz
+exactly; a pinned hysteresis 10 kept with the level centred (135); a pinned level 150 with the auto hysteresis 23; EXT
+never retunes. (The model's noise is bounded and uniform, so it cannot show span / 8 failing: that is the bench's
+call above.) test_session: a misfit result is not VALID; the mock keeps the hysteresis in effect for a 0. Vectors:
+`req_get_counter_auto` (level 0, hysteresis 0) replaces `req_get_counter_follow_trigger`; 161 vectors, check OK.
+mcp: test_trig26 `test_counter_auto_thresholds` (a fake device clock steps the gates: boot tuned, the trigger level
+ignored, a range change gives one misfit gate then a fitting one, pinned hysteresis / level, back to auto, no signal),
+the tool test uses `level='auto'` and refuses `'trigger'`. `make -s test` green, 542 mcp tests, ruff clean.
+
+**Bench (owner, FEL load; nothing flashed)**
+1. CH1 on the RC ladder's input node, the generator at 1 kHz, trigger on CH1 anywhere: the Freq card reads 1.000 kHz
+   steadily (was 2.6..15 kHz), +Duty near the record's. MCP `scope_counter(readings=10)`: `level_auto` and
+   `hysteresis_auto` true, `hysteresis_codes` about 16 (round(span / 6) of `min_code`..`max_code`), `level_code` about
+   (min + max + h) / 2, `frequency_hz` 1000.00 within a few mHz, `frequency_spread_hz` a few mHz.
+2. Move the trigger marker to the top and bottom of the signal: the counter's level does not move, the card stays
+   1.000 kHz.
+3. CH1 on the bare generator post: 1 kHz and 1 MHz exact (1.000 kHz / 1.000 MHz cards; `frequency_hz` within 1e-5).
+4. Change CH1's V/div by one step: for one gate the card shows the record's value (same number, four digits), then
+   the counter's again; GET_COUNTER level / hysteresis bytes 18 / 19 move to the new midpoint once (no restarts on
+   later gates: `seq` advancing one per 100 ms with VALID set).
+5. A host-pinned hysteresis is kept: `scope_counter(hysteresis=10)`: `hysteresis_codes` 10 on every later reading,
+   `level_code` centred, `level_auto` true; `scope_counter(level=1.0)`: the level pinned at 1 V; `level='auto',
+   hysteresis='auto'` restores the boot behaviour.
+6. Raise CH1's V/div until the square is under half a division (span under 12 codes): `valid` false with the "spans
+   ... under the 12" caveat, the cards on the record's values.
+Regression signs: the card flickering between the counter and the record at a steady signal (the deadband too tight
+for the unit's noise: widen max(2, h / 4)), `seq` steps of more than one gate at a steady signal (retunes every gate),
+the RC node still miscounting (span / 6 too small for that noise: go to span / 5).
+
+**Open**
+- docs/plans/fpga-0x153c.md section 5 (the contract) still says the level follows the trigger level: history, left.
+- The RTL comment in `fpga/al3/src/zaklad.v` ("the firmware writes 128 / 6") stays for the next FPGA change.
