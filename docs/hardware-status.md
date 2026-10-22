@@ -1591,3 +1591,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   9.94 / 2.62 / 1.22; CH2 B 1.0..1.2 throughout. The 0x36 counters stay 0 (32-code threshold), so training and self-check
   cannot see it. CH2 A's valid window on this placement is narrower than one 2.5 ns stage. fpga-capwin (Opus; the account has
   no Fable quota left, owner) investigates: per-bit skew, IOB placement, finer delays, a training metric for small errors.
+- 2026-10-22 10:16-10:22: fw-relay merged (relay registers written only on a change; host setters / ARM / SET_ACQ_STATE RUN
+  leave the Bode view first and never start a sweep); image backups/fw-0.2.105_136d5e1a.bin (sha256 136d5e1aea77..) by FEL.
+  **5-minute soak: 150 status, 7 health, 7 two-channel captures, 0 errors**; READ_SPECTRUM answered E_STATE (the Spectrum
+  view was not open: expected, not an error). Relay clicks: owner to report.
