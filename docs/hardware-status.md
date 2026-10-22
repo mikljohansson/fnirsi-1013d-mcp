@@ -1648,3 +1648,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   flat low level below the 0x5F/0x60 carry), <= 0.29 % elsewhere; CH2 B 5.9 % at 0xA8..0xAF, 0.83 % at 0x68, 0.53 % at 0x58.
   The overall share depends on where the calibration's offset parks the flat levels, so the 11:36 0x153C figures are not
   like-for-like (no per-code data then). **Owner (18:56): accept the gated 0x153D** without the 0x153C per-code rerun.
+- 2026-10-22 18:56-19:02 (lead): FEL fw 0.2.105 c681efa4 (release, 07c2bbf) on the gated 0x153D. Counter on CH1 (post, 1 kHz):
+  Filter Off 200 MSa/s valid 999.996 Hz duty 0.4996; Filter Off 500 kSa/s and 1 MSa/s not valid, GATED; decim 3 at 500 kSa/s
+  valid 1000.004 Hz. Soak 301 s (`soak.py`): 150 status, 4 health, 4 captures, 0 errors (the spectrum read's E_STATE with no
+  spectrum shown is expected). The card still boots 0.2.105 ba1a1283 (single-class); persist waits for the owner's OK.
