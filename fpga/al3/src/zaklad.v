@@ -1341,6 +1341,45 @@ module fnirsi_1013D
   );
 
 //-------------------------------------------------------------------------------------
+//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
+//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
+//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
+//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
+//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
+//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
+//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
+
+  reg        ho_st_q = 0;
+  reg [32:0] ho_cnt = 0;
+  reg        ho_run = 0;
+  reg        ho_en = 0;                    //0x1B != 0, registered
+  reg [1:0]  ho_ct_s = 0;
+  reg        ho_ct_d = 0;
+  assign     ho_act = ho_run & ho_en;
+
+  always @(posedge clk_200MHz)
+    begin
+      ho_st_q <= sampling_triggered;
+      ho_en   <= (trig_holdoff != 32'd0);
+      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
+      ho_ct_d <= ho_ct_s[1];
+
+      if(ho_ct_s[1] ^ ho_ct_d)
+        ho_run <= 0;
+      else if(sampling_triggered & ~ho_st_q)
+        begin
+          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
+          ho_run <= 1;
+        end
+      else
+        begin
+          ho_cnt <= ho_cnt - 33'd1;
+          if(ho_cnt[32])
+            ho_run <= 0;
+        end
+    end
+
+//-------------------------------------------------------------------------------------
 //Sample write clock
 
   //0x1538: encode generation. sce_q is sample_clock_enable one clock ahead, as a register: computed on each falling
@@ -1947,45 +1986,6 @@ assign sampling_enable = ~(
         else trigger_address <= trigger_read_address;
        end
 
-    end
-
-//-------------------------------------------------------------------------------------
-//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
-//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
-//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
-//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
-//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
-//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
-//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
-
-  reg        ho_st_q = 0;
-  reg [32:0] ho_cnt = 0;
-  reg        ho_run = 0;
-  reg        ho_en = 0;                    //0x1B != 0, registered
-  reg [1:0]  ho_ct_s = 0;
-  reg        ho_ct_d = 0;
-  assign     ho_act = ho_run & ho_en;
-
-  always @(posedge clk_200MHz)
-    begin
-      ho_st_q <= sampling_triggered;
-      ho_en   <= (trig_holdoff != 32'd0);
-      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
-      ho_ct_d <= ho_ct_s[1];
-
-      if(ho_ct_s[1] ^ ho_ct_d)
-        ho_run <= 0;
-      else if(sampling_triggered & ~ho_st_q)
-        begin
-          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
-          ho_run <= 1;
-        end
-      else
-        begin
-          ho_cnt <= ho_cnt - 33'd1;
-          if(ho_cnt[32])
-            ho_run <= 0;
-        end
     end
 
 //-------------------------------------------------------------------------------------
