@@ -363,6 +363,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   ring words (and the 0x36 outlier sums covered ~1000 of 8000 words per capture, probably since 0.2.79's training;
   inference). Fixed per capture (4ba6cf5); fail-fast bound CS_RESID_MAX_Q16 = 128 per capture (a0e0156). CH2 B's 3 over
   2 follows the spec (q gates the quiet set, cs_pick takes the lower centre on a tie).
+  **Owner decision 18:56: accept the gated 0x153D (fd0be7a2)** for 0.3.0 although CH2 A reads 3.3 % against 0x153C's 1.0 %
+  at 200 MSa/s: the errors sit at the 0x5F/0x60 carry where the square's flat level parks, the overall share depends on
+  the offset, and the 11:36 0x153C run has no per-code data (hardware-status 18:27-18:33). Slow rates are clean (0 %).
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench

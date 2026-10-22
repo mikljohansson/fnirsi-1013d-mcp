@@ -1638,3 +1638,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   squiggles are gone). Against 0x153C (11:36: A 1.01 / 0.92, B 0.86 / 0.17) the slow rates pass and 200 MSa/s CH2 A fails
   the acceptance. Next: a PC_DEBUG build of main 07c2bbf (fw-capmetric2's fix, `backups/fw-0.2.105-dbg_64e5d382.bin`),
   retrain with the inputs open, rerun the A/B, then a CH2 A stage scan with debug 0x63 writes.
+- 2026-10-22 18:27-18:33 (lead, owner present): fw 0.2.105-dbg 64e5d382 (07c2bbf, fw-capmetric2's fix) on the gated 0x153D.
+  Wizard with the inputs open, saved: q per stage 2..5 / outliers: CH1 A 66 64 466 61 / 0 0 20 0; CH1 B 215 182 157 162 /
+  0; CH2 A 1058 1003 120298 1090 / 0 0 17453 0; CH2 B 960 888 913 991 / 0; stages CH1 A3 B4, CH2 A3 B3 (0x06E3, unchanged).
+  COM10 dropped once (owner moved the cable). A/B (18:31): 200 MSa/s A 3.32 % / hot 1.30 %, B 0.37 % / 0.39 %; 2 MSa/s 0 / 0.
+  CH2 stage scan at 200 MSa/s (debug 0x63 writes): A 2: 3.45 %, 3: 2.82 %, 4: 8.02 %, 5: 3.58 %; B 0.36..0.45 % at every
+  stage. fw 0.2.104 refuses SET_TIMEBASE on 0x153D (bitstream mismatch), so no same-firmware comparison. Per 8-code band
+  (`e_ab2.py`, 32 captures per core, raw in `backups/ab_0x153D-gate_codes.npz`): CH2 A 12.0 % at 0x58..0x5F (the square's
+  flat low level below the 0x5F/0x60 carry), <= 0.29 % elsewhere; CH2 B 5.9 % at 0xA8..0xAF, 0.83 % at 0x68, 0.53 % at 0x58.
+  The overall share depends on where the calibration's offset parks the flat levels, so the 11:36 0x153C figures are not
+  like-for-like (no per-code data then). **Owner (18:56): accept the gated 0x153D** without the 0x153C per-code rerun.
