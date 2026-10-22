@@ -1652,3 +1652,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   Filter Off 200 MSa/s valid 999.996 Hz duty 0.4996; Filter Off 500 kSa/s and 1 MSa/s not valid, GATED; decim 3 at 500 kSa/s
   valid 1000.004 Hz. Soak 301 s (`soak.py`): 150 status, 4 health, 4 captures, 0 errors (the spectrum read's E_STATE with no
   spectrum shown is expected). The card still boots 0.2.105 ba1a1283 (single-class); persist waits for the owner's OK.
+- 2026-10-22 19:52 (lead, owner's OK): **fw 0.2.105 c681efa4 persisted to the SD card** (`--persist-only`, sector 750,
+  817664 bytes, all 1597 sectors read back identical, eGON checksum 0x9D8EDB7F; sector backup `backups/sdcard/sd_750-2347_20261022-195232.bin`).
+  State at the pause (owner travelling): FPGA flash = gated 0x153D fd0be7a2 (padded aa252fb7), card boots 0.2.105
+  c681efa4 with the calibration saved between 18:27 and 18:29 by the debug build (stages 0x06E3, trained). Release bump to 0.3.0 waits.

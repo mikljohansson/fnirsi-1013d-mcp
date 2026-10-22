@@ -366,6 +366,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   **Owner decision 18:56: accept the gated 0x153D (fd0be7a2)** for 0.3.0 although CH2 A reads 3.3 % against 0x153C's 1.0 %
   at 200 MSa/s: the errors sit at the 0x5F/0x60 carry where the square's flat level parks, the overall share depends on
   the offset, and the 11:36 0x153C run has no per-code data (hardware-status 18:27-18:33). Slow rates are clean (0 %).
+  Bench done 19:52: counter gating and soak pass, c681efa4 persisted to SD. **Paused at the owner's request (19:52, trip).**
+  Next on return: the 0.3.0 release work (version bump, CHANGELOG / release notes incl. the TODO near line 56 of
+  docs/release-notes/0.3.0.md, release-checklist still naming 0x153B, rc dry run, tag); 0x153D's dist row to benched.
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
