@@ -6322,7 +6322,7 @@ waits on nothing; USB drive's loop waits on the touch only.
 
 **Bench (owner; FEL load of a 0.2.105 image on a bitstream other than 0x153D, e.g. the unit's 0x153B; nothing flashed)**
 1. The notice shows. Diagnostics, then Back: the notice; tap the centre of Settings: Settings opens; Back: the notice.
-2. USB drive, Exit: the notice. Diagnostics, Calibration tab, Log tab, Back: the notice, its three buttons answer.
+2. USB drive, Back (Exit until fw-usbback, section 85): the notice. Diagnostics, Calibration tab, Log tab, Back: the notice, its three buttons answer.
 3. Leave the notice up for 2 minutes, then tap each button: it answers every time (the probe no longer runs).
 4. While on the notice the MCP still gets GET_INFO (76 = 0x153D, 78 = 1) and ARM answers E_UNSUPPORTED detail 1.
 
@@ -6454,3 +6454,43 @@ coordinator's unit screenshots.
 
 **Open**
 - The Frequency response's own Sweep rows keep 16 px - / + keys (not asked); align them if the owner likes the trigger's.
+
+## 85. fw-usbback: the USB drive screen's Back in the header (fw 0.2.105, protocol unchanged)
+
+Branch `fw-usbback` from main 88c3705. Brief: the owner at the bench, 2026-10-22: the USB drive screen gets Back at the
+top right like the other screens, and the Exit button at the lower right goes. Commit c2694f3 (code, test), then the
+docs commit with this section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.**
+
+**What was built**
+- **One header for the full-screen pages**: Settings' `draw_header` is now `ui_page_header(title, subtitle)`
+  (ui_settings_ui.c, declared in ui_settings.h) with `ui_page_back(pressed)`; the pure `ui_page_back_hit(x, y)`
+  (ui_settings.c) is the UI_SET_BACK_* rectangle (692, 4, 96 x 44), used by `ui_set_hit`, the time page and USB drive.
+  Diagnostics draws the same header through its page model (ui_diag.c `ud_header`, UD_BACK_X 692), unchanged.
+- **USB drive** (menu.c `scope_setup_usb_screen`): `ui_page_header("USB drive", 0)` replaces the dark blue band and its
+  title at 14, 13; the USB_EXIT_* button and defines are gone; the picture and the three lines stay where they were;
+  line 3 reads "Eject the drive on the PC before tapping Back." A touch on Back draws it pressed; with `mounted_to_PC`
+  "Not allowed!" (4 s), then after the release Back is drawn released and the screen stays; otherwise exactly Exit's
+  path: `usb_device_disable`, `USB_CH340 = 1`, `usb_device_init`, `usb_device_enable` (CDC back), wait for the release,
+  `pc_glue_ui_hold` released, `scope_sync_thumbnail_files`. The loop has no `PC_UI_YIELD` (USB drive mode keeps E_BUSY,
+  docs/ui-guidelines.md section 4). The callers are untouched: the main menu row (statemachine.c) and the mismatch
+  notice (ui_diag_view.c UD_ID_USB) copy their screen to displaybuffer2 and back; the notice sets `fm_redraw`, so its
+  page and hit areas are built again after Back (section 82).
+- Host text: mcp `protocol.py` busy hint for detail 5 says "leaves it with Back on the scope (Exit on firmware before
+  0.2.105)"; docs/guide/screens.md "USB drive", docs/agent-measurement-guide.md (E_BUSY row) and the CHANGELOG say Back.
+- Tests: test_ui checks `ui_page_back_hit` over the whole screen against the rectangle and that "USB drive" and the two
+  long lines fit (title clear of Back, lines inside x 790). GCC 10 build without new warnings in the touched files;
+  `make -s test` and the vector check green.
+
+**Bench (owner, FEL load; nothing flashed)**
+1. Main menu > USB drive: black header, "USB drive" left, Back at the top right where Settings has it; no button at the
+   lower right; the last line says "tapping Back". The PC sees the drive; the COM port is gone.
+2. With the drive still mounted on the PC, tap Back: Back lights while touched, "Not allowed!" for about 4 s, Back drawn
+   normal again, the screen stays. Eject on the PC, tap Back: the scope screen as it was, the COM port is back and the
+   MCP answers PING / GET_INFO.
+3. FPGA mismatch notice (an image on a bitstream other than 0x153D) > USB drive > Back: the notice, and its three
+   buttons answer (Diagnostics, Settings, USB drive again).
+4. Settings and its Time and date page: Back still lights and leaves as before.
+
+**Open**
+- The mockup artboard UsbDrive (docs/mockups/gen_ux/boards.py) still draws the Exit button and "tap Exit"; regenerate it
+  with the header Back when the mockups are next refreshed.
