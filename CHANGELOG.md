@@ -263,6 +263,11 @@ sections 74 to 79.
   reads 0 after 0x01 = 1 again (9ba3ddf, the fault the short ready wait exposed; fpga-d3c's register audit found no
   other); timing re-rolled (50b4abe: clk_200MHz 4.955 ns, 6385 LUT / 7420 LE, 85.9 %), testbenches and the contract
   transcript updated (25457ff); README section 17 "Full-rate encodes and sample skipping".
+- 0x153D encodes the ADCs as 0x153C again (owner 2026-10-22 after the 11:36 A/B: the full-rate encodes gave CH2 1-3 %
+  code errors from the AD9288's partner-core coupling at every timebase, 0x153C reads 0 % at 2 MSa/s): gated by the divider
+  with the filter off, full rate with a filter, peak detect and at 200 MSa/s; logger, square, version and the W fix kept
+  (ebf3645 reverts 646c453 and its testbench changes); roll h1 (e3a23c2) closes every clock at 4.983 ns with the encode
+  pads on 0x153C's; `dist/al3-0x153D.bin` `fd0be7a2...e96a` (padded `aa252fb7...63cc`), unbenched; README section 17.
 
 #### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 

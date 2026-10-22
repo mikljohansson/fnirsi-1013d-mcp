@@ -11,19 +11,14 @@
 // 6.7..7.9 ns after the write clock edge; the simulated flops switch 1.25 ns after it, so epad about 5.5..6.7).
 // The model keeps the encode time of every sample value it produced, so a stored word can be checked for
 //   - garbage (a value >= 200: the capture hit the transition),
-//   - the word association: the A sample must be encoded 5 ns after the B sample of the same word (B first; 0x153D:
-//     the encodes run at 100 MHz per core whatever the divider, so T = 10 ns at every rate; up to 0x153C T/2 of the
-//     divided write clock),
-//   - continuity: consecutive words hold samples D + 1 encodes apart (0x153D: with K = 0 the write path stores every
-//     (D + 1)-th captured pair; up to 0x153C consecutive samples of the divided encode).
-// The dut's outlier counters (read 0x36) are compared with the count the testbench derives from the full-rate stream
-// (every write clock edge while the capture writes, 0x153D; up to 0x153C the stored words, which were every edge).
+//   - the word association: the A sample must be encoded T/2 after the B sample of the same word (B first),
+//   - continuity: consecutive words hold consecutive samples.
+// The dut's outlier counters (read 0x36) are compared with the count the testbench derives from the stored stream.
 //
-// Phase 1: every divider D in {0, 1, 2, 3, 4, 9, 19}, stages 2..5, both B references (0x63 bits 12/13) and both
+// Phase 1: every rate D in {0, 1, 2, 3, 4, 9, 19}, stages 2..5, both B references (0x63 bits 12/13) and both
 //   data-align models, at the nominal pad delay: each core must be clean exactly where the datasheet window formula
-//   says (README section 10) with T = 10 ns at every divider, the counters must agree with the stream, and with the
-//   matching reference every clean capture must be B-first by 5 ns at every rate (0x153D: the divider sweep shows the
-//   window does not depend on it; up to 0x153C the window moved with the divided encode).
+//   says (README section 10), the counters must agree with the stream, and with the matching reference every clean
+//   capture must be B-first by T/2 at every rate (the 50 MSa/s case is the one a rising-edge-only capture misses).
 // Phase 2: the pad delay swept from 2 to 12 ns in 0.5 ns steps at 200 MSa/s with the datasheet corner (tPD 6, tV 2)
 //   and the typical values (4.5, 3.0), stages 3 and 4: clean exactly inside the predicted range, the counters flag
 //   every dirty capture (a wrong stage fails loudly), B-first wherever clean.
@@ -152,10 +147,8 @@ module tb;
   // per-core outlier count as the dut's counters define it (|sample - previous| > threshold, from the third word)
 
   reg      capturing = 0;
-  integer  nw = 0, ne = 0;                 // stored words / write clock edges since the release
-  integer  cur_div = 0;                    // the divider of the capture (0x153D: the stride of the stored pairs)
-  reg [7:0] pv1A = 0, pv1B = 0, pv2A = 0, pv2B = 0;   // the previous stored word's samples
-  reg [7:0] ev1A = 0, ev1B = 0, ev2A = 0, ev2B = 0;   // the previous edge's samples (the counters' reference)
+  integer  nw = 0;
+  reg [7:0] pv1A = 0, pv1B = 0, pv2A = 0, pv2B = 0;
   integer  g1A, g1B, g2A, g2B;             // garbage words per core
   integer  w1A, w1B, w2A, w2B;             // ramp wraps (119 -> 20) per core: the one legitimate jump of the quiet input
   integer  x1A, x1B, x2A, x2B;             // expected outlier counts per core
@@ -170,7 +163,7 @@ module tb;
 
   task clear_stats;
     begin
-      nw = 0; ne = 0; g1A = 0; g1B = 0; g2A = 0; g2B = 0; x1A = 0; x1B = 0; x2A = 0; x2B = 0; w1A = 0; w1B = 0; w2A = 0; w2B = 0;
+      nw = 0; g1A = 0; g1B = 0; g2A = 0; g2B = 0; x1A = 0; x1B = 0; x2A = 0; x2B = 0; w1A = 0; w1B = 0; w2A = 0; w2B = 0;
       ab1_bad = 0; ab2_bad = 0; ct1_bad = 0; ct2_bad = 0; ab1_n = 0; ab2_n = 0;
       dt1_min = 1e9; dt1_max = -1e9; dt2_min = 1e9; dt2_max = -1e9;
     end
@@ -179,48 +172,43 @@ module tb;
   // the dut's counters clear while 0x01 = 1 and count from the release (skipping two words): the statistics start there too
   always @(negedge dut.sample_system_reset) if (capturing) clear_stats;
 
-  // 0x153D: the dut's counters compare the captured pair of every write clock edge with the previous edge's while the
-  // capture writes (from the third edge after the release), stored or not; the garbage, word-association and
-  // continuity statistics are over the stored words (every (D + 1)-th edge with K = 0)
   always @(posedge dut.sample_write_clock)
-    if (capturing && dut.sample_write_enable) begin
+    if (capturing && dut.sample_write_enable && dut.swc_adv) begin
       v1A = dut.samples.dia[7:0];  v1B = dut.samples.dia[15:8];
       v2A = dut.samples.dia[23:16]; v2B = dut.samples.dia[31:24];
-      if (ne >= 2) begin                     // the dut's counters start at the third edge after the release
-        if (v1A == 8'd20 && ev1A == 8'd119) w1A = w1A + 1;
-        if (v1B == 8'd20 && ev1B == 8'd119) w1B = w1B + 1;
-        if (v2A == 8'd20 && ev2A == 8'd119) w2A = w2A + 1;
-        if (v2B == 8'd20 && ev2B == 8'd119) w2B = w2B + 1;
-        if (far(v1A, ev1A)) x1A = x1A + 1;
-        if (far(v1B, ev1B)) x1B = x1B + 1;
-        if (far(v2A, ev2A)) x2A = x2A + 1;
-        if (far(v2B, ev2B)) x2B = x2B + 1;
+      if (v1A >= 8'd200) g1A = g1A + 1;
+      if (v1B >= 8'd200) g1B = g1B + 1;
+      if (v2A >= 8'd200) g2A = g2A + 1;
+      if (v2B >= 8'd200) g2B = g2B + 1;
+      if (nw >= 2) begin                     // the dut's counters start at the third word after the release
+        if (v1A == 8'd20 && pv1A == 8'd119) w1A = w1A + 1;
+        if (v1B == 8'd20 && pv1B == 8'd119) w1B = w1B + 1;
+        if (v2A == 8'd20 && pv2A == 8'd119) w2A = w2A + 1;
+        if (v2B == 8'd20 && pv2B == 8'd119) w2B = w2B + 1;
       end
-      ev1A = v1A; ev1B = v1B; ev2A = v2A; ev2B = v2B;
-      ne = ne + 1;
-      if (dut.swc_adv) begin
-        if (v1A >= 8'd200) g1A = g1A + 1;
-        if (v1B >= 8'd200) g1B = g1B + 1;
-        if (v2A >= 8'd200) g2A = g2A + 1;
-        if (v2B >= 8'd200) g2B = g2B + 1;
-        if (v1A < 8'd200 && v1B < 8'd200) begin
-          dt = c1A.tenc[v1A] - c1B.tenc[v1B];
-          if (dt < dt1_min) dt1_min = dt;
-          if (dt > dt1_max) dt1_max = dt;
-          ab1_n = ab1_n + 1;
-          if (nw >= 1 && pv1A < 8'd200 && v1A != 8'd20 + ((pv1A - 8'd20 + cur_div + 1) % 100)) ct1_bad = ct1_bad + 1;
-        end
-        if (v2A < 8'd200 && v2B < 8'd200) begin
-          dt = c2A.tenc[v2A] - c2B.tenc[v2B];
-          if (dt < dt2_min) dt2_min = dt;
-          if (dt > dt2_max) dt2_max = dt;
-          ab2_n = ab2_n + 1;
-          if (nw >= 1 && pv2A < 8'd200 && v2A != 8'd20 + ((pv2A - 8'd20 + cur_div + 1) % 100)) ct2_bad = ct2_bad + 1;
-        end
-        if (dump && (nw < 12 || (dump > 1 && $time > 303000 && $time < 307700))) $display("  w%0d t=%0t 1A %0d 1B %0d 2A %0d 2B %0d tA %0.2f tB %0.2f", nw, $time, v1A, v1B, v2A, v2B, c1A.tenc[v1A], c1B.tenc[v1B]);
-        pv1A = v1A; pv1B = v1B; pv2A = v2A; pv2B = v2B;
-        nw = nw + 1;
+      if (nw >= 2) begin
+        if (far(v1A, pv1A)) x1A = x1A + 1;
+        if (far(v1B, pv1B)) x1B = x1B + 1;
+        if (far(v2A, pv2A)) x2A = x2A + 1;
+        if (far(v2B, pv2B)) x2B = x2B + 1;
       end
+      if (v1A < 8'd200 && v1B < 8'd200) begin
+        dt = c1A.tenc[v1A] - c1B.tenc[v1B];
+        if (dt < dt1_min) dt1_min = dt;
+        if (dt > dt1_max) dt1_max = dt;
+        ab1_n = ab1_n + 1;
+        if (nw >= 1 && pv1A < 8'd200 && v1A != 8'd20 + ((pv1A - 8'd20 + 8'd1) % 100)) ct1_bad = ct1_bad + 1;
+      end
+      if (v2A < 8'd200 && v2B < 8'd200) begin
+        dt = c2A.tenc[v2A] - c2B.tenc[v2B];
+        if (dt < dt2_min) dt2_min = dt;
+        if (dt > dt2_max) dt2_max = dt;
+        ab2_n = ab2_n + 1;
+        if (nw >= 1 && pv2A < 8'd200 && v2A != 8'd20 + ((pv2A - 8'd20 + 8'd1) % 100)) ct2_bad = ct2_bad + 1;
+      end
+      if (dump && (nw < 12 || (dump > 1 && $time > 303000 && $time < 307700))) $display("  w%0d t=%0t 1A %0d 1B %0d 2A %0d 2B %0d tA %0.2f tB %0.2f", nw, $time, v1A, v1B, v2A, v2B, c1A.tenc[v1A], c1B.tenc[v1B]);
+      pv1A = v1A; pv1B = v1B; pv2A = v2A; pv2B = v2B;
+      nw = nw + 1;
     end
 
   //---------------------------------------------------------------------------------
@@ -233,7 +221,6 @@ module tb;
 
   task capture(input [31:0] div, input [15:0] cs);
     begin
-      cur_div = div;
       wr2(8'h63, cs);
       wr4(8'h0D, div);
       wr1(8'h17, 8'hFF);                                // level never crossed by the ramp
@@ -315,8 +302,8 @@ module tb;
                T, al, rf, stA, stB, tpd_r, tv_r, epad1, nw, g1A, g1B, g2A, g2B, oc1A, oc1B, oc2A, oc2B, x1A, x1B, x2A, x2B,
                dt1_min, dt1_max, dt2_min, dt2_max, ct1_bad, ct2_bad, mA1, mB1, mA2, mB2);
       check(nw >= 60, {"capture too short: ", tag});
-      // the dut's counters are exactly the full-rate stream's outliers (every write clock edge, 0x153D)
-      check(oc1A == x1A && oc1B == x1B && oc2A == x2A && oc2B == x2B, {"0x36 counters differ from the full-rate stream: ", tag});
+      // the dut's counters are exactly the stream's outliers
+      check(oc1A == x1A && oc1B == x1B && oc2A == x2A && oc2B == x2B, {"0x36 counters differ from the stored stream: ", tag});
       // clean where the formula says clean, every word garbage where it says inside the transition
       if (mA1 > 0.2)       check(g1A == 0, {"CH1 A predicted clean but garbage stored: ", tag});
       else if (mA1 < -0.2) check(g1A == nw && oc1A > 0, {"CH1 A predicted in transition but not all words garbage / counter 0: ", tag});
@@ -331,15 +318,15 @@ module tb;
       if (cleanB1) check(oc1B == w1B, {"CH1 B clean but counter not the ramp wraps: ", tag});
       if (cleanA2) check(oc2A == w2A, {"CH2 A clean but counter not the ramp wraps: ", tag});
       if (cleanB2) check(oc2B == w2B, {"CH2 B clean but counter not the ramp wraps: ", tag});
-      // with the matching reference: B first by T/2 = 5 ns in every word, samples D + 1 encodes apart in consecutive words
+      // with the matching reference: B first by T/2 in every word, consecutive samples in consecutive words
       if (al == rf) begin
         if (cleanA1 && cleanB1) begin
           check(ab1_n > 0 && dt1_min > T / 2.0 - 1.0 && dt1_max < T / 2.0 + 1.0 && ct1_bad == 0,
-                {"CH1 word association not B first by 5 ns or not D + 1 encodes apart: ", tag});
+                {"CH1 word association not B first by T/2 or not consecutive: ", tag});
         end
         if (cleanA2 && cleanB2) begin
           check(ab2_n > 0 && dt2_min > T / 2.0 - 1.0 && dt2_max < T / 2.0 + 1.0 && ct2_bad == 0,
-                {"CH2 word association not B first by 5 ns or not D + 1 encodes apart: ", tag});
+                {"CH2 word association not B first by T/2 or not consecutive: ", tag});
         end
       end
     end
@@ -368,7 +355,7 @@ module tb;
           for (st = 2; st <= 5; st = st + 1) begin
             if (!(quick && (st == 2 || st == 5) && di > 1)) begin
               align = al;
-              T = 10.0;                                   // 0x153D: the encode period at every divider (was 10 (D + 1))
+              T = 10.0 * (divs[di] + 1);
               cs = {2'b00, rf[0], rf[0], st[2:0], st[2:0], st[2:0], st[2:0]};
               capture(divs[di], cs);
               evaluate(T, al, rf, st, st);
@@ -397,7 +384,7 @@ module tb;
     for (ci = 0; ci < 2; ci = ci + 1) begin
       tpd_r = tpds[ci]; tv_r = tvs[ci]; set_adc(tpd_r, tv_r);
       for (di = 0; di < 7; di = di + 1) begin
-        T = 10.0;                                         // 0x153D: the encode period at every divider
+        T = 10.0 * (divs[di] + 1);
         capture(divs[di], po);
         evaluate(T, 0, 0, po[2:0], po[5:3]);
         check(g1A == 0 && g1B == 0 && g2A == 0 && g2B == 0 && oc1A == w1A && oc1B == w1B && oc2A == w2A && oc2B == w2B,

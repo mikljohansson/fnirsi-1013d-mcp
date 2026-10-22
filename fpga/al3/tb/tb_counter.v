@@ -292,11 +292,10 @@ module tb;
     gate_result(1.0e9 / a_p, a_h / a_p, 3.0e-6, 58, 62, 198, 202, "CH1 (src 1, 0x15 = CH2) square 777.7 ns, 200 MSa/s");
     check(r_st[5:4] == 2'b00, "status: source CH1");
 
-    // the same at 10 MSa/s (divider 9). 0x153D: the encodes run at full rate at every divider, so the counter still sees
-    // one sample per 5 ns and keeps the 200 MSa/s tolerance (up to 0x153C samples 50 ns apart, tolerance 2e-5)
+    // the same at 10 MSa/s (divider 9): samples 50 ns apart
     wr4(8'h0D, 32'd9);
     select(2'd1, 2'd0);
-    gate_result(1.0e9 / a_p, a_h / a_p, 3.0e-6, 58, 62, 198, 202, "CH1 square 777.7 ns, 10 MSa/s (5 ns resolution)");
+    gate_result(1.0e9 / a_p, a_h / a_p, 2.0e-5, 58, 62, 198, 202, "CH1 square 777.7 ns, 10 MSa/s");
     wr4(8'h0D, 32'd0);
 
     // K = 1 (0x53 = 1, divider 1): the decimator forces the full-rate write clock, the counter keeps 5 ns resolution
