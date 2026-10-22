@@ -6,6 +6,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **A host capture leaves the Bode view** (owner decision 2026-10-22 09:59, "first"): a host ARM / capture or SET_ACQ_STATE
+  RUN while the frequency response view is open leaves the view (back to the scope view) and never starts a Bode sweep;
+  sweeps come only from the view's own RUN and BODE_CTRL. Implemented in fw-relay.
 - [ ] **Relays click on every host capture** (bench 2026-10-22 09:5x, owner): the soak's host capture + RUN restore every
   10 s switched the relays each time with no range / coupling change. Write the relay / range / coupling outputs only when
   their value changes (UI and host paths alike); a soak must be silent. fw-relay.
