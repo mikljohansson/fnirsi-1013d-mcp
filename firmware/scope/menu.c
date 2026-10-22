@@ -38,12 +38,6 @@
 #include "acq_view.h"
 #include "trig_ui.h"
 
-//USB drive screen: the Exit button (fw 0.2.51)
-#define USB_EXIT_X     610
-#define USB_EXIT_Y     412
-#define USB_EXIT_W     160
-#define USB_EXIT_H     52
-
 #include <string.h>
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -219,27 +213,18 @@ void scope_setup_view_screen(void)
 void scope_setup_usb_screen(void)
 {
   //fw 0.2.51, "USB drive" (docs/plans/ux-makeover.md section 2, design artboard UsbDrive): the scope and the PC as
-  //1.00o5 drew them, what is going on in three plain lines, and an Exit button
+  //1.00o5 drew them, what is going on in three plain lines. fw 0.2.105 (owner, 2026-10-22): the Settings / Diagnostics
+  //header with Back at the top right (ui_page_header) instead of the Exit button at the lower right
   static const char *lines[3] =
   {
     "The SD card is now a USB drive on the PC.",
     "PC control (MCP) is disconnected until you leave this screen.",
-    "Eject the drive on the PC before tapping Exit."
+    "Eject the drive on the PC before tapping Back."
   };
   int i, usb_drive_hold;
 
-  //Clear the whole screen
-  display_set_fg_color(BLACK_COLOR);
-  display_fill_rect(0, 0, 800, 480);
-
-  //Header bar with the title
-  display_set_fg_color(0x000B1A33);
-  display_fill_rect(0, 0, 800, 52);
-  display_set_fg_color(0x001F3A66);
-  display_draw_horz_line(51, 0, 799);
-  display_set_font(&font_5);
-  display_set_fg_color(WHITE_COLOR);
-  display_text(14, 13, "USB drive");
+  //The whole screen cleared, the header with the title and Back (the only control on the screen)
+  ui_page_header("USB drive", 0);
 
   //Set the light color for the equipment borders
   display_set_fg_color(0x00AAAAAA);
@@ -277,14 +262,6 @@ void scope_setup_usb_screen(void)
   for(i = 0; i < 3; i++)
     display_text(40, 342 + 24 * i, (int8 *)lines[i]);
 
-  //The Exit button (USB_EXIT_*), the only control on the screen
-  display_set_fg_color(0x00333333);
-  display_fill_rounded_rect(USB_EXIT_X, USB_EXIT_Y, USB_EXIT_W, USB_EXIT_H, 4);
-  display_set_fg_color(0x00606060);
-  display_draw_rounded_rect(USB_EXIT_X, USB_EXIT_Y, USB_EXIT_W, USB_EXIT_H, 4);
-  display_set_fg_color(WHITE_COLOR);
-  display_text(USB_EXIT_X + (USB_EXIT_W - ui_text_width(&font_3, "Exit")) / 2, USB_EXIT_Y + 18, "Exit");
-
   //Stop the USB interface
   usb_device_disable();
 
@@ -298,7 +275,7 @@ void scope_setup_usb_screen(void)
   //E_BUSY "USB drive mode": this screen never closes by itself while the PC may hold the drive (protocol 1.23)
   usb_drive_hold = pc_glue_ui_hold(PC_HOLD_USB_DRIVE);
 
-  //Wait for the user to touch Exit to quit
+  //Wait for the user to touch Back to quit
   while(1)
   {
     //Scan the touch panel for touch
@@ -307,15 +284,18 @@ void scope_setup_usb_screen(void)
     //Check if there is touch
     if(havetouch)
     {
-      //Check if touch within the Exit button
-      if((xtouch >= USB_EXIT_X) && (xtouch < USB_EXIT_X + USB_EXIT_W) && (ytouch >= USB_EXIT_Y) && (ytouch < USB_EXIT_Y + USB_EXIT_H))
+      //Check if touch within the Back button: pressed while the finger is on it, as on Settings
+      if(ui_page_back_hit(xtouch, ytouch))
       {
+        ui_page_back(1);
+
         if (mounted_to_PC)
         {
           scope_display_error();
           
-          //Wait until touch is released 
+          //Wait until touch is released, then Back is drawn released again
           tp_i2c_wait_for_touch_release();
+          ui_page_back(0);
         }
         else 
         {  
@@ -327,7 +307,7 @@ void scope_setup_usb_screen(void)
           //Start the USB interface
           usb_device_enable();
           
-          //Touched the text field so wait until touch is released and then quit
+          //Touched Back so wait until touch is released and then quit
           tp_i2c_wait_for_touch_release();
           
           break;

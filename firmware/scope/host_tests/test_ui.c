@@ -1238,6 +1238,7 @@ static void test_settings_geometry(void)
 
       got = ui_set_hit(x, y, &part);
       T_EQ(got, want);
+      T_EQ(ui_page_back_hit(x, y), in_rect(x, y, UI_SET_BACK_X, UI_SET_BACK_Y, UI_SET_BACK_W, UI_SET_BACK_H) ? 1 : 0);
 
       if(want >= 0)
         T_EQ(part, wpart);
@@ -1410,6 +1411,10 @@ static void test_settings_text(void)
 
   //Header: the title and Back on one line (fw 0.2.63: no subtitle, no note beside Restore)
   T_TRUE(12 + ui_text_width(&font_5, "Settings") + 16 <= UI_SET_BACK_X);
+  //USB drive (fw 0.2.105, menu.c scope_setup_usb_screen): the same header, its three lines at x 40 clear of the edge
+  T_TRUE(12 + ui_text_width(&font_5, "USB drive") + 16 <= UI_SET_BACK_X);
+  T_TRUE(40 + ui_text_width(&font_3, "PC control (MCP) is disconnected until you leave this screen.") <= 790);
+  T_TRUE(40 + ui_text_width(&font_3, "Eject the drive on the PC before tapping Back.") <= 790);
   T_TRUE(ui_text_width(&font_3, "Restore default settings") + 24 <= UI_SET_RESTORE_W);
 
   //Time editor: labels left of the - buttons, values between the buttons
