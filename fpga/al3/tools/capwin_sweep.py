@@ -63,6 +63,12 @@ def core_stats(x: np.ndarray, partner_toggles: np.ndarray) -> dict:
     per-sample arrays the summaries need (all of the same length, NaN-free)."""
     med = running_median(x)
     ok = ~np.isnan(med)
+    # the firmware metric of README section 18: the residual against the median of 3 (x[j-1], x[j], x[j+1])
+    xi = x.astype(np.int32)
+    d3 = np.zeros(len(x), dtype=np.int32)
+    lo, hi = np.minimum(xi[:-2], xi[1:-1]), np.maximum(xi[:-2], xi[1:-1])
+    d3[1:-1] = xi[1:-1] - np.maximum(lo, np.minimum(hi, xi[2:]))
+    d3 = d3[ok]
     x = x[ok].astype(np.int32)
     med = med[ok]
     res = x - med
@@ -71,7 +77,7 @@ def core_stats(x: np.ndarray, partner_toggles: np.ndarray) -> dict:
     err = np.stack([np.abs((x ^ (1 << i)) - med) for i in range(8)])
     best = np.argmin(err, axis=0)
     wrong = np.where(err[best, np.arange(len(x))] <= 2.5, best, 8).astype(np.int8)
-    return {"res": res, "med": med, "wrong": wrong, "ptog": partner_toggles[ok]}
+    return {"res": res, "med": med, "wrong": wrong, "ptog": partner_toggles[ok], "d3": d3, "x": x}
 
 
 def partner_toggles(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -96,8 +102,17 @@ def summarise(per: list[dict]) -> dict:
     med = np.concatenate([p["med"] for p in per])
     wrong = np.concatenate([p["wrong"] for p in per])
     ptog = np.concatenate([p["ptog"] for p in per])
+    d3 = np.concatenate([p["d3"] for p in per])
+    x = np.concatenate([p["x"] for p in per])
     out: dict = {"n": len(res), "rms": float(np.sqrt(np.mean(res ** 2))) if len(res) else float("nan"),
-                 "bands": {}}
+                 "bands": {}, "q16": float(16 * np.mean(d3.astype(np.float64) ** 2)) if len(d3) else float("nan")}
+    # the most frequent (median code, read code) pairs of the samples >= BAD1 off: a stage-dependent bitwise mix of
+    # neighbouring codes is a capture in the core's own transition; the same pairs at every stage are not the capture
+    m = np.clip(np.rint(med), 0, 255).astype(int)
+    sel = np.abs(res) >= BAD1
+    keys, cnt = np.unique(m[sel] * 256 + x[sel], return_counts=True)
+    order = np.argsort(-cnt)[:5]
+    out["pairs"] = [(int(keys[i] // 256), int(keys[i] % 256), int(cnt[i])) for i in order]
     band = (np.clip(np.rint(med), 0, 255) // BAND).astype(int)
     for k in np.unique(band):
         sel = band == k
@@ -166,6 +181,13 @@ def report(res: dict[tuple[int, int, int], dict], counts: dict[tuple[int, int], 
             lines.append(f"    stage {s}: {r['n_bad4']:6d} of {r['n']} ({100 * r['bad4']:.3f} %)  bits "
                          + " ".join(f"{v:.2f}" for v in r["bit_share"])
                          + f"  partner toggles {r['ptog_in']:.2f} (control {r['ptog_ctl']:.2f}){cnt}")
+            lines.append(f"      q16 {r['q16']:.1f}; top pairs median->read "
+                         + " ".join(f"{a:02X}->{b:02X}:{n}" for a, b, n in r["pairs"]))
+        q = {s: res[(core, s, core)]["q16"] for s in stages}
+        qmin = min(q.values())
+        quiet = [s for s in stages if q[s] <= qmin * 5 / 4 + 4]
+        lines.append(f"  {CORES[core]}: quiet stages by the section 18 rule (q16 <= 5/4 q16_min + 4, before the 0x36 "
+                     f"check): {', '.join(map(str, quiet))}")
     lines.append("Reading: a stage whose rms in a band exceeds the partner's and the core's best stage there is at the "
                  "edge of its window; bits concentrated in one or two columns point at those pins (per-pin skew or "
                  "crosstalk), 'none' (several bits at once) at the core's own transition, partner toggles well above "
