@@ -234,10 +234,10 @@ mean and max width), the samples / preview as `<ch>_min` and `<ch>_max`, and the
 `<ch>_max_volts`, `<ch>_min_codes`, `<ch>_max_codes`; `volts` / `codes` are the midpoint; the caveat says the
 envelope includes the noise extremes and that averaging is refused while peak detect is on (`scope_averaged_capture`
 refuses with a hint; SET_SEQ mode 2 answers E_STATE detail 7). Volts of a peak record (READ_RAW layout 3, READ_TRACE
-WIDE) use the calibration's stored v3 zeros and gains with the v4 tracker included, as the firmware's midpoint does
-(fw-c6 `fpga_channel_correction_full`). Since fw 0.2.105 (FPGA 0x153D, the ADCs always at 200 MSa/s) there is one
-calibration class, so GET_CAL's `gain_a` .. `off_b` (bytes 92..107) are the same correction at every divider. At
-divider 0 and over 8190
+WIDE) use the **full clock class** of the calibration (the stored v3 zeros and gains of the full class, the v4 tracker
+included), as the firmware's midpoint does (fw-c6 `fpga_channel_correction_full`): under peak detect the ADCs run at
+200 MSa/s whatever the divider, while GET_CAL's `gain_a` .. `off_b` (bytes 92..107) and CAL_GATED describe the
+divider's gated class at a divider > 0, so those bytes are not what a peak record needs. At divider 0 and over 8190
 samples the record stays legacy (GET_DECIM why 2 / 3) and the firmware does not write peak detect at all (shift byte
 0x00).
 
@@ -396,7 +396,10 @@ with several, a `.npz` (kind `counter`, `scope_report` plots it) and the `resolu
 the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy (about 1e-5, uncalibrated) on top.
 Auto thresholds (the boot setting, fw-ctrauto): after each gate the firmware centres the band on the gate's raw
 min / max midpoint; a gate counted at thresholds that do not fit it (a new signal or range) is not valid and the next
-one is retuned, so the tool skips one such first gate. Caveats: no valid count (fewer than two edges: raise the gate,
+one is retuned, so the tool skips one such first gate. CH1 / CH2 counts need the ADCs at full rate (200 MSa/s, any
+filter, Peak; fw 0.2.105 on FPGA 0x153D): with Filter Off at a slower rate the encodes are gated by the divider, the
+counter sees the divided stream, and the result has `gated` true and `valid` false with a caveat saying so (GET_COUNTER
+flags bit 4); the scope's cards then show the record's measurement. Caveats: no valid count (fewer than two edges: raise the gate,
 check the source), a signal under the 12-code span auto needs or outside pinned thresholds (says which), vmin / vmax
 include the noise extremes. Wire: request u8 what (0 read / 1 configure), gate, source, level, hysteresis, 3 x 0
 (level 0 / hysteresis 0 = auto; a non-zero level refuses hysteresis > level);
@@ -590,17 +593,16 @@ bitstream change.
 
 **`cal_probe`** (`scope_cal_probe`, tier 2, protocol 1.21 / fw 0.2.67, provisional numbering; diagnostic): CAL_PROBE
 runs the calibration wizard's zero measurement of one channel and hardware range (or, `whole_step`, the wizard's whole
-zero step on the screen) and returns the verdict (OK, CLIP, NOISE, ZERO, SPREAD, SLOPE, DRIFT, TIMING, READOUT; CLASS
-is retired since fw 0.2.105) in words, the failing point / rate / core / value, the centre and zero PWM, the zero
-split, the encode-check counts during the probe and per point (coarse and slope points at 2 MSa/s, the full-rate zero
-and slope points at 200 MSa/s; point 4, the gated zero, is not measured since fw 0.2.105) per core the mean, RMS about
-the mean (`noisy` above the wizard's limit of 3 codes), RMS within a conversion, extremes and clipped samples. Nothing
-is stored; the tool
+zero step on the screen) and returns the verdict (OK, CLIP, NOISE, ZERO, SPREAD, SLOPE, DRIFT, CLASS, TIMING,
+READOUT) in words, the failing point / class / core / value, the centre and zero PWM, the zero split, the encode-check
+counts during the probe and per point (coarse, gated slope and zero pair, full-rate zero pair and slope) per core the
+mean, RMS about the mean (`noisy` above the wizard's limit of the point's class: 3 codes full rate, 1 code gated
+since fw 0.2.100, 3 codes before), RMS within a conversion, extremes and clipped samples. Nothing is stored; the tool
 stops the UI acquisition for it and sets RUN again. A/B switches for the bus readout: `settle_reads`, `prestrobe`.
 
 **`calibration_info`** (`scope_calibration_info`, tier 0): the conversion in use per channel, the scope's calibration
-(v3 block, current correction), from 1.15 `tracking` per channel (the v4 A - B tracker: tracking / frozen / idle, d,
-e, q, ages, `in_words`) and from 1.16 `calibration_provenance` (which firmware build and FPGA calibrated, which parts it
+(v3 block, current correction), from 1.15 `tracking` per channel (the v4 tracker: tracking / frozen / idle, d, e, q,
+cm, ages, `in_words`) and from 1.16 `calibration_provenance` (which firmware build and FPGA calibrated, which parts it
 wrote, the date with a clock module, power-ons and operating hours since), plus the per-unit file.
 
 **`read_calibration`** (tier 0). Per channel: offset centres, gain factors per range, core A/B

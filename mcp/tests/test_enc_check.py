@@ -192,16 +192,13 @@ def test_cal_probe(sim_factory, tmp_path):
         assert r.flags & P.CALP_PRESTROBE and 8 <= r.split_d <= 120 and 0 < r.zero_pwm < 2000
         raw = r.pack()
         assert len(raw) == P.CAL_PROBE_BYTES and P.CalProbeResp.unpack(raw).pack() == raw
-        pts = r.points
-        # point 4 (the gated zero) is retired since fw 0.2.105: never measured; points 0..3 at 2 MSa/s, 5..7 at 200
-        assert [p.conversions for p in pts] == [2, 2, 4, 4, 0, 128, 64, 64]
-        assert [p.cls for p in pts if p.measured] == [1, 1, 1, 1, 0, 0, 0]
+        pts = [p for p in r.points if p.measured]
+        assert [p.conversions for p in pts] == [2, 2, 4, 4, 16, 128, 64, 64]
         assert abs(pts[5].cores[0].mean - 128) < 2 and pts[5].cores[1].mean - pts[5].cores[0].mean == \
             pytest.approx(-2.0, abs=0.3)  # CH2's core B offset in the model
         d = r.describe()
         assert d["channel"] == "CH2" and d["volts_per_div"] == 1.0 and d["failure"] is None
-        assert d["points"][4]["point"] == "full-rate zero (pair)" and not d["points"][4]["core_A"]["noisy"]
-        assert d["points"][4]["rate"] == "200 MSa/s" and d["points"][0]["rate"] == "2 MSa/s"
+        assert d["points"][5]["point"] == "full-rate zero (pair)" and not d["points"][5]["core_A"]["noisy"]
         whole = s.cal_probe(0, 0, mode=1)
         assert whole.range == 5 and whole.flags & P.CALP_MODE1 and whole.rc == 0
     noisy = sim_factory(signal="sine:freq=10kHz,amp=0.2")
@@ -209,7 +206,7 @@ def test_cal_probe(sim_factory, tmp_path):
     async def main():
         async with client_for(noisy, tmp_path) as c:
             r = await c.call("scope_cal_probe", channel="CH1", range_index=3)
-            assert r["result"] == "NOISE" and r["failure"]["rate"] in P.CAL_PROBE_RATES
+            assert r["result"] == "NOISE" and r["failure"]["class"] in ("gated", "full rate")
             assert r["text"] == "too much noise" and r["failure"]["value_codes"] > 3
             assert any("stopped for the probe" in x for x in r["caveats"])
             assert (await c.call("scope_status"))["run_state"] == "RUN"

@@ -156,10 +156,10 @@ path. |
 | 1.9 | 0.2.30+ | decimation filter (caps bit 15 DECIM, FPGA 0x1534): GET_DECIM 0x020C / SET_DECIM 0x020D, GET_TRIGGER words = samples and GET_TIMEBASE period N x 5 ns while on, READ_TRACE flag bit 2 WIDE (header bytes 30/31 = mode, S), READ_RAW layout 2, GET_CAPTURE_INFO 76 bytes; `decim_config` mirrors `pc_decim.c` (all `decim` vectors). 1.8 was skipped |
 | 1.10-1.11 | 0.2.43-0.2.44 | calibration v2: no longer decoded (the volts model raises on `cal_version` 2) |
 | 1.11 | 0.2.44+ | 0x1535 FIR: caps bit 16 FIR, SET_DECIM / GET_DECIM flags bit 3, 0x29 bits 6 / 5 (`DECIM_FIR_EN` / `DECIM_FIR_ACT`), gain (N/2)^K and S + 1 while active (`decim_config(..., has=DECIM_HAS_FIR)`, `DecimConfig.from_status`), filter names `cic2+fir` (`parse_decim_filter`) |
-| 1.12 | 0.2.45+ | calibration v3, GET_CAL 256 bytes: `CalResp.v3`, `zero16_at` / `zero_at` (firmware rounding), `slope_codes`, `gain_corr` / `gain_q16`, `stored_gain16` (one class since fw-fullrate: class-0 slots only), the next readout's `gain_a/b`, `off_a/b`, `gain16`; `parse_adc_cal_block` decodes the v3 block (`adc_cal_v3` vectors). The `adc_cal` (v2) vectors section is unused by mcp; fw-gen7 removes it |
+| 1.12 | 0.2.45+ | calibration v3, GET_CAL 256 bytes: `CalResp.v3`, `zero16_at` / `zero_at` (firmware rounding), per-class `slope_codes`, `gain_corr` / `gain_q16`, `gain16_full`, the next readout's `gain_a/b`, `off_a/b`, `gain16`; `parse_adc_cal_block` decodes the v3 block (`adc_cal_v3` vectors). The `adc_cal` (v2) vectors section is unused by mcp; fw-gen7 removes it |
 | 1.13 | 0.2.46+ | GET_STATUS display_mode 2 waterfall / 3 density (spectrum sub-views; READ_SPECTRUM works) / 4 phosphor; capture tools add the spectrum or phosphor caveat (`Session.ensure_control`). The host decodes no settings words (210 included) |
 | 1.14 | 0.2.49+ | GET_LINK_STATS n = 62 (60 `usb_inferred_resumes`, 61 `usb_soft_reconnects`), event type 20 `usb_soft_disconnect` (reason, back-off level, suspends; fw-usb2, f3763cc) |
-| 1.15 | 0.2.50+ | calibration v4 (row 54): GET_CAL 288 bytes, `CalResp.track_*`, `has_tracker` (by length; 256 / 248 / 72 still parse), `TRACK_*` flags; the volts model takes the tracked d, e out of 8-bit codes (the class probe's cm, bytes 280..287, is reserved since fw-fullrate); conversions re-read GET_CAL when the cached answer is over `CAL_TRACK_AGE_S` (1 s) old; `scope_calibration_info` `tracking` (state, values, `in_words`) |
+| 1.15 | 0.2.50+ | calibration v4 (row 54): GET_CAL 288 bytes, `CalResp.track_*` / `cm_*`, `has_tracker` (by length; 256 / 248 / 72 still parse), `TRACK_*` flags; the volts model takes the tracked d, e (8-bit full class) and cm (full class, 8-bit and 16-bit) out; conversions re-read GET_CAL when the cached answer is over `CAL_TRACK_AGE_S` (1 s) old; `scope_calibration_info` `tracking` (state, values, `in_words`) |
 | 1.16 | 0.2.52+ | row 55: GET_HEALTH 0x000A (`HealthResp`, 96 bytes, fast timeout class, allowed while modal; `describe()`; flags CLEAR_RESTART / RESTART_TEST), SD_INFO flag IDENT (`SdInfo.ident` = `SdIdent`, 112 bytes; the scope caches it until a write reaches sector 750), GET_CAL 356 bytes (`prov_state`, `prov`, `provenance()` -> `Provenance`, power-ons / minutes since), SAVE_REPORT 0x0504 (`SaveReportResp`, 15 s timeout); stored layouts `parse/pack_life_record`, `parse/pack_provenance`, `parse/pack_ident_record` = the `diag_layouts` vectors; tools `scope_health`, `scope_save_report`, `scope_sd_info` `card_image`, `scope_calibration_info` `calibration_provenance`. Simulator: `Device.power_on`, `minutes_stored`, `restart_record`, `cal_prov` / `cal_prov_bad`, `ident_cache`, `reports`; `make_egon_image(ident=)`; `SIM_BUILD` / `SIM_BUILD_TIME` = the running build |
 | 1.18 | 0.2.61+ | row 57: link counters 62-63 (`adc_fullrate_bad` / `_recovered`), event types 21 / 22 named (decoded in words since 1.19 work) |
 | 1.19 | 0.2.62+ | row 58 (FPGA 0x1538): `Caps.ENC_CHECK` (18), `Features.ENC_CHECK` (5), `HealthResp` 104 bytes (`enc_*`, `has_enc_check` by length, `describe_enc`, `ENC33_PINS`), event 21 (reason / re-arms / caller / value) and 22 in words; `Session.enc_notes` caveat on every tool that calls `ensure_control`. Simulator `al3e`; `_enc_check` per full-rate capture, hooks `enc_bad_next` / `enc_unrecovered_next` / `enc_rearms` |
@@ -185,8 +185,9 @@ simulator keeps the thresholds in effect (`counter_level_eff` / `counter_hyst_ef
 `Scope.counter_level_cfg` / `counter_hyst_cfg` remember this client's configuration so a gate / source change does
 not pin the values read back; `scope_counter(level='auto', hysteresis='auto')`, `level_auto` / `hysteresis_auto`,
 one misfit first gate skipped, fw-hyst's "does not reach both thresholds" caveat plus one for a span under 12. (2) Peak detect: the volts of
-layout 3 / WIDE pairs use the stored v3 block (one calibration class since fw-fullrate, so GET_CAL 92..107 are the
-same correction at every divider); the simulator's midpoint trace goes through `_peak_corr` (= `fpga_channel_correction_full`);
+layout 3 / WIDE pairs use the full clock class (the host always did: `_channel_peak` scales with `CAL_CLASS_FULL`
+from the stored v3 block, never GET_CAL 92..107, which report the gated class at D > 0 as the firmware's CAL_GATED
+does now in the simulator too); the simulator's midpoint trace goes through `_peak_corr` (= `fpga_channel_correction_full`);
 at divider 0 / over 8190 samples 0x56 bit 1 is not written (shift byte 0x00), the FIR request is dropped (status 0x81,
 `fir_en` false), settle 11 N x 5 ns + 1 us; SET_DECIM 4 with the FIR bit is E_BAD_ARG 1 and keeps the Filter's FIR
 behind Sample = Peak (GET_DECIM masks it). Still different: a GET_COUNTER `what` = 1 shorter than 5 bytes is
@@ -220,52 +221,47 @@ firmware's NULL handler does, not E_UNKNOWN_CMD; test_transport). The 0x53 mode 
 `flags` field (positional order now k, shift, why, n, gain, ...), SET_DECIM flags bits 0..2 (swap, falling edge) are
 accepted and dropped by firmware and simulator, GET_DECIM reports them 0; only `SetDecimReq.FIR` remains.
 
-fw-fullrate (2026-10-21, fw 0.2.105 for FPGA 0x153D, protocol 1.27 row 67, no new minor): 0x153D runs the ADC encodes at
-200 MSa/s at every sample rate (K = 0 at D > 0 stores every (D + 1)-th pair; the bench found the 0x153C counter miscounts
-with Filter Off at divided rates because Atlan's K = 0 path gated the encodes), so the calibration has **one clock
-class**. Gone from the host: `CAL_CLASS_FULL` / `CAL_CLASS_GATED` / `CAL_CLASS_NAMES`, `cal_clock_class`,
-`Scope.current_clock_class` and the `clock_class` argument of `Scope.scale` / `channel_scale`, `CAL_GATED` (GET_CAL byte
-73 bit 2, reserved), `TRACK_PROBE_DATA` / `TRACK_PROBE_VALID` (byte 256 bits 5 / 6) and `CalResp.cm_*` / `track_cm` (bytes
-280..287, the class probe, reserved), `CAL_NOISE_LIMIT16_GATED` / `cal_noise_limit16` (one limit `CAL_NOISE_LIMIT16`,
-3 codes), the simulator's `gated_zero_shift`, per-class `core_gain` (now per channel and core) and the cm part of `v4`
-(now (d, e, q)). `CalResp` decodes the class-0 slots of the stored block only (zero / slope / noise 12 values, gain 2;
-the class-1 slots are skipped), its accessors take no class (`zero_at(core, range, dcoffset)`, `gain_corr(core)`), and
-`gain16_full()` is `stored_gain16()`. `parse_adc_cal_block` accepts the header's classes 1 (fw 0.2.105 writes it, so an
-older firmware rejects the block) or 2 (older blocks: the gated slots are ignored). The tracker's d / e now apply to
-8-bit readouts at every divider (TRACK_APPLIES = v3 and the filter off), so `channel_scale` always takes them when
-GET_CAL carries the tracker. A per-unit file with v3 contributes its per-core gains directly as volts per corrected code.
-CAL_PROBE: point 4 (the gated zero) is never measured, the point / failure "class" byte is the rate (`CAL_PROBE_RATES`,
-1 = 2 MSa/s, 0 = 200 MSa/s; describe() says `rate`), reasons 11 and 16 are retired, 19 is the capture-stage training's
-fault. The counter needs no caveat at divided rates.
-
 ## Volts model (`calibration.channel_scale`, `scope.Scope.scale`)
 
 Per channel and ADC core (A = 0x20/0x22, low byte in layout 2; B = 0x21/0x23), in this order:
 
-1. **Scope calibration v3** (GET_CAL version 3, after a base calibration on fw >= 0.2.45; one class for every
-   capture since fw-fullrate): the raw 0 V code `z_k = zero16_at(...) / 16` (zero + slope x dcoffset, dcoffset =
-   offset_pwm - dc_calibration_offset[range]) and volts per raw code `g_k = uv_per_lsb x G_k` (G = gain onto the
-   channel's mean gain). READ_RAW: `(raw - z_k) g_k`. READ_TRACE 8-bit codes are corrected on the scope to
+1. **Scope calibration v3** (GET_CAL version 3, after a base calibration on fw >= 0.2.45): for the capture's clock
+   class (`P.cal_clock_class(divider, decimated)`: full at divider 0 and for every filtered capture, gated
+   otherwise) the raw 0 V code `z_k = zero16_at(...) / 16` (zero + per-class slope x dcoffset, dcoffset =
+   offset_pwm - dc_calibration_offset[range]) and volts per raw code `g_k = uv_per_lsb x G_k[c]` (G = gain onto the
+   gated mean gain). READ_RAW: `(raw - z_k) g_k`. READ_TRACE 8-bit codes are corrected on the scope to
    `T + G_k (raw - z_k)` (T = `cal_target`), inverted by `volts_compensated`. 16-bit samples: mean raw code
    `m = out x 2^S / gain`, volts `(m - mean z) x harmonic mean of g_A, g_B` (`volts_mean_raw`), firmware 8-bit codes
    `T + gain16 (m - mean z)` (`codes_mean_raw`, inverse `volts_wide_codes`). Source string
-   `scope calibration v3`. **v4** (protocol 1.15, row 54, 8-bit readouts at every divider, from GET_CAL 256..279):
-   the 8-bit v3 code c of core A becomes `c - (d + e (c - 128)) / 2`, of core B `c + (d + e (c - 128)) / 2`
-   (`ChannelScale._v4_code`, in `codes_from_raw` and `volts_raw`); 16-bit samples weigh both cores equally, so A - B
-   cancels there. READ_TRACE codes carry v4 already (`volts_compensated` uses them as they are). q is shown, not
-   applied (as the firmware). Source string `, v4 tracking (A-B ..)`. Simulator: `SimConfig.v4` = per channel
-   (d, e, q) of true A - B drift with a converged tracker (GET_CAL reports and the 8-bit readouts take out d, e).
-2. **Per-unit JSON** (`<data_dir>/cal/<serial>.json`, below): with v3 in use it contributes only its per-core gains,
-   as volts per corrected code in place of the firmware's (`, unit-calibration gains` in the source); its zeros are
+   `scope calibration v3 (full|gated clock)`. **v4** (protocol 1.15, row 54, full class only, from GET_CAL 256..287):
+   the 8-bit v3 code c of core A becomes `c - (d + e (c - 128)) / 2 - cm`, of core B `c + (d + e (c - 128)) / 2 - cm`
+   (`ChannelScale._v4_code`, in `codes_from_raw` and `volts_raw`); 16-bit codes `- cm` (`codes_mean_raw`,
+   `volts_mean_raw`). READ_TRACE codes carry v4 already (`volts_compensated` uses them as they are). q is shown, not
+   applied (as the firmware). Source string `, v4 tracking (A-B .., cm ..)`. Simulator: `SimConfig.v4` = per channel
+   (d, e, q, cm) of true full-class drift with a converged tracker (GET_CAL reports and the readouts take out d, e, cm).
+2. **Per-unit JSON** (`<data_dir>/cal/<serial>.json`, below): with v3 in use it contributes only its gated per-core
+   gains, carried to the class by `G_k[c] / G_k[gated]` (`, unit-calibration gains` in the source); its zeros are
    ignored. Without v3 it supplies zeros, slopes and gains for the ranges it covers.
 3. **Firmware formula** (uv_per_lsb_q8, zero_code_q8 and the 1.00o5 whole-code compensations).
 
 `scope_calibration_info` shows all three: the live conversion per channel, `scope_calibration` (version, flags
 incl. gains measured / kept, the next readout's gain / offset / gain16 / corr16, the stored zeros, slopes and noise
-per core, the gain corrections per core, gain16, the range and lever the gains were measured with) and the JSON's
-fits. Simulator truth for tests: `SimConfig.zero_error`, `core_b_offset`, `core_gain` (relative gain per channel and
-core; keep each channel's mean at 1 for exact volts), `offset_slope`, and `cal_v3=True` for a bound v3 block
+per class and core, the gain corrections per class and core, gain16, the range and lever the gains were measured
+with) and the JSON's fits. Simulator truth for tests: `SimConfig.zero_error`, `core_b_offset`, `gated_zero_shift`,
+`core_gain` (relative gain per channel, class, core), `offset_slope`, and `cal_v3=True` for a bound v3 block
 measured from that truth.
+
+**fw-gated (2026-10-22, fw 0.2.105, FPGA 0x153D rebuilt with 0x153C's encode generation).** fw-fullrate's single
+class (0e7a0a4) is reverted: `cal_clock_class`, `CalResp`'s gated slots and byte 73 bit 2, the class probe's bytes
+280..287 (`cm_*`, `TRACK_PROBE_*`), the simulator's gated zero shift and per-class gains are back. A sector 708 block
+with header classes 1 (the single-class 0.2.105 builds) still parses: `parse_adc_cal_block` copies slot 0 into slot 1
+and sets `CAL_GAIN_FLAG_FULL_ONLY` (gain_flags bit 1), as the firmware's `acal_unpack`; GET_CAL 73 bit 5
+`CAL_FULL_ONLY` reports it (`scope_calibration` flag `gated_class_copied_from_full` and a note). Counter: GET_COUNTER
+flags bit 4 `COUNTER_F_GATED` (CH1 / CH2 counted while Filter Off at a divided rate gated the encodes; never VALID),
+`CounterResp.gated`; `scope_counter` returns `gated` per reading and overall and says why it is not valid; the
+simulator flags a CH1 / CH2 gate gated when `divider != 0` and the decimation config has `k == 0` and no peak. Tests:
+test_cal_v3 `test_single_class_block_loads_with_the_gated_class_copied`, test_trig26 (the counter tests run at divider
+0; gated at divider 49, a boxcar filter valid again, EXT never gated; the tool's gated caveat at 10 MSa/s).
 
 ## Transport rules (from hardware; keep them)
 
@@ -311,7 +307,7 @@ planner changes.
 
 mcp-ci (2026-10-21): the Windows CI job (Python 3.12, `time.monotonic` ticks in 15.6 ms there; 3.13 uses QueryPerformanceCounter) failed two wall-clock races. (1) The Bode "every setting given back" snapshots in `test_bode_sim` / `test_bode_device` compared GET_GEN whole: its 0x39 bits (step, gap, pending, bursts, marker) are live, and the sweep's last SET_GEN leaves `pending` set for up to two steps. The configuration was always restored; `_gen_config` now masks the live bits (keeps GEN_ST_RUNNING; fw-nopat). Snapshot GET_GEN that way in any new before / after test. (2) The simulator's `log_lap_next` hook fired on the first LOG_READ even when no word was unread (a read in the start's clock tick: w = 0), so the lap lost no words and `lap[0]` was empty; it now waits for an unread word. Reproduce the coarse clock locally by giving `Device` a clock of `int(time.perf_counter() * 64) / 64`.
 
-mcp-c8 (2026-10-21): `test_trig26` (protocol 1.26: the structs against the firmware's SET_TRIGGER2 / GET_TRIGGER / GET_STATUS / GET_CAPTURE_INFO vectors, the counter and peak structs, the qualifier reference model (chunked), the counter helpers, every type and refusal on the simulator, the hold-off in segments and across arms, the counter and peak-detect models, the tools incl. the mismatch and missing-caps refusals). The counter tests use the real clock (a 100 ms gate per reading). mcp-c8b: `test_counter_level_follows_the_trigger_level`, `test_peak_with_the_fir_filter_as_the_firmware`, `test_peak_config_matches_the_firmware_vectors` (the `decim_peak` section), `test_peak_volts_use_the_calibration` (a unit with split cores at divider 19).
+mcp-c8 (2026-10-21): `test_trig26` (protocol 1.26: the structs against the firmware's SET_TRIGGER2 / GET_TRIGGER / GET_STATUS / GET_CAPTURE_INFO vectors, the counter and peak structs, the qualifier reference model (chunked), the counter helpers, every type and refusal on the simulator, the hold-off in segments and across arms, the counter and peak-detect models, the tools incl. the mismatch and missing-caps refusals). The counter tests use the real clock (a 100 ms gate per reading). mcp-c8b: `test_counter_level_follows_the_trigger_level`, `test_peak_with_the_fir_filter_as_the_firmware`, `test_peak_config_matches_the_firmware_vectors` (the `decim_peak` section), `test_peak_volts_use_the_full_clock_class` (a gated unit at divider 19).
 
 mcp-soft (2026-10-20): `test_decode` (the decoders on synthetic lines and the simulator's serial signals, the
 samples-per-bit limits, the timelines), `test_data_tools` (the four tools end to end: decode from a capture / file /
@@ -324,9 +320,9 @@ cancel test), `test_robustness`, `test_serial_link`, `test_simulator_scope`, `te
 `test_firmware_match` (section 14 items), `test_server` (every tool in-process, restarts, legacy fallback),
 `test_stdio` (server subprocess), `test_analysis`, `test_calibration`, `test_flash` (FEL flow, bench wrapper),
 `test_sdcard` (SD commands, persist, resume after drops, restore, CLI), `test_ext_trigger`, `test_soak`,
-`test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v3` (1.12 GET_CAL 256, `adc_cal_v3` block vectors and an older classes-2 block, volts on both cores at every
-rate, GET_CAL's next-readout gain / offset vs the host model, unit file gains only, scope_calibration_info),
-`test_paths` (outside-a-checkout defaults and refusals, `--list-tools`), `test_seq` (1.17: maths vs the `seq` vectors, wire layouts vs the firmware frames, segment / circular / STOP / auto runs, averaging legacy and 16-bit with positions, fit errors, the tools), `test_diag` (1.16 stored layouts vs `diag_layouts`, GET_HEALTH / SD identity / provenance / SAVE_REPORT layouts and simulator, the tools), `test_cal_v4` (1.15 GET_CAL 288 with 280..287 reserved, v4 volts on raw / trace codes at 200 MSa/s and divided, WIDE without the tracker, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
+`test_fir` (1.11 FIR maths / sim / tool, suspend event fields, soak reopen mode), `test_cal_v3` (1.12 GET_CAL 256, `adc_cal_v3` block vectors, volts on both cores and classes, GET_CAL's next-readout
+gain / offset vs the host model, unit file gated gains only, scope_calibration_info),
+`test_paths` (outside-a-checkout defaults and refusals, `--list-tools`), `test_seq` (1.17: maths vs the `seq` vectors, wire layouts vs the firmware frames, segment / circular / STOP / auto runs, averaging legacy and 16-bit with positions, fit errors, the tools), `test_diag` (1.16 stored layouts vs `diag_layouts`, GET_HEALTH / SD identity / provenance / SAVE_REPORT layouts and simulator, the tools), `test_cal_v4` (1.15 GET_CAL 288, v4 volts on raw / WIDE / trace codes vs the simulator's drift, GET_CAL re-read, tracker words), `test_spectrum` (1.7 spectrum view, event log 0.2.22-0.2.25 additions, FFT_BENCH), `test_decim` (1.9: maths vs
 the firmware vectors, wire layouts, simulator noise / volts / trigger / EXT latency, `scope_set_decimation`),
 `test_enc_check` (1.19: vector `resp_get_health_1_19`, 96-byte compatibility, words, simulator counters, tool and caveat; CAL_PROBE: vector, round trip, model, tool), `test_bode_device` (1.20: vectors, codecs, device vs host within 0.02 dB / 0.2 deg with the same flags and ranges, thru, STOP / abort / reason 5, the tool), `test_report` (every kind through the tools, offline HTML check, no-matplotlib fallback, CLI),
 `test_bode` (planner rules and vectors, DFT, a synthetic RC through dithered 8-bit at 200 MSa/s, gates, markers,
@@ -340,8 +336,9 @@ Fixtures: `sim`/`transport`/`scope` are collaborative with UI captures on demand
 `flat_next` (the next n host captures are one saturated value on every core: the 0x153A first-record artefact).
 SimConfig `bode_readout_fault` (the device sweep ends after its pre-scan with READ_BODE reason 8); `SimBode.swept`
 (the header shows the settings in effect before the first sweep, the latest sweep's after it: fw 0.2.71).
-SimConfig `cal_v3` (a bound v3 block measured from the model: zeros, slopes, gains G = g_ref / g with g_ref the mean
-of both cores) and `core_gain` (relative gain per channel and core). Known flake: `test_sdcard::test_slow_write_answers_are_retried_without_reopening` (0.2 s write
+SimConfig `cal_v3` (a bound v3 block measured from the model: zeros, slopes, gains G = g_ref / g), `core_gain`
+(relative gain per channel, class and core) and `gated_zero_shift` (per-core zero moves while the encode clock is
+gated). Known flake: `test_sdcard::test_slow_write_answers_are_retried_without_reopening` (0.2 s write
 timeout) can fail once under a loaded full run; it passes alone.
 Run: `.venv/Scripts/python -m pytest -q`; WSL: `wsl -d <distro> -- bash -lc "cd /mnt/d/path/to/fnirsi-1013d-mcp/mcp &&
 ~/.venvs/fnirsi1013d-mcp/bin/python -m pytest -q -p no:cacheprovider"`; lint: `.venv/Scripts/ruff check --select

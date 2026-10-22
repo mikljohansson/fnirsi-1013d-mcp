@@ -9,10 +9,9 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
 1. `scope_profile`: what this unit can do (FPGA variant, memory depth, generator, which facts are unverified).
    Read its standing caveats once.
 2. `scope_calibration_info`: which volts conversion is in effect per channel. The source string is `scope
-   calibration v3` (the scope's own per-core zeros and gains, after its base calibration on firmware >= 0.2.45; one
-   calibration for every rate and filter since fw 0.2.105, where the ADCs always run at 200 MSa/s), `unit-calibration`
-   (measured per-unit zero/gain, T8; with v3 in use it only contributes the per-core gains) or `firmware` (the
-   firmware formula; absolute DC levels can be off by a few
+   calibration v3 (full|gated clock)` (the scope's own per-core, per-class zeros and gains, after its base
+   calibration on firmware >= 0.2.45), `unit-calibration` (measured per-unit zero/gain, T8; with v3 in use it only
+   contributes the gated per-core gains) or `firmware` (the firmware formula; absolute DC levels can be off by a few
    codes). Only calibration v3 is decoded: if the scope still holds a v2 block (firmware 0.2.43-0.2.44) the volts
    model refuses it and the error says to update the firmware and run the base calibration again. That is done at
    the scope by the person: System settings, Base calibration, with the probes and USB unplugged for the zero step,
@@ -373,7 +372,7 @@ How to show them:
 | "modal screen", E_BUSY detail 0 | firmware before 0.2.78 with a menu open on the scope: ask the person to close it, retry |
 | E_BUSY "calibration measurement running" / "file save in progress" / "USB drive mode" | the scope is in a step that must finish (0.2.78+): wait and retry, or ask the person (USB drive: Back) |
 | the scope restarted, the link dropped, settings look lost, or "is the right firmware on it?" | fw 0.2.52+: `scope_health` (USB state, power-on number, how the previous power-on ended, unsaved settings, a stored restart record with the exception type) and `scope_sd_info` (`card_image`: what the card boots and whether that is the running build, e.g. after a FEL load). For a fault report ask for `scope_save_report` and tell the person the file name on the card; quote `in_words` rather than raw registers |
-| the two ADC cores drift apart (an fs/2 step in 8-bit captures) hours after calibrating | fw 0.2.50+ tracks it: `scope_calibration_info` `tracking` says whether the A - B tracker has run (it learns from 200 MSa/s records with the filter off and applies at every rate); `calibration_provenance` says when and by which build the scope was calibrated |
+| volts drift at 200 MSa/s or filtered captures read a little off hours after calibrating | fw 0.2.50+ tracks it: `scope_calibration_info` `tracking` says whether the tracker and the class probe have run (the probe needs a quiet input with the scope running and no menu); `calibration_provenance` says when and by which build the scope was calibrated |
 | "still starting" | the scope just booted (about 5 s after a FEL load); the server waits up to 10 s |
 | the scope's calibration wizard fails its zero step ("too much noise", "the input is not at 0 V") | fw 0.2.67+: `scope_cal_probe(channel, range_index)` runs the wizard's own measurement and returns per point and core what it saw (mean, RMS, extremes, clipped); compare with a host capture at the same range (`scope_capture`, 200 MSa/s). Inputs at 0 V (probes off) as for the wizard |
 | a 200 MSa/s capture shows one core (every other sample) off by tens of codes, or the caveat "accepted garbled" | fw 0.2.62+: `scope_health` `encode_check` (the check mode, the last 0x33 byte and its failing pins, captures checked / garbled / re-taken) and `scope_event_log` (event `adc_fullrate_garbled`). Repeat the capture; on AL3 0x1532..0x1537 the fix is the recommended bitstream (0x153B) |

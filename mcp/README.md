@@ -248,7 +248,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_sd_info` | 0 | SD card size, partition, write window, eGON headers at 16/80/750 (optionally checksum-verified); fw >= 0.2.2; from fw 0.2.52 the identity of the image the card boots and whether it is the running one |
 | `scope_health` | 0 | fw >= 0.2.52: USB state now, MMU / caches, power-on number, operating hours, settings save state, the stored restart record, in words; fw >= 0.2.62 (1.19) `encode_check`: the full-rate capture check (mode, last 0x33 byte and failing pins, captures checked / garbled / re-taken) |
 | `scope_save_report` | 1 | fw >= 0.2.52: the scope writes its diagnostics report to `reports/` on its SD card; returns the file name |
-| `scope_calibration_info` | 0 | scaling in effect per channel, the scope's calibration (v1 / v3, flags, current correction, stored per-core zeros, slopes and gains), calibration file and its fitted zero / slope / gain per range and core |
+| `scope_calibration_info` | 0 | scaling in effect per channel, the scope's calibration (v1 / v2, flags, current correction, stored per-core zeros per clock class), calibration file and its fitted zero / slope / gain per range and core |
 | `scope_cal_probe` | 2 | fw >= 0.2.67 (protocol 1.21, diagnostic): the calibration wizard's zero measurement of one channel and range on the scope (verdict, failing point, per point and core mean / RMS / extremes / clipped); nothing stored |
 | `scope_calibrate_volts` | 2 | a known DC voltage on every range: fits 0 V code, volts per code and offset slope per range and ADC core, saves the calibration file |
 | `scope_generator` | 3 | calibration-pin square wave; confirmation token to enable. Since protocol 1.27 (FPGA 0x153D) a fractional two-step square on the 5 ns clock: the frequency exact to 2^-16 of the period (`frequency_exact_hz`, `period_clocks`, P16 / H16), edges on the 5 ns grid, glitch-free changes |
@@ -298,10 +298,10 @@ preview.
 
 Physical units: volts are converted per ADC core. With the scope's own calibration v3 in use (firmware >= 0.2.45,
 protocol 1.12, GET_CAL version 3 after a base calibration at the scope), each core's 0 V code and gain come from the
-scope's stored block: zeros plus the offset slope, and per-core gain corrections onto the channel's mean gain (so
-the cores agree). One calibration covers every rate and filter since fw 0.2.105 (FPGA 0x153D runs the ADCs at
-200 MSa/s at every sample rate; the gated class of fw 0.2.45-0.2.104 is gone). READ_TRACE codes are already corrected
-on the scope; a per-unit file then only contributes its per-core gains (`scaling` = `scope calibration v3...`).
+scope's stored block for the capture's clock class (full rate: divider 0 and filtered captures; gated: legacy divider
+>= 1): zeros plus the per-class offset slope, and per-core gain corrections onto the gated mean gain (so 200 MSa/s,
+filtered and gated captures agree, and the cores agree at full rate). READ_TRACE codes are already corrected on the
+scope; a per-unit file then only contributes its gated per-core gains (`scaling` = `scope calibration v3 (...)`).
 Calibration v2 (firmware 0.2.43-0.2.44) is refused: update the firmware and re-run the base calibration. Otherwise, with a per-unit calibration covering the range,
 `raw_code = zero + slope x (offset_pwm - pwm_ref) + volts / gain` per core (fitted by `scope_calibrate_volts`,
 or imported from bench data with `python -m fnirsi1013d.calibration --import <t8 json...> --out <file>`); otherwise
