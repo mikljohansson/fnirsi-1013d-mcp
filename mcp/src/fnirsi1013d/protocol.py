@@ -3752,6 +3752,8 @@ CAPF_READ = 0x04  # outlier counts were read after a full-rate capture since boo
 CAPF_FLAGGED = 0x08  # the last read flagged a core
 CAPF_OTHER = 0x10  # a stored value exists for another bitstream (not applied: recalibrate)
 CAPF_REPEAT = 0x20  # fw 0.2.81 (GET_HEALTH 106 only): a core flagged in 3 captures within a minute: recalibrate
+#: fw 0.2.105 (GET_HEALTH 106 only): the runtime guard moved a flagged core to another stage of its trained clean set
+CAPF_MOVED = 0x40
 #: 0x63 at power-on: CH1 A 4, CH1 B 4, CH2 A 3, CH2 B 4, B cores by their own encode
 CAP_POWER_ON = 0x08E4
 #: the 0x36 order of the cores; flag masks use bit i = core i
@@ -3940,7 +3942,7 @@ class HealthResp(Payload):
             "has_stages": True, "value": f"0x{v:04X}", "stages": cap_stages_text(v), "source": source,
             "stored_for_other_bitstream": bool(f & CAPF_OTHER), "last_counts": counts, "flagged_cores": flagged,
             "captures_read": self.cap_reads, "captures_flagged": self.cap_flagged_n,
-            "flagged_repeatedly": bool(f & CAPF_REPEAT)}
+            "flagged_repeatedly": bool(f & CAPF_REPEAT), "moved_by_guard": bool(f & CAPF_MOVED)}
         if not read:
             state = "no 200 MSa/s capture read yet"
         elif f & CAPF_FLAGGED:
@@ -3954,6 +3956,8 @@ class HealthResp(Payload):
             text += "; a value stored for another bitstream is not applied: run the calibration wizard"
         if f & CAPF_REPEAT:
             text += "; a core was flagged in 3 captures within a minute: run the calibration wizard"
+        if f & CAPF_MOVED:
+            text += "; a flagged core was moved to another trained stage this boot (stored)"
         out["text"] = text
         return out
 
@@ -4286,6 +4290,8 @@ class DeviceEvent:
             if a & 0x10:
                 end = f"no clean stage for {cores}, kept" if a & 0x0F else "now"
                 return f"adc_capture training ended: {end} {cap_stages_text(b)} (0x{b:04X})"
+            if a & 0x20:  # fw 0.2.105: the runtime guard moved these cores inside their trained clean set (stored)
+                return f"adc_capture guard moved {cores}: now {cap_stages_text(b)} (0x{b:04X})"
             # fw 0.2.81: logged once per core when it was flagged in 3 captures within a minute (0.2.79-0.2.80: when
             # the set of flagged cores changed)
             return f"adc_capture self-check flagged {cores or 'no core'}: {b} outliers beyond the chip partner"

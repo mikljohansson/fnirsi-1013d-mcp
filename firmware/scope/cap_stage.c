@@ -22,16 +22,15 @@ uint16_t cs_ref_bit(uint32_t core)
 
 #define CLEAN(c, s)  (((c) >> (s)) & 1)
 
-//fw 0.2.81 (bench 2026-10-20: CH1 A clean at 2, 3, 5, bad at 4 picked 3): every clean stage scored by the width of its
-//clean run, being 3 or 4, its distance to the nearer end of the run, being the power-on stage or next to it, in that
-//order. 0.2.79 kept the power-on stage whenever 3 and 4 were both clean
-uint8_t cs_pick(uint8_t clean, uint8_t po)
+//fw 0.2.105 (cap_stage.h "Pick"): every clean stage scored by the width of its clean run, being 3 or 4, its distance to
+//the nearer end of the run, in that order; *tie = the stages with the top score. 0.2.81 broke a tie toward the power-on
+//stage (bench 2026-10-22 on 0x153D: CH1 A 2..5 clean on the quiet input, the power-on 4 garbled a real signal)
+static uint8_t cs_best(uint8_t clean, uint8_t *tie)
 {
   int     s, lo, hi, margin, score, best_score = -1;
   uint8_t best = CS_NONE;
 
-  if((po != 3) && (po != 4))
-    po = 4;
+  *tie = 0;
 
   for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
   {
@@ -42,17 +41,39 @@ uint8_t cs_pick(uint8_t clean, uint8_t po)
     for(hi=s;(hi < CS_STAGE_MAX) && CLEAN(clean, hi + 1);hi++);
 
     margin = ((s - lo) < (hi - s)) ? (s - lo) : (hi - s);
-    score  = (hi - lo + 1) * 64 + (((s == 3) || (s == 4)) ? 16 : 0) + margin * 4 +
-             ((s == po) ? 2 : (((s == po - 1) || (s == po + 1)) ? 1 : 0));
+    score  = (hi - lo + 1) * 64 + (((s == 3) || (s == 4)) ? 16 : 0) + margin * 4;
 
+    //Equal scores: the lower stage stays (the loop runs upwards)
     if(score > best_score)
     {
       best_score = score;
       best       = (uint8_t)s;
+      *tie       = (uint8_t)(1u << s);
     }
+    else if(score == best_score)
+      *tie |= (uint8_t)(1u << s);
   }
 
+  //One stage at the top: no tie
+  if(!(*tie & (*tie - 1)))
+    *tie = 0;
+
   return best;
+}
+
+uint8_t cs_pick(uint8_t clean)
+{
+  uint8_t tie;
+
+  return cs_best(clean, &tie);
+}
+
+uint8_t cs_tie(uint8_t clean)
+{
+  uint8_t tie;
+
+  (void)cs_best(clean, &tie);
+  return tie;
 }
 
 uint32_t cs_band_code(uint32_t i)
@@ -117,11 +138,94 @@ static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, ui
   return CS_OK;
 }
 
+//The lowest and the highest stage of a mask
+static uint8_t cs_low(uint8_t m)
+{
+  uint8_t s = 0;
+
+  while(m && !(m & 1))
+  {
+    m >>= 1;
+    s++;
+  }
+
+  return s;
+}
+
+static uint8_t cs_high(uint8_t m)
+{
+  uint8_t s = 0;
+
+  while(m >>= 1)
+    s++;
+
+  return s;
+}
+
+//Tie pass: the cores with a tie (t->tie) at each of their two stages, the others at their pick (in v), io->tie_reps
+//captures per stage and band point CS_TIE_CODE .. (+ CS_TIE_POINTS - 1 points), from the highest point down (the band
+//pass ends at its highest); a candidate that counts leaves the core's set
+static int cs_tie_pass(const cs_io *io, cs_train *t, uint16_t v)
+{
+  uint16_t cnt[CS_CORES], w;
+  uint32_t k, p, lo, hi, r, j;
+
+  hi = (CS_TIE_CODE - CS_BAND_FIRST) / CS_BAND_STEP + CS_TIE_POINTS - 1;
+  lo = hi + 1 - CS_TIE_POINTS;
+
+  if(hi >= io->points)
+    hi = io->points - 1;
+
+  if(lo > hi)
+    lo = hi;
+
+  for(p=hi + 1;p-- > lo;)
+  {
+    if(io->park(io->ctx, p))
+      return CS_E_IO;
+
+    for(j=0;j<2;j++)
+    {
+      w = v;
+
+      for(k=0;k<CS_CORES;k++)
+        if(t->tie[k])
+          w = cs_with(w, k, j ? cs_high(t->tie[k]) : cs_low(t->tie[k]));
+
+      for(r=0;r<io->tie_reps;r++)
+      {
+        t->captures++;
+
+        if(io->measure(io->ctx, w, cnt))
+          return CS_E_IO;
+
+        for(k=0;k<CS_CORES;k++)
+          if(t->tie[k])
+            t->tie_sum[k][j] += cnt[k];
+      }
+    }
+  }
+
+  for(k=0;k<CS_CORES;k++)
+  {
+    if(!t->tie[k])
+      continue;
+
+    if(t->tie_sum[k][0])
+      t->set[k] &= (uint8_t)~(1u << cs_low(t->tie[k]));
+
+    if(t->tie_sum[k][1])
+      t->set[k] &= (uint8_t)~(1u << cs_high(t->tie[k]));
+  }
+
+  return CS_OK;
+}
+
 int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
 {
   uint16_t v, base;
   uint32_t k;
-  uint8_t  pick[CS_CORES], refmask = 0, s;
+  uint8_t  refmask = 0, ties = 0;
   int      rc;
 
   for(k=0;k<sizeof(*t);k++)
@@ -148,20 +252,18 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
   if(rc != CS_OK)
     return rc;
 
-  v = base;
-
   for(k=0;k<CS_CORES;k++)
   {
-    pick[k] = CS_NONE;
-
     if(!(t->cores & (1u << k)))
       continue;
 
-    pick[k] = cs_pick(t->clean[k], cs_stage(CS_PO, k));
+    t->set[k] = t->clean[k];
 
-    if((pick[k] == CS_NONE) && cs_ref_bit(k))
+    if((cs_pick(t->clean[k]) == CS_NONE) && cs_ref_bit(k))
       refmask |= (uint8_t)(1u << k);
   }
+
+  v = base;
 
   //B cores with no clean stage: again with their chip's reference bit (data-align mode)
   if(refmask)
@@ -178,18 +280,11 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
       return rc;
 
     for(k=0;k<CS_CORES;k++)
-    {
-      if(!(refmask & (1u << k)))
-        continue;
-
-      s = cs_pick(t->clean_ref[k], cs_stage(CS_PO, k));
-
-      if(s != CS_NONE)
+      if((refmask & (1u << k)) && (cs_pick(t->clean_ref[k]) != CS_NONE))
       {
-        pick[k] = s;
+        t->set[k] = t->clean_ref[k];
         v = (uint16_t)(v | cs_ref_bit(k));
       }
-    }
   }
 
   for(k=0;k<CS_CORES;k++)
@@ -197,14 +292,46 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
     if(!(t->cores & (1u << k)))
       continue;
 
-    if(pick[k] == CS_NONE)
+    if(cs_pick(t->set[k]) == CS_NONE)
       t->bad |= (uint8_t)(1u << k);
     else
-      v = cs_with(v, k, pick[k]);
+    {
+      v = cs_with(v, k, cs_pick(t->set[k]));
+      t->tie[k] = cs_tie(t->set[k]);
+      ties |= t->tie[k];
+    }
   }
 
   if(t->bad)
     return CS_E_DIRTY;
+
+  //Two centres of an even run (or two equal reserves): the tie pass decides, then the pick again on what stayed clean
+  if(ties && io->tie_reps)
+  {
+    rc = cs_tie_pass(io, t, v);
+
+    if(rc != CS_OK)
+      return rc;
+
+    for(k=0;k<CS_CORES;k++)
+    {
+      if(!t->tie[k])
+        continue;
+
+      if(cs_pick(t->set[k]) == CS_NONE)
+        t->bad |= (uint8_t)(1u << k);
+      else
+        v = cs_with(v, k, cs_pick(t->set[k]));
+    }
+
+    if(t->bad)
+      return CS_E_DIRTY;
+  }
+  else
+  {
+    for(k=0;k<CS_CORES;k++)
+      t->tie[k] = 0;
+  }
 
   t->value = v;
   return CS_OK;
@@ -273,6 +400,75 @@ uint8_t cs_watch_add(cs_watch *w, uint8_t flagged, uint32_t now_ms)
   }
 
   return reached;
+}
+
+void cs_watch_forget(cs_watch *w, uint8_t cores)
+{
+  uint32_t k, i;
+
+  for(k=0;k<CS_CORES;k++)
+  {
+    if(!(cores & (1u << k)))
+      continue;
+
+    w->n[k] = 0;
+    w->repeat &= (uint8_t)~(1u << k);
+
+    for(i=0;i<CS_REPEAT_N - 1;i++)
+      w->t[k][i] = 0;
+  }
+}
+
+uint16_t cs_sets_pack(const uint8_t set[CS_CORES])
+{
+  uint16_t v = 0;
+  uint32_t k;
+
+  for(k=0;k<CS_CORES;k++)
+    v = cs_sets_with(v, k, set[k]);
+
+  return v;
+}
+
+uint8_t cs_sets_core(uint16_t sets, uint32_t core)
+{
+  return (uint8_t)(((sets >> (4 * core)) & 0x0F) << CS_STAGE_MIN);
+}
+
+uint16_t cs_sets_with(uint16_t sets, uint32_t core, uint8_t set)
+{
+  return (uint16_t)((sets & ~(0x0Fu << (4 * core))) | ((uint32_t)((set >> CS_STAGE_MIN) & 0x0F) << (4 * core)));
+}
+
+uint8_t cs_guard(uint16_t *value, uint16_t *sets, uint8_t cores)
+{
+  uint32_t k;
+  uint8_t  moved = 0, cur, set, s;
+
+  for(k=0;k<CS_CORES;k++)
+  {
+    if(!(cores & (1u << k)))
+      continue;
+
+    cur = cs_stage(*value, k);
+    set = cs_sets_core(*sets, k);
+
+    //A stage outside the stored set (or no set): not the trained value, nothing to move within
+    if(!CLEAN(set, cur))
+      continue;
+
+    set = (uint8_t)(set & ~(1u << cur));
+    s   = cs_pick(set);
+
+    if(s == CS_NONE)
+      continue;
+
+    *value = cs_with(*value, k, s);
+    *sets  = cs_sets_with(*sets, k, set);
+    moved |= (uint8_t)(1u << k);
+  }
+
+  return moved;
 }
 
 static char *cs_str(char *p, const char *s)
@@ -354,4 +550,46 @@ int cs_trailer_unpack(const uint8_t *in, uint16_t *v, uint16_t *fpga)
   *v    = (uint16_t)cs_get16(in + 8);
   *fpga = (uint16_t)cs_get16(in + 10);
   return CS_T_VALID;
+}
+
+//CRC-32 of the trailer's 12 bytes before its own CRC and the sets' 4 bytes (a CRC over the whole trailer would not bind:
+//a CRC-32 over data followed by its own CRC is the same constant for every data)
+static uint32_t cs_ext_crc(const uint8_t *sector)
+{
+  uint8_t  b[16];
+  uint32_t i;
+
+  for(i=0;i<12;i++)
+    b[i] = sector[CS_TRAILER_OFFSET + i];
+
+  for(i=0;i<4;i++)
+    b[12 + i] = sector[CS_EXT_OFFSET + i];
+
+  return acal_crc32(b, 16);
+}
+
+void cs_ext_pack(uint8_t *sector, uint16_t sets)
+{
+  uint8_t *p = sector + CS_EXT_OFFSET;
+  uint32_t crc;
+
+  p = cs_put16(p, sets);
+  p = cs_put16(p, 0);
+  crc = cs_ext_crc(sector);
+  p = cs_put16(p, crc & 0xFFFF);
+  cs_put16(p, crc >> 16);
+}
+
+int cs_ext_unpack(const uint8_t *sector, uint16_t *sets)
+{
+  const uint8_t *p = sector + CS_EXT_OFFSET;
+
+  *sets = 0;
+
+  if((cs_get16(p + 2) != 0) ||
+     ((cs_get16(p + 4) | (cs_get16(p + 6) << 16)) != cs_ext_crc(sector)))
+    return 0;
+
+  *sets = (uint16_t)cs_get16(p);
+  return 1;
 }

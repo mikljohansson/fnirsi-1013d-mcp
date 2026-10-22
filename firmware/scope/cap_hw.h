@@ -16,8 +16,11 @@ uint16_t fpga_capture_value(void);                   //0x63 in effect
 int      fpga_capture_has(void);                     //the running bitstream has the stages (0x153A+)
 void     fpga_capture_commit(void);                  //the wizard's Save: the value in effect becomes the stored one
 void     fpga_capture_check(void);                   //after an accepted full-rate capture: read 0x36, flag; a core
-                                                     //flagged 3 times in a minute: REPEAT, event 23 once
+                                                     //flagged 3 times in a minute: moved once inside its trained set
+                                                     //(MOVED), else REPEAT; event 23 once
 void     fpga_capture_counts(uint16_t cnt[4]);       //read 0x36's counts (training captures)
+void     fpga_capture_service(void);                 //MAIN context: store a value the runtime guard moved to (sector 708
+                                                     //bytes 488..511)
 
 //Train cores (cap_stage.h mask) through io (park the input at a band point, one capture at 200 MSa/s with 0x63 = v);
 //the result (or the value before) is written; event 23 a = 0x10 | the cores without a clean stage, b = the value in

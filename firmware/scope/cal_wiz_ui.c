@@ -232,7 +232,8 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint16_t cnt[4])
 }
 
 //fw 0.2.81: the training band's offset PWM per point (cs_band_pwm from the 2 MSa/s slope points of cal_centre)
-#define CAL_BAND_SETTLE_MS  60      //per point: 4 codes (about 15 PWM counts) from the last, as cal_measure's steps
+#define CAL_BAND_SETTLE_MS  60      //per point: 2 codes (about 8 PWM counts) from the last (4 up to the first 0.2.105,
+                                    //as cal_measure's steps); the tie pass's first point is 10 codes from the last
 
 static int32_t cal_band_pwm[CS_BAND_POINTS];
 
@@ -253,10 +254,11 @@ static int cal_cap_park(void *ctx, uint32_t p)
 //centre search, a quiet input checked (a signal would count at every stage), then cs_train_run. fw 0.2.81: over
 //the band of codes 120..140 around the centre (cs_band_pwm, CS_BAND_REPS captures per stage and point), since a stage at
 //the edge of the AD9288 data transition garbles only at some codes and in some captures (bench 2026-10-20, CH1 A4).
+//fw 0.2.105: every 2 codes, 4 captures, and the tie pass at codes 126..130 (cap_stage.h "Pick").
 //ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage: fail fast)
 static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
 {
-  static const cs_io io = { 0, CS_BAND_POINTS, CS_BAND_REPS, cal_cap_park, cal_cap_measure };
+  static const cs_io io = { 0, CS_BAND_POINTS, CS_BAND_REPS, CS_TIE_REPS, cal_cap_park, cal_cap_measure };
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
   int32_t         centre, mlo, mhi;
@@ -338,7 +340,8 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   {
     cs_train t;
 
-    //fw 0.2.81: the band training takes about half a second per channel (twice that with the reference pass): say so
+    //fw 0.2.105: the band training takes about a second per channel (11 points x 60 ms settling, 176 captures, the tie
+    //pass 3 x 60 ms and 96 captures; about 0.75 s more with the reference pass): say so
     if(wiz_progress(ch, CW_PR_TRAIN))
       return CW_RC_CANCELLED;
 

@@ -6560,3 +6560,93 @@ nothing or draws a sliver; RUN arming at the old rate; a pending rate surviving 
 **Open**
 - Memory / Filter / Sample taps in STOP re-window the frozen record (above); the same pending treatment for the depth
   would close it if the owner wants it.
+
+## 87. fw-capstage: the capture stage pick, a stronger training, the runtime guard (fw 0.2.105, protocol 1.27 additive)
+
+Branch `fw-capstage` from main a1217d2, commit 76fbaa2 (fw 0.2.105, `PC_FW_VERSION` and `PC_FW_FPGA_VERSION` 0x153D unchanged). Not
+benched. The design is in `cap_stage.h` (sections "Training", "Pick", "Runtime guard").
+
+**Cause** (docs/hardware-status.md 2026-10-22 08:35-08:50, 0x153D, owner's unit): the wizard with the inputs open left
+CH1 A4 B4, CH2 A3 B4 (the power-on 0x08E4). On a real signal (CH1 on the generator post, 200 MSa/s) CH1 A at stage 4
+counted 146-177 outliers in a few captures and the counter read 2 kHz on 1 kHz; at stages 2, 3 and 5 it counted 0 over 30
+captures from 1 kHz to 7.3 MHz. The quiet band training (6 points every 4 codes, 2 captures) found 2..5 clean, and
+`cs_pick`'s last tie-break took the power-on stage 4. Section 54's 2026-10-20 note already had CH1 A4 garbling only at
+codes 127..135. With 0x153D's encodes at full rate at every rate (section 83), every capture and the counter need all
+four cores clean, so a marginal stage matters at every time base.
+
+**Rule** (`cs_pick` / `cs_tie`): among the clean stages, the widest run, then 3 or 4 before a reserve, then the distance
+to the nearer end of the run, then the lower stage; no power-on term (`cs_pick(clean)` lost its `po` argument). Two
+equal centres (2..5 clean, {3, 4}, also {2, 5}) are a tie: `cs_tie` names them and the training measures them again (the
+tie pass), drops a stage that counts there and picks again; two that stay clean give the lower one. "The centre whose
+outer neighbour is clean too" never separates the two centres of a widest run (both outer neighbours are clean in a run
+of 4, both outside the run in a run of 2), so the evidence is the tie pass and the fallback the lower stage (inference:
+the only stage seen garbling beside clean ones on this design, twice, was the upper centre CH1 A4). Results: 2..5 -> 3,
+{2,3,5} -> 3, {2,3,4} -> 3, {3,4,5} -> 4, {3,4} -> 3, {4,5} -> 4, {2,5} -> 2. Expected on the owner's unit: 0x08E3 (CH1
+A3 B4, CH2 A3 B4).
+
+**Training strength**: `CS_BAND_STEP` 2 and `CS_BAND_POINTS` 11 (codes 120, 122, .. 140), `CS_BAND_REPS` 4; the tie pass
+(`cs_tie_pass`, `cs_io.tie_reps` = `CS_TIE_REPS` 16) parks at codes 130, 128, 126 (`CS_TIE_CODE`, `CS_TIE_POINTS`; from
+the top down, the band pass ends at 140) and captures each tied core at each of its two stages 16 times per point, the
+other cores at their pick. `cs_train` has `tie`, `tie_sum` and `set` (the clean set of the timing in use after the tie
+pass). Mock (test_cap_stage `test_tie`): a stage that garbles 5 % of the quiet captures at 126..130 passes the band's 12
+tries there and is caught by the tie pass's 48; the 0.2.81 band misses it.
+
+**Wizard time**: the host model (test_fpga_bus `test_train_capture_cost`, 0x153D, 0.30 us per strobe) puts one training
+capture at 92 us of bus and acquisition (8000 words = 80 us); the target's done poll also scans the touch panel each
+poll and the arm writes the filter and sequencer registers (not modelled), so section 54's 0.3-0.5 ms per capture stays
+the budget. Per channel: band 11 x 60 ms settling + 176 captures (was 6 x 60 ms + 48) and, with a tie, 3 x 60 ms + 96
+captures: about 0.75 s + 0.23 s = 1.0 s with 0.5 ms captures (0.85 s with the model's), was 0.38 s; a B core's reference
+pass adds about 0.75 s more. The wizard grows by about 1.2 s for both channels. `CAL_BAND_SETTLE_MS` stays 60 (2-code
+steps now; the tie pass's first park is 10 codes).
+
+**Moving signal without a probe: not possible.** The only source the wizard can drive into an open input is the offset
+PWM (25 kHz, 40 us period, research/notes/fpga-verilog-analysis.md 7.5), filtered by the 2 x 1 kOhm and three-capacitor
+network into the ADC node (research/notes/hack-repo-hardware-fpga.md); its settling is tens of ms (the 60 ms per point),
+so over one 40-80 us capture the input moves by far less than a code per sample, and the ripple is below the noise. The
+garble needs large sample-to-sample code changes (a square edge); the generator sits on the calibration post, which
+reaches an input only through a probe. The quiet training can therefore only sample the codes near 0x7F / 0x80 densely,
+and the runtime guard covers what it still misses.
+
+**Runtime guard** (`cs_guard`, `cap_hw.c` `cap_guard`): when the repeat watch (3 flags within 60 s) fires for a core while
+`PC_CAPF_TRAINED` holds (the stored value of this bitstream is in effect) and the stored clean sets are known, the core's
+stage is removed from its stored set and `cs_pick` chooses again from the rest; at most once per core per boot
+(`cap_moved`); 0x63 is written, `cap_st.stored` and the sets updated, `PC_CAPF_MOVED` (GET_HEALTH 106 bit 6) set, event
+23 a = 0x20 | moved cores, b = the new value, and `cs_watch_forget` restarts that core's watch (a repeat at the new stage
+sets REPEAT: Calibrate). A core with nothing left is not moved and gets REPEAT as before. The set only shrinks and never
+grows outside the training, so nothing oscillates, also not over boots; the wizard's Save stores a fresh set and clears
+MOVED. Storage at once: `fpga_capture_service` (called from `pc_glue_ui_service`, MAIN context) reads sector 708, packs the
+trailer and the sets into bytes 488..511 and writes it back (nothing else in the sector changes; a failed read writes
+nothing and the next calibration save stores it). Inference, not benched: a large signal near 100 MHz could make the
+two cores' counts differ by itself and move a core once; the worst case is another stage the training passed.
+
+**Stored sets** (`cs_ext_pack` / `cs_ext_unpack`, sector 708 bytes 504..511, after the unchanged v1 trailer): u16 sets
+(core k's clean stages 2..5 in bits 4k..4k+3, `cs_sets_*`), u16 0, u32 zlib.crc32 of bytes 488..499 then 504..507. The
+CRC skips the trailer's own CRC on purpose: a CRC-32 over data followed by its CRC is the same constant for every data,
+so a CRC over 488..507 would not bind the sets to the value (test_trailer checks the binding). A 0.2.79..0.2.104 save
+clears the bytes: no sets, no guard, until the next training. 0.2.79+ read the trailer as before (downgrade safe).
+
+**Diagnostics / report / host**: the Calibration page line reads "(trained, a flagged core moved): ..." with MOVED; the
+report file adds "; a flagged core moved to another trained stage this boot"; mcp `CAPF_MOVED`,
+`describe_capture()["moved_by_guard"]`, event 23 a bit 5 "adc_capture guard moved CH1 A: now ...". docs/protocol.md row
+64 has the band, the tie pass, bit 6, event 23 bit 5 and bytes 504..511 (additive, no minor bump).
+
+Tests: test_cap_stage 226 (pick and tie table, the unit mock with the new band, `test_tie`, `test_guard` incl. the
+shrinking set and the watch reset, the sets' trailer binding), test_fpga_bus `test_train_capture_cost`, test_ui_diag
+the MOVED line; `make -s test`, the vector check and mcp pytest green; GCC 10 without new warnings in the touched files.
+
+**Bench (owner; FEL load of this build; back up SD 700-710 first: the wizard's Save and the guard write sector 708)**
+1. Calibrate with both inputs open (probes off, USB cable away). The "training capture stages" step takes about a second
+   per channel (was half a second). Zero level notes: "Capture stages: CH1 A3 B4" and "Capture stages: CH2 A3 B4"; Save.
+   GET_HEALTH 104 = 0x08E3 with TRAINED; GET_EVENT_LOG type 23 a = 0x10, b = 0x08E3.
+2. The 0x36 sweep on the real signal (CH1 on the post, 200 MSa/s, 1 kHz and 100 kHz; GET_HEALTH 108..115 after each
+   capture): every core 0 outliers over 30 captures, GET_HEALTH 106 bits 5 and 6 stay 0, 120 stays 0.
+3. Counter with Filter Off at 500 kSa/s: 1 kHz reads 1.000 000 kHz, 1 MHz 1.000 000 MHz.
+4. Guard (optional; after step 1, with the backup of 708): SD_READ_SECTORS 708, put the trailer for 0x08E4 at 488
+   (`protocol.pack_cap_trailer(0x08E4, 0x153D)`) and the sets 0xFFFF (2..5 for every core) at 504 with the CRC of
+   "Stored sets" above, SD_WRITE_SECTORS with CONFIG, power-cycle: GET_HEALTH 104 = 0x08E4 with TRAINED. Then 1 kHz on CH1 for a minute: one event 23 a = 0x21, b = 0x08E3,
+   Diagnostics "(trained, a flagged core moved)", GET_HEALTH 106 bit 6, GET_CAL 358 = 0x08E3, and after a power cycle
+   GET_HEALTH 104 = 0x08E3. Restore 708 from the backup (or Calibrate again) afterwards.
+
+**Open**
+- The guard's trigger is the repeat watch; a capture-count trigger (e.g. 3 flagged captures in a row) would react faster
+  on a steady signal. Left as is until the bench shows the minute matters.

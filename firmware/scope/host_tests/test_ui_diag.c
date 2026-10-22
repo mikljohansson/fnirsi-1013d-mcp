@@ -410,6 +410,12 @@ static void test_pages(void)
   check_layout("cal capture repeat", 0);
   T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): last capture clean, flagged 3 times in a minute: "
                    "calibrate"), UD_C_WARN);
+  //fw 0.2.105: the runtime guard moved CH1 A to 3 (the line fits with the note)
+  health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED | PC_CAPF_READ | PC_CAPF_MOVED; health[104] = 0xE3;
+  ud_build(&pg, UD_PAGE_CAL, &in, &note);
+  check_layout("cal capture moved", 0);
+  T_EQ(text_colour("ADC capture stages CH1 A3 B4, CH2 A3 B4 (trained, a flagged core moved): capture clean"), UD_C_SOFT);
+  health[104] = 0xE4;
   health[106] = PC_CAPF_HAS | PC_CAPF_OTHER; cal[0][360] = 0x3B; cal[0][361] = 0x15;
   ud_build(&pg, UD_PAGE_CAL, &in, &note);
   check_layout("cal capture other", 0);

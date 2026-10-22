@@ -420,6 +420,8 @@ typedef struct
 #define PC_CAPF_OTHER        0x10  //a stored value exists for another bitstream (not applied: recalibrate)
 #define PC_CAPF_REPEAT       0x20  //fw 0.2.81: a core was flagged in 3 captures within a minute since the last saved
                                    //training (cap_stage.h cs_watch): recalibrate
+#define PC_CAPF_MOVED        0x40  //fw 0.2.105: the runtime guard moved a core off a flagged stage this boot, inside its
+                                   //trained clean set (cap_stage.h cs_guard; event 23 a bit 5)
 
 void     pc_hal_cap_state(pc_hw_cap *c);                     //any context
 void     pc_hal_cap_check(void);                             //[FPGA] after a full-rate host capture: read 0x36
