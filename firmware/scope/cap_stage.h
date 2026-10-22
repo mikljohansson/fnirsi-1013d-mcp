@@ -53,6 +53,12 @@
 // only shrinks: it cannot oscillate, also not over boots. The new value is written to 0x63, stored in sector 708 at once
 // (MAIN context, fpga_capture_service) and logged (event 23 a = 0x20 | the moved cores, b = the new value). A core with
 // nothing left keeps its stage and asks for Calibrate (REPEAT) as before.
+//
+// Ownership (fw-guardfix, bench 2026-10-22): the self-check reads the 0x63 value the FPGA holds with the counts (0x36's
+// first two bytes). A capture taken at a value the firmware did not write (DEBUG_FPGA: fpga/al3/tools/capwin_sweep.py,
+// a manual sweep) still updates the counts, but it neither feeds cs_watch (no REPEAT) nor reaches the guard, and nothing
+// is logged; the guard also acts only while the FPGA holds the stored value of this bitstream. Whoever wrote 0x63 owns
+// the stages until it holds the firmware's value again.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef CAP_STAGE_H

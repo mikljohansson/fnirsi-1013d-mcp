@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_sta
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h $(SRC)/gen_pat.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_cap_hw $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll
 
 $(OUT):
 	mkdir -p $@
@@ -58,6 +58,10 @@ $(OUT)/test_enc_heal: test_enc_heal.c test_util.h $(SRC)/enc_heal.c $(SRC)/enc_h
 # fw 0.2.79: FPGA 0x153A capture stage training against a mock FPGA that garbles chosen stages, self-check, trailer
 $(OUT)/test_cap_stage: test_cap_stage.c test_util.h $(SRC)/cap_stage.c $(SRC)/cap_stage.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_cap_stage.c $(SRC)/cap_stage.c $(SRC)/adc_cal.c
+
+# fw-guardfix: cap_hw.c's self-check, REPEAT and runtime guard against a mock bus and sector 708 (0x63 written from outside)
+$(OUT)/test_cap_hw: test_cap_hw.c test_util.h $(SRC)/cap_hw.c $(SRC)/cap_hw.h $(SRC)/cap_stage.c $(SRC)/cap_stage.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
+	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_cap_hw.c $(SRC)/cap_stage.c $(SRC)/adc_cal.c
 
 $(OUT)/test_cal_wizard: test_cal_wizard.c test_util.h $(SRC)/cal_wiz.c $(SRC)/cal_wiz.h $(SRC)/cap_stage.c $(SRC)/cap_stage.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h $(SRC)/ui_fmt.c $(SRC)/ui_fmt.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_cal_wizard.c $(SRC)/cal_wiz.c $(SRC)/cap_stage.c $(SRC)/adc_cal.c $(SRC)/ui_fmt.c $(SRC)/font_2.c $(SRC)/font_3.c $(SRC)/font_5.c
@@ -184,6 +188,7 @@ test: all
 	$(OUT)/test_cal_wizard
 	$(OUT)/test_enc_heal
 	$(OUT)/test_cap_stage
+	$(OUT)/test_cap_hw
 	$(OUT)/test_fpga_bus
 	$(OUT)/test_ui
 	$(OUT)/test_ui_diag

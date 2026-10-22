@@ -59,16 +59,19 @@ void fpga_capture_write(uint16_t v)
     cap_st.flags &= (uint8)~PC_CAPF_TRAINED;
 }
 
-//0x36: the 0x63 value, then four 16-bit counts, high bytes first
-static void cap_read(uint16_t cnt[CS_CORES])
+//0x36: the 0x63 value the FPGA holds, then four 16-bit counts, high bytes first. Returns the 0x63 value
+static uint16 cap_read(uint16_t cnt[CS_CORES])
 {
+  uint16 v;
   uint32 k;
 
   fpga_write_cmd(0x36);
-  (void)fpga_read_short();
+  v = fpga_read_short();
 
   for(k=0;k<CS_CORES;k++)
     cnt[k] = fpga_read_short();
+
+  return (uint16)(v & CS_MASK);
 }
 
 //Boot (pc_glue_init) and after a calibration load: the stored value when it belongs to this bitstream, else 0x08E4.
@@ -141,16 +144,19 @@ void fpga_capture_commit(void)
 
 //fw 0.2.105: cores that reached the repeat watch, moved once per boot inside their trained clean set (cs_guard) while
 //the stored value of this bitstream is in effect and its sets are known; the new value is in effect and stored at once
-//(the sector write waits for fpga_capture_service). Returns the cores moved
-static uint8 cap_guard(uint8 reached)
+//(the sector write waits for fpga_capture_service). hw = the 0x63 value the FPGA held for this capture (0x36). Returns
+//the cores moved
+static uint8 cap_guard(uint8 reached, uint16 hw)
 {
   uint16 v = cap_st.value, sets = cap_stored_sets;
   uint8  moved;
 
   reached &= (uint8)~cap_moved;
 
-  //TRAINED: the stored value of this bitstream is in effect, so the stored sets are its sets
-  if(!reached || !(cap_st.flags & PC_CAPF_TRAINED))
+  //TRAINED: the stored value of this bitstream is in effect, so the stored sets are its sets. fw-guardfix: and the FPGA
+  //holds it (a DEBUG_FPGA write of 0x63 does not pass fpga_capture_write; the caller already skips such captures, this
+  //is the guard's own check before it writes 0x63 and sector 708)
+  if(!reached || !(cap_st.flags & PC_CAPF_TRAINED) || (hw != cap_st.stored))
     return 0;
 
   moved = cs_guard(&v, &sets, reached);
@@ -195,13 +201,13 @@ void fpga_capture_service(void)
 void fpga_capture_check(void)
 {
   uint8 reached;
-  uint16 ex[CS_CORES], worst = 0;
+  uint16 ex[CS_CORES], worst = 0, hw;
   uint32 k;
 
   if(!(cap_st.flags & PC_CAPF_HAS) || cap_training)
     return;
 
-  cap_read(cap_st.cnt);
+  hw = cap_read(cap_st.cnt);
   cap_st.reads++;
   cap_st.flags  |= PC_CAPF_READ;
   cap_st.flagged = cs_flagged(cap_st.cnt);
@@ -215,6 +221,13 @@ void fpga_capture_check(void)
   cap_st.flags |= PC_CAPF_FLAGGED;
   cap_st.flagged_n++;
 
+  //fw-guardfix (bench 2026-10-22): a capture taken at a 0x63 value the firmware did not write (a DEBUG_FPGA write: the
+  //capture-window sweep, a manual sweep) says nothing about the firmware's stages. The counts above stay (GET_HEALTH
+  //shows what the FPGA counted), but the capture neither counts toward REPEAT nor reaches the guard, and nothing is
+  //logged: whoever wrote 0x63 owns the stages until it holds the firmware's value again
+  if(hw != cap_st.value)
+    return;
+
   //fw 0.2.81: an intermittent stage flags now and then (bench 2026-10-20, CH1 A4); a core flagged in 3 captures within a
   //minute keeps failing at its stage: REPEAT (the Diagnostics Calibration verdict asks for Calibrate) and event 23 once
   //per core (a = the cores that reached it, b = the largest excess of this capture), until a training is saved
@@ -222,7 +235,7 @@ void fpga_capture_check(void)
 
   //fw 0.2.105: first the guard; the cores it could not move ask for Calibrate
   if(reached)
-    reached &= (uint8)~cap_guard(reached);
+    reached &= (uint8)~cap_guard(reached, hw);
 
   if(reached)
   {
@@ -273,5 +286,5 @@ int fpga_capture_train(uint8_t cores, const cs_io *io, cs_train *t)
 
 void fpga_capture_counts(uint16_t cnt[4])
 {
-  cap_read(cnt);
+  (void)cap_read(cnt);
 }
