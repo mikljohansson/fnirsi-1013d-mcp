@@ -90,15 +90,16 @@ Diagnostics > Status shows one calibration verdict with its reason:
 | Check | FPGA changed since calibration (0x1535 to 0x153A): recalibrate. | Run Calibrate. The core order can differ between bitstreams |
 | Check | Calibrated 2 min after power-on: recalibrate after 5 minutes of warm-up. | Run Calibrate after warm-up |
 | Check | ADC capture flagged 3 times within a minute: run Calibrate. | Run Calibrate; it trains the capture stages again |
+| Check | Calibration lacks the gated rates (a 0.2.105 test build): run Calibrate. | Run the wizard with the gain steps. A calibration saved by an early 0.2.105 build has no values for Filter Off below 200 MSa/s; until then those rates use the 200 MSa/s values, a few codes off |
 | Check | Gains not measured: run Calibrate with the probes on the post. | Run the wizard with the gain steps |
 | Check | Gains carried over from an earlier calibration: run Calibrate. | Run the wizard with the gain steps |
 | Check | A value is over its limit (below): move chargers and the USB cable away and calibrate again. If it stays, the input stage is noisy. | Run Calibrate with nothing on the inputs, chargers and the USB cable away. If the noise stays over its limit, the input stage is noisy |
 | Check | Saved calibration does not match the current offsets: run Calibrate. | Run Calibrate |
 | Fault | Uncalibrated: readings may be several % off. Run Calibrate. | Run Calibrate |
 
-Below the verdict, the Status page shows per channel the gain difference between the two ADC cores ("Core gain split,
-A / B", limit 8.0 %) and the worst noise RMS with the inputs open (limit 3.0 code), each with OK or Check. Both
-limits are the wizard's own pass criteria, so a calibration that passed shows OK. The provenance line says when the
+Below the verdict, the Status page shows per channel the gain ratio between the rates (limit 2 %) and the worst noise
+RMS with the inputs open, gated (limit 1.0 code) and at full rate (limit 3.0 code), each with OK or Check. The noise
+limits are the wizard's own pass criterion, so a calibration that passed shows OK. The provenance line says when the
 calibration was taken, for example "Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."
 
 Diagnostics > Calibration shows the values per range: the offset centre, the volts factor, the zeros and gains of both
