@@ -6,6 +6,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [ ] **ACQ rate changes in STOP** (owner 2026-10-22 08:56: the rate grid ignores taps in STOP, "rather unintuitive"): Atlan's
+  rule (statemachine.c, rate changes only in RUN or single mode) exists because the handler writes the FPGA at once and the
+  stopped record would be drawn with the new rate's geometry. New behaviour as on bench scopes: in STOP the rate (and the
+  time/div grid's viable set) take taps, the pending setting shows as selected, the frozen record keeps its own capture
+  geometry on screen, RUN arms at the new rate. fw-stoprate.
 - [ ] **USB drive screen: Back in the header** (owner 2026-10-22 08:31): a Back button in the top-right header like the other
   screens, the Exit button at the lower right removed. Small; no mockup round.
 - [ ] **UI tweaks from the 0x153C bench** (owner 2026-10-21 18:38): the trigger menu's - and + buttons with twice the font
