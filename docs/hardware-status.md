@@ -1595,3 +1595,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   leave the Bode view first and never start a sweep); image backups/fw-0.2.105_136d5e1a.bin (sha256 136d5e1aea77..) by FEL.
   **5-minute soak: 150 status, 7 health, 7 two-channel captures, 0 errors**; READ_SPECTRUM answered E_STATE (the Spectrum
   view was not open: expected, not an error). Relay clicks: owner to report.
+- 2026-10-22 10:16-10:29: fpga-capwin merged (no FPGA source change: TD shows all 32 ADC bits in IOB DDR registers with 0.00 ns
+  per-bit skew; the inference is crosstalk from the partner core's output switching, half a clock later, leaving two clean
+  halves per core; README section 18; bench script fpga/al3/tools/capwin_sweep.py). PC_DEBUG image
+  backups/fw-0.2.105-dbg_f78498db.bin by FEL, SD 700-710 backed up (backups/sd_700-710_20261022-pre-capwin.bin). 0x63 read
+  0x08A3: **the runtime guard had moved CH2 A from 3 to 2** (during the 09:55 manual stage sweep, stored in sector 708). The
+  capwin sweep (200 MSa/s, Filter Off) aborted at CH1 A stage 4: the guard moved CH1 A to 2 under it (0x08A4 -> 0x08A2).
+  Bug: the guard acts on cap_st.value, not on the FPGA's 0x63, so it moves cores that bench / host writes put on a stage.
+  fw-guardfix dispatched (act only when the FPGA holds the stored training value). The stored stages are now wrong for this
+  unit (CH1 A 2, CH2 A 2): a wizard run will retrain them after the fix.
