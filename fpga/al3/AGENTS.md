@@ -429,19 +429,20 @@ no bitstream changed** (`src/` untouched; the IDELAY experiments ran in private 
   `tb/capture_margins.py --bits` shows every data pin at -0.11 / +0.12 ns, skew 0.00 in every core: no FPGA per-bit
   skew, no constraint to add. Typical-timing margins (`capture_margins.py io.timing 3.0 4.5 0.3`) make k4 every core's
   safest stage, which contradicts CH1 A k4 garbling between clean k3 and k5.
-- **Cause (inference).** Antiphase encodes with data-align off put each core's output transition in the middle of its
-  partner's window; the partner's switching (shared AD9288 output supply, adjacent buses) splits each core's window into
-  two clean halves of about 3.5 ns. On the 2.5 ns grid k3 and k5 sit 0.7..0.8 ns inside them, k4 and k2 0.2..0.3 ns from
-  an edge. Fits CH1 A (k4 dirty), CH2 A (k2 = k4 dirty, k3 best, k5 dirty with a 1 ns later own transition) and CH2 B
-  (B4 clean). Code dependence = how many partner bits switch (the carries 0x5F/60, 0x67/68, 0x7F/80).
-- **Next, in order.** (1) The coordinator runs `fpga/al3/tools/capwin_sweep.py` (mcp venv, PC_DEBUG image, SD 700-710
-  backed up; README section 18 has the setup) and looks at the "partner toggles" columns and the bit columns.
-  (2) The firmware agent implements the residual metric of README section 18 in `cap_stage.h` (quiet set =
-  outlier-clean and within 25 % of the core's best residual; band at the carries 64..192; read 2048 words per core).
-  (3) Only if (1) confirms the cause: 0x153E with two runtime-phase capture clocks (PLL C2 / C3, dynamic phase, 125 ps)
-  for the A and B core groups; cost in README section 18. A static `AL_LOGIC_IDELAY` on CH2 A (n = 8, about 1.27 ns,
-  with stage 2) is the cheap bench experiment for the centring claim; it needs placement rolls (the n = 1 build missed
-  `clk_200MHz` by 1.79 ns on an unrelated path).
+- **Bench sweep (2026-10-22 11:23, `backups/capwin-before.npz`, README section 18 "Bench result and verdict").** Two error
+  classes. (a) Capture errors: bitwise mixes of neighbouring codes at carries (0x5F/60 -> 0x6E, 0x97/98 -> 0x9F), stage
+  dependent, with the core's own data changing; absent at CH1 A3, CH1 B 3..5, CH2 A3, CH2 B 3..5 (the A cores have one
+  clean stage, the B cores three). (b) CH2 only, stage independent: CH2 A 0x61..0x64 and CH2 B 0x5F / 0x6E read 4..5
+  codes high in 5..13 % of the samples at those codes, the same at stages 3..5, more partner switching at those samples
+  (code-matched 4.25 / 2.31 bits on CH2 A3): ADC / analog side (inference), the owner's squiggles. The flagged samples
+  are 85..100 % positive, so noise is at most 13..29 % of them. Per-pin causes are ruled out (the "bit 2 / bit 1" columns
+  are an artefact; the pairs differ in 2..4 bits and do not move with the stage). The partner-split capture hypothesis
+  is revised: the coupling acts on the conversion, not on the capture window.
+- **Verdict.** No bitstream change (no IDELAY, no PLL phase: every core has a stage free of capture errors, and class
+  (b) does not depend on the sampling instant). Firmware: the residual metric of README section 18 (q16 against the
+  median of 3, quiet = within 5/4 of the core's best + 4, parked at 8k - 0.5); on the bench data it gives 0x08E3 and drops
+  CH1 A5 and CH2 A4, which the 32-code counters pass. The squiggles: hardware (CH2 ADC decoupling, S1 / S2) or a despike
+  rule, both the owner's call.
 - **TD facts found.** `AL_LOGIC_IDELAY #(.INDEL(n))`, n = 1..31 as a plain integer (a sized literal crashes the
   elaborator, `bad_lexical_cast`), packs with the IDDR into the IOB (`#ireg` stays 33); TD's timing: 0.52 ns at n = 1,
   2.16 at 16, 3.73 at 31 (about 0.107 ns per tap); the tap count does not re-roll the placement. The PLL's VCO is 1 GHz: static and dynamic phase steps of 125 ps; C2..C4 free.

@@ -2943,7 +2943,8 @@ logic change) re-rolled CH2 A to 7.68 ns; 0x153A's three builds had 7.38..7.93 (
 every core, yet CH1 A garbled at k4 and not at k3 or k5 on either side of it, and CH2 A is as bad at k4 as at k2 (0.08 ns
 from its window's end). A core cannot be clean at 3 and 5 and dirty at 4 if its window is one interval.
 
-**Cause (inference; it fits every bench observation and the script tests it): the partner core's output switching.**
+**First hypothesis (before the sweep; the bench result at the end of this section revises it): the partner core's
+output switching splits the capture window.**
 The two cores of a chip are encoded in antiphase and the chip runs with data-align off (section 10), so each core's
 outputs switch T/2 after its partner's, in the middle of the partner's valid window. In a core's own frame (ns after its
 write clock edge, modulo the 10 ns encode period, typical AD9288, encode about 7.3 ns): own transition [0.2, 1.7], the
@@ -2983,51 +2984,48 @@ Ruled out: FPGA per-bit skew (0, above), a capture register outside the IOB (`#i
 - Input hysteresis (DS001 p.62: 250 or 450 mV, LVCMOS33) would raise the pins' immunity to a small bounce; whether TD 4.6.8
   exposes it for the AL3 in `zaklad.adc` is not checked (no such property in `al3_macro.v`'s `AL_PHY_PAD`).
 
-**Recommended fix, in order.**
-1. **Measure** (no flash, a PC_DEBUG image): `fpga/al3/tools/capwin_sweep.py` (below) on every core, CH2 on the ladder
-   node and CH1 on the post's square. It confirms the cause when the bad samples of CH1 A k4 and CH2 A k4 show the partner
-   switching more bits inside their window than in the control, and tells board skew apart (stage 2 and stage 4 failing in
-   different single bits).
-2. **Firmware, the training and the guard see small errors** (no bitstream; specified below for the firmware agent). With
-   it the pick on this unit stays CH2 A3 (its only stage without excess noise on the bench numbers), and a unit whose best stage is
-   at a half's edge is picked by noise instead of by the 32-code counters.
-3. **0x153E, only if the bench confirms the cause and the stage-3 residual matters:** two capture clocks from the free PLL
-   outputs, one for the A cores' IDDRs and one for the B cores', each with the PLL's dynamic phase (125 ps steps over a
-   period), so the training centres each group in its larger clean half: from about 0.7 ns to about 1.75 ns typical margin.
-   Cost: two global clocks, a phase-dependent hand-over from the capture clock into `clk_200MHz` (the edge chosen per
-   phase range, so the word association stays fixed), its constraints, a `tb_adccap.v` phase sweep, a new firmware step
-   (sweep the phase with the residual metric), the full two-seed `run.sh` and the usual 10..20 placement rolls at 86 % of
-   the LEs. The static `AL_LOGIC_IDELAY` cannot do this per unit: it only offsets the grid by a fixed amount for every
-   unit. As a **bench experiment** it is cheap: CH2 A's eight pins at n = 8 (about 1.27 ns) make CH2 A's stage 2 sample at
-   8.73 ns in the frame above, the centre of its later clean half on this unit (inference: needs its own transition 1 ns
-   late, as above), and the sweep script then shows whether k2 + 1.27 ns beats k3 (the same placement
-   at n = 4, 8, 12 gives three offsets from one roll). Any IDELAY edit re-rolls the placement: the n = 1 build
-   missed `clk_200MHz` by 1.79 ns (12 errors, `q_post_reg` into the averaging RAM's address, a path the IDELAY does not
-   touch), so an experiment image needs the usual rolls before it may be flashed.
+**Options considered before the sweep** (the verdict is in the bench result at the end of this section).
+- **0x153E with runtime-phase capture clocks:** two capture clocks from the free PLL outputs, one for the A cores' IDDRs
+  and one for the B cores', each with the PLL's dynamic phase (125 ps steps over a period), so the training could centre
+  each group. Cost: two global clocks, a phase-dependent hand-over from the capture clock into `clk_200MHz` (the edge
+  chosen per phase range, so the word association stays fixed), its constraints, a `tb_adccap.v` phase sweep, a new
+  firmware step (sweep the phase with the residual metric), the full two-seed `run.sh` and the usual 10..20 placement
+  rolls at 86 % of the LEs.
+- **Static `AL_LOGIC_IDELAY`:** it only offsets the grid by a fixed amount for every unit, or deskews single pins. A bench
+  experiment would cost one placement roll: the same placement at n = 4, 8, 12 gives three offsets. Any IDELAY edit
+  re-rolls the placement: the n = 1 build missed `clk_200MHz` by 1.79 ns (12 errors, `q_post_reg` into the averaging
+  RAM's address, a path the IDELAY does not touch), so an experiment image needs the usual rolls before it may be flashed.
 
 **Firmware metric for the training and the guard (specification; host-testable in `cap_stage.h` / `test_cap_stage.c`).**
 - Residual of a capture, per core: for j = 1 .. n - 2, m = median(x[j-1], x[j], x[j+1]), d = x[j] - m; E = sum of d^2
   (u32; d is at most 255, n <= 4096), N = n - 2. Integer only. `uint32_t cs_resid(const uint8_t *x, uint32_t n)`.
 - Data: after each training capture read the parked channel's two cores, 2048 words each (READ_RAW's path; about 1.3 ms of
   bus at 0.3 us per byte), from the record's middle.
-- Band: park the quiet input at the carries, codes 8k for k = 8 .. 24 (64 .. 192, 17 points; the noise straddles 8k - 1 /
-  8k, so the cores switch 4 or more bits there, 8 at 128), 2 captures per stage and point; the tie pass stays as it is.
+- Band: park the quiet input at the carries, codes 8k - 0.5 for k = 8 .. 24 (63.5 .. 191.5, 17 points; `cs_band_pwm`
+  interpolates in 1/16 code), so the noise straddles 8k - 1 / 8k and the cores switch 4 or more bits there (8 at 128):
+  the bench's capture errors are all at such carries (0x5F / 0x60, 0x67 / 0x68, 0x8F / 0x90, 0x97 / 0x98). CH1's noise is
+  about 0.5 codes rms, so a park more than a code off a carry sees nothing; 2 captures per stage and point; the tie pass
+  stays as it is.
 - Per core c and stage s: q[c][s] = the sum over the points and captures of E / (N / 16) (1/16 code^2 per sample, u32
   arithmetic, no 64-bit division). q_min[c] = the smallest q
   of the core's stages with 0 outliers. A stage is **quiet** when its outlier sum is 0 and q[c][s] <= q_min[c] * 5 / 4 + 4
   (within 25 % of the core's best stage, plus 1/4 code^2). The pick (`cs_pick`, unchanged) runs on the quiet set instead of
   the outlier-clean set; the stored clean set (bytes 504..511) is the quiet set, so the guard only moves within it.
-  On this unit's median-9 numbers (CH2 A variance 1..2.9 at k3 against 4.8..32 at k2 and k4 and up to 168 at k5 in the
-  bands 90..121) only k3 is quiet; the median-3 residual is smaller in absolute terms, the ratios are what the rule uses.
+  On the bench sweep (2026-10-22 11:23, `capwin_sweep.py` prints q16 = 16 E / N per stage and this rule's quiet set):
+  CH1 A 15.0 / 2.8 / 414 / 9.7 at stages 2..5 -> {3}; CH1 B 51.4 / 3.8 / 3.9 / 3.9 -> {3, 4, 5}; CH2 A 473 / 32.3 / 68.4
+  / 1770 -> {3}; CH2 B 186 / 18.6 / 18.0 / 18.4 -> {3, 4, 5}. `cs_pick` then gives 0x08E3, the trained value, and drops
+  CH1 A5 and CH2 A4, which the 32-code counters on a quiet input pass (CH1 A5 counted 0 even on the moving signal).
   Range: one capture's E / (N / 16) is at most 2046 x 65025 / 127, about 1.05e6, so 17 points x 2 captures stay far
   below 2^32.
-- Warning, not failure: when a core's q_min exceeds its partner's q_min * 3 / 2 + 8, the wizard notes "CH2 A capture
-  window narrow" (Diagnostics, event 23 with a new bit): the residual this section measured at k3.
+- No "narrow window" warning (dropped after the bench): the residual left at the quiet stages is not a capture
+  error (bench result below), so there is nothing for the user to do about it.
 - Wizard time: 17 points x 60 ms settling + 17 x 4 stages x 2 captures x (0.5 ms capture + 1.3 ms read + about 1 ms of
   arithmetic) = about 1.4 s per channel (now about 1 s).
-- Host tests: a mock core that flips bit 3 or bit 4 at a stage only while the partner switches 4 or more bits (the cause
-  above), invisible to the 0x36 model at 32 codes: the old rule keeps the stage, the new one drops it; a clean unit's pick
-  unchanged; the warning on a core with 1.5x its partner's residual.
+- Host tests (the bench's two error classes): a mock core whose word at a stage next to the clean one is a bitwise mix
+  of two neighbouring codes, ones winning (0x5F / 0x60 -> 0x6E, 0x97 / 0x98 -> 0x9F), in a few % of the samples at the
+  carries, invisible to the 0x36 model at 32 codes: the old rule keeps the stage, the new one drops it; plus a
+  stage-independent floor (0x62 -> 0x66 in 9 % of the samples at every stage): it must not change the pick; a clean
+  unit's pick unchanged.
 
 **Bench script: `fpga/al3/tools/capwin_sweep.py`** (the coordinator runs it; mcp venv; a PC_DEBUG image; SD sectors
 700..710 backed up first, because a stage that the firmware's guard flags three times in a minute is moved and stored in
@@ -3040,6 +3038,67 @@ sector 708; the script stops if it sees that and always writes the original 0x63
 - `--cores "CH2 A" --stages 2,3,4,5 --captures 16` for one core; `--analyse capwin-before.npz` reprints a saved run;
   `--selftest` checks the analysis on synthetic data (a late bit 3 at one stage) without a scope.
 - Set up the scope first: 200 MSa/s (divider 0), Filter Off, the signal as above, a trigger that fires.
+- Since the bench run it also prints, per stage, q16 (the firmware metric's 16 E / N), the five most frequent (median
+  code -> read code) pairs of the flagged samples, and per core the quiet set of the rule above.
+
+#### Bench result and verdict (sweep 2026-10-22 11:23)
+
+`capwin_sweep.py` on the unit (fw 0.2.105 PC_DEBUG with fw-guardfix, 0x153D, trained 0x08E3, 200 MSa/s Filter Off; CH1
+on the RC ladder's input fed by the post's 1 kHz square, CH2 on its second node; every core at stages 2..5, 8 captures of
+3000 words each; data `backups/capwin-before.npz`). Samples 4 or more codes off the core's 9-sample running median
+(the partner core at its trained stage meanwhile), the 0x36 sums, and the most frequent (median code -> read code) pairs:
+
+| Core | stage 2 | stage 3 | stage 4 | stage 5 |
+|---|---|---|---|---|
+| CH1 A | 1.34 % (98->9F, 5F->68) | **0** | 4.62 %, 0x36 93 (5F->7F, 5F->7C, 83->87) | 0.59 % (5F->68, 98->9F) |
+| CH1 B | 1.49 %, 0x36 89 (90->9F, 88->8F) | **0** | **0** | **0** |
+| CH2 A | 16.4 % (5F->6E, 60->66) | 3.53 % (62->66, 62->67, 63->68) | 3.66 %, 0x36 2146 (62->66, **5F->70**, 60->70) | 28.1 %, 0x36 6528 (68->7E, 60->7E) |
+| CH2 B | 5.14 %, 0x36 2462 (5F->73, 63->5F) | 1.69 % (5F->63, 6E->72) | 1.29 % (5F->63, 6E->72) | 1.50 % (5F->63, 6E->72) |
+
+Noise rms (median-9 residual) at the clean stages: CH1 0.47..0.57 codes, CH2 1.1..1.4. Further analysis of the saved data
+(scratch scripts, numbers here):
+- **The errors are not noise.** 85..100 % of the flagged samples lie above the median (CH1: 100 %; CH2 A3 721 of 844;
+  CH2 B3 371 of 405). Symmetric noise puts at most twice the negative count in the flagged set: at most 29 % on CH2 A3,
+  17 % on CH2 B3. A Gaussian of 1.1 codes rms gives |residual| >= 3.5 in about 0.15 % of the samples, i.e. 4..11 % of
+  CH2's flagged 1.3..3.7 %. CH1, with half the noise, has exactly 0 at its clean stages.
+- **Two classes.** (a) **Capture errors**: the read code is a bitwise mix of two neighbouring codes at a carry with the
+  ones winning (0x5F / 0x60 -> 0x6E or 0x7F, 0x97 / 0x98 -> 0x9F, 0x8F / 0x90 -> 0x9F), they change with the stage, and
+  they come where the core's own data changes (code-matched: the core's own x[j-1] ^ x[j+1] switches 2.26 bits on the bad
+  samples of CH1 A4 against 0.51 on the good samples at the same codes; CH2 A5 2.65 against 1.67). They are the stages
+  next to the clean ones: CH1 A 2, 4, 5; CH1 B 2; CH2 A 2, 5 and part of 4 (5F->70, 60->70); CH2 B 2. (b) **A
+  stage-independent code error on CH2 only**: CH2 A 0x61..0x64 read 4..5 codes high (62->66 in 9 % of the samples at
+  that code at stage 3 and at stage 4; 63->68 13 % / 11 %), CH2 B 0x5F -> 0x63 / 0x64 and 0x6E -> 0x72 (5..8 % at that
+  code, the same at stages 3, 4 and 5). The same pairs at the same rates over 2.5 to 5 ns of sampling instant cannot be
+  the FPGA's capture; the core's own data is not changing there (own switching 1.87 bad / 1.87 good on CH2 A3, 1.1..1.5
+  against 2.2..2.4 on CH2 B), and the partner switches more at those samples (code-matched, the partner's switching
+  while the sample is on the pins: CH2 A3 4.25 bits on the bad samples against 2.31 on the good samples at the same codes,
+  CH2 A4 3.30 / 2.05, CH2 B3..5 2.4 / 2.0..2.2). That points at the ADC converting or driving wrong while its other core
+  switches many bits (supply / ground coupling inside the AD9288 or its decoupling; inference), not at the FPGA. Class (b)
+  is the owner's squiggles: CH2 A's 98..105 band is codes 0x62..0x69.
+- **Per-pin causes (CH2 A d2, CH2 B d1) are ruled out.** The single-bit columns of the report are an artefact of the
+  "+4 within 2.5 codes" rule: a read 4 codes high is "explained" by bit 2 or bit 1, but the actual pairs differ in 2..4
+  bits (0x5F -> 0x63 differs in bits 2..5, 0x62 -> 0x66 in bit 2 but 0x63 -> 0x68 in bits 0, 1 and 3), and a per-pin delay
+  would make the error depend on the stage, which class (b) does not.
+- **The partner-split hypothesis above is revised.** Class (a) at CH1 A4 comes with the core's own switching, not the
+  partner's (0.78 / 0.70 code-matched); the A cores simply have a narrower clean window than the B cores on this unit
+  (one clean stage each: CH1 A3, CH2 A3; the B cores three each, 3..5), and stage 3 is clean of class (a) on both. The
+  partner coupling is real but acts on the conversion (class b), at every stage.
+
+**Verdict.**
+- **No bitstream change.** Every core already has a stage free of capture errors (CH1 A3: 0 of 23,936 samples; CH1 B
+  3..5: 0; CH2 B 3..5 and CH2 A3: no stage-dependent mixes, only class (b)). A per-pin IDELAY or a per-group PLL phase
+  moves the sampling instant; class (b) does not depend on it (same pairs, same rates at stages 3..5), so neither would
+  remove the squiggles, and the margin gain on class (a) is not needed while training finds the clean stage. Revisit only
+  if a unit shows a core with no clean stage in this sweep.
+- **Firmware: the residual metric above**, unchanged in form; the bench confirms the rule: its quiet sets give 0x08E3 and
+  drop the stages the 32-code counters pass (CH1 A5, CH2 A4). Changes from the bench: park at 8k - 0.5 (the errors are
+  at carries; CH1's 0.5-code noise needs the park within a code), no "narrow window" warning, host tests with the two
+  classes. The runtime guard is unchanged (0x36 counts).
+- **The owner's squiggles (class b)**: an analog / ADC-side effect on CH2, 4..5 codes, 1.5..3.5 % of the samples near
+  0x5F..0x64 and 0x6E. Not fixable by the capture. Options, none recommended yet: look at the CH2 ADC's DRVDD
+  decoupling and the S1 / S2 straps (data-align would move the B outputs' switching onto A's encode and away from the
+  conversion instants; hardware, inference); or a host / firmware despike that replaces a sample 4 or more codes off when
+  both partner samples next to it agree within 2 codes (a slow-signal-only rule; it changes data, so the owner decides).
 
 ## Device facts from the datasheet
 
