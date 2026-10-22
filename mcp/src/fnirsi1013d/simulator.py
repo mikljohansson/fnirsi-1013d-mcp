@@ -3761,6 +3761,8 @@ class Device:
             r.cap_trailer, (r.cap_stored, r.cap_stored_fpga) = 1, self.cap_stored
         r.cap_flags = self.cap_flags & (P.CAPF_HAS | P.CAPF_TRAINED | P.CAPF_OTHER)
         r.cap_value = self.cap_value
+        if self.proto_minor < 28:
+            return self._ok(req, r.pack()[:364])
         return self._ok(req, r.pack())
 
     def _cmd_read_screen(self, req: P.Frame) -> P.Frame:

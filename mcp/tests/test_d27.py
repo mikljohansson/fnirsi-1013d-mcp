@@ -26,7 +26,7 @@ def gen_sim(sim_factory, ch2: str = "zero", **kw):
 
 
 def test_constants_caps_and_sizes():
-    assert P.PROTO_MINOR == 27 and P.FW_FPGA_VERSION == 0x153D and P.GEN_CLOCK_HZ == 200_000_000
+    assert P.PROTO_MINOR >= 27 and P.FW_FPGA_VERSION == 0x153D and P.GEN_CLOCK_HZ == 200_000_000
     assert (P.Cmd.LOG_START, P.Cmd.LOG_READ, P.Cmd.LOG_STOP) == (0x0214, 0x0215, 0x0216)
     # no SET_SWEEP (chirps are host-stepped SET_GEN writes); 0x0217 / 0x021A were the cut SET_PATTERN(_TRIGGER)
     assert not any(c in (0x0217, 0x0218, 0x021A) for c in P.Cmd)

@@ -179,7 +179,7 @@ def test_simulator_mismatch(sim_factory):
         # the basic set still answers
         assert s.ping(b"x") == b"x" and s.status().acq_state == P.AcqState.IDLE
         assert s.link_stats()["frames"] > 0 and s.event_log() is not None
-        assert s.get_cal(0, cached=False).nbytes == 364 and s.read_screen().shape == (480, 800)
+        assert s.get_cal(0, cached=False).nbytes == 432 and s.read_screen().shape == (480, 800)
         assert s.sd_info().card_sectors > 0 and s.battery() is not None
 
 

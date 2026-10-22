@@ -603,7 +603,10 @@ stops the UI acquisition for it and sets RUN again. A/B switches for the bus rea
 **`calibration_info`** (`scope_calibration_info`, tier 0): the conversion in use per channel, the scope's calibration
 (v3 block, current correction), from 1.15 `tracking` per channel (the v4 tracker: tracking / frozen / idle, d, e, q,
 cm, ages, `in_words`) and from 1.16 `calibration_provenance` (which firmware build and FPGA calibrated, which parts it
-wrote, the date with a clock module, power-ons and operating hours since), plus the per-unit file.
+wrote, the date with a clock module, power-ons and operating hours since), from 1.24 `capture_stages` (the stored
+FPGA capture stages) and from 1.28 `capture_training` per channel (the last capture stage training since boot: per
+core A / B its quiet stages, the residual metric q and the 0x36 outlier sums at stages 2..5, whether core B used the A
+encode, whether it failed; null when the wizard has not trained that channel since boot), plus the per-unit file.
 
 **`read_calibration`** (tier 0). Per channel: offset centres, gain factors per range, core A/B
 compensation, derived volts per code per range. Caveat: "Calibration is done on the scope's UI; these values
