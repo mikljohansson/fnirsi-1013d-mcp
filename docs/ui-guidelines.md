@@ -62,7 +62,10 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   end changes nothing and the other direction works at once. Stopped (and in the waveform viewer) the record on screen
   is fixed and keeps its rate: the zoom steps through the time/divs that record can show, and where the ladder would go
   on but the record cannot, the tap says "Stopped: press RUN to zoom further"; the time/div boxes it cannot show are
-  grey. The host's SET_TIMEBASE by UI index keeps its documented index-to-rate table (`docs/protocol.md`).
+  grey. A rate box tapped while stopped (owner, 2026-10-22; fw-stoprate) is the setting for the next RUN, as on bench
+  scopes: green in the grid and the ACQ chip, nothing written to the FPGA, the record keeping its own rate for its
+  trace, cursors and measurements; RUN arms at it as a tap while running would (snap and notice included), and until
+  then the white time/div boxes are those the record can show and the new rate keeps. The host's SET_TIMEBASE by UI index keeps its documented index-to-rate table (`docs/protocol.md`).
 - **Span drives the sample rate** (maintainer, 2026-10-19 23:09; fw 0.2.77), the Spectrum's counterpart. The view is a span
   from a 1-2-5 ladder (1 Hz .. 20 MHz, then the whole axis 0 .. 25 MHz) around a centre: a tap in the right half of the
   plot narrows the span one step, the left half widens it, both about the centre (kept inside 0 .. 25 MHz); a drag in

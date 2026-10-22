@@ -173,6 +173,17 @@ sections 74 to 79.
   drive on the PC before tapping Back." (c2694f3) The mcp host's E_BUSY "USB drive mode" hint names Back (Exit on
   firmware before 0.2.105).
 
+**ACQ sample rate in STOP (fw-stoprate).**
+
+- **The Sample Rate grid takes taps in STOP** (owner, 2026-10-22; was grey, 1.00o5's rule): the tapped rate is the
+  setting for the next RUN, as on bench scopes. It shows green in the grid and in the top bar's ACQ chip; the record on
+  screen keeps the rate it was captured at (trace, record slider, cursors, measurements and the stopped zoom), and
+  nothing reaches the FPGA until RUN, which arms at the new rate as a tap while running does (the time/div snaps with
+  "Time/div set to ... for this rate" when the rate cannot show it). While a rate is pending, the white time/divs are
+  those the record can show and the new rate keeps. The host's SET_TIMEBASE, AUTO SET or a time/div that moves the rate
+  replace a pending rate; GET_TIMEBASE reports the rate the FPGA holds. In roll the grid takes no tap (it was grey but
+  took taps while running). (c4025cf)
+
 **UI tweaks from the 0x153C bench (fw-acqui).**
 
 - **Trigger menu: larger - and + keys**: the Width / N / Idle keys draw their glyphs in the 24 px font, about twice the

@@ -8,7 +8,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [ ] **Counter hysteresis default** (bench 2026-10-22 09:02): 6 codes miscounts slow noisy edges (RC node: 9.5..13.7 kHz on 1 kHz);
   16 and 32 read 1000.00 Hz. Raise the boot default (fw-c7's 128 / 6) and the MCP default; fw-hyst.
-- [ ] **ACQ rate changes in STOP** (owner 2026-10-22 08:56: the rate grid ignores taps in STOP, "rather unintuitive"): Atlan's
+- [x] **ACQ rate changes in STOP** (fw-stoprate c4025cf, bench pending: firmware/AGENTS.md section 86) (owner 2026-10-22 08:56: the rate grid ignores taps in STOP, "rather unintuitive"): Atlan's
   rule (statemachine.c, rate changes only in RUN or single mode) exists because the handler writes the FPGA at once and the
   stopped record would be drawn with the new rate's geometry. New behaviour as on bench scopes: in STOP the rate (and the
   time/div grid's viable set) take taps, the pending setting shows as selected, the frozen record keeps its own capture
