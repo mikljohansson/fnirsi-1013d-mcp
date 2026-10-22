@@ -330,6 +330,13 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3gate (Opus explicitly; no Fable quota, dispatched 11:45, branch fpga-d3gate): 0x153D back to 0x153C's encode
+  generation (revert of the full-rate encodes, keeping the logger W fix, the logger, the square, 0x3D), testbenches and
+  contract back, timing rolls with the encode pads close to 0x153C's, two-seed run.sh, dist, docs.
+- fw-gated (Opus explicitly, dispatched 11:45, branch fw-gated): the GATED calibration class back (revert of fw-fullrate's
+  single class, card header accepted by 0.2.104 again, single-class blocks still load), the counter feeds the cards only at
+  full rate, the encode check's 0x153C rule, the FPGA model gated at K = 0 / D > 0, the MCP's two classes, docs.
+  After both: the noise-aware capture training metric (fpga-capwin's README section 18 spec), then the bench.
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
