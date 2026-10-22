@@ -570,15 +570,9 @@ module tb;
       for (it = 0; it < iterations; it = it + 1) begin
         rnd = $random(seed); rnd2 = $random(seed);
         kr = rnd2[1:0];
-        if (kr == 0) dv = 32'd0;                          // 0x153D: K = 0 compared with the reference at 200 MSa/s only (the dut
-                                                          // stores every (D + 1)-th full-rate pair at D > 0; tb_skip.v has D > 0);
-                                                          // up to 0x153C rnd[17:16] + (rnd[18] ? 0 : 6)
+        if (kr == 0) dv = rnd[17:16] + (rnd[18] ? 32'd0 : 32'd6);
         else         dv = rnd[19] ? rnd[23:20] : 32'd14 + rnd[28:24];
         shr = (kr == 0) ? rnd2[13:8] : (rnd[12] ? rec_shift_fir(kr, dv) : rec_shift(kr, dv));
-        // 0x153D (fpga-d3c): no comparison while the rates change and until the arm has reset the capture, and the
-        // divider goes to 0 first (as tb_fir.v: a transient K = 0 at the old D > 0 is not lockstep with the reference)
-        eq_on = 0;
-        wr4(8'h0D, 32'd0);
         // sequencer registers: mode 0 or 3 (off), random flag bits and values
         wr1(8'h57, {rnd2[31:26], rnd2[25] ? 2'd3 : 2'd0});
         wr2(8'h58, $random(seed));
@@ -627,7 +621,6 @@ module tb;
         // FIR settling when it engages (the reference sees the same writes; only the data delay)
         #((kr + 10) * ((dv / 2) + 1) * 10 + 500);
         start_capture;
-        eq_on = 1;
         wait_done(100000);
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
@@ -661,19 +654,6 @@ module tb;
   // one full-memory flat capture at K = 1 rewrites all 8192 words in both instances and aligns them
   task resync;
     begin
-      // 0x153D: the dut's write clock toggles on every clk_200MHz edge whatever the divider, the reference's toggled at
-      // 100 / (D + 1) MHz in the K = 0 captures at D > 0 above, so the two phases (and with them the decimator's P count)
-      // can differ now: at divider 0 with K = 0 (both enables constant, dec_pc held at 0 in both) copy the dut's write clock
-      // and encode flops into the reference, half a clock from the toggling (negative) edges, as tb_decim.v does before its
-      // phase 4
-      set_fir(2'd0, 1'b0, 6'd0, 32'd0, 1'b0);
-      @(posedge dut.clk_200MHz); #0.6;
-      refd.sample_write_clock = dut.sample_write_clock;
-      refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
-      refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
-      refd.sample_rate_counter = 32'd1;
-      refd.swc_prev = dut.sample_write_clock;
-      #500;
       set_fir(2'd1, 1'b0, 6'd0, 32'd1, 1'b0);
       adc_mode = 3; flat_val = 8'd20;
       wr1(8'h57, 8'h00);
@@ -701,9 +681,7 @@ module tb;
   // legacy or 16-bit word period in ns and the timestamp increment per write clock edge (5 ns units)
   task geometry(input [1:0] kk, input [31:0] divider);
     begin
-      // 0x153D: the write clock runs at full rate at every divider, so the timestamp moves by 2 per 10 ns edge and a
-      // record's first stored word falls on any edge of the D + 1 skip cycle (up to 0x153C 2 (D + 1) per divided edge)
-      if (kk == 0) begin word_ns = 10 * (divider + 1); inc5 = 2; end
+      if (kk == 0) begin word_ns = 10 * (divider + 1); inc5 = 2 * (divider + 1); end
       else         begin word_ns = 10 * ((divider / 2) + 1); inc5 = 2; end
     end
   endtask
@@ -802,19 +780,6 @@ module tb;
     //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
     wr4(8'h52, 32'd0);
     wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
-    // 0x153D: the dut's write clock toggles on every clk_200MHz edge from power-on, the reference's from its divider
-    // counter's first count one cycle later, so their phases differ by an edge (the reference's A / B samples swapped
-    // against the dut's): copy the dut's write clock and encode flops into the reference at divider 0, half a clock from
-    // the toggling (negative) edges, as tb_decim.v does before its phase 4. Repeated wherever a K = 0 capture at D > 0
-    // (the reference's gated encodes) precedes a lockstep phase.
-    wr4(8'h0D, 32'd0); #200;
-    @(posedge dut.clk_200MHz); #0.6;
-    refd.sample_write_clock = dut.sample_write_clock;
-    refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
-    refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
-    refd.sample_rate_counter = 32'd1;
-    refd.swc_prev = dut.sample_write_clock;
-    #500;
 
     //-------------------------------------------------------------------------------
     // Phase 1: equivalence with 0x1535, sequencer off
@@ -869,7 +834,7 @@ module tb;
     wr1(8'h17, 8'd200);
     wr4(8'h0E, 32'd60);
     seq_cfg(2'd1, 1'b0, 1'b0, 12'd4, 4'd6, 16'd1, 5'd0, 32'd0);
-    log_run(2'd1, 4, 1, 40, 12, 6, 0, 20, 2, 0);   // 0x153D: timestamps move by 2 per full-rate edge (was 4 at D = 1)
+    log_run(2'd1, 4, 1, 40, 12, 6, 0, 20, 4, 0);
     seg_log_arm = 1;
     start_capture;
     wait_seq(100000);
@@ -905,7 +870,7 @@ module tb;
     #2000;
     setup_capture(2'd0, 1'b0, 1'b1, 32'd9, 13'd20, 13'd100);
     seq_cfg(2'd1, 1'b0, 1'b0, 12'd5, 4'd7, 16'd1, 5'd0, 32'd0);
-    log_run(2'd1, 5, 1, 100, 20, 7, 0, 100, 2, 0);   // 0x153D: 2 per full-rate edge (was 20 at D = 9)
+    log_run(2'd1, 5, 1, 100, 20, 7, 0, 100, 20, 0);
     seg_log_arm = 1;
     start_capture;
     fork
@@ -990,7 +955,7 @@ module tb;
     wr1(8'h17, 8'd128);
     setup_capture(2'd0, 1'b0, 1'b1, 32'd9, 13'd30, 13'd100);
     seq_cfg(2'd2, 1'b0, 1'b0, 12'd1, 4'd0, 16'd4, 5'd2, 32'd0);
-    log_run(2'd2, 1, 4, 100, 30, 0, 0, 100, 2, 0);   // 0x153D: 2 per full-rate edge (was 20 at D = 9)
+    log_run(2'd2, 1, 4, 100, 30, 0, 0, 100, 20, 0);
     start_capture;
     fork
       step_pulses(4, 15000, 3000, 6000);
