@@ -149,7 +149,8 @@ ui_ms_source ui_ms_get_source(int item);
 //(ui_ms_counter_set, memory only) and the six timing cards are its sources (ui_ms_counter_register). **The card rule**:
 //the counter follows the trigger source (one channel at a time), so a Freq, Period, +Width, -Width, +Duty or -Duty card
 //of live channel ch shows the counter's value when the counter's current result (fpga_counter_current: the gate on, the
-//result younger than three gates + 100 ms) is for that channel and has a period (E >= 1); every other card, the other
+//result younger than three gates + 100 ms) is for that channel, has a period (E >= 1) and its thresholds fit it
+//(fpga_counter_usable: not misfit, fw-ctrauto); every other card, the other
 //channel's timing cards, an EXT-source result, a result without edges (the signal under the Schmitt thresholds, or
 //slower than two edges per gate) and the reference traces keep the record-based measurement. Same formats as the
 //record's (ui_fmt_mhz / ui_fmt_ps / ui_fmt_sig4_fixed: four significant digits), so the text never changes shape.

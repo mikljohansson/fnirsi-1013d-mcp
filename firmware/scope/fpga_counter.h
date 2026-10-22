@@ -18,12 +18,27 @@
 //   (fpga_bus_wr.wclk moved since the previous pass) writes 0x61 = 0 first (the running gate is aborted, nothing can be
 //   published after this), then reads 0x35 and drops the result it may carry (the gate that spanned the write, or one
 //   read late), then writes 0x61 = the value again: the next result is a clean full gate. Cost 4 strobes on such passes.
-// - The level follows the UI's trigger level (the marker the user placed inside the signal) with hysteresis 6 codes
-//   (about three times the 2 LSB noise) unless the host pinned it (GET_COUNTER what = 1 with level != 0); a change
-//   writes 0x62 (3 strobes) and restarts the gate the same way, so no result mixes two levels.
+// - The thresholds follow the signal (fw-ctrauto) unless the host pinned them (GET_COUNTER what = 1: a non-zero level
+//   pins the level, a non-zero hysteresis pins the hysteresis; 0 = auto, the boot configuration). After each gate the
+//   result's raw min / max (CH1 / CH2) give the thresholds the signal asks for: span = max - min; hysteresis h =
+//   max(6, round(span / 6)), at most span / 2; the band centred on the midpoint: level (the upper threshold, 0x62 byte
+//   0) = ceil((min + max + h) / 2), the low threshold level - h. Why span / 6 (bench 2026-10-22, 0x153D, CH1 on an RC
+//   node, 1 kHz, 89..184, fast jumps then slow exponential settles with a few codes rms of noise): hysteresis 6 read
+//   2.6 to 13.7 kHz (the noise re-crossing the band on the slow settles), 16 and 32 read 1 kHz; span / 8 = 12 sits
+//   between the failing 6 and the passing 16 (4 x the 3 codes rms, on a slow edge that dwells thousands of samples in
+//   the band), span / 6 rounds to 16 there. A
+//   hysteresis centred on the midpoint delays both edges alike, so a symmetric signal's duty is not biased by it.
+//   A gate whose thresholds are within a deadband of what it asks for (level and hysteresis each within max(2, h / 4)
+//   codes: the extremes of the noise move min / max by a code or two between gates) gives a valid result; one outside
+//   it (a new signal, a range change, the first gate after boot) is marked misfit and the next thresholds are written
+//   (0x62, 3 strobes, then the gate restarted as below, so no result mixes two threshold pairs). A span below 12 codes
+//   (FPGA_CNT_AUTO_MIN_SPAN: no signal, the noise alone) keeps the thresholds and, with an auto level, marks the result
+//   misfit. Misfit results are not VALID and do not feed the cards (the record's measurement shows). EXT results and
+//   results dropped by the rate-change rule do not move the thresholds.
 // - A host configuration (GET_COUNTER what = 1) is only noted; the next pass writes it (0x62, 0x61 = 0, 0x61 = value).
 // - A result is current while the gate is on and it is younger than three gates plus 100 ms (the configured gate);
-//   with E >= 1 it feeds the measurement cards of its source channel (ui_meas.c) and GET_COUNTER's VALID bit.
+//   with E >= 1 and not misfit it feeds the measurement cards of its source channel (ui_meas.c) and GET_COUNTER's VALID
+//   bit (fpga_counter_usable).
 //
 // Arithmetic (64-bit integers, no floating point; one clock = 5 ns): frequency = E x 2e8 / T Hz, in uHz through a
 // two-stage division (E x 2e8 fits, E x 2e14 does not); period = T x 5000 / E ps; high time = W x 5000 / E ps; low time
@@ -51,16 +66,19 @@
 #define FPGA_CNT_RES_CH2     1
 #define FPGA_CNT_RES_EXT     2
 
-#define FPGA_CNT_LEVEL_BOOT  128
+#define FPGA_CNT_LEVEL_BOOT  128      //the first gate's thresholds (written at boot; the auto rule replaces them)
 #define FPGA_CNT_HYST_BOOT   6
+
+#define FPGA_CNT_HYST_MIN       6     //auto hysteresis floor (about twice the analog noise rms on a quiet input)
+#define FPGA_CNT_AUTO_MIN_SPAN  12    //auto: a gate's max - min below this is no signal
 
 typedef struct
 {
   //Configuration asked for (boot, or GET_COUNTER what = 1)
   uint8_t  cfg_gate;            //FPGA_CNT_GATE_*
   uint8_t  cfg_source;          //FPGA_CNT_SRC_*
-  uint8_t  cfg_level;           //0 = follow the UI trigger level
-  uint8_t  cfg_hyst;
+  uint8_t  cfg_level;           //0 = auto (the midpoint of the previous gate's min / max)
+  uint8_t  cfg_hyst;            //0 = auto (round(span / 6), at least 6)
   uint8_t  pending;             //a configuration not yet written (the next pass writes it)
 
   //What the FPGA holds (the last values written)
@@ -77,6 +95,7 @@ typedef struct
   uint32_t e, t, w;
   uint8_t  min, max;
   uint32_t res_ms;              //when it was read (the pass's clock)
+  uint8_t  misfit;              //auto: counted at thresholds its own min / max do not ask for, or no signal (not VALID)
 
   //Derived from E / T / W (fpga_counter_derive); 0 when E = 0
   uint8_t  has_period;          //E >= 1
@@ -91,23 +110,28 @@ typedef struct
   uint32_t results;             //snapshots with "new" taken
   uint32_t dropped;             //"new" snapshots dropped after a write clock change
   uint32_t restarts;            //0x61 = 0 / value sequences written by the pass
+  uint32_t retunes;             //auto thresholds written after a misfit result
 } fpga_counter_state;
 
 extern fpga_counter_state fpga_cnt;
 
-//Boot: 0x62 = 128 / 6, 0x61 = gate 100 ms with source 0 (the trigger source); the state reset, the write clock baseline
+//Boot: 0x62 = 128 / 6, 0x61 = gate 100 ms with source 0 (the trigger source), level and hysteresis auto; the state
+//reset, the write clock baseline
 void fpga_counter_boot(void);
 
-//A host configuration: noted, written by the next pass (level 0 = follow the UI trigger level). gate and source are
-//FPGA_CNT_GATE_* / FPGA_CNT_SRC_* (the caller validates)
+//A host configuration: noted, written by the next pass (level 0 / hysteresis 0 = auto, from the signal). gate and
+//source are FPGA_CNT_GATE_* / FPGA_CNT_SRC_* (the caller validates)
 void fpga_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst);
 
-//Once per main-loop pass after the capture readout: the rate-change rule, the 0x35 read, the level follow and a pending
-//configuration (see above). now_ms = the pass's clock, trig_level = the UI's trigger level clamped to 0..255
-void fpga_counter_pass(uint32_t now_ms, uint8_t trig_level);
+//Once per main-loop pass after the capture readout: the rate-change rule, the 0x35 read, the auto thresholds and a
+//pending configuration (see above). now_ms = the pass's clock
+void fpga_counter_pass(uint32_t now_ms);
 
 //The held result is current: the gate is on and it is younger than three configured gates plus 100 ms
 int fpga_counter_current(uint32_t now_ms);
+
+//The held result is usable (VALID, the cards): current, with a period, not misfit
+int fpga_counter_usable(uint32_t now_ms);
 
 //The derived values of E / T / W as above; 0 when e == 0 (the outputs are then 0)
 int fpga_counter_derive(uint32_t e, uint32_t t, uint32_t w, uint64_t *freq_uhz, uint64_t *period_ps, uint64_t *width_ps,

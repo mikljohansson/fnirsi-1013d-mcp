@@ -41,7 +41,10 @@
 //     sequence number, and restarts; any change of the effective source or gate (0x61, or 0x15 with source 0)
 //     restarts the gate without publishing, a same-value write does not. CH1 / CH2 see edges only when the low code is
 //     below level - hysteresis and the high code at or above the level. The mixed-age transient of a 0x0D / 0x53 write
-//     is not modelled (the firmware's rule is what the tests check).
+//     is not modelled (the firmware's rule is what the tests check). fw-ctrauto: a source with a sample function
+//     (fm_cnt_wave: the raw code at each 5 ns clock) is counted sample by sample instead, through the Schmitt trigger
+//     (high at code >= level, low below level - hysteresis, the state starting from the gate's first sample), with E, T,
+//     W between the first and the last rising edge and min / max over every sample of the gate.
 //   - D4 logger (0x153D, fw-d4; docs/plans/fpga-0x153c.md sections 2.1, 2.2, 6.1): 0x69 bit 0 stream (the capture after
 //     the release writes one word per write clock edge for ever, no trigger, no stop; words carry their index as in the
 //     capture model, or the peak pairs), bit 1 clears the lap flag; 0x6A the reader position (the next word to read);
@@ -140,6 +143,7 @@ typedef struct
     uint64_t period_ps, high_ps, phase_ps;
     uint8_t  lo, hi;
   } cnt_sig[3];                     //CH1, CH2, EXT
+  uint8_t (*cnt_wave[3])(uint64_t clk); //fw-ctrauto: sample-level source (the code at 5 ns clock clk), NULL = cnt_sig
   uint8_t  cnt_cfg;                 //{ 0, 0, 0, 0, ext, ch2, gate[1:0] } the gate runs with (0 = off)
   uint64_t cnt_start_ps, cnt_end_ps;//the running gate
   uint32_t cnt_publishes, cnt_restarts;
@@ -201,6 +205,7 @@ int  fm_trace_find(uint8_t cmd, uint32_t value, uint32_t from);  //index of the 
 //fw-c7: the counter's stream on source src (0 CH1, 1 CH2, 2 EXT): a square wave of period_ns / high_ns (multiples of
 //5 ns) starting at phase_ns, codes lo / hi; period 0 = a constant low level
 void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase_ns, uint8_t lo, uint8_t hi);
+void fm_cnt_wave(int src, uint8_t (*wave)(uint64_t clk));
 //The generator: the clock now (5 ns), the pin (0 / 1, 2 = hi-Z)
 uint64_t fm_clk(void);
 int      fm_pin(void);

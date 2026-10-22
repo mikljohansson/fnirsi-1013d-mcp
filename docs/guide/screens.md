@@ -81,7 +81,10 @@ Vavg, Vrms, Vpp, Vp, Freq, Period, +Width, -Width, +Duty, -Duty. Choose the sour
 top of the menu. A new unit shows Freq, Vpp and Vavg on each enabled channel. The cards appear in the order you chose
 them; the number at the top left of each item in the menu is its place. Freq, Period, the widths and the duties read
 "no period" while the record holds fewer than three crossings. The values are taken over the whole record, and Vrms
-includes the DC level.
+includes the DC level. On the trigger channel Freq, Period, the widths and the duties come from the FPGA's hardware
+counter instead, counted at 200 MSa/s over 100 ms with thresholds that follow the signal (centred between its lowest
+and highest level); for a moment after the signal or the range changes, and for a signal smaller than about half a
+division, they show the record's values.
 
 **Touch on the plot.**
 

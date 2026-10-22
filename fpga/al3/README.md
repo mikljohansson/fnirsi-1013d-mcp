@@ -2141,7 +2141,7 @@ Contract: `docs/plans/fpga-0x153c.md` sections 2.1 (0x61, 0x62), 2.2 (0x35), 5 a
 |---|---|---|---|
 | 0x61 | 1 | 1..0 | **gate**: 0 off (power-on), 1 = 10 ms, 2 = 100 ms, 3 = 1 s (exactly 2e6 / 2e7 / 2e8 clocks of 200 MHz) |
 | | | 3..2 | **source**: 0 the trigger source (0x15 as written: 0 CH1, 1 CH2, 2 and 3 EXT), 1 CH1, 2 CH2, 3 EXT. A 0x61 write that changes the value restarts the gate |
-| 0x62 | 2 | | **level** (raw ADC code: high at code >= level), then **hysteresis** (low at code < level - hysteresis; hysteresis >= level never goes low). Power-on 0 / 0; the firmware writes 128 / 6 at boot and follows the trigger level |
+| 0x62 | 2 | | **level** (raw ADC code: high at code >= level), then **hysteresis** (low at code < level - hysteresis; hysteresis >= level never goes low). Power-on 0 / 0; the firmware writes 128 / 6 at boot, then centres the band on each gate's min / max (fw-ctrauto) |
 
 Read 0x35, 16 bytes, one consistent snapshot:
 

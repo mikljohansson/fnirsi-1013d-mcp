@@ -268,14 +268,73 @@ static void fm_cnt_check(void)
   }
 }
 
+//fw-ctrauto: a sample-level source through the Schmitt trigger, every 5 ns clock of the gate: E, T, W between the
+//first and the last rising edge, min / max over the whole gate
+static void fm_cnt_publish_wave(uint8_t (*wave)(uint64_t clk), uint64_t g0, uint64_t g1)
+{
+  uint64_t k, k0 = g0 / 5000, k1 = g1 / 5000, first = 0, last = 0, high = 0, n = 0;
+  uint8_t  lvl = fm.reg_62_lvl, lo_thr = (fm.reg_62_lvl > fm.reg_62_hys) ? (uint8_t)(fm.reg_62_lvl - fm.reg_62_hys) : 0;
+  uint8_t  x, mn = 255, mx = 0;
+  int      st = wave(k0) >= lvl;
+
+  for(k=k0;k<k1;k++)
+  {
+    x = wave(k);
+
+    if(x < mn) mn = x;
+    if(x > mx) mx = x;
+
+    if(!st && (x >= lvl))
+    {
+      st = 1;
+
+      if(!n)
+        first = k;
+
+      last = k;
+      n++;
+    }
+    else if(st && (x < lo_thr))
+      st = 0;
+
+    if(st && n)
+      high++;                                        //high clocks from the first rising edge on
+
+    if(k == last)
+      fm.pub_w = (uint32_t)(high - 1);               //up to (not including) the latest rising edge's clock
+  }
+
+  fm.pub_min = mn;
+  fm.pub_max = mx;
+
+  if(n >= 2)
+  {
+    fm.pub_e = (uint32_t)(n - 1);
+    fm.pub_t = (uint32_t)(last - first);
+  }
+  else
+    fm.pub_e = fm.pub_t = fm.pub_w = 0;
+}
+
 static void fm_cnt_publish(uint64_t g0, uint64_t g1)
 {
   int      ext = (fm.cnt_cfg & 0x08) != 0, ch2 = (fm.cnt_cfg & 0x04) != 0, si = ext ? 2 : (ch2 ? 1 : 0);
+
   uint64_t period = fm.cnt_sig[si].period_ps, high = fm.cnt_sig[si].high_ps, phase = fm.cnt_sig[si].phase_ps;
   uint8_t  lo = fm.cnt_sig[si].lo, hi = fm.cnt_sig[si].hi;
   uint64_t n = 0, k0, k1;
   uint8_t  lo_thr = (fm.reg_62_lvl > fm.reg_62_hys) ? (uint8_t)(fm.reg_62_lvl - fm.reg_62_hys) : 0;
   int      edges = period != 0;
+
+  //fw-ctrauto: a sample-level source
+  if(fm.cnt_wave[si])
+  {
+    fm_cnt_publish_wave(fm.cnt_wave[si], g0, g1);
+    fm.pub_cfg = fm.cnt_cfg;
+    fm.pub_seq++;
+    fm.cnt_publishes++;
+    return;
+  }
 
   //CH1 / CH2: the Schmitt trigger must see both levels
   if(!ext && edges && !((lo < lo_thr) && (hi >= fm.reg_62_lvl)))
@@ -348,6 +407,12 @@ void fm_cnt_signal(int src, uint64_t period_ns, uint64_t high_ns, uint64_t phase
   fm.cnt_sig[src].phase_ps  = (phase_ns / 5) * 5000;
   fm.cnt_sig[src].lo        = lo;
   fm.cnt_sig[src].hi        = hi;
+  fm.cnt_wave[src]          = 0;
+}
+
+void fm_cnt_wave(int src, uint8_t (*wave)(uint64_t clk))
+{
+  fm.cnt_wave[src] = wave;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

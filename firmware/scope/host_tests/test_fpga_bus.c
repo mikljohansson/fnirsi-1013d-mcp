@@ -20,8 +20,9 @@
 //     a trigger across a re-arm, released by 0x66 + arm or by 0x1B = 0, and the 0x34 / 0x37 status reads;
 //   - fw-c7 (0x153C, C7 counter, fpga_counter.c): the boot writes (0x62 = 128 / 6, 0x61 = gate 100 ms, source 0), the
 //     once-per-pass 0x35 read (17 strobes) and the values it derives from the model's synthetic square waves at every
-//     gate, the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), the trigger level
-//     followed into 0x62, a host configuration applied by the next pass, the trigger source followed through 0x15.
+//     gate, the rate-change rule (0x61 = 0 before the read, the result dropped, 0x61 = value after), a host
+//     configuration applied by the next pass, the trigger source followed through 0x15; fw-ctrauto: the thresholds
+//     following the signal (test_counter_auto, with a slow-settle noisy square counted sample by sample).
 //   - fw-d5 (0x153D, protocol 1.27, firmware/AGENTS.md sections 75 and 79): the generator as a fractional two-step square
 //     (gen_pat.c: the P16 / H16 formulas at many frequencies and duties, exact mean period, every edge within one 5 ns
 //     clock of its ideal time on the model's square), the double-buffered frequency change (glitch-free, taken at once
@@ -990,16 +991,16 @@ static void test_peak(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 // C7 counter (fw-c7, FPGA 0x153C, fpga_counter.c): the boot writes, the once-per-pass 0x35 read and its cost, the derived
 // values against the model's synthetic square waves at every gate, the rate-change rule (0x61 = 0 before the read, the
-// result dropped, 0x61 = value after), the trigger level followed into 0x62, a host configuration applied by the next
-// pass, the trigger source followed through 0x15, the current / stale rule, the arithmetic's corner cases
+// result dropped, 0x61 = value after), a host configuration applied by the next pass, the trigger source followed
+// through 0x15, the current / stale rule, the arithmetic's corner cases; the auto thresholds (fw-ctrauto)
 
 #define CNT_PASS_STROBES  17
 
-static uint32_t cnt_pass(uint32_t ms, uint8_t lvl)
+static uint32_t cnt_pass(uint32_t ms)
 {
   uint32_t s0 = fm.strobes;
 
-  fpga_counter_pass(ms, lvl);
+  fpga_counter_pass(ms);
   return fm.strobes - s0;
 }
 
@@ -1154,20 +1155,26 @@ static void test_counter(void)
   T_EQ(fm.trace[1].cmd, 0x61); T_EQ(fm.trace[1].value, 0x02);
   T_EQ(fm.reg_61, 0x02); T_EQ(fm.reg_62_lvl, 128); T_EQ(fm.reg_62_hys, 6); T_EQ(fm.cnt_cfg, 0x02); T_EQ(fm.cnt_restarts, 1);
   T_EQ(fpga_cnt.gate, FPGA_CNT_GATE_100MS); T_EQ(fpga_cnt.source, FPGA_CNT_SRC_TRIG); T_EQ(fpga_cnt.level, 128);
-  T_EQ(fpga_cnt.hyst, 6); T_EQ(fpga_cnt.cfg_level, 0); T_EQ(fpga_cnt.held, 0); T_EQ(fpga_cnt.pending, 0);
+  T_EQ(fpga_cnt.hyst, 6); T_EQ(fpga_cnt.cfg_level, 0); T_EQ(fpga_cnt.cfg_hyst, 0); T_EQ(fpga_cnt.held, 0);
+  T_EQ(fpga_cnt.pending, 0);
 
-  //1 MHz 50 % on CH1 between codes 60 and 200. The first pass: no gate has ended, the read costs 17 strobes and nothing
-  //is written (the trigger level is the boot level)
+  //The rules below run on pinned thresholds (the auto ones: test_counter_auto): 128 / 6 pinned by the host, which the
+  //first pass applies as a restart (0x62 unchanged, 0x61 = 0 / 2)
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 128, 6);
+
+  //1 MHz 50 % on CH1 between codes 60 and 200. The first pass: no gate has ended, the read costs 17 strobes, and the
+  //host configuration's restart 4
   fm_cnt_signal(0, 1000, 500, 35, 60, 200);
   fm.ntrace = 0;
-  T_EQ(cnt_pass(1000, 128), CNT_PASS_STROBES);
-  T_EQ(fpga_cnt.reads, 1); T_EQ(fpga_cnt.held, 0); T_EQ(fpga_cnt.results, 0); T_EQ(fm.ntrace, 0);
+  T_EQ(cnt_pass(1000), CNT_PASS_STROBES + 4);
+  T_EQ(fpga_cnt.reads, 1); T_EQ(fpga_cnt.held, 0); T_EQ(fpga_cnt.results, 0); T_EQ(fm.ntrace, 2);
+  T_EQ(fpga_cnt.restarts, 1);
   T_EQ(fpga_counter_current(1000), 0);
 
   //100 ms later one gate has been published: the result is taken, CH1, gate 2, exact 1 MHz 50 %
   fm_advance_ns(100000000);
   T_EQ(fm.cnt_publishes, 1);
-  T_EQ(cnt_pass(1100, 128), CNT_PASS_STROBES);
+  T_EQ(cnt_pass(1100), CNT_PASS_STROBES);
   T_EQ(fpga_cnt.held, 1); T_EQ(fpga_cnt.results, 1); T_EQ(fpga_cnt.dropped, 0);
   T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.res_gate, 2); T_EQ(fpga_cnt.seq, 1);
   T_TRUE((fpga_cnt.e == 99999) || (fpga_cnt.e == 100000));
@@ -1181,12 +1188,12 @@ static void test_counter(void)
 
   //The same gate read again: not new, nothing taken; the pass still costs 17 strobes and writes nothing
   fm.ntrace = 0;
-  T_EQ(cnt_pass(1120, 128), CNT_PASS_STROBES);
+  T_EQ(cnt_pass(1120), CNT_PASS_STROBES);
   T_EQ(fpga_cnt.results, 1); T_EQ(fm.ntrace, 0);
 
   //Two more gates in one interval: the latest one is taken (seq 3), once
   fm_advance_ns(200000000);
-  cnt_pass(1320, 128);
+  cnt_pass(1320);
   T_EQ(fpga_cnt.results, 2); T_EQ(fpga_cnt.seq, 3);
 
   //Rate change: a 0x0D write while the gate runs; the gate that spans it ends before the next pass. That pass writes
@@ -1197,40 +1204,41 @@ static void test_counter(void)
   fm_advance_ns(80000000);
   n = fpga_cnt.results;
   fm.ntrace = 0;
-  T_EQ(cnt_pass(1430, 128), CNT_PASS_STROBES + 4);
-  T_EQ(fpga_cnt.dropped, 1); T_EQ(fpga_cnt.results, n); T_EQ(fpga_cnt.restarts, 1);
+  T_EQ(cnt_pass(1430), CNT_PASS_STROBES + 4);
+  T_EQ(fpga_cnt.dropped, 1); T_EQ(fpga_cnt.results, n); T_EQ(fpga_cnt.restarts, 2);
   T_EQ(fm.ntrace, 2);                                                        //0x61 = 0, 0x61 = 2
   i61a = (uint32_t)fm_trace_find(0x61, 0, 0); i61b = (uint32_t)fm_trace_find(0x61, 2, 0);
   T_EQ(i61a, 0); T_EQ(i61b, 1);
-  T_EQ(fm.cnt_cfg, 0x02); T_EQ(fm.cnt_restarts, 2);
+  T_EQ(fm.cnt_cfg, 0x02); T_EQ(fm.cnt_restarts, 3);
   T_TRUE(fm.cnt_start_ps > fm.t_ps - 2000000);                                //restarted within this pass
   t0 = fm.cnt_start_ps;
   //A snapshot's "new" was consumed by the dropped read: the next pass before the gate ends sees nothing
-  cnt_pass(1450, 128);
+  cnt_pass(1450);
   T_EQ(fpga_cnt.results, n); T_EQ(fpga_cnt.dropped, 1);
   fm_advance_ns(100000000);
   T_TRUE(fm.cnt_end_ps > t0);
-  cnt_pass(1550, 128);
+  cnt_pass(1550);
   T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_cnt.freq_uhz, 1000000000000ull); T_EQ(fpga_cnt.e * 200, fpga_cnt.t);
 
   //A 0x53 write counts as a rate change too; a 0x54 / 0x56 write does not
   fpga_write_cmd(0x53); fpga_write_byte(0x01);
   fm.ntrace = 0;
-  cnt_pass(1560, 128);
-  T_EQ(fpga_cnt.restarts, 2); T_EQ(fm.ntrace, 2);
+  cnt_pass(1560);
+  T_EQ(fpga_cnt.restarts, 3); T_EQ(fm.ntrace, 2);
   fpga_write_cmd(0x54); fpga_write_byte(0x03);
   fpga_write_cmd(0x56); fpga_write_byte(0x01);
   fm.ntrace = 0;
-  cnt_pass(1580, 128);
-  T_EQ(fpga_cnt.restarts, 2); T_EQ(fm.ntrace, 0);
+  cnt_pass(1580);
+  T_EQ(fpga_cnt.restarts, 3); T_EQ(fm.ntrace, 0);
 
-  //The trigger level moves to 150: 0x62 = 150 / 6 then 0x61 = 0 / 2 (the gate restarted so no result mixes two levels)
+  //The host pins level 150: 0x62 = 150 / 6 then 0x61 = 0 / 2 (the gate restarted so no result mixes two levels)
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 150, 6);
   fm.ntrace = 0;
-  T_EQ(cnt_pass(1600, 150), CNT_PASS_STROBES + 3 + 4);
+  T_EQ(cnt_pass(1600), CNT_PASS_STROBES + 3 + 4);
   T_EQ(fm.ntrace, 3);
   T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x9606);
   T_EQ(fm.trace[1].cmd, 0x61); T_EQ(fm.trace[1].value, 0); T_EQ(fm.trace[2].cmd, 0x61); T_EQ(fm.trace[2].value, 2);
-  T_EQ(fpga_cnt.level, 150); T_EQ(fpga_cnt.restarts, 3); T_EQ(fm.reg_62_lvl, 150);
+  T_EQ(fpga_cnt.level, 150); T_EQ(fpga_cnt.restarts, 4); T_EQ(fm.reg_62_lvl, 150);
   i35 = fpga_cnt.reads;
   T_EQ(i35, 10);                                                               //one 0x35 read per pass so far
 
@@ -1239,23 +1247,23 @@ static void test_counter(void)
   fm_cnt_signal(0, 1000, 500, 35, 60, 140);
   fm_advance_ns(100000000);
   n = fpga_cnt.results;
-  cnt_pass(1700, 150);
+  cnt_pass(1700);
   T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_cnt.e, 0); T_EQ(fpga_cnt.has_period, 0); T_EQ(fpga_cnt.freq_uhz, 0);
   T_EQ(fpga_cnt.min, 60); T_EQ(fpga_cnt.max, 140); T_EQ(fpga_counter_current(1700), 1);
 
   //Host configuration: 1 s gate, CH2, level 100, hysteresis 10: noted, written by the next pass (0x62, 0x61 = 0, 0x61 =
-  //0x0B); the level no longer follows the trigger
+  //0x0B)
   fm_cnt_signal(1, 1000000, 200000, 0, 80, 110);                             //1 kHz 20 % on CH2 between 80 and 110
   fpga_counter_config(FPGA_CNT_GATE_1S, FPGA_CNT_SRC_CH2, 100, 10);
   T_EQ(fpga_cnt.pending, 1); T_EQ(fm.reg_61, 0x02);                          //nothing written yet
   fm.ntrace = 0;
-  cnt_pass(1720, 150);
+  cnt_pass(1720);
   T_EQ(fpga_cnt.pending, 0); T_EQ(fm.ntrace, 3);
   T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x640A);
   T_EQ(fm.trace[1].value, 0); T_EQ(fm.trace[2].cmd, 0x61); T_EQ(fm.trace[2].value, 0x0B);
   T_EQ(fm.cnt_cfg, 0x07); T_EQ(fpga_cnt.gate, 3); T_EQ(fpga_cnt.source, 2); T_EQ(fpga_cnt.level, 100); T_EQ(fpga_cnt.hyst, 10);
   fm.ntrace = 0;
-  cnt_pass(1740, 128);                                                         //a trigger level change is ignored now
+  cnt_pass(1740);                                                              //nothing more to write
   T_EQ(fm.ntrace, 0);
   //The old result (read at 1700) ages out against the new 1 s gate's bound (3 s + 100 ms) only after 3.1 s; a 1 s gate
   //completes first
@@ -1263,21 +1271,21 @@ static void test_counter(void)
   T_EQ(fpga_cnt.min, 60); T_EQ(fpga_cnt.max, 140);                            //still the E = 0 result: lo 60, hi 140
   fm_advance_ns(1000000000);
   n = fpga_cnt.results;
-  cnt_pass(2740, 128);
+  cnt_pass(2740);
   T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH2); T_EQ(fpga_cnt.res_gate, 3);
   T_TRUE((fpga_cnt.e == 999) || (fpga_cnt.e == 1000));
   T_EQ(fpga_cnt.freq_uhz, 1000000000ull); T_EQ(fpga_cnt.period_ps, 1000000000ull); T_EQ(fpga_cnt.width_ps, 200000000ull);
   T_EQ(fpga_cnt.low_ps, 800000000ull); T_EQ(fpga_cnt.duty_ppm, 200000); T_EQ(fpga_cnt.min, 80); T_EQ(fpga_cnt.max, 110);
 
-  //Back to following the trigger level (level 0), 10 ms gate on EXT: 10 MHz 50 %; min / max read 255 / 0 on EXT
+  //128 / 6 again, 10 ms gate on EXT: 10 MHz 50 %; min / max read 255 / 0 on EXT
   fm_cnt_signal(2, 100, 50, 0, 0, 0);
-  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_EXT, 0, 6);
+  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_EXT, 128, 6);
   fm.ntrace = 0;
-  cnt_pass(2760, 128);
+  cnt_pass(2760);
   T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x8006); T_EQ(fm.trace[2].value, 0x0D);
   fm_advance_ns(10000000);
   n = fpga_cnt.results;
-  cnt_pass(2780, 128);
+  cnt_pass(2780);
   T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_EXT); T_EQ(fpga_cnt.res_gate, 1);
   T_TRUE((fpga_cnt.e == 99999) || (fpga_cnt.e == 100000));
   T_EQ(fpga_cnt.freq_uhz, 10000000000000ull); T_EQ(fpga_cnt.period_ps, 100000); T_EQ(fpga_cnt.min, 255); T_EQ(fpga_cnt.max, 0);
@@ -1285,20 +1293,20 @@ static void test_counter(void)
 
   //Source 0 follows the trigger source: 0x15 = 1 (CH2) restarts the FPGA's gate by itself (no firmware write), the
   //next result is CH2's
-  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 0, 6);
-  cnt_pass(2800, 128);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 128, 6);
+  cnt_pass(2800);
   T_EQ(fm.cnt_cfg, 0x02);
   fm_cnt_signal(0, 1000, 500, 35, 60, 200);
   fm_cnt_signal(1, 2000, 500, 0, 60, 200);
   fm_advance_ns(100000000);
-  cnt_pass(2900, 128);
+  cnt_pass(2900);
   T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.freq_uhz, 1000000000000ull);
   r = fm.cnt_restarts;
   fm.ntrace = 0;
   fpga_write_cmd(0x15); fpga_write_byte(0x01);
   T_EQ(fm.cnt_restarts, r + 1); T_EQ(fm.cnt_cfg, 0x06);
   fm_advance_ns(100000000);
-  cnt_pass(3000, 128);
+  cnt_pass(3000);
   T_EQ(fm.ntrace, 1);                                                          //only the 0x15
   T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH2); T_EQ(fpga_cnt.freq_uhz, 500000000000ull); T_EQ(fpga_cnt.duty_ppm, 250000);
   //A same-value 0x61 write does not restart the model's gate (the firmware never writes one on its own)
@@ -1307,20 +1315,20 @@ static void test_counter(void)
   T_EQ(fm.cnt_restarts, r);
 
   //Gate off: 0x61 = 0; the held result is not current
-  fpga_counter_config(FPGA_CNT_GATE_OFF, FPGA_CNT_SRC_TRIG, 0, 6);
+  fpga_counter_config(FPGA_CNT_GATE_OFF, FPGA_CNT_SRC_TRIG, 128, 6);
   fm.ntrace = 0;
-  cnt_pass(3020, 128);
+  cnt_pass(3020);
   T_EQ(fm.ntrace, 2); T_EQ(fm.cnt_cfg, 0); T_EQ(fpga_cnt.gate, 0);
   T_EQ(fpga_counter_current(3020), 0);
   fm_advance_ns(300000000);
   n = fpga_cnt.results;
-  cnt_pass(3320, 128);
+  cnt_pass(3320);
   T_EQ(fpga_cnt.results, n);
   //On again: one gate later a result
-  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 0, 6);
-  cnt_pass(3340, 128);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 128, 6);
+  cnt_pass(3340);
   fm_advance_ns(100000000);
-  cnt_pass(3440, 128);
+  cnt_pass(3440);
   T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_counter_current(3440), 1);
 
   //On the 0x153B model the registers do not exist: the pass reads zeros and never holds a result
@@ -1328,8 +1336,178 @@ static void test_counter(void)
   fpga_counter_boot();
   fm_cnt_signal(0, 1000, 500, 0, 60, 200);
   fm_advance_ns(100000000);
-  cnt_pass(100, 128);
+  cnt_pass(100);
   T_EQ(fpga_cnt.reads, 1); T_EQ(fpga_cnt.held, 0);
+}
+
+//fw-ctrauto: the bench's RC node (2026-10-22, 0x153D: 1 kHz, 89..184, a fast jump then a slow settle), sample by
+//sample: one 1 ms period of 200000 clocks; the rise jumps 89 -> 140 and settles to 184, the fall jumps 184 -> 133 and
+//settles to 89 (tau 100 us = 20000 clocks), plus -7..+7 codes of noise (bounded and uniform: the model shows the
+//mechanism, the bench's Gaussian tails decide the fraction, fpga_counter.h). The noise repeats every period, so a correct count is exact (T = E x 200000)
+#define CNT_RC_PERIOD  200000u
+
+static uint8_t cnt_rc_tab[CNT_RC_PERIOD];
+
+static void cnt_rc_build(void)
+{
+  uint32_t i, h = 0x12345678u;
+  double   v = 140.0, a = 1.0 / 20000.0;
+  int      x;
+
+  for(i=0;i<CNT_RC_PERIOD;i++)
+  {
+    if(i == CNT_RC_PERIOD / 2)
+      v = 133.0;
+
+    v += (((i < CNT_RC_PERIOD / 2) ? 184.0 : 89.0) - v) * a;
+    h = h * 1664525u + 1013904223u;
+    x = (int)(v + 0.5) + (int)((h >> 16) % 15) - 7;
+    cnt_rc_tab[i] = (uint8_t)((x < 0) ? 0 : ((x > 255) ? 255 : x));
+  }
+}
+
+static uint8_t cnt_rc_wave(uint64_t clk)
+{
+  return cnt_rc_tab[clk % CNT_RC_PERIOD];
+}
+
+//The auto rule's thresholds for a min / max (fpga_counter.h): h = max(6, round(span / 6)) <= span / 2, the band centred
+static void cnt_auto_expect(uint8_t mn, uint8_t mx, uint8_t *lvl, uint8_t *hys)
+{
+  uint32_t span = (uint32_t)(mx - mn), h = (span + 3) / 6;
+
+  if(h < 6)        h = 6;
+  if(h > span / 2) h = span / 2;
+  *hys = (uint8_t)h;
+  *lvl = (uint8_t)(((uint32_t)mn + mx + h + 1) / 2);
+}
+
+static void test_counter_auto(void)
+{
+  uint32_t n, r;
+  uint8_t  lvl, hys;
+
+  fm_reset(0x153D, 199, 902);
+  fpga_counter_boot();
+
+  //Boot: 128 / 6 written, both auto. A 1 MHz square 60..200 on CH1: the first gate at 128 / 6 counts it, but its min /
+  //max ask for 142 / 23 (span 140: 23 = round(140 / 6); (60 + 200 + 23 + 1) / 2 = 142): misfit (not usable, the cards
+  //show the record), and the pass writes 0x62 = 142 / 23 and restarts the gate
+  fm_cnt_signal(0, 1000, 500, 35, 60, 200);
+  cnt_pass(1000);
+  fm_advance_ns(100000000);
+  fm.ntrace = 0;
+  T_EQ(cnt_pass(1100), CNT_PASS_STROBES + 3 + 4);
+  T_EQ(fpga_cnt.results, 1); T_EQ(fpga_cnt.has_period, 1); T_EQ(fpga_cnt.misfit, 1);
+  T_EQ(fpga_counter_current(1100), 1); T_EQ(fpga_counter_usable(1100), 0);
+  T_EQ(fm.ntrace, 3); T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x8E17);
+  T_EQ(fm.trace[1].value, 0); T_EQ(fm.trace[2].value, 2);
+  T_EQ(fpga_cnt.level, 142); T_EQ(fpga_cnt.hyst, 23); T_EQ(fpga_cnt.retunes, 1);
+  //The next gate fits: usable, exact, nothing written
+  fm_advance_ns(100000000);
+  fm.ntrace = 0;
+  T_EQ(cnt_pass(1200), CNT_PASS_STROBES);
+  T_EQ(fpga_cnt.results, 2); T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(1200), 1);
+  T_EQ(fpga_cnt.freq_uhz, 1000000000000ull); T_EQ(fpga_cnt.duty_ppm, 500000); T_EQ(fm.ntrace, 0);
+
+  //Deadband: min / max moving by a few codes (58..203 asks for 143 / 24, within max(2, 24 / 4) = 6 of 142 / 23) keep the
+  //thresholds: usable, no write, no restart
+  fm_cnt_signal(0, 1000, 500, 35, 58, 203);
+  r = fm.cnt_restarts;
+  fm_advance_ns(100000000);
+  fm.ntrace = 0;
+  T_EQ(cnt_pass(1300), CNT_PASS_STROBES);
+  T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(1300), 1); T_EQ(fm.ntrace, 0); T_EQ(fm.cnt_restarts, r);
+  T_EQ(fpga_cnt.level, 142); T_EQ(fpga_cnt.hyst, 23);
+
+  //No signal: 120..128 (span 8 < 12): the thresholds stay, the result is misfit
+  fm_cnt_signal(0, 1000, 500, 35, 120, 128);
+  fm_advance_ns(100000000);
+  fm.ntrace = 0;
+  cnt_pass(1400);
+  T_EQ(fpga_cnt.min, 120); T_EQ(fpga_cnt.max, 128); T_EQ(fpga_cnt.misfit, 1); T_EQ(fpga_counter_usable(1400), 0);
+  T_EQ(fm.ntrace, 0); T_EQ(fpga_cnt.level, 142); T_EQ(fpga_cnt.hyst, 23);
+  //Even when the kept thresholds count it: an 8-code square at 124..132 under a pinned hysteresis 3 that the host then
+  //returns to the auto level (the level stays 142 until a gate with a signal): first pinned 128 / 3 counts it
+  fm_cnt_signal(0, 1000, 500, 35, 124, 132);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_CH1, 128, 3);
+  cnt_pass(1410);
+  fm_advance_ns(100000000);
+  cnt_pass(1510);
+  T_EQ(fpga_cnt.has_period, 1); T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(1510), 1);   //pinned: the host's call
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_CH1, 0, 3);
+  cnt_pass(1520);
+  fm_advance_ns(100000000);
+  fm.ntrace = 0;
+  cnt_pass(1620);
+  T_EQ(fpga_cnt.has_period, 1); T_EQ(fpga_cnt.misfit, 1); T_EQ(fpga_counter_usable(1620), 0);  //auto level: no signal
+  T_EQ(fm.ntrace, 0); T_EQ(fpga_cnt.level, 128); T_EQ(fpga_cnt.hyst, 3);
+
+  //The bench's slow-settle node, counted sample by sample at the 10 ms gate (ten periods per gate). With the thresholds
+  //pinned at the old fixed 146 / 6 (the band 140..146 sits on the slow settles) the noise re-crosses the band: several
+  //rising edges per period, a frequency several times 1 kHz
+  cnt_rc_build();
+  fm_cnt_wave(0, cnt_rc_wave);
+  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_CH1, 146, 6);
+  cnt_pass(1700);
+  T_EQ(fm.reg_62_lvl, 146); T_EQ(fm.reg_62_hys, 6);
+  fm_advance_ns(10000000);
+  n = fpga_cnt.results;
+  cnt_pass(1710);
+  T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_cnt.has_period, 1);
+  T_TRUE(fpga_cnt.e >= 20);                                                     //ten periods, at least twice the edges
+  T_TRUE(fpga_cnt.freq_uhz >= 2000000000ull);
+  //Back to auto (level and hysteresis 0): the next gate (still 146 / 6) is misfit against its min / max, the pass
+  //retunes to the midpoint band, and the gate after that counts exactly 1 kHz
+  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_CH1, 0, 0);
+  cnt_pass(1720);
+  T_EQ(fpga_cnt.level, 146); T_EQ(fpga_cnt.hyst, 6);                           //no result yet: kept
+  fm_advance_ns(10000000);
+  cnt_pass(1730);
+  T_EQ(fpga_cnt.misfit, 1); T_EQ(fpga_counter_usable(1730), 0);
+  T_TRUE(fpga_cnt.min <= 84); T_TRUE(fpga_cnt.max >= 189);
+  cnt_auto_expect(fpga_cnt.min, fpga_cnt.max, &lvl, &hys);
+  T_EQ(fpga_cnt.level, lvl); T_EQ(fpga_cnt.hyst, hys); T_EQ(fm.reg_62_lvl, lvl); T_EQ(fm.reg_62_hys, hys);
+  T_TRUE(hys >= 16);                                                            //round(span / 6) on about 82..191
+  fm_advance_ns(10000000);
+  cnt_pass(1740);
+  T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(1740), 1);
+  T_TRUE((fpga_cnt.e == 9) || (fpga_cnt.e == 10)); T_EQ(fpga_cnt.t, fpga_cnt.e * CNT_RC_PERIOD);
+  T_EQ(fpga_cnt.freq_uhz, 1000000000ull);
+
+  //A host-pinned hysteresis is kept with the auto level: level 0 / hysteresis 10 on the 60..200 square at 100 ms: the
+  //level centres the 10-code band ((60 + 200 + 10 + 1) / 2 = 135), the hysteresis stays 10
+  fm_cnt_signal(0, 1000, 500, 35, 60, 200);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_CH1, 0, 10);
+  cnt_pass(1800);
+  T_EQ(fpga_cnt.hyst, 10);
+  fm_advance_ns(100000000);
+  cnt_pass(1900);
+  T_EQ(fpga_cnt.misfit, 1); T_EQ(fpga_cnt.level, 135); T_EQ(fpga_cnt.hyst, 10);
+  fm_advance_ns(100000000);
+  cnt_pass(2000);
+  T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(2000), 1); T_EQ(fpga_cnt.level, 135); T_EQ(fpga_cnt.hyst, 10);
+  T_EQ(fpga_cnt.freq_uhz, 1000000000000ull);
+  //A pinned level with the auto hysteresis: 150 / round(140 / 6) = 23 after a gate
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_CH1, 150, 0);
+  cnt_pass(2010);
+  T_EQ(fpga_cnt.level, 150); T_EQ(fpga_cnt.hyst, 10);
+  fm_advance_ns(100000000);
+  cnt_pass(2110);
+  T_EQ(fpga_cnt.misfit, 1); T_EQ(fpga_cnt.level, 150); T_EQ(fpga_cnt.hyst, 23);
+  fm_advance_ns(100000000);
+  cnt_pass(2210);
+  T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(2210), 1);
+
+  //EXT never moves the thresholds and is never misfit
+  fm_cnt_signal(2, 100, 50, 0, 0, 0);
+  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_EXT, 0, 0);
+  cnt_pass(2220);
+  fm_advance_ns(10000000);
+  fm.ntrace = 0;
+  cnt_pass(2230);
+  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_EXT); T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_counter_usable(2230), 1);
+  T_EQ(fm.ntrace, 0); T_EQ(fpga_cnt.level, 150); T_EQ(fpga_cnt.hyst, 23);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1761,6 +1939,7 @@ int main(void)
   test_fullrate();
   test_counter_derive();
   test_counter();
+  test_counter_auto();
   test_gen_formulas();
   test_gen_square();
   test_gen_change();

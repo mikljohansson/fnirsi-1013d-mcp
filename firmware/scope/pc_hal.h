@@ -140,6 +140,7 @@ typedef struct
   uint8_t  held;                //a result is held
   uint8_t  current;             //and it is current: the gate on, the result younger than three gates + 100 ms
   uint8_t  has_period;          //E >= 1
+  uint8_t  misfit;              //auto thresholds: counted at thresholds its min / max do not ask for, or no signal
   uint8_t  seq;                 //the result's sequence number
   uint8_t  res_src;             //the result's source: 0 CH1, 1 CH2, 2 EXT
   uint8_t  res_gate;            //the result's gate code
@@ -148,7 +149,7 @@ typedef struct
 } pc_hw_counter;
 
 void     pc_hal_counter_read(pc_hw_counter *c);                                        //any context (a memory read)
-void     pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst); //any context; level 0 = follow the trigger level
+void     pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst); //any context; level / hyst 0 = auto
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Generator (FPGA 0x153D: the fractional two-step square, gen_pat.h; 0x50 the pin driver)

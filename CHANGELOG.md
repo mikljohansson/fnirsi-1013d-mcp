@@ -208,6 +208,22 @@ sections 74 to 79.
   its trained set, at once and stored; event 23 a bit 5, GET_HEALTH 106 bit 6, Diagnostics "(trained, a flagged core
   moved)". (76fbaa2)
 
+**Counter thresholds follow the signal (fw-ctrauto).**
+
+- **The hardware counter's level and hysteresis are auto** (bench 2026-10-22 on 0x153D: CH1 on an RC node at 1 kHz,
+  89..184 codes with slow settles, read 2.6 to 13.7 kHz at the fixed hysteresis 6 and 1 kHz at 16 and 32): after each
+  gate the firmware centres the band on the gate's raw min / max midpoint with hysteresis round(span / 6), at least 6
+  codes and at most half the span (16 on that node). A gate counted at thresholds more than max(2, h / 4) codes off what
+  its min / max ask for (a new signal or range, the first gate after boot) is not VALID and does not reach the cards
+  (they show the record's value for it); the pass then writes the new thresholds and restarts the gate. Within that
+  deadband nothing is written, so noise does not restart the gate. A span under 12 codes keeps the thresholds and is
+  not used. The counter no longer follows the trigger marker. GET_COUNTER: level 0 and hysteresis 0 mean auto (level 0
+  followed the trigger level before; the wire layout and protocol 1.27 are unchanged), a non-zero value pins that one;
+  vector `req_get_counter_auto` replaces `req_get_counter_follow_trigger`. (241e4d1, 540e75b) The mcp host matches:
+  `scope_counter(level='auto', hysteresis='auto')` (level 'trigger' is gone), `level_auto` / `hysteresis_auto`, a
+  misfit first gate skipped, caveats for a signal under the auto span or outside pinned thresholds (from fw-hyst), the
+  simulator's auto rule and its low threshold saturating at code 0. (f7fa203)
+
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, flash image `04e3328b...d0e7`, status

@@ -384,19 +384,22 @@ the source (CH1 / CH2 through a Schmitt comparator at `level` with `hysteresis` 
 |---|---|---|---|
 | `gate` | `"10ms"`, `"100ms"`, `"1s"` | as set | configures the gate |
 | `source` | `"trigger"`, `"CH1"`, `"CH2"`, `"EXT"` | as set (boot: trigger = follows the trigger source) | |
-| `level` | float V or `"trigger"` | as set (boot: follows the trigger level) | comparator level at the probe tip, converted to a raw code and pinned (CH1 / CH2); `"trigger"` follows the trigger level again (wire level 0) |
-| `hysteresis` | int codes | as set (boot: 6) | codes below the level that read low |
+| `level` | float V or `"auto"` | as set (boot: auto) | comparator level at the probe tip, converted to a raw code and pinned (CH1 / CH2); `"auto"` centres it on the signal again (wire level 0) |
+| `hysteresis` | int codes 1..255 or `"auto"` | as set (boot: auto) | codes below the level that read low, pinned; `"auto"` = round(span / 6) of the gate's raw min..max, at least 6 (wire 0) |
 | `readings` | int 1..50 | 1 | snapshots, one per new gate (the tool waits for each gate to end) |
 
 Returns `source` (the effective channel), `gate_s`, `frequency_hz` = E / (T x 5 ns), `period_s`, `width_s` (positive),
 `duty` = W / T, `edges`, `vmin` / `vmax` / `vpp` (CH1 / CH2: the raw extremes through the 8-bit model's mean of both
-cores), `level_code` / `level_volts` (the level in effect), `level_follows_trigger` (this session's configuration:
-GET_COUNTER reports only the level in effect), `hysteresis_codes`, every reading, `frequency_mean_hz` / `frequency_spread_hz`
+cores), `level_code` / `level_volts` (the level in effect), `level_auto` / `hysteresis_auto` (this session's
+configuration: GET_COUNTER reports only the values in effect), `hysteresis_codes`, every reading, `frequency_mean_hz` / `frequency_spread_hz`
 with several, a `.npz` (kind `counter`, `scope_report` plots it) and the `resolution` statement: one 5 ns clock over
 the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy (about 1e-5, uncalibrated) on top.
-Caveats: no valid count (fewer than two edges: raise the gate, set the level mid-swing), vmin / vmax include the
-noise extremes, the thresholds are raw codes. Wire: request u8 what (0 read / 1 configure), gate, source, level,
-hysteresis, 3 x 0 (level 0 = follow the trigger level, any hysteresis; a non-zero level refuses hysteresis > level);
+Auto thresholds (the boot setting, fw-ctrauto): after each gate the firmware centres the band on the gate's raw
+min / max midpoint; a gate counted at thresholds that do not fit it (a new signal or range) is not valid and the next
+one is retuned, so the tool skips one such first gate. Caveats: no valid count (fewer than two edges: raise the gate,
+check the source), a signal under the 12-code span auto needs or outside pinned thresholds (says which), vmin / vmax
+include the noise extremes. Wire: request u8 what (0 read / 1 configure), gate, source, level, hysteresis, 3 x 0
+(level 0 / hysteresis 0 = auto; a non-zero level refuses hysteresis > level);
 response 24 bytes: flags (new, valid, EXT, CH2), seq, gate, source, u32 E, T, W, u8 min, max, level and hysteresis in
 effect, u32 freq_mHz. fw 0.2.104 (fw-c7) answers these bytes.
 

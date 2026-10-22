@@ -1014,8 +1014,7 @@ class Device:
         self.cap_counts_next: list[tuple[int, int, int, int]] = []
         #: protocol 1.26: the trigger hold-off (0x1B) still to run at the next arm, from the latest capture's trigger
         #: (across MCU re-arms, as the FPGA's counter; cleared by 0x66 + ARM) and the counter's configuration (the
-        #: firmware's boot values: gate 100 ms, the trigger source, level 0 = follow the trigger level, hysteresis 6)
-        #: and last read sequence
+        #: firmware's boot values: gate 100 ms, the trigger source, level and hysteresis 0 = auto) and last read sequence
         self.holdoff_left_s = 0.0
         #: 0x66 = 1 written (boot, SET_TRIGGER hold-off, SET_TRIGGER2): the next 0x01 = 1 clears a running hold-off
         self.holdoff_clear_pending = True
@@ -1023,9 +1022,15 @@ class Device:
         self.trig_status: tuple[int, int, int] = (0, 0, 0)
         self.counter_gate = 2
         self.counter_source = 0
-        self.counter_level = P.COUNTER_LEVEL_FOLLOW  # as configured; counter_level_now() is the one in effect
-        self.counter_hyst = P.COUNTER_DEFAULT_HYST
+        self.counter_level = P.COUNTER_AUTO  # as configured (0 = auto)
+        self.counter_hyst = P.COUNTER_AUTO
+        #: the thresholds in effect (0x62): boot 128 / 6, then the firmware's auto rule after each gate
+        self.counter_level_eff = P.COUNTER_DEFAULT_LEVEL
+        self.counter_hyst_eff = P.COUNTER_DEFAULT_HYST
         self.counter_seq_read: int | None = None
+        #: the last gate evaluated (the auto rule runs once per gate) and its snapshot
+        self.counter_seq_eval: int | None = None
+        self.counter_last: P.CounterResp | None = None
         #: protocol 1.27 (FPGA 0x153D): the square's commit not yet taken (device time it is taken)
         self.gen_pending_until = 0.0
         #: the streaming logger (dict while a log exists since the last LOG_START; see _cmd_log_start) and the test
@@ -3023,34 +3028,44 @@ class Device:
         self.holdoff_clear_pending = True  # 0x66 = 1: a new definition is a new session
         return self._ok(req, self.trigger().pack())
 
-    def counter_level_now(self) -> int:
-        """The counter's Schmitt level in effect: the configured code, or with level 0 the trigger level (fw-c7
-        pc_glue_counter_pass: scopesettings.triggerlevel clamped to 0..255, taken every main-loop pass)."""
-        if self.counter_level != P.COUNTER_LEVEL_FOLLOW:
-            return self.counter_level
-        return min(255, max(0, int(self.settings.trigger.level)))
-
     def counter_snapshot(self) -> P.CounterResp:
         """The 0x35 snapshot (protocol 1.26): the latest complete gate of the counter on its source, from the signal's
-        periodic edges through the Schmitt thresholds (``signal_edges`` / ``gate_count``), min / max from the noise-free
-        extremes plus the expected noise extreme over the gate's 200 MSa/s samples. ``new`` = the gate sequence moved
-        since the last read."""
+        periodic edges through the Schmitt thresholds in effect (``signal_edges`` / ``gate_count``), min / max from the
+        noise-free extremes plus the expected noise extreme over the gate's 200 MSa/s samples. ``new`` = the gate
+        sequence moved since the last read. The firmware's auto thresholds (fw-ctrauto, P.counter_auto_target) run
+        once per gate: the gates since the last evaluation (at most three) are evaluated in turn, each one counted at
+        the thresholds in effect and, when they do not fit its min / max, not VALID and the next gate's thresholds
+        retuned, as the firmware's main loop does whether or not the host reads."""
         gate_s = P.COUNTER_GATES[self.counter_gate]
+        if gate_s <= 0:
+            return self._counter_gate(None, 0.0)
+        seq = int((self.now() - self.t_boot) / gate_s)
+        if self.counter_seq_eval != seq or self.counter_last is None:
+            # at the first read the firmware has run since boot: its earlier gates have tuned the thresholds
+            first = seq - 2 if self.counter_seq_eval is None else self.counter_seq_eval + 1
+            for k in range(max(first, seq - 2), seq + 1):
+                self.counter_last = self._counter_gate(k, gate_s)
+            self.counter_seq_eval = seq
+        assert self.counter_last is not None
+        resp = P.CounterResp.unpack(self.counter_last.pack())
+        if self.counter_seq_read == seq:  # the model always has a complete gate behind it
+            resp.flags &= ~P.COUNTER_F_NEW
+        self.counter_seq_read = seq
+        return resp
+
+    def _counter_gate(self, seq: int | None, gate_s: float) -> P.CounterResp:
+        """One gate (sequence ``seq``; None = the gate off) counted at the thresholds in effect; the auto rule then
+        retunes them."""
         src = self.counter_source
         if src == 0:
             src = (1, 2, 3)[min(self.settings.trigger.source, 2)]
         flags = (P.COUNTER_F_EXT if src == 3 else 0) | (P.COUNTER_F_CH2 if src == 2 else 0)
-        level = self.counter_level_now()
-        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, level,
-                             self.counter_hyst, 0)
-        if gate_s <= 0:
+        level, hyst = self.counter_level_eff, self.counter_hyst_eff
+        resp = P.CounterResp(flags, 0, self.counter_gate, self.counter_source, 0, 0, 0, 255, 0, level, hyst, 0)
+        if seq is None:
             return resp
-        up = self.now() - self.t_boot
-        seq = int(up / gate_s)
+        resp.flags |= P.COUNTER_F_NEW
         resp.seq = seq & 0xFF
-        if self.counter_seq_read != seq:  # the model always has a complete gate behind it
-            resp.flags |= P.COUNTER_F_NEW
-        self.counter_seq_read = seq
         t_start = max(0.0, (seq - 1) * gate_s)
         gen = self.settings.gen
         if src == 3:
@@ -3062,24 +3077,34 @@ class Device:
             sig = self.cfg.signals[ch]
             cs = self.settings.channels[ch]
             high = self._code_to_volts(ch, level, self.settings)
-            low = self._code_to_volts(ch, level - self.counter_hyst, self.settings)
+            low = self._code_to_volts(ch, level - hyst, self.settings)
             dc = sig.dc if cs.coupling == 1 else 0.0
-            edges = signal_edges(sig, gen, high + dc, low + dc)
-            # min / max of the raw codes over the gate: the noise-free extremes of one period (or the level) plus the
-            # expected extreme of the noise over the gate's samples
-            period = edges[0] if edges is not None else 1e-3
-            t = t_start + np.arange(4096) * (period / 4096)
+            # the FPGA's low threshold saturates at code 0 (level <= hysteresis: never low, so no edges; fw-hyst)
+            edges = signal_edges(sig, gen, high + dc, low + dc) if level > hyst else None
+            # min / max of the raw codes over the gate: the noise-free extremes of one period (the whole gate when
+            # these thresholds see no period) plus the expected extreme of the noise over the gate's samples
+            window = edges[0] if edges is not None else gate_s
+            t = t_start + np.arange(4096) * (window / 4096)
             c = self._analog(ch, t, None, self.settings)
             n_samples = max(2.0, gate_s * P.BASE_CLOCK_HZ)
             ext = self.cfg.noise_lsb * math.sqrt(2 * math.log(n_samples)) if self.cfg.noise_lsb > 0 else 0.0
             resp.min = int(np.clip(np.rint(c.min() - ext), 0, 255))
             resp.max = int(np.clip(np.rint(c.max() + ext), 0, 255))
+        fits = True
+        if src != 3 and not (self.counter_level and self.counter_hyst):
+            target = P.counter_auto_target(resp.min, resp.max, self.counter_level, self.counter_hyst)
+            if target is None:
+                fits = bool(self.counter_level)  # no signal: an auto level's count is noise
+            elif not P.counter_auto_fits(level, hyst, target):
+                fits = False
+                self.counter_level_eff, self.counter_hyst_eff = target
         if edges is not None:
             e, t, w = gate_count(edges[0], edges[1], edges[2], t_start, gate_s)
             if e >= 1:
                 resp.e, resp.t, resp.w = e, t, w
-                resp.flags |= P.COUNTER_F_VALID
-                resp.freq_mhz = P.counter_freq_mhz(e, t)
+                if fits:
+                    resp.flags |= P.COUNTER_F_VALID
+                    resp.freq_mhz = P.counter_freq_mhz(e, t)
         return resp
 
     def _code_to_volts(self, ch: int, code: float, settings: Settings) -> float:
@@ -3101,10 +3126,21 @@ class Device:
                 raise _DevErr(P.Status.E_BAD_ARG, 1, f"gate {r.gate}")
             if r.source >= len(P.COUNTER_SOURCES):
                 raise _DevErr(P.Status.E_BAD_ARG, 2, f"source {r.source}")
-            if r.level != P.COUNTER_LEVEL_FOLLOW and r.hysteresis > r.level:  # level 0 follows the trigger level
+            if r.level != P.COUNTER_AUTO and r.hysteresis > r.level:  # level 0 is auto
                 raise _DevErr(P.Status.E_BAD_ARG, 4, "hysteresis > level")
             self.counter_gate, self.counter_source = r.gate, r.source
             self.counter_level, self.counter_hyst = r.level, r.hysteresis
+            # the firmware's next pass writes the pinned values (an auto hysteresis under a pinned level is clamped)
+            if r.level:
+                self.counter_level_eff = r.level
+            if r.hysteresis:
+                self.counter_hyst_eff = r.hysteresis
+            elif self.counter_hyst_eff > self.counter_level_eff:
+                self.counter_hyst_eff = self.counter_level_eff
+            # the gate restarts: the next result is one gate later, counted at these thresholds
+            gate_s = P.COUNTER_GATES[r.gate]
+            self.counter_seq_eval = int((self.now() - self.t_boot) / gate_s) - 1 if gate_s > 0 else None
+            self.counter_last = None
             self.counter_seq_read = None
         return self._ok(req, self.counter_snapshot().pack())
 
