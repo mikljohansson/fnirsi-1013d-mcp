@@ -306,6 +306,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-d3c done 02:0x (2026-10-22), merged 02:1x (63872af): 0x153D with full-rate encodes, run.sh 19 steps ALL PASS on both
+  seeds (on ccf5bc2), bitstream source 50b4abe (roll k4: block order only), raw 0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e,
+  padded 04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7, reproducible; 6385 LUT / 5887 reg / 7420 LE (85.9 %, 1220
+  free), clk_200MHz 4.955 ns 0 errors, every clock 0 errors (clkc[0] artefact), capture margins >= 1.48 ns. Audit: only the
+  logger's W (fixed 9ba3ddf); tb_skip phase 6 guards it at D = 199999. K = 0 segment timestamps are any even number now
+  (pc_seq passes them raw). Packed to backups/dist-0x153D. Bench next: flash 0x153D over 0x153C, FEL 0.2.105 (e184e47a).
 - fpga-d3c interim (on 20:56): the register audit found nothing beyond the logger's W (fixed in 9ba3ddf): every register
   loaded only on a stored write is reset explicitly or first read after one (ts_cap loaded by every record's first word);
   tb_skip phase 6 checks 0x14 / 0x0A / 0x18 / 0x38 / 0x34 at D = 199999 before the first word and fails with the fix
