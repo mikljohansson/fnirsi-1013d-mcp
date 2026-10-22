@@ -4,11 +4,8 @@
 // strobes) and models, from fpga/al3/README.md "Changes" section 7 and the RTL it cites:
 //   - the sample memory read: the word read on a strobe is the one latched by the previous strobe, and the read pointer
 //     (0x1F) advances on each read strobe: mem[S], mem[S], mem[S + 1], ... without a dummy strobe (finding 5);
-//   - the sampling reset: 0x01 = 1 / 0 with write clock edges every 10 (D + 1) ns (legacy layout, one word per edge;
-//     fw-fullrate, 0x153D: the encodes and the write clock at 100 MHz at every rate, edges every 10 ns, a word stored on
-//     every (D + 1)-th edge after the release, its pair the (D + 1)-th of the full-rate stream: with raw_words set the
-//     words are fm_fullrate_pair's synthetic samples instead of their write index; the ready wait is one 10 ns edge),
-//     read 0x05 ready once an edge has passed in reset, and the trigger read address loaded from the 0x0B register only on
+//   - the sampling reset: 0x01 = 1 / 0 with write clock edges every 10 (D + 1) ns (legacy layout, one word per edge),
+//     read 0x05 ready once an edge (0x153C+: six edges) has passed in reset, and the trigger read address loaded from the 0x0B register only on
 //     write clock edges while in reset (0x1532..0x1536), plus on the first edge after the release (0x1537+, `ssr_d`)
 //     (finding 2);
 //   - every bus strobe takes a random 41..298 ns (the testbench's strobe periods), so each arm starts at a random phase;
@@ -117,9 +114,7 @@ typedef struct
   uint8_t  released;                //a capture runs or ran since the last release
   uint8_t  we;                      //write enable
   uint32_t n;                       //words written since the release
-  uint32_t e;                       //write clock edges since the release (stored-word edges on 0x153D's legacy path)
-  uint32_t wphase;                  //fw-fullrate: write clock edges since the last stored word, 0..D
-  uint8_t  raw_words;               //fw-fullrate: legacy words carry fm_fullrate_pair's samples
+  uint32_t e;                       //write clock edges since the release
   int64_t  trig_at;                 //edge index of the trigger crossing (-1 none)
   uint8_t  triggered;               //0x18
   uint32_t trig_word;               //write index of the trigger (when it was taken while writing)
@@ -203,7 +198,6 @@ int     fm_dec_on(void);                    //the 16-bit path: K != 0 or peak
 uint32_t fm_window(void);                   //N = 2 (floor(D / 2) + 1)
 uint8_t fm_raw_sample(uint32_t ch, uint64_t j);                        //synthetic raw 200 MSa/s sample j of channel ch
 void    fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx); //{ max, min } of word w's window
-void    fm_fullrate_pair(uint32_t ch, uint32_t w, uint8_t *a, uint8_t *b); //0x153D legacy word w: cores A, B
 void fm_fill(uint32_t salt);                //distinct bytes per word and lane
 void fm_advance_ns(uint32_t ns);            //idle time (e.g. the capture after the release)
 void fm_advance_ps(uint64_t ps);            //D4 logger: the same in ps
