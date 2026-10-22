@@ -1604,3 +1604,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   Bug: the guard acts on cap_st.value, not on the FPGA's 0x63, so it moves cores that bench / host writes put on a stage.
   fw-guardfix dispatched (act only when the FPGA holds the stored training value). The stored stages are now wrong for this
   unit (CH1 A 2, CH2 A 2): a wizard run will retrain them after the fix.
+- 2026-10-22 10:37-11:24: fw-guardfix merged; debug image backups/fw-0.2.105-dbg_5dd255dd.bin by FEL; the wizard retrained
+  0x08E3 (CH1 A3 B4, CH2 A3 B4; the 11:2x COM10 loss was the cable left out, owner). **capwin_sweep (all cores, stages 2..5,
+  8 captures each; data backups/capwin-before.npz): the guard did not move anything.** CH1 A: stage 3 0 samples >= 4 codes
+  off, 2 1.3 %, 4 4.6 % (0x36 93), 5 0.6 %; CH1 B clean at 3..5. **CH2 A: no fully clean stage: 3 3.5 % (mostly bit 2,
+  partner toggling above control), 4 3.7 % (0x36 2146), 2 16 %, 5 28 %.** CH2 B: 1.3..1.7 % at 3..5 flat, mostly bit 1.
+  Analysis handed back to fpga-capwin.
