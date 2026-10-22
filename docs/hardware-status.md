@@ -1610,3 +1610,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   off, 2 1.3 %, 4 4.6 % (0x36 93), 5 0.6 %; CH1 B clean at 3..5. **CH2 A: no fully clean stage: 3 3.5 % (mostly bit 2,
   partner toggling above control), 4 3.7 % (0x36 2146), 2 16 %, 5 28 %.** CH2 B: 1.3..1.7 % at 3..5 flat, mostly bit 1.
   Analysis handed back to fpga-capwin.
+- 2026-10-22 11:36-11:40: **A/B of CH2's code errors, 0x153D vs 0x153C** (owner: the squiggles are new; the same filter and
+  frequency were clean on earlier bitstreams). Same script (e_ab.py: 16 raw captures per core, share of samples >= 4 codes
+  above a 3-sample median, overall / at codes 0x5E..0x6F), same probes, Filter Off. 0x153D (fw 0.2.105): 200 MSa/s A 3.04 % /
+  3.12 %, B 1.29 % / 1.50 %; 2 MSa/s (divider 99) A 1.32 % / 2.12 %, B 0.92 % / 1.08 %. Then FPGA flash 0x153D -> 0x153C
+  (probe ff ff ff once, GND, then ef 40 14; double read = 04e3328b.. the 0x153D image; tool backup
+  backups/20261022-113748-pre-write.bin; verified 07393bf5..), FEL fw 0.2.104 (7c640ab5): 200 MSa/s A 1.01 % / 0.92 %, B
+  0.86 % / 0.17 %; **2 MSa/s A 0 / 0, B 0 / 0**. Verdict: (1) the full-rate encodes at slow rates (0x153D) bring the partner-
+  core coupling to every timebase (0x153C's gated encodes are clean there); (2) 0x153D's encode timing is worse than 0x153C's
+  at full rate as well (A 3x, B hot zone 9x). Unit left on 0x153C + fw 0.2.104 (RAM) pending the owner's decision.
