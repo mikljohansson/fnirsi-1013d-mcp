@@ -359,6 +359,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   fw-capmetric2 (Opus explicitly, dispatched 17:21, branch fw-capmetric2): the A cores' training residual is ~160x the B
   cores' and flat across stages on the bench (hardware-status 17:03-17:21): find and fix the A-core data read; review
   why CH2 B picked 3 over 2.
+  fw-capmetric2 merged 17:42: the wizard's 1000-word auto time-out ended every training capture, so cs_resid read stale
+  ring words (and the 0x36 outlier sums covered ~1000 of 8000 words per capture, probably since 0.2.79's training;
+  inference). Fixed per capture (4ba6cf5); fail-fast bound CS_RESID_MAX_Q16 = 128 per capture (a0e0156). CH2 B's 3 over
+  2 follows the spec (q gates the quiet set, cs_pick takes the lower centre on a tie).
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
