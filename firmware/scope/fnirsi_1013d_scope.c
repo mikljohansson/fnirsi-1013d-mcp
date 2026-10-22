@@ -197,7 +197,7 @@ int main(void)
   
   //fpgasettings.settriggerpoint = 1500;
   //fpgasettings.totalsamples = 3000;//16382;
-  extern uint32 a,b,c,d,e,f;
+  extern uint32 f;
   f = fpgasettings.totalsamples;//16382;
    
   //fpga_set_generator_freq(103456);  //in Hz
@@ -360,7 +360,6 @@ int main(void)
           //usb_CDC_receive_callback();
     }
     
-   extern uint32 a,b,c,d,e,f;
 //fpgasettings.totalsamples = f;//16382;
     //if (e==1) {timer0_delay(500);scope_save_view_item_file(VIEW_TYPE_PICTURE); e=0;}
     

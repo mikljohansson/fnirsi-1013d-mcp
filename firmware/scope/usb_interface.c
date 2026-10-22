@@ -1473,8 +1473,6 @@ void usb_device_CDC_irq_handler(void)
 //******************************************************************************************
 
 
-static uint16 lcd_y = 70;
-static uint16 lcd_y2 = 70;
 char line[128];
 
 // extern alebo definícia štruktúry (ak nie je v .h)
