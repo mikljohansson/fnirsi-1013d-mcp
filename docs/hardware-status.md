@@ -1550,3 +1550,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   the card's fw 0.2.102, which showed "first start / calibration missing": expected, fw-fullrate writes the calibration header
   with classes 1 so firmware older than 0.2.105 rejects the single-class block; the owner skipped it, 0.2.105 (debug image
   0a57df0b, current main incl. fw-usbback) loads the block (cal_version 3, the 08:3x gains). Cards: Freq 1.000 kHz, Duty 50.00 %.
+- 2026-10-22 08:56-09:0x (owner, on screen, debug image 0a57df0b on 0x153D): the ACQ rate grid ignored taps because the scope
+  was in STOP after the host scripts (Atlan's rule; owner: unintuitive, fw-stoprate dispatched). **Roll mode passes**: 1 Hz
+  square scrolls right to left on CH1 at full amplitude, CH2 baseline, ACQ chip "Long" 500 Sa/s. **The ACQ menu (five-column
+  grids, Filter Off / Hi-Res / Anti-alias), the trigger menu's larger - / + keys and the USB drive screen's header Back
+  look good (owner).** Screenshots docs/screenshots/acq-menu.png and acq-menu-roll.png.
