@@ -4193,7 +4193,7 @@ static void test_counter(void)
   r = req(PC_CMD_GET_COUNTER, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
   T_EQ(r.p[0], 0); T_EQ(r.p[1], 0); T_EQ(r.p[2], 2); T_EQ(r.p[3], 0); T_EQ(pc_get_u32(r.p + 4), 0);
-  T_EQ(r.p[16], 255); T_EQ(r.p[17], 0); T_EQ(r.p[18], 128); T_EQ(r.p[19], 6); T_EQ(pc_get_u32(r.p + 20), 0);
+  T_EQ(r.p[16], 255); T_EQ(r.p[17], 0); T_EQ(r.p[18], 128); T_EQ(r.p[19], 16); T_EQ(pc_get_u32(r.p + 20), 0);
   r = get_counter(0, 9, 9, 9, 9);                                              //what 0: the other fields are ignored
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN); T_EQ(r.p[0], 0); T_EQ(mock.cnt_configs, 0);
 
@@ -4201,6 +4201,7 @@ static void test_counter(void)
   //10 kHz: NEW | VALID and the exact bytes
   mock.cnt.held = 1; mock.cnt.current = 1; mock.cnt.has_period = 1; mock.cnt.seq = 17; mock.cnt.res_src = 0;
   mock.cnt.res_gate = 2; mock.cnt.e = 1000; mock.cnt.t = 20000000; mock.cnt.w = 4000000; mock.cnt.min = 112; mock.cnt.max = 147;
+  mock.cnt.hyst = 6;                                                           //the vector's hysteresis (boot is 16)
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
   T_EQ(unhex("03110200e8030000002d310100093d007093800680969800", want, 24), 24);

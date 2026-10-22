@@ -107,7 +107,7 @@ void mock_reset(uint16_t fpga_version)
   //C7 counter: the boot configuration, no result yet
   mock.cnt.gate   = 2;
   mock.cnt.level  = 128;
-  mock.cnt.hyst   = 6;
+  mock.cnt.hyst   = 16;
   mock.cnt.min    = 255;
 
   mock.trg.source     = 0;

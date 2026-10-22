@@ -9,7 +9,7 @@
 // (a 0x15 write with source 0 too), a same-value 0x61 write does not; a level change does not restart it.
 //
 // The firmware (fpga_counter.c, host-buildable against fpga_bus.h's primitives, host_tests/test_fpga_bus.c):
-// - Boot (fpga_counter_boot, built-for bitstream only): 0x62 = 128 / 6, then 0x61 = gate 100 ms, source 0 (5 strobes).
+// - Boot (fpga_counter_boot, built-for bitstream only): 0x62 = 128 / 16, then 0x61 = gate 100 ms, source 0 (5 strobes).
 // - One read per screen pass (fpga_counter_pass, after the capture readout: the command byte + 16 data strobes, 17 x 0.3
 //   us = about 5 us): a snapshot with "new" set is the result of the last completed gate and is taken, derived
 //   (frequency, period, high / low time, duty: integer arithmetic below) and time-stamped.
@@ -18,9 +18,14 @@
 //   (fpga_bus_wr.wclk moved since the previous pass) writes 0x61 = 0 first (the running gate is aborted, nothing can be
 //   published after this), then reads 0x35 and drops the result it may carry (the gate that spanned the write, or one
 //   read late), then writes 0x61 = the value again: the next result is a clean full gate. Cost 4 strobes on such passes.
-// - The level follows the UI's trigger level (the marker the user placed inside the signal) with hysteresis 6 codes
-//   (about three times the 2 LSB noise) unless the host pinned it (GET_COUNTER what = 1 with level != 0); a change
-//   writes 0x62 (3 strobes) and restarts the gate the same way, so no result mixes two levels.
+// - The level follows the UI's trigger level (the marker the user placed inside the signal) with hysteresis 16 codes
+//   unless the host pinned it (GET_COUNTER what = 1 with level != 0); a change writes 0x62 (3 strobes) and restarts the
+//   gate the same way, so no result mixes two levels. Why 16 (fw-hyst, bench 2026-10-22, 0x153D): a 1 kHz square on an
+//   RC node (slow exponential edges with a few codes of noise, 88..183, level 145) read 9.5..13.7 kHz at the earlier 6
+//   (noise re-crossing the band on the slow edge), 999.999..1000.001 Hz at 16 and 999.995..1000.002 Hz at 32; CH2's
+//   analog noise at range 0 is about 3 codes rms (cap_stage.h). The cost: a signal must reach the level and go below
+//   level - 16 to be counted, so one smaller than about 32 codes pk-pk (with the marker mid-signal) or a marker within
+//   16 codes of the bottom (the low threshold saturates at 0) gives E = 0, and the cards show the record's measurement.
 // - A host configuration (GET_COUNTER what = 1) is only noted; the next pass writes it (0x62, 0x61 = 0, 0x61 = value).
 // - A result is current while the gate is on and it is younger than three gates plus 100 ms (the configured gate);
 //   with E >= 1 it feeds the measurement cards of its source channel (ui_meas.c) and GET_COUNTER's VALID bit.
@@ -52,7 +57,7 @@
 #define FPGA_CNT_RES_EXT     2
 
 #define FPGA_CNT_LEVEL_BOOT  128
-#define FPGA_CNT_HYST_BOOT   6
+#define FPGA_CNT_HYST_BOOT   16       //codes; see "The level follows" above (fw-hyst)
 
 typedef struct
 {
@@ -95,7 +100,7 @@ typedef struct
 
 extern fpga_counter_state fpga_cnt;
 
-//Boot: 0x62 = 128 / 6, 0x61 = gate 100 ms with source 0 (the trigger source); the state reset, the write clock baseline
+//Boot: 0x62 = 128 / 16, 0x61 = gate 100 ms with source 0 (the trigger source); the state reset, the write clock baseline
 void fpga_counter_boot(void);
 
 //A host configuration: noted, written by the next pass (level 0 = follow the UI trigger level). gate and source are

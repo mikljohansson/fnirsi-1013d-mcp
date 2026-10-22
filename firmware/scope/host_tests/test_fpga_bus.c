@@ -1145,16 +1145,16 @@ static void test_counter(void)
   fm_reset(0x153D, 199, 900);
   fm.ntrace = 0;
 
-  //Boot: 0x62 = 128 / 6, then 0x61 = gate 100 ms, source 0 (5 strobes); the gate runs on CH1 (0x15 = 0)
+  //Boot: 0x62 = 128 / 16, then 0x61 = gate 100 ms, source 0 (5 strobes); the gate runs on CH1 (0x15 = 0)
   r = fm.strobes;
   fpga_counter_boot();
   T_EQ(fm.strobes - r, 5);
   T_EQ(fm.ntrace, 2);
-  T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x8006);
+  T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x8010);
   T_EQ(fm.trace[1].cmd, 0x61); T_EQ(fm.trace[1].value, 0x02);
-  T_EQ(fm.reg_61, 0x02); T_EQ(fm.reg_62_lvl, 128); T_EQ(fm.reg_62_hys, 6); T_EQ(fm.cnt_cfg, 0x02); T_EQ(fm.cnt_restarts, 1);
+  T_EQ(fm.reg_61, 0x02); T_EQ(fm.reg_62_lvl, 128); T_EQ(fm.reg_62_hys, 16); T_EQ(fm.cnt_cfg, 0x02); T_EQ(fm.cnt_restarts, 1);
   T_EQ(fpga_cnt.gate, FPGA_CNT_GATE_100MS); T_EQ(fpga_cnt.source, FPGA_CNT_SRC_TRIG); T_EQ(fpga_cnt.level, 128);
-  T_EQ(fpga_cnt.hyst, 6); T_EQ(fpga_cnt.cfg_level, 0); T_EQ(fpga_cnt.held, 0); T_EQ(fpga_cnt.pending, 0);
+  T_EQ(fpga_cnt.hyst, 16); T_EQ(fpga_cnt.cfg_level, 0); T_EQ(fpga_cnt.held, 0); T_EQ(fpga_cnt.pending, 0);
 
   //1 MHz 50 % on CH1 between codes 60 and 200. The first pass: no gate has ended, the read costs 17 strobes and nothing
   //is written (the trigger level is the boot level)
@@ -1224,11 +1224,11 @@ static void test_counter(void)
   cnt_pass(1580, 128);
   T_EQ(fpga_cnt.restarts, 2); T_EQ(fm.ntrace, 0);
 
-  //The trigger level moves to 150: 0x62 = 150 / 6 then 0x61 = 0 / 2 (the gate restarted so no result mixes two levels)
+  //The trigger level moves to 150: 0x62 = 150 / 16 then 0x61 = 0 / 2 (the gate restarted so no result mixes two levels)
   fm.ntrace = 0;
   T_EQ(cnt_pass(1600, 150), CNT_PASS_STROBES + 3 + 4);
   T_EQ(fm.ntrace, 3);
-  T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x9606);
+  T_EQ(fm.trace[0].cmd, 0x62); T_EQ(fm.trace[0].value, 0x9610);
   T_EQ(fm.trace[1].cmd, 0x61); T_EQ(fm.trace[1].value, 0); T_EQ(fm.trace[2].cmd, 0x61); T_EQ(fm.trace[2].value, 2);
   T_EQ(fpga_cnt.level, 150); T_EQ(fpga_cnt.restarts, 3); T_EQ(fm.reg_62_lvl, 150);
   i35 = fpga_cnt.reads;
@@ -1322,6 +1322,33 @@ static void test_counter(void)
   fm_advance_ns(100000000);
   cnt_pass(3440, 128);
   T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_counter_current(3440), 1);
+
+  //fw-hyst: the boot hysteresis (16) at the trigger level 150 on the trigger source (CH2 since the 0x15 write): a 1 MHz
+  //square 140..165 crosses the level but never goes below 150 - 16 = 134, so the gate has no edges (E = 0, no period:
+  //the cards show the record's measurement); the same signal counts at hysteresis 6, and 120..165 counts at 16
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 0, FPGA_CNT_HYST_BOOT);
+  fm_cnt_signal(1, 1000, 500, 0, 140, 165);
+  cnt_pass(3460, 150);
+  T_EQ(fm.reg_62_lvl, 150); T_EQ(fm.reg_62_hys, 16); T_EQ(fpga_cnt.hyst, 16);
+  fm_advance_ns(100000000);
+  n = fpga_cnt.results;
+  cnt_pass(3560, 150);
+  T_EQ(fpga_cnt.results, n + 1); T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH2); T_EQ(fpga_cnt.e, 0);
+  T_EQ(fpga_cnt.has_period, 0); T_EQ(fpga_cnt.freq_uhz, 0); T_EQ(fpga_counter_current(3560), 1);
+  T_EQ(fpga_cnt.min, 140); T_EQ(fpga_cnt.max, 165);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 0, 6);
+  cnt_pass(3580, 150);
+  T_EQ(fm.reg_62_hys, 6);
+  fm_advance_ns(100000000);
+  cnt_pass(3680, 150);
+  T_EQ(fpga_cnt.results, n + 2); T_EQ(fpga_cnt.has_period, 1); T_EQ(fpga_cnt.freq_uhz, 1000000000000ull);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 0, FPGA_CNT_HYST_BOOT);
+  fm_cnt_signal(1, 1000, 500, 0, 120, 165);
+  cnt_pass(3700, 150);
+  fm_advance_ns(100000000);
+  cnt_pass(3800, 150);
+  T_EQ(fpga_cnt.results, n + 3); T_EQ(fpga_cnt.has_period, 1); T_EQ(fpga_cnt.freq_uhz, 1000000000000ull);
+  T_EQ(fpga_cnt.duty_ppm, 500000); T_EQ(fpga_cnt.min, 120); T_EQ(fpga_cnt.max, 165);
 
   //On the 0x153B model the registers do not exist: the pass reads zeros and never holds a result
   fm_reset(0x153B, 199, 901);
