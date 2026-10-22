@@ -1580,3 +1580,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   which Filter. **Device Bode sweep 100 Hz .. 1 MHz, 30 points: done, low-pass, -3 dB 3.73 kHz (an ideal two-stage 1.6 kOhm /
   10 nF ladder: 3.72 kHz)**, -45 deg 3.44 kHz, -90 deg 13.8 kHz (ideal 3.0 / 9.95 kHz; probe loading on the second node, an
   inference), 23 valid, 7 flagged at the top end below -30 dB. 30-minute soak started 09:49.
+- 2026-10-22 09:49-09:52: the 30-minute soak (status every 2 s, a host capture of CH1 + CH2 and set_acq_state(RUN) every
+  10 s, a spectrum read every 30 s; no channel or range change) was stopped after about 3 minutes at the owner's question:
+  **the relays clicked on every cycle** although nothing asked for a range or coupling change, so the host capture or the
+  RUN restore re-writes the relays (wear; queued as fw-relay). No errors were seen while it ran (killed, no summary line).

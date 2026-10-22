@@ -6,6 +6,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [ ] **Relays click on every host capture** (bench 2026-10-22 09:5x, owner): the soak's host capture + RUN restore every
+  10 s switched the relays each time with no range / coupling change. Write the relay / range / coupling outputs only when
+  their value changes (UI and host paths alike); a soak must be silent. fw-relay.
 - [ ] **Counter hysteresis default** (bench 2026-10-22 09:02): 6 codes miscounts slow noisy edges (RC node: 9.5..13.7 kHz on 1 kHz);
   16 and 32 read 1000.00 Hz. Raise the boot default (fw-c7's 128 / 6) and the MCP default; fw-hyst.
 - [x] **ACQ rate changes in STOP** (fw-stoprate c4025cf, bench pending: firmware/AGENTS.md section 86) (owner 2026-10-22 08:56: the rate grid ignores taps in STOP, "rather unintuitive"): Atlan's
