@@ -1542,3 +1542,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   With CH1 A = 3 written by hand: counter with **Filter Off at 500 kSa/s: 1 kHz 1000.000 Hz, 1 MHz 1000000.0000 Hz, 999.5 Hz
   999.5000 Hz (the fractional square exact)**; 7.3 MHz miscounts (26 codes pk-pk through the post's 1 kOhm into the probe,
   below the hysteresis at level 145). The full-rate fix works; the stage choice is a firmware bug (fw-capstage).
+- 2026-10-22 08:47-08:53: **logger on 0x153D** (debug image, CH1 A stage 3 by hand, 1 kHz on CH1 at the post, Hi-Res): 1 ch
+  8-bit 500 kS/s 20 s: 10,000,000 words, 0 lost, no gap chunk, sent == produced; 1 ch 16-bit 250 kS/s 20 s: 5,000,000 words,
+  0 lost; 2 ch 16-bit 125 kS/s 60 s: 7,500,000 words, 0 lost. **Pass, every contract tier gap-free.** COM10 became unopenable
+  twice (Windows lists it, open says the port does not exist): once after the debug image's FEL load, once after a host
+  script exited uncleanly in the middle of a log; a USB replug (the second time a scope restart) cleared it. The restart booted
+  the card's fw 0.2.102, which showed "first start / calibration missing": expected, fw-fullrate writes the calibration header
+  with classes 1 so firmware older than 0.2.105 rejects the single-class block; the owner skipped it, 0.2.105 (debug image
+  0a57df0b, current main incl. fw-usbback) loads the block (cal_version 3, the 08:3x gains). Cards: Freq 1.000 kHz, Duty 50.00 %.
