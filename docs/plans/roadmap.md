@@ -162,9 +162,37 @@ like `docs/plans/fpga-0x153c.md` section 13 on the 0x153D source.
    firmware change), the square generator's u32 step count (24 bits saves about 100 reg but raises the lowest square from
    23 mHz to about 6 Hz).
 
-4. **Finer ADC encode / capture phase** (fpga-capwin, 2026-10-22, README section 18): the free PLL outputs (125 ps steps)
-   to centre each core group's capture and to move the encodes away from the partner core's output switching, to get the
-   remaining ~1 % of CH2 code errors at 200 MSa/s below 0x153C's level. Two global clocks, a phase-dependent hand-over.
+4. **Finer ADC encode / capture phase** (fpga-capwin, 2026-10-22, README section 18; owner 2026-10-22 12:14): the goal is
+   to push the remaining ~1 % of CH2 code errors at 200 MSa/s below 0x153C's level. The PLL (VCO 1 GHz) has three free
+   outputs, C2..C4, with a static or runtime phase in 125 ps steps. Today C0 is the 200 MHz system clock and C1, at 90
+   degrees, times the encodes. The IDDR capture on both C0 edges gives the 2.5 ns grid the capture stages 2..5 choose from.
+   There are two separate knobs:
+   - **Capture phase:** one PLL clock for the A cores' input registers and one for the B cores', each with a runtime
+     phase. The wizard sweeps it in 125 ps steps (40 per 5 ns) with the residual metric and parks each group mid-window.
+     Today the best stage can sit about 0.7 ns from the partner core's output switching (CH2 A at stage 3). Costs:
+     - two global clocks
+     - a phase-dependent hand-over into `clk_200MHz` that keeps the A/B word pairing fixed, with its constraints
+     - a `tb_adccap.v` phase sweep and a firmware sweep step
+     - the usual 10..20 rolls at 86 % of the LEs
+
+     Caveat: fpga-capwin found the class (b) errors independent of the capture stage. If the partner's output switching
+     disturbs the sample inside the ADC at conversion, no capture phase removes it.
+   - **Encode phase:** drive the encodes from a PLL output with a set phase instead of flops whose pad delay changes with
+     each placement roll. This would make the encode timing repeatable across builds, and possibly tunable. The A/B of
+     2026-10-22 is the evidence that this knob matters: 0x153D's roll was worse than 0x153C at 200 MSa/s (CH2 A 3.0 %
+     against 1.0 %, with only the encode timing changed). The limit: A and B must stay 180 degrees apart, or the
+     interleaved samples are spaced unevenly. Only the A-B skew trim and a shift of both encodes together are free; one
+     core's encode cannot move away from its partner's output switching.
+
+   **Experiment before any design work**, all static and with no runtime logic, each image rolled to 0 timing errors
+   before it is flashed:
+   - (a) `AL_LOGIC_IDELAY` on CH2 A's data pins at n = 4, 8 and 12 (three builds of one placement; adding the IDELAY
+     re-rolls it once)
+   - (b) C1's static phase stepped by -375..+375 ps in 125 ps steps for the encodes
+
+   Rerun the same A/B (`e_ab.py`: 16 raw CH2 captures per core, share of samples 4 or more codes above a 3-sample
+   median, at divider 0) against 0x153C. If neither moves the ~1 %, the runtime-phase design does not earn its two
+   clocks. If (b) moves it, the encode-clock variant is the candidate. If only (a) moves it, the capture-clock one is.
 
 Dropped by the owner on 2026-10-21 and not candidates: the pulse pattern generator with its trigger engine and marker (cut from
 0x153D at 15:55, it did not fit; chirps stay host-stepped on the square), runt, window and the pulse-width range triggers.
