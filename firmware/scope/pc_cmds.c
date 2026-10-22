@@ -3906,9 +3906,10 @@ static int pc_dispatch(pc_session *s, int ctx)
 
 //fw 0.2.62: every full-rate host capture is checked before READ_RAW can read it (enc_heal.h): 0x1538+ by FPGA read 0x33,
 //0x1532..0x1537 by the B-against-A residual of the record's first words. A bad one is discarded and re-armed with the same
-//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2). fw-fullrate
-//(0x153D: the encodes at 200 MSa/s at every rate): the 0x33 check covers every capture, the residual divider-0 legacy
-//records only (its core A neighbours are 5 ns away only there).
+//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2). Since
+//fw 0.2.105 the 0x33 check covers every capture (its prediction includes the divider's enable, so the gated encodes of
+//Filter Off at a divided rate are checked too), the residual divider-0 legacy records only (its core A neighbours are
+//5 ns away only there).
 static uint8_t pc_enc_status(void *ctx)
 {
   (void)ctx;

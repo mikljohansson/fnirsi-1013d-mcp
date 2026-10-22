@@ -132,8 +132,9 @@ int fpga_encode_after_capture(void)
   int      bad, rearm;
   int      mode = eh_capture_mode(eh_st.mode, fpga_bus_wr.since_reset);
 
-  //The flag check covers every capture (fw-fullrate: on 0x153D the encodes run at 200 MSa/s at every rate and filter,
-  //and the FPGA checks them on every clock, fpga-d3 2026-10-21). The data check only at divider 0 (always the legacy
+  //The flag check covers every capture: the FPGA compares the four encode flops against the predicted write clock on
+  //every 200 MHz clock, and the prediction includes the divider's enable, so Filter Off at a divided rate (the encodes
+  //gated by the divider, fw-gated) is checked as well as the full-rate captures (fpga-d3gate 2026-10-22). The data check only at divider 0 (always the legacy
   //8-bit layout): it interpolates core B between its core A neighbours, which are 5 ns away only there (at D > 0 the
   //pairs are (D + 1) x 10 ns apart, at K > 0 the words are 16-bit). A UI averaging run leaves lane sums in the ring, not
   //samples: the data check cannot read it either (the flag covers the whole run, unless a rate write came during it)

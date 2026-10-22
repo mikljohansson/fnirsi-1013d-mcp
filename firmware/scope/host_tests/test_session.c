@@ -3659,8 +3659,8 @@ static void test_enc_check(void)
   pc_session_init(&S);
   T_EQ(S.var.caps & PC_CAP_INTERLEAVE_UNVERIFIED, PC_CAP_INTERLEAVE_UNVERIFIED);
 
-  //Divided rate (divider 19), fw-fullrate: 0x153D runs the encodes at 200 MSa/s at every rate and checks them on every
-  //clock, so the 0x33 check covers this capture too: one bad capture, re-armed once with the same geometry, recovered
+  //Divided rate (divider 19, Filter Off: the encodes gated by the divider): the FPGA's prediction includes the divider's
+  //enable, so the 0x33 check covers this capture too: one bad capture, re-armed once with the same geometry, recovered
   setup(PC_FW_FPGA_VERSION);
   mock.polls_to_trigger = 1; mock.polls_to_done = 1;
   mock.enc_bad_arms = 1;

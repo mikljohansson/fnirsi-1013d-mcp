@@ -5,9 +5,10 @@
 // 0x33 read) is enc_heal_hw.c, the host ARM path is pc_acq_service in pc_cmds.c.
 //
 // The built-for bitstream (0x153D, PC_FW_FPGA_VERSION) derives the ADC encodes statelessly from the write clock and
-// checks them itself: FPGA read 0x33 (since 0x1538). Since 0x153D the encodes run at 200 MSa/s at every rate and filter
-// (fw-fullrate; 0x153C and before gated them at divided rates), so the flag covers every capture. Two ways to check one
-// finished capture:
+// checks them itself: FPGA read 0x33 (since 0x1538). The encodes run at 200 MSa/s at divider 0, with any filter and with
+// peak detect; Filter Off at a divided rate gates them with the divider (fw-gated). The FPGA compares the encode flops
+// against the predicted write clock on every 200 MHz clock and the prediction includes the divider's enable, so the
+// flag covers every capture (fpga-d3gate 2026-10-22). Two ways to check one finished capture:
 //   EH_MODE_FLAG: read 0x33; bit 0 set = an encode check failed since the last 0x01 = 1. Every capture.
 //   EH_MODE_DATA: EH_CHECK_PAIRS words of each channel from the record start, per channel the RMS of core B's samples
 //     against the mean of their two core A neighbours (both neighbour pairs, the smaller one: it does not depend on the
