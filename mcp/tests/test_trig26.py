@@ -340,7 +340,7 @@ def test_counter_on_the_simulator(sim_factory):
         assert r.freq_mhz == 10_000_000
         r2 = s.read_counter()
         assert r2.seq == r.seq and not r2.new  # no new gate yet
-        r = s.read_counter(gate=3, source="CH2", level=205)  # the 1 kHz 0..3 V sync square on CH2, level ~1.5 V
+        r = s.read_counter(gate=3, source="CH2", level=205, hysteresis=6)  # the 0..3 V sync square on CH2, ~1.5 V
         assert r.gate == 3 and r.source == 2 and r.effective_source == "CH2" and r.frequency_hz == pytest.approx(10e3)
         assert r.e == 10000 and r.t == 200_000_000 and r.new and r.resolution == 5e-9  # the 10 kHz sync square
         r = s.read_counter(source="EXT")  # the pin: CH2's signal through the 1.65 V threshold
@@ -358,37 +358,76 @@ def test_counter_on_the_simulator(sim_factory):
         s.close()
 
 
-def test_counter_level_follows_the_trigger_level(sim_factory):
-    """fw-c7: level 0 follows the UI trigger level (the boot state; hysteresis may exceed it), the response's level is
-    the one in effect; a pinned level stays until level 0; Scope.read_counter keeps the follow state across gate /
-    source changes instead of pinning the level it read back."""
+def _fake_counter_clock(d) -> list[float]:
+    """The simulator's clock under the test's control (the counter's gates are counted from it): t[0] seconds."""
+    t = [10.05]
+    d.t_boot = 0.0
+    d.clock = lambda: t[0]
+    return t
+
+
+def test_counter_auto_thresholds(sim_factory):
+    """fw-ctrauto: level and hysteresis 0 = auto (the boot state): after each gate the band is centred on the gate's
+    raw min / max with hysteresis round(span / 6), at least 6; a gate counted at thresholds that do not fit its min /
+    max is not VALID and the next gate's thresholds are retuned; the trigger level does not move them; a pinned level
+    or hysteresis stays pinned (Scope.read_counter keeps the configured values, not the ones read back)."""
     s, srv = _scope(sim_factory, signal="square:freq=10kHz,amp=1,duty=0.2")
+    d = srv.device
     try:
         s.set_channel(0, range_index=1)
-        s.set_trigger(source=0, level=128)
+        t = _fake_counter_clock(d)
+        r = s.read_counter()  # the gates since boot have tuned the thresholds
+        assert r.valid and (d.counter_level, d.counter_hyst) == (P.COUNTER_AUTO, P.COUNTER_AUTO)
+        target = P.counter_auto_target(r.min, r.max)
+        assert target is not None and P.counter_auto_fits(r.level, r.hysteresis, target)
+        assert r.hysteresis >= P.COUNTER_HYST_MIN and r.min < r.level - r.hysteresis < r.level <= r.max
+        s.set_trigger(source=0, level=200)  # the trigger marker does not move the counter's level
+        t[0] += 0.1
+        r2 = s.read_counter()
+        assert r2.new and r2.valid and r2.level == r.level
+        # a range change: the next gate is counted at the old thresholds, which do not fit it (not VALID, E still
+        # given); the gate after that is counted at the retuned ones
+        s.set_channel(0, range_index=2)
+        t[0] += 0.1
         r = s.read_counter()
-        assert r.level == 128 and r.hysteresis == P.COUNTER_DEFAULT_HYST and r.valid and srv.device.counter_level == 0
-        s.set_trigger(level=135)  # the marker moved: the counter follows (the firmware's next pass)
-        assert s.read_counter().level == 135
+        assert r.new and not r.valid and r.e >= 1 and r.frequency_hz is None
+        t[0] += 0.1
+        r = s.read_counter()
+        assert r.valid and r.frequency_hz == pytest.approx(10e3) and r.duty == pytest.approx(0.2, abs=0.02)
+        assert P.counter_auto_fits(r.level, r.hysteresis, P.counter_auto_target(r.min, r.max))
+        # a pinned hysteresis is kept with the auto level, which centres it
+        r = s.read_counter(hysteresis=10)
+        assert s.counter_hyst_cfg == 10 and s.counter_level_cfg == P.COUNTER_AUTO and r.hysteresis == 10
+        t[0] += 0.1
+        r = s.read_counter()
+        t[0] += 0.1
+        r = s.read_counter()
+        assert r.valid and r.hysteresis == 10 and abs(r.level - (r.min + r.max + 11) // 2) <= 2
+        # a pinned level: hysteresis 10 still pinned; a gate change keeps both; back to auto with 0 / 0
+        r = s.read_counter(level=140)
+        assert (r.level, r.hysteresis, s.counter_level_cfg, s.counter_hyst_cfg) == (140, 10, 140, 10)
+        r = s.read_counter(gate=1)
+        assert (r.gate, r.level, r.hysteresis) == (1, 140, 10) and d.counter_level == 140
+        r = s.read_counter(gate=2, level=P.COUNTER_AUTO, hysteresis=P.COUNTER_AUTO)
+        t[0] += 0.1
+        r = s.read_counter()
+        t[0] += 0.1
+        r = s.read_counter()
+        assert r.valid and P.counter_auto_fits(r.level, r.hysteresis, P.counter_auto_target(r.min, r.max))
+        # resp: hysteresis > level is fine with the auto level; a non-zero level still refuses it
         resp = P.CounterResp.unpack(s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 0, 200).pack()).payload)
-        assert (resp.level, resp.hysteresis) == (135, 200)  # hysteresis > level is fine while following
-        r = s.read_counter(hysteresis=6)
-        assert (r.level, r.hysteresis) == (135, 6) and r.valid and s.counter_level_cfg == P.COUNTER_LEVEL_FOLLOW
-        r = s.read_counter(level=140)  # pinned
-        assert r.level == 140 and s.counter_level_cfg == 140
-        s.set_trigger(level=132)
-        assert s.read_counter().level == 140
-        r = s.read_counter(gate=3)  # a gate change keeps the pin
-        assert (r.gate, r.level) == (3, 140)
-        r = s.read_counter(level=P.COUNTER_LEVEL_FOLLOW)
-        assert r.level == 132 and r.valid
-        r = s.read_counter(gate=2, source="CH1")  # and keeps following: the level read back is not pinned
-        assert r.level == 132 and srv.device.counter_level == P.COUNTER_LEVEL_FOLLOW
-        s.set_trigger(level=130)
-        assert s.read_counter().level == 130
-        with pytest.raises(DeviceError) as e:  # a non-zero level still refuses hysteresis above it
+        assert resp.hysteresis == 200
+        with pytest.raises(DeviceError) as e:
             s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 10, 20).pack())
         assert (e.value.status, e.value.detail) == (P.Status.E_BAD_ARG, 4)
+        # no signal (a 2 mV square: a few codes of span): the thresholds stay, nothing is VALID
+        s.t.request(P.Cmd.GET_COUNTER, P.CounterReq(1, 2, 0, 0, 0).pack())
+        lvl = d.counter_level_eff
+        d.cfg.signals = (parse_signal("square:freq=10kHz,amp=0.002"), d.cfg.signals[1])
+        for _ in range(3):
+            t[0] += 0.1
+            r = s.read_counter()
+            assert not r.valid and r.max - r.min < P.COUNTER_AUTO_MIN_SPAN and r.level == lvl
     finally:
         s.close()
 
@@ -581,14 +620,15 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             assert r["duty"] == pytest.approx(0.2) and r["period_s"] == pytest.approx(100e-6) and r["valid"]
             assert r["vmax"] > r["vmin"] and r["vpp"] > 1.5 and "5 ns clock" in r["resolution"]
             assert r["gate_s"] == 0.1 and r["readings"][0]["edges"] == 1000 and Path(r["file"]).is_file()
-            assert r["level_follows_trigger"]
-            r = await c.call("scope_counter", gate="1s", source="CH2", level=1.5, readings=2)
+            assert r["level_auto"] and r["hysteresis_auto"]
+            r = await c.call("scope_counter", gate="1s", source="CH2", level=1.5, hysteresis=6, readings=2)
             assert r["source"] == "CH2" and len(r["readings"]) == 2 and r["frequency_hz"] == pytest.approx(10e3)
-            assert r["frequency_spread_hz"] == 0 and not r["level_follows_trigger"]
+            assert r["frequency_spread_hz"] == 0 and not r["level_auto"] and not r["hysteresis_auto"]
             rep = await c.call("scope_report", source=r["file"])
             assert rep["kind"] == "counter" and rep["table"][0]["frequency"].startswith("10 kHz")
-            r = await c.call("scope_counter", level="trigger")
-            assert r["level_follows_trigger"] and r["level_code"] == srv.device.settings.trigger.level
+            r = await c.call("scope_counter", gate="100ms", source="trigger", level="auto", hysteresis="auto")
+            assert r["level_auto"] and r["hysteresis_auto"] and r["valid"] and r["source"] == "CH1"
+            assert "trigger" in await c.fails("scope_counter", level="trigger")  # not a quantity any more
             # peak detect through scope_capture: one shot, the Filter restored
             await c.call("scope_set_timebase", sample_rate="1MS/s")
             await c.call("scope_set_trigger", source="CH1", mode="auto", total_samples=3000)

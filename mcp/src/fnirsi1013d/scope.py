@@ -381,9 +381,10 @@ class Scope:
         self._chan: dict[int, P.ChannelConfig] = {}
         self._cal: dict[int, P.CalResp] = {}
         self._cal_t: dict[int, float] = {}
-        #: GET_COUNTER level this client configured (P.COUNTER_LEVEL_FOLLOW = following the trigger level, the
-        #: firmware's boot state): GET_COUNTER reports the level in effect, not whether it follows
-        self.counter_level_cfg = P.COUNTER_LEVEL_FOLLOW
+        #: GET_COUNTER level / hysteresis this client configured (P.COUNTER_AUTO = auto, the firmware's boot state):
+        #: GET_COUNTER reports the thresholds in effect, not whether they are auto
+        self.counter_level_cfg = P.COUNTER_AUTO
+        self.counter_hyst_cfg = P.COUNTER_AUTO
         self._tb: P.Timebase | None = None
         self._trig: P.Trigger | None = None
         #: legacy (no SHARED_MODE) only: REMOTE held by this client
@@ -736,9 +737,10 @@ class Scope:
                      hysteresis: int | None = None) -> P.CounterResp:
         """GET_COUNTER (protocol 1.26, caps COUNTER): the hardware counter's latest gate (E, T, W, min, max). With
         any of ``gate`` (P.COUNTER_GATES index), ``source`` (P.COUNTER_SOURCES index or name), ``level`` (raw code;
-        0 = follow the trigger level), ``hysteresis`` given the configuration is written first (the other fields keep
-        their values; the level is the one this client configured, following the trigger level unless it pinned one:
-        the response's level is the one in effect and cannot say whether it follows)."""
+        0 = auto: centred on the signal), ``hysteresis`` (codes; 0 = auto: round(span / 6), at least 6) given the
+        configuration is written first (the other fields keep their values; level and hysteresis are the ones this
+        client configured, auto unless it pinned them: the response's are the ones in effect and cannot say whether
+        they are auto)."""
         if gate is None and source is None and level is None and hysteresis is None:
             return P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, P.CounterReq().pack()))
         cur = P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, P.CounterReq().pack()))
@@ -747,9 +749,9 @@ class Scope:
         req = P.CounterReq(P.CounterReq.CONFIG, cur.gate if gate is None else int(gate),
                            cur.source if source is None else int(source),
                            self.counter_level_cfg if level is None else int(level),
-                           cur.hysteresis if hysteresis is None else int(hysteresis))
+                           self.counter_hyst_cfg if hysteresis is None else int(hysteresis))
         resp = P.CounterResp.unpack(self._req(P.Cmd.GET_COUNTER, req.pack()))
-        self.counter_level_cfg = req.level
+        self.counter_level_cfg, self.counter_hyst_cfg = req.level, req.hysteresis
         return resp
 
     # --- SD card (fw >= 0.2.2, cap SD_SECTORS) -------------------------------------------------------------

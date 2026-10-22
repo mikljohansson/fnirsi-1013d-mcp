@@ -2954,10 +2954,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         source: Annotated[Literal["trigger", "CH1", "CH2", "EXT"] | None, Field(description="what to count: "
                           "'trigger' follows the trigger source (the boot setting), or a channel / EXT")] = None,
         level: Annotated[float | str | None, Field(description="comparator level in volts at the probe tip (CH1 / "
-                         "CH2; converted to a raw code and pinned), or 'trigger' to follow the trigger level (the "
+                         "CH2; converted to a raw code and pinned), or 'auto' to centre it on the signal again (the "
                          "boot setting); default: as set")] = None,
-        hysteresis: Annotated[int | None, Field(ge=0, le=255, description="codes below the level that read low "
-                                                                            "(boot: 6, about 3 x the noise)")] = None,
+        hysteresis: Annotated[int | Literal["auto"] | None, Field(description="codes below the level that read low "
+                              "(1..255, pinned), or 'auto' (the boot setting: round(span / 6) of the signal's raw "
+                              "min..max, at least 6); default: as set")] = None,
         readings: Annotated[int, Field(ge=1, le=50, description="snapshots to take, one per new gate (the tool waits "
                                                                  "for each gate to end)")] = 1,
     ) -> dict[str, Any]:
@@ -2966,9 +2967,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         raw min / max over the gate (as volts and Vpp for CH1 / CH2). Resolution one 5 ns clock over the gate (5e-7 at
         10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy on top; range about 1 Hz (two edges in a 1 s gate) to the
         30 MHz front end. Tier 0 when it only reads; configuring the gate, source or thresholds is a tier 1 change
-        the measurement cards on the scope follow. The comparator level follows the trigger level (the boot setting,
-        what triggers is what is counted) until a level in volts pins it; level='trigger' follows again. Needs no
-        capture; `readings` > 1 returns every snapshot and the spread, and saves them as a .npz for scope_report."""
+        the measurement cards on the scope follow. The thresholds follow the signal by default (auto, the boot
+        setting, as a bench counter's): after each gate the firmware centres the band on the gate's raw min / max
+        midpoint with hysteresis round(span / 6), at least 6 codes, so slow noisy edges are not counted twice; a level
+        in volts or a hysteresis in codes pins that one, 'auto' releases it. A gate counted while the thresholds were
+        being retuned (a new signal or range) is not valid; the next gate is. Needs no capture; `readings` > 1 returns
+        every snapshot and the spread, and saves them as a .npz for scope_report."""
         args = {k: v for k, v in dict(gate=gate, source=source, level=level, hysteresis=hysteresis,
                                       readings=readings).items() if v is not None}
         configuring = any(v is not None for v in (gate, source, level, hysteresis))
@@ -2990,8 +2994,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             eff_src = P.COUNTER_SOURCES[kw.get("source", cur.source)]
             if eff_src == "trigger":
                 eff_src = ("CH1", "CH2", "EXT")[min(s.get_trigger(cached=False).source, 2)]
-            if isinstance(level, str) and level.strip().lower() == "trigger":
-                kw["level"] = P.COUNTER_LEVEL_FOLLOW
+            if isinstance(level, str) and level.strip().lower() == "auto":
+                kw["level"] = P.COUNTER_AUTO
             elif level is not None:
                 if eff_src == "EXT":
                     notes.append("level is ignored for EXT (3.3 V logic input)")
@@ -2999,11 +3003,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     ch = channel_index(eff_src)
                     v = parse_quantity(level, "V")
                     raw = round(s.scale(ch, s.get_channel(ch, cached=False)).raw_a_for_volts(v))
-                    kw["level"] = int(min(255, max(1, raw)))  # code 0 would mean "follow the trigger level"
+                    kw["level"] = int(min(255, max(1, raw)))  # code 0 would mean auto
                     if raw != kw["level"]:
                         notes.append(f"level {v:g} V is outside the channel's range; clamped to code {kw['level']}")
             if hysteresis is not None:
-                kw["hysteresis"] = hysteresis
+                if hysteresis != "auto" and not 1 <= int(hysteresis) <= 255:
+                    raise ToolError("scope_counter: hysteresis is 1..255 codes or 'auto'")
+                kw["hysteresis"] = P.COUNTER_AUTO if hysteresis == "auto" else int(hysteresis)
             if kw:
                 notes += sess.ensure_control()
                 cur = s.read_counter(**kw)
@@ -3012,12 +3018,23 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             gate_s = cur.gate_s
             snaps: list[P.CounterResp] = []
             last_seq: int | None = None
-            deadline = time.monotonic() + (3 * gate_s + 0.5) * readings + 2.0
+            auto = P.COUNTER_AUTO in (s.counter_level_cfg, s.counter_hyst_cfg)
+            retune_skips = 1 if auto and eff_src != "EXT" else 0
+            deadline = time.monotonic() + (3 * gate_s + 0.5) * (readings + retune_skips) + 2.0
+            first = True
             while len(snaps) < readings and time.monotonic() < deadline:
-                r = cur if not snaps and kw else s.read_counter()  # a configure call already answered a snapshot
+                r = cur if first and kw else s.read_counter()  # a configure call already answered a snapshot
+                first = False
                 if r.new and r.seq != last_seq:
-                    snaps.append(r)
                     last_seq = r.seq
+                    tgt = P.counter_auto_target(r.min, r.max, s.counter_level_cfg, s.counter_hyst_cfg)
+                    if (not snaps and retune_skips and not r.valid and tgt is not None
+                            and not P.counter_auto_fits(r.level, r.hysteresis, tgt)):
+                        retune_skips -= 1  # counted while the auto thresholds were being retuned: the next gate
+                        notes.append("the first gate was counted while the auto thresholds were being retuned to the "
+                                     "signal; it was skipped")
+                        continue
+                    snaps.append(r)
                     continue
                 time.sleep(min(0.05, max(0.005, gate_s / 10)))
             if not snaps:
@@ -3038,8 +3055,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             last = snaps[-1]
             freqs = [r.frequency_hz for r in snaps if r.frequency_hz is not None]
             out: dict[str, Any] = {"ok": True, "source": src_name, "gate_s": gate_s, "level_code": last.level,
-                                   "level_follows_trigger": s.counter_level_cfg == P.COUNTER_LEVEL_FOLLOW,
-                                   "hysteresis_codes": last.hysteresis, "valid": last.valid,
+                                   "level_auto": s.counter_level_cfg == P.COUNTER_AUTO,
+                                   "hysteresis_codes": last.hysteresis,
+                                   "hysteresis_auto": s.counter_hyst_cfg == P.COUNTER_AUTO, "valid": last.valid,
                                    "frequency_hz": _r6(last.frequency_hz), "period_s": _r6(last.period_s),
                                    "width_s": _r6(last.width_s), "duty": _r6(last.duty), "edges": last.e,
                                    "readings": rows}
@@ -3057,10 +3075,21 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if not last.valid:
                 notes.append("no valid count in the gate: raise the gate time, check the level against the signal "
                              "(scope_capture shows it) or the source")
+                lo_thr = max(0, last.level - last.hysteresis)
+                if src_name != "EXT" and last.gate and last.min <= last.max:
+                    if last.max - last.min < P.COUNTER_AUTO_MIN_SPAN and s.counter_level_cfg == P.COUNTER_AUTO:
+                        notes.append(f"the signal spans {last.max - last.min} raw codes ({last.min}..{last.max}), "
+                                     f"under the {P.COUNTER_AUTO_MIN_SPAN} the auto thresholds need: use a more "
+                                     "sensitive range; the scope's cards show the record's measurement")
+                    elif last.max < last.level or last.min >= lo_thr:  # fw-hyst's caveat
+                        notes.append(f"the signal (raw codes {last.min}..{last.max}) does not reach both thresholds "
+                                     f"(high at >= {last.level}, low below {lo_thr}): use a more sensitive range, "
+                                     "level / hysteresis 'auto', or a smaller pinned hysteresis; the scope's cards "
+                                     "then show the record's measurement")
             if sc is not None:
                 notes.append("vmin / vmax are the raw extremes over the whole gate through the 8-bit model (mean of "
                              "both cores), noise peaks included: a few codes wider than a capture's min / max")
-            if snaps and src_name != "EXT":
+            if snaps and src_name != "EXT" and not auto:
                 notes.append("the counter thresholds are raw codes: with a signal that does not cross the level by "
                              "more than the hysteresis the count is 0")
             arrays = {"capture_t_s": np.arange(len(snaps), dtype=np.float64) * gate_s,
