@@ -3,7 +3,31 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
-State on 2026-10-21 (fpga-c4, branch `fpga-c4`):
+State on 2026-10-21 (fpga-d3c, branch `fpga-d3`):
+- fpga-d3c (2026-10-21, branch `fpga-d3`): **0x153D with the ADC encodes always at full rate** (the owner's 17:59
+  decision; fpga-d3's 646c453, fpga-d3b's W fix 9ba3ddf), a register audit (no other fault), the testbenches for the new
+  timing (`tb/tb_skip.v` = run.sh step 19), timing re-rolled (50b4abe: 4.955 ns, 6385 LUT / 5887 reg / 7420 LE = 85.9 %),
+  `dist/al3-0x153D.bin` `0e2cdbce...150e`, flash image `04e3328b...d0e7`, unbenched, min firmware 0.2.105. Section
+  "0x153D full-rate encodes, fpga-d3c" below has the numbers, the run.sh results and the owner's flash checklist (the
+  flash holds 0x153C). The fpga-d3 bullet below describes the superseded pre-full-rate pin.
+- fpga-d3 (2026-10-21, branch `fpga-d3`): **0x153D built and simulated, not flashed**: D1's streaming logger and the
+  fpga-d2 branch stripped to an accurate fractional square generator (the owner cut the pulse pattern generator and its
+  trigger engine at integration, 15:55: 96 % of the LEs and no timing closure with it), version byte 0x3D, the DDS gone,
+  `tb/tb_square.v` = run.sh step 18, `tb/contract_0x153D.txt` (logger + SET_GEN scenarios), timing closed at 4.945 ns after
+  22 placement rolls (6430 LUT / 5911 reg / 7451 LE = 86.2 %, 13.8 % free), `dist/al3-0x153D.bin` (`11b83ce7...bca97`,
+  flash image `f65ca4c2...fa32`, status unbenched, min firmware 0.2.105 as a placeholder). Section "0x153D D3
+  integration, fpga-d3" below: the semantics, the roll table pointer, the flash checklist. README section 17.
+- fpga-d2 (2026-10-21, branch `fpga-d2`): **0x153D item D2**, the pulse pattern generator (module `pat_gen`, 0x6C-0x6F,
+  read 0x39) replaces the DDS (0x51 / 0x52 retired), the marker is capture trigger source 0x15 = 3, a third `trig_qual` is
+  the pattern trigger engine (0x76-0x7D, read 0x42); `tb/tb_pattern.v` = run.sh step 18 (10462 checks). Version byte still
+  0x3B (D3). Build: 7198 LUT / 6127 reg / 8061 LE (93 % of the LEs), `clk_200MHz` misses on old paths (congestion); the
+  measured cut table is in the section "0x153D D2 pattern generator, fpga-d2" below. **Not built for dist, not flashed.**
+  The owner cut the pattern feature at integration (15:55); fpga-d3 strips the branch to the fractional square.
+- fpga-d1 (2026-10-21, branch `fpga-d1`): **0x153D item D1**, the streaming logger (0x69 stream / clear lap, 0x6A reader
+  position, read 0x38 = 8-byte snapshot: stream, lap, W, words written, unread 0 .. 8192 with a full detector) in
+  `src/zaklad.v` (the two gates in the capture logic, the block "Streaming logger" after the counter) and `tb/tb_stream.v`
+  (run.sh step 17), `FPGA commands.txt`, README section 16. Version byte still 0x3B (D3 sets 0x3D). Semantics agreed with
+  fw-d4 (merged). Section "0x153D D1 logger, fpga-d1" below. **Not built for dist, not flashed.**
 - fpga-c4 (2026-10-21, branch `fpga-c4`): **0x153C built and simulated, not flashed**: C0 cruft removal + div20 (-206 LUT
   against the merged baseline), version byte 0x3C, the post-pass lane adders in one stage and the hold-off block placed for
   timing (clk_200MHz 0 errors, 4.772 ns; 6126 LUT / 5451 reg), `tb/contract_0x153C.txt`, `dist/al3-0x153C.bin`
@@ -111,7 +135,7 @@ State on 2026-10-21 (fpga-c4, branch `fpga-c4`):
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, sixteen steps (16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153C.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, eighteen steps (18: `tb_square.v`, the fractional square generator, 0x153D; 17: `tb_stream.v`, the streaming logger, 0x153D; 16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153D.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -146,9 +170,11 @@ wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compar
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x153C, commit bd24bdf) gives `build/FPGA.bin` sha256
-  `2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2` (= `dist/al3-0x153C.bin`; about 90 s). The testbench
-  scripts compile with `-DSIM` (w_last). The older lines below are history.
+- Current `src/` (0x153D with the full-rate encodes, commit 50b4abe) gives `build/FPGA.bin` sha256
+  `0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e` (= `dist/al3-0x153D.bin`; about 2 min). The
+  pre-full-rate 0x153D (ecdc6f0) gave `11b83ce70fddb657127b2e685e4d290281dc53fd6959f9459a071854b7dcba97`. 0x153C
+  (commit bd24bdf) gave `2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2`. The testbench scripts compile
+  with `-DSIM` (w_last). The older lines below are history.
 - 0x1537 `src/` gave `build/FPGA.bin` sha256 `426a3784883b82c9c9f42870584e64d1d082cdcb38c8b62db143e161e2633b17`
   (two builds in different work dirs, same hash; about 60 s). 0x1536 (`SRC_REV=27c0c75`) gave `4eaf6811814c58e1f00e648b97e7a608bb5ca387fb036f21714e91667959b48b`. 0x1535 (`SRC_REV=e2aec2e`) gave
   `5040a2aeede071019bca0ffee47d765b87d980e1e47ca01ac32cb875c839aa96`. 0x1534 (`SRC_REV=6d4c8ad`) gave `83140510dfbfef56cc5ed15d70866e6bc52c407a41fd0ea480e8993df5b820c1`.
@@ -278,19 +304,21 @@ References:
 - `research/notes/fpga-verilog-analysis.md`: command tables for all variants, bus timing, limits.
 - `README.md` here: zaklad.v vs stock table, pin map. `docs/protocol.md`: the PC-side protocol of our firmware.
 
-`src/zaklad.v` (about 1260 lines), top to bottom:
-- Helper modules `clockdivider`, `pwmcounter`, `freq_generator_dds_pwm` (32-bit phase accumulator; output is
-  `phase_acc < duty_threshold`), and `decim_chan` (0x1534 filter per channel: capture on either write-clock edge,
+`src/zaklad.v` (3357 lines at 0x153D), top to bottom:
+- Helper modules `clockdivider`, `pwmcounter` (Atlan4's `freq_generator_dds_pwm` went in 0x153D), and `decim_chan` (0x1534 filter per channel: capture on either write-clock edge,
   polyphase (1+z^-1)^K prefilter, 3 integrators, decimation strobe, 3 combs, shift and saturation, all 48 bit),
   and `fir_chan` (0x1535 FIR per channel: 15 x 16-bit delay line, symmetric pre-add into an 8-entry shift register,
   one inferred M18x18 with input and product registers, 37-bit accumulator, rounding, clamp; taps per K in `tap()`),
   and `trig_qual` (0x153C trigger qualifier: pulse width / Nth edge / timeout state machine on one trigger stream;
-  one instance on the write clock for CH1 / CH2, one on `clk_200MHz` for EXT).
+  one instance on the write clock for CH1 / CH2, one on `clk_200MHz` for EXT), and `sq_gen` (0x153D fractional square
+  generator on `clk_200MHz`: two 49-bit entries with shadows, one Bresenham accumulator, a 33-bit frozen-sign counter).
 - `pll main_clock`: 50 MHz `i_xtal` to `clk_200MHz` (clk0) and `clk_ADC` (clk1, 200 MHz at 90 degrees).
   IP in `al_ip/pll.v`.
 - Clock dividers: 50 MHz peripheral clock, PWM counters for the offsets (25 kHz) and the backlight.
-- DDS generator `u_freq` drives `o_1khz_calib` (P133) when `gen_out_enable` is set, else hi-Z. Cmd 0x50 enable,
-  0x51 phase increment (32 bit), 0x52 duty. Default 85899 = 1 kHz, clocked from 50 MHz.
+- Square generator `u_sq` (0x153D; up to 0x153C Atlan4's DDS `u_freq` on 50 MHz with 0x51 / 0x52) drives `o_1khz_calib`
+  (P133) when `gen_out_enable` (cmd 0x50 bit 0) is set, else hi-Z. Cmd 0x6C (7 bytes: index 0 / 1, level, u32 n, u16 f)
+  into the shadows, 0x6D (mode 3 / 0, idle level, start, commit) takes them; read 0x39. Power-on: off, hi-Z, until the
+  firmware writes the 1 kHz square at boot (100000 + 100000 clocks). Section "0x153D D3 integration" and README 17.
 - `sample_memory samples`: 8192 x 32 dual port (32 BRAM9K). Port A writes `{adc2B, adc2A, adc1B, adc1A}` on
   `sample_write_clock` at the 13-bit `sample_write_address`. Port B is read by the MCU at `sample_read_address`.
 - ADC encode generation on negedge `clk_ADC` (A is the complement of B); sample-rate divider on negedge
@@ -298,8 +326,9 @@ References:
 - Capture logic on `sample_write_clock`: write address, pretrigger (0x0B) and total (0x0C) counts, trigger
   compare on the raw ADC core A inputs (rising/falling), auto time-out, trigger address.
 - MCU bus on `i_mcu_clk`: command latch (`i_mcu_dcs` = 1), write decoder (0x01, 0x0B-0x0E, 0x15-0x17, 0x1A,
-  0x1B, 0x1F, 0x32-0x38, 0x50-0x66), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x23, 0x28-0x37). 0x0F, 0x3C, 0x41 and
-  0x24-0x27 went in 0x153C (section "0x153C built, fpga-c4").
+  0x1B, 0x1F, 0x32-0x38, 0x50, 0x53-0x66, 0x69, 0x6A, 0x6C, 0x6D), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x23,
+  0x28-0x39). 0x0F, 0x3C, 0x41 and 0x24-0x27 went in 0x153C (section "0x153C built, fpga-c4"), 0x51 / 0x52 in 0x153D
+  (the DDS); 0x6E, 0x6F, 0x76-0x7D and read 0x42 (the fpga-d2 pattern feature) are not decoded.
   Multi-byte values are big-endian and stepped by `mcu_state`.
 - External trigger (0x1533), block after the generator pin assign. The pad is read through `ext_sync` (2 flops,
   first in the IOB), then a 3-sample majority filter (`ext_level`), then the edge select per `trigger_edge`. The
@@ -330,12 +359,19 @@ References:
     `seq_acc_ram` (16 EMB9K), the table writes `tab_*`, and `cap_rst200` for `sampling_triggered` / `ext_pending`;
   - MCU side: 0x57-0x5D, 0x2A status, 0x2B-0x32 through `seq_lat` (latched on every `i_mcu_clk` edge like the sample
     memory's read register; the reads also advance `sample_read_offset`); 0x0A reports the whole run.
+- Hardware counter (0x153C, C3), block after `seq_lat`: 0x61 / 0x62, read 0x35 (16 bytes from a snapshot).
+- Streaming logger (0x153D, D1), block before the outlier counters (moved there by the timing roll): `str_s` in
+  `sampling_enable` and `~str_200` in `trigger_check_enable` are its only touches of the capture logic; the word counter,
+  the unread count `occ` with the lap flag and the 0x38 snapshot on `clk_200MHz` through the sequencer's `swc_rise_q`
+  snapshot; 0x69 / 0x6A. Section "0x153D D1 logger" and README 16.
 - Command codes still free in the decoders (checked 2026-10-19, after 0x1536): writes 0x02-0x0A, 0x10-0x14, 0x18,
   0x19, 0x1C-0x1E, 0x20-0x31, 0x39-0x3B, 0x3D-0x4F, 0x5E and up; reads 0x01-0x04, 0x07-0x09, 0x0B-0x13, 0x15-0x17,
   0x19-0x1F, 0x33-0x40, 0x42 and up. Stock firmware wrote 0x28 (roll mode) and Donwulff says stock used 0x24/0x26
   differently, so prefer 0x2A and up, or 0x57 and up, for new codes. Since then: 0x63, 0x64 / read 0x36 (0x153A);
-  0x5E, 0x5F, 0x60, 0x66 / reads 0x34, 0x37 and the 0x1B meaning (0x153C C1); the 0x153C..0x153E allocation is the
-  table in `docs/plans/fpga-0x153c.md` section 2.
+  0x5E, 0x5F, 0x60, 0x66 / reads 0x34, 0x37 and the 0x1B meaning (0x153C C1); 0x61, 0x62 / read 0x35 (0x153C C3); 0x69,
+  0x6A / read 0x38 and 0x6C, 0x6D / read 0x39 (0x153D); 0x51, 0x52 retired in 0x153D (not reused); the 0x153C..0x153E
+  allocation is the table in `docs/plans/fpga-0x153c.md` section 2 (0x6E, 0x6F, 0x76-0x7D, read 0x42 were the cut
+  pattern feature's: free, but fw-nopat's firmware never writes them).
 
 ## Wanted next (priority order)
 
@@ -383,6 +419,361 @@ Decimation filter (0x1534), open items:
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
 
+## 0x153D full-rate encodes, fpga-d3c (2026-10-21)
+
+Brief (coordinator): finish fpga-d3's integration after the owner's 17:59 decision (the ADC encodes always at full rate)
+and fpga-d3b's W fix: a register audit, the testbench updates, a TD build with every clock closed, `run.sh` ALL PASS on two
+seeds, dist / README / commands / CHANGELOG. Branch `fpga-d3` (worked on a local `fpga-d3c` branch in a worktree because
+another worktree held `fpga-d3`). This section supersedes the numbers in "0x153D D3 integration" below (that pin, ecdc6f0,
+is history: the encodes were still divided there).
+
+**Source.** 646c453 (fpga-d3: full-rate write clock, the skip counter `skip_cnt` / `skip_adv` for K = 0, timestamps +2, the
+60 ns ready wait), 9ba3ddf (fpga-d3b: the logger's W `p_wa` also loads at a reset edge), 50b4abe (fpga-d3c: roll k4 = the
+"Select the address and clock source" block moved before the hardware counter, order only; comments). README section 17
+"Full-rate encodes and sample skipping" has the design, the W fault, the audit table and every changed testbench check.
+
+**Register audit.** Every register loaded only on a stored write was checked for what the firmware or the design sees
+between the 0x05 ready and the first stored word: all are reset explicitly or first read after a stored write, except the
+logger's W (fixed in 9ba3ddf). `ts_cap` (no reset) is loaded at the first stored word of every record before the sequencer
+can copy it. K >= 1 is not new (its write clock was full rate in 0x153C). `tb_skip.v` phase 6 checks 0x14 / 0x0A / 0x18 /
+0x38 / 0x34 at D = 199999 before the first word (fails with the W fix reverted). **Nothing changes for the firmware.**
+
+**Tests.** `tb_skip.v` 125 checks; `tb_ext_trigger.v` / `tb_decim.v` end with 12 random K = 0 captures at D = 1 .. 9 checked
+against the dut's own pair stream; `tb_counter.v` (divider 9 at the 5 ns tolerance), `tb_encphase.v` (20 ns settle at every
+rate); `tb_fir.v` / `tb_seg.v` (never run on 646c453 before: their random phases now write 0x0D = 0 first and compare from the arm on, seg_model's K = 0 timestamps step by 2); fc367e7's `tb_adccap.v` / `tb_skip.v` edits verified; `tb/contract_0x153D.txt` regenerated (42 checks PASS). **Full
+`tb/run.sh` (19 steps, `REF_SRC_DIR=~/g11/refs`) on ccf5bc2 (a snapshot of `src` + `tb`):** **ALL PASS on seeds 12345 and 4242** (2026-10-21 23:04 .. 2026-10-22 02:08, about 3 h each run in parallel; per step 41 / 109-110 / 168-171 + cic_model / 8 / 53-56 + seg_model 22 runs 0 failures / 882 / 42 + the transcript / encphase / 70 / 26 / 2082 / 38 / 85 / 1293 / 45 / 115 / 757 / 14102 / 125 checks).
+
+**Build** (TD 4.6.8 SP1): **6385 LUT (73.9 %) / 5887 reg (68.1 %) / 7420 LE (85.9 %, 1220 LEs free)**, 48 EMB9K + 2 EMB32K,
+2 of 3 M18x18, 60 pads; `clk_200MHz` **0 errors, 4.955 ns**; `sample_write_clock` 8.966 ns, `i_mcu_clk` 22.694 ns, `clkc[1]`
+2.489 ns, all 0 errors; `clkc[0]` 5 (SDC artefact); capture margins >= 1.48 ns at the power-on stages. 23 rolls (README
+roll table); k2 also closed timing but had a 0.96 ns capture margin and was rejected. The committed source rebuilt in a
+fresh work dir gives the same bytes.
+
+**Dist.** `dist/al3-0x153D.bin` sha256 `0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e`, flash image (1
+MiB, 0xFF padded) `04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7`, source_commit 50b4abe, status
+unbenched, min firmware 0.2.105; `tools/bitstreams.py check` passes.
+
+**Flash-session checklist for 0x153D (the owner; the flash holds 0x153C now).**
+1. `python -I tools/bitstreams.py pack --out backups/dist-0x153D`: `fnirsi_1013d-fpga-al3-0x153d.bin` (`0e2cdbce...150e`)
+   and `fnirsi_1013d-fpga-al3-0x153d-flash1m.bin` (`04e3328b...d0e7`); `sha256sum` both, log the names in
+   `docs/hardware-status.md`.
+2. FEL-load firmware 0.2.105 (on 0x153C it shows the mismatch banner, the expected "before" state), scope on battery, USB
+   unplugged, FT2232D channel A on J2; `spiflash_d2xx.py probe` = `ef 40 14`.
+3. `spiflash_d2xx.py read -o backups/<date>-pre-0x153D.bin --twice`: both reads must hash to the 0x153C padded image
+   `07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77`; anything else: stop.
+4. `spiflash_d2xx.py write -i backups/dist-0x153D/fnirsi_1013d-fpga-al3-0x153d-flash1m.bin --yes --confirm-id ef4014`; the
+   verified read-back must hash `04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7`. Rollback = the 0x153C
+   padded image (`07393bf5...1f77`) written the same way.
+5. Power-cycle, `#VER` = `fpga=0x153d`, the banner gone; wizard with the inputs open (retrain the stages), band sweep at
+   200 MSa/s, self-check 0 flagged; probe on the post, amplitude check (about 178 codes pk-pk at range 3); then the full-rate
+   checks: the counter reads the 1 kHz post within 1e-7 at a slow K = 0 timebase with the filter off (the 0x153C
+   miscount), a slow-timebase capture of the post shows clean edges, a LOG_START at 1 kSa/s starts at word 0; then the
+   0x153C checks 1-7 of README section 15, the logger checks of section 16 and the square checks of section 17. Log each in
+   `docs/hardware-status.md`; set dist to `recommended` only on a clean run and run `tools/bitstreams.py check`.
+
+**Commands** (scratchpad scripts, all under `~/d3c`): `d3c-build.sh <name> [zaklad override]`, `d3c-mv.py <in> <out>
+<section header prefix> <anchor prefix>` (move a section for a roll), `d3c-par.sh` / `d3c-chk.sh` (parallel rolls, verdict
+and capture margins), `d3c-smoke.sh <seed> <step> <name>`, `d3c-full2.sh <snapshot>` (both seeds on a copy of
+`fpga/al3/src` + `tb` so that worktree edits cannot disturb the 4-5 h run), `d3c-mut.sh` (mutation runs).
+
+## 0x153D D3 integration, fpga-d3 (2026-10-21)
+
+Brief (coordinator): item D3 of `docs/plans/fpga-0x153c.md` section 10 ("as C4, version 0x3D"): merge `origin/fpga-d1`
+(the streaming logger) and `origin/fpga-d2` (the pattern generator) onto main 703e9c9 (the 0x153C dist), version byte
+0x3D, `tb/contract_0x153D.txt`, `run.sh` ALL PASS on two seeds, the TD build with every clock closed, `dist/al3-0x153D.bin`
+with the manifest entry, the docs and this handoff. **The owner cut the pattern feature at integration (15:55, via the
+coordinator)**: the D2 branch was stripped to an accurate fractional square generator with exactly the register subset
+the firmware's square path writes (`fpga_bus.c` `fpga_pat_square` / `fpga_pat_step_write` / `fpga_pat_ctl` /
+`fpga_pat_drive` / `fpga_pat_level`); fw-nopat removed the pattern features from the firmware and MCP against that subset
+and models the stripped semantics in `host_tests/fpga_model.c`. Branch `fpga-d3`; the full write-up is README section 17
+(the square and the cut, with the measured numbers), section 16 is D1's logger; registers: `src/FPGA commands.txt`.
+
+**What is in `src/zaklad.v`** (3357 lines): the header bullets (0x153D D1 and D2 / D3); module `sq_gen` after `trig_qual`
+(two active entries, two shadows, the 49-bit prefetch register, one Bresenham accumulator, the 33-bit frozen-sign
+counter and the pipelined carry of fpga-d2's core; the pair taken on the commit's own clock); the MCU-side registers
+`pat_wr_idx` / `pat_wr_lvl` / `pat_wr_n` / `pat_wr_f` / `pat_wr_t`, `pat_ctl` / `pat_ctl_t` after `gen_out_enable`
+(initial 0); the instance `u_sq` and the pin assign (`gen_out_enable ? pat_level : 1'bZ`) in the DDS's place
+(`freq_generator_dds_pwm`, `u_freq`, `clk_1KHz`, `clk_out_divider`, `clk_out_duty` gone); the EXT block is 0x153C's
+(`ext_pending` from `ext_edge | ext_qev`); D1's logger block (before "Outlier counters" since the timing roll) and its
+two capture-logic terms; the hold-off block before "Segmented capture and averaging, write clock side" (the roll);
+decoder cases 0x69 / 0x6A (D1), 0x6C / 0x6D (the square), 0x50 without 0x51 / 0x52; `mcu_state` lines for 0x6A, 0x6C
+(writes) and 0x38, 0x39 (reads); read-mux cases 0x38 (D1) and 0x39 (the square). 0x6E, 0x6F, 0x76-0x7D and read 0x42
+have no decoder entry: the bytes are ignored. 0x06 reads 0x15 0x3D.
+
+**Semantics as built** (README section 17 has the register map; deviations from the contract and from fpga-d2's design,
+all accepted by the coordinator and modelled by fw-nopat): 0x6C index 0 = the high step, 1 = the low step (byte 0 bit 5
+= level, bits 7 / 6 ignored, index >= 2 ignored), u32 n >= 2, u16 f; 0x6D mode 3 continuous / 0 off (1 and 2 act as 0),
+bit 2 idle level, bit 4 start (a mode-3 write while idle starts by itself, one while running is not a restart), bit 5
+commit (the shadow pair becomes the active pair on the clock the write is seen, whatever the generator is doing: the
+step in progress completes with its old duration, every step from the next boundary on is new; a second commit replaces
+the first at once; pending in 0x39 is therefore always 0); read 0x39 = { running, 0, 0, 0, 0, 0, 0, step }, 0, 0, { 0 x 7,
+mode active }; step 0 of a start begins 35 .. 38 ns (7 .. 8 clocks) after the 0x6D data strobe (tb_square case L); 0x15 =
+3 acts as EXT. The DDS stays removed: 0x51 / 0x52 writes are ignored, the firmware's 0x50 write (four bytes) ends with
+the low byte, which is the one that counts.
+
+**Tests.** `tb/tb_square.v` (step 18, `ONLY=square`, derived from fpga-d2's `tb_pattern.v`: G, L, S, B cases): **14102
+checks, 0 failed, PASS on seeds 12345 and 4242** (README section 17 "Tests"). `tb/tb_seqcontract.v` gained scenario L
+(fw-d4's LOG_START / drain / LOG_STOP sequences at the 500 kS/s tier) and G (fw-d5's SET_GEN 10 kHz 25 % from idle and
+12 kHz 50 % on the run), 42 checks, transcript `tb/contract_0x153D.txt` (PT / PE, the pattern scenarios written before
+the cut, were removed with it). The equivalence testbenches keep fpga-d2's reference changes (0x52 = 0 to the reference
+and a reset pulse before the first phase; the dut has no DDS) with trigger source 3 back in their random phases (it acts
+as EXT in both) and tb_ext_trigger's source-3 case expecting an EXT trigger again; `tb_decim.v` has tb_fir's `mem_dirty`
+mask (the coordinator's item: with the DDS gone an EXT capture with the pin driven never triggers and runs to its
+time-out, and the 0x153B stop semantics differ from the 0x1533 reference by design on those words). **Full `tb/run.sh`
+(18 steps, `REF_SRC_DIR=~/g11/refs`) on the pinned source ecdc6f0: RUN_RESULTS_TBD**
+
+**Build** (TD 4.6.8 SP1, `build.sh`; the roll table and the capture margins are in README section 17): the pinned
+source ecdc6f0 = roll h2x: **6430 LUT (74.4 %) / 5911 reg (68.4 %) / 7451 LE (86.2 %, 1189 LEs free)**, 48 EMB9K + 2
+EMB32K, 2 of 3 M18x18, 60 pads; `clk_200MHz` **0 errors, 4.945 ns**; `sample_write_clock` 9.718 ns, `i_mcu_clk` 26.482
+ns, `clkc[1]` 2.68 ns, all 0 errors; `clkc[0]` 40 (SDC artefact); capture margins >= 1.08 ns at the power-on stages
+(CH1 A 1.08, CH1 B 1.71, CH2 A 2.37, CH2 B 1.63; retrain after flashing). Against 0x153C (6126 / 5451 / 7103): +304 LUT /
++460 reg / +348 LE (the logger +129 / +186 / +155, the square the rest). The merged pre-cut projection was about 96 % of
+the LEs (fpga-d2's merged build 7351 / 6416 / 8321 without the logger), which is why the owner cut the pattern: 0.3.0
+ships on 0x153D and the free 13.8 % stays free. **The lottery took 22 rolls**: ten hold-off block positions (best
+-0.015 ns), the logger block at three positions on top of the best three, the counter block moved, the `sq_gen` module
+moved (no re-roll: byte-identical) and TD's `optimize_place` / `optimize_route` (no-ops: byte-identical); TD 4.6.8 has
+no placer seed or effort option (`help` lists `create_bound` as the only placement control). Every miss was routing on
+a different old path (`q_pass`, `q_untrig`, the post-pass lane adder, the logger's `occ` load, `qual_ext/rem`, `sq_gen`'s
+`cnt` load), 3 LUT levels with 50 .. 65 % of the path in nets, so no cycle-identical retiming would have helped. The
+knobs that re-roll are the positions of clk_200MHz `always` blocks. Reproducibility: a rebuild from the committed source
+(`~/d3/td/b3`) gives the same bytes.
+
+**Dist.** `dist/al3-0x153D.bin` sha256 `11b83ce70fddb657127b2e685e4d290281dc53fd6959f9459a071854b7dcba97`, flash image
+(1 MiB, `tools/bitstreams.py pack` writes it) `f65ca4c22c03fa0b96692f76e910867a34b028724a8e7629b1d35f7a4432fa32`, manifest
+status **unbenched**, min firmware **0.2.105 as a placeholder** (the firmware built for 0x153D, fw-d4 + fw-d5 + fw-nopat,
+is not numbered yet; the coordinator numbers it at the merge and corrects the manifest); `tools/bitstreams.py check`
+passes. Nothing is recommended until the owner benches it (0x153B stays recommended; 0x153C unbenched).
+
+**Flash-session checklist for 0x153D (the owner; the fpga-c4 steps with 0x153D's numbers).**
+1. `python -I tools/bitstreams.py pack --out backups/dist-0x153D`: `fnirsi_1013d-fpga-al3-0x153d.bin` (`11b83ce7...bca97`)
+   and `fnirsi_1013d-fpga-al3-0x153d-flash1m.bin` (`f65ca4c2...fa32`); `sha256sum` them, log the names in
+   `docs/hardware-status.md`.
+2. FEL-load the firmware built for 0x153D (on 0x153B / 0x153C it shows the mismatch banner, the expected "before"
+   state), scope on battery, USB unplugged, FT2232D channel A on J2; `spiflash_d2xx.py probe` = `ef 40 14`.
+3. `spiflash_d2xx.py read -o backups/<date>-pre-0x153D.bin --twice`: both reads must hash to the previously pinned padded
+   image: `07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77` if 0x153C was flashed first (the plan), or
+   `1391978c33379271789a9405f7b0fb9395a85e223ecc69a0430b9f2859a23b88` (the 0x153B image, in the flash since 2026-10-20
+   19:31) if 0x153C was skipped; anything else: stop.
+4. `spiflash_d2xx.py write -i backups/dist-0x153D/fnirsi_1013d-fpga-al3-0x153d-flash1m.bin --yes --confirm-id ef4014`; the
+   verified read-back must hash `f65ca4c2...fa32`. Rollback = the previous image written the same way.
+5. Power-cycle, `#VER` = `fpga=0x153d`, the banner gone; wizard with the inputs open (retrain the stages), band sweep at
+   200 MSa/s, self-check 0 flagged; probe back on the post, amplitude check (about 178 codes pk-pk at range 3), then the
+   0x153C checks 1-7 of README section 15, the logger checks of section 16 (contract 9.2 items 8 and 9) and the square
+   checks of section 17 (the wizard's 1 kHz on the counter within 1e-7, 999.5 Hz, a glitch-free change on the Scope
+   view, the gain step of the wizard, the Bode sweep). Log each in `docs/hardware-status.md`; set dist to `recommended`
+   (0x153B `supported`) only on a clean run and run `tools/bitstreams.py check`.
+
+**For the next integrator (0x153E, if the owner reopens it).** Start from the roll table in README section 17: expect
+10 to 20 rolls at this fill, move clk_200MHz `always` blocks (hold-off, logger, counter) to re-roll, do not bother with
+module order, declarations, renames or TD's optimize commands. The fpga-d2 branch (f085b05) holds the pulse pattern
+generator with its testbench if the feature is ever wanted back; its cost table is in the section below.
+
+**Commands.** `wsl -d <distro> -- bash <scratch>/d3-build.sh <name> [zaklad.v override]` (a copy of `build.sh`,
+`build.tcl` and `src/` under `~/d3/td/<name>`, parallel variants from the scratchpad's `d3-<name>.v`, about 2 min for
+four at once), `d3-timing.sh <name> [sed range]` and `d3-fails.sh <names>` (the negative-slack endpoints per build);
+sims through `d3-smoke.sh <seed> <step> <name>` (`SIM_WORK=~/d3/sim-<name>`, `REF_SRC_DIR=~/g11/refs`), the full runs
+through `d3-full.sh <seed>` under an attached `wsl.exe` (a PowerShell background tool call that stays alive for the
+duration; logs `~/d3/logs/full-<seed>.log`). Git Bash mangles arguments that start with `/` (MSYS path conversion: pass
+`//Anchor` text without the slashes), the worktree guard refuses heredocs and compound git commands (one git command per
+call, commit messages from a file, edit scripts in the scratchpad run as `python -I <script>`), and `bash` reads
+`run.sh` as it goes: never edit it while a run uses it.
+
+## 0x153D D2 pattern generator, fpga-d2 (2026-10-21)
+
+**Owner decision 2026-10-21 15:55 (via the coordinator): the pattern feature (the step table, bursts, the pattern trigger
+engine, the marker as trigger source) is cut from 0x153D in favour of a plain accurate fractional square generator;
+fpga-d3 strips this branch's RTL to the two-step fractional square during integration and owns the stripped version (the
+size estimate for it is in the paragraph "If the owner cuts the pattern" below). This section describes the branch as
+pushed (head b0a059c plus this note), before the cut.**
+
+Brief (coordinator): item D2 of `docs/plans/fpga-0x153c.md` section 10: remove the DDS, the pulse pattern generator
+(module `pat_gen`: 8 steps of u32 + u16 / 65536 clocks, double-buffered entries 0 / 1, bursts / repeat / gap / continuous,
+marker, the pin behind 0x50), the pattern trigger engine (a third `trig_qual`, 0x76-0x7D, read 0x42), the marker as
+capture trigger source 0x15 = 3 through `ext_pending`, reads 0x39 / 0x42, `tb/tb_pattern.v` as run.sh step 18,
+`FPGA commands.txt`, README "Changes" section 15. RTL and testbench only; no flash, no dist, no version byte (D3).
+Branch `fpga-d2` from main 55e5f6b (the merged C1 + C3 source); fpga-d1 (logger) worked in parallel on the same base.
+The full write-up is README section 15; the registers are in `src/FPGA commands.txt`.
+
+**What is in `src/zaklad.v`** (D2 owns these; D1 owns the capture-logic lines of the logger and its own entries): the
+header bullet; module `pat_gen` after `trig_qual`; `freq_generator_dds_pwm`, `u_freq`, `clk_1KHz`, `clk_out_divider`,
+`clk_out_duty` removed, `gen_out_enable` initial 0 (the hardware's power-on value); the MCU-side pattern / engine
+registers in the declarations after `gen_out_enable`; the `u_pat` instance and the pin assign in the generator's place;
+the EXT block's `ext_pending` set term (`trig_src_pat ? (pat_marker & pat_mark_en) : (ext_edge | ext_qev)`); the block
+"Pattern trigger engine" after C1's `ext_qev_r` (`pq_s` on the write clock, `qual_pat`, the event, `pq_take_r`); the
+`mcu_state` lines for 0x6C / 0x6E / 0x6F / 0x79 / 0x7B / 0x7C (writes) and 0x39 / 0x42 (reads), 0x51 / 0x52 removed from
+it; the decoder cases 0x6C-0x6F and 0x76-0x7D after 0x62, the 0x51 / 0x52 cases removed, 0x50's comment; the own-copy
+always block for `trig_src_pat` (0x15 = 3) after the decoder; the read-mux cases 0x39 and 0x42 after 0x35. C1's 0x15 /
+0x16 / 0x5E cases, `trigger_previous` and the two capture qualifiers are untouched; the timed trigger path is untouched.
+
+**Semantics as built** (README section 15 has the register map; every deviation was sent to fw-d5, whose `fpga_model.c`
+follows them, commit 2001e99 in fw-d5): a step lasts n + carry(acc + f) clocks, one Bresenham accumulator per engine
+cleared at a burst start only (every edge 0 .. 1 clock early against the ideal, the mean exact); a commit (0x6D bit 5) is
+taken at the next step boundary or at a start and `pending` clears there, but the generator prefetches two segments, so
+after a commit during step k the steps k + 1 and k + 2 run with the old entries and **the new ones apply from step
+k + 3** (at a start: from step 0; a commit while stopped stays pending until the start); a mode-3 write while idle is a
+start, a start bit or mode-3 write while running is ignored, mode 0 stops at once; the marker triggers the capture only
+with **both** 0x15 = 3 and 0x6D bit 3, through the EXT path (0x14 = the last word written before the marker clock);
+0x15 = 3 turns the CH1 / CH2 / EXT paths and the qualified types of the capture off; with C2's peak detect on, the
+engine's 16-bit compare takes the window max / min byte like the capture's (0x79 = level << 8); entry 7 without an end bit acts as
+end, 0x6C index 8 .. 31 is ignored, n >= 2 (the firmware enforces it); step 0 of a burst begins 5 clocks after the start
+condition is seen (0x6D: 8 .. 9 clocks after the data strobe; the engine: 6 clocks = 30 ns after the event clock, i.e.
+37.5 ns after the qualifying word's write edge for CH1 / CH2, about 55 ns after the pad edge for EXT); the engine's
+event sets 0x42 bit 6 and clears `armed` (one shot) whatever 0x6D bits 7..6 say, an event during a burst or gap is
+ignored, re-arm holds the qualifier in reset while the burst runs; 0x42 bit 7 reads 1 (own engine). SET_PATTERN's pin
+flag (bit 0 of the firmware's flags, 0x50) lets the engine run on EXT with the pin hi-Z; the firmware writes the gap as
+round(ns / 5) clocks (fw-d5 / coordinator).
+
+**Tests.** `tb/run.sh` step 18 (`ONLY=pattern`, about 9 min alone, 40 on the loaded machine): **10462 checks, 0 failed, PASS on seeds 12345 and 4242**; the cases
+and the measured numbers are in README section 15 "Tests" (edges 0 .. 1 clock early on fresh starts, a span under one
+clock after a change on the run; the engine's burst 6 clocks after the event clock in 96 runs). The equivalence
+testbenches changed for the DDS's removal: tb_ext_trigger, tb_decim, tb_fir and tb_seg write 0x52 = 0 to the reference
+(its DDS output stays low, the pattern's idle level) and a reset pulse before the first equivalence phase, their random
+phases write 0x52 = 0 and no longer write trigger source 3 (PATTERN now), tb_ext_trigger's generator check is the 1 MHz
+pattern on the pin and its source-3 case expects no EXT trigger; ext: 39 checks PASS, 0 mismatches. Full-run results on
+both seeds: **Full `tb/run.sh` (19 steps after the merge of C2) on the merged source, seeds 12345 (17514 s) and 4242 (16797 s), four to
+five hours each on the shared WSL: 18 of 19 steps PASS on both seeds** (ext 39, fir 166 / 165 + cic_model 1557 / 1543
+samples, long 8, seg 55 / 60 + seg_model 22 runs, trigpos 882, contract 12 with the transcript equal to contract_0x153B.txt,
+encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, trigtypes 1293, peak 45, counter 115, **pattern
+10462 / 10462**), and **tb_decim fails 2 of 104 / 103 checks on both seeds**: the K = 0 equivalence phases 1 and 4 report
+memory mismatches ("sample memory: 2 words differ" in 6 random captures of phase 1, "79 words differ" and the following
+bus reads of the record in phase 4; the other phases 0 mismatches, cic_model 1887 / 1884 samples PASS). **Not an RTL
+difference: the control run of the same tb_decim.v against the base source (origin/main 55e5f6b, before D2 and C2;
+`DUT=~/d2/base_zaklad.v ONLY=decim`, log `~/d2/run-basedecim.log`) reproduces every mismatch at the same simulation
+times** (28185969000 ps, 66987209000, 89732042000 ...). Cause (hypothesis, fpga-d2): the testbench changes for the DDS's
+removal. Without a DDS an EXT-source capture with 0x50 = 1 never triggers and runs to its time-out, so tb_decim's random
+phases now wait 100000 polls (as tb_fir does) and compare the memory of completed time-out captures, where the 0x153B
+stop semantics differ from the 0x1533 reference by design (the `mem_dirty` mask and the read-back handling of tb_fir /
+tb_seg exist for exactly that; tb_decim never needed them because its 4000-poll wait left those captures running).
+tb_decim now prints the first differing words with both values and the capture's geometry (`wa`, `w_last`, `ta`, the stop
+flags); the fix is tb_fir's mask ported to tb_decim, or the random phase skipping the memory compare of a capture the
+reference stopped at its time-out. D3 takes it on the integrated source. The same tb_decim passed on the pre-merge D2
+source this morning only because the 4000-poll wait left those captures unfinished (then the 0x14 check failed instead:
+`ec3a658`).
+
+**Build** (TD 4.6.8 SP1, `build.sh`, this branch alone): **7198 LUT (83.3 %) / 6127 reg / 8061 LE (93.3 %)**, `clk_200MHz`
+27 errors, 6.62 ns (TNS -17.5), `sample_write_clock` 9.617 ns and `i_mcu_clk` / `clkc[1]` 0 errors; against the C1 + C3
+merged build (6079 / 5177 / 6822) **+1119 LUT / +950 reg / +1239 LE**. Measured per block (variant builds): the pattern
+trigger engine 451 LUT / 169 reg (the no-engine variant: 6747 / 5958, still 54 errors at 5.624 ns); entries 4 .. 7 of the
+table 172 LUT / 208 reg (`STEPS = 4`: 7026 / 5919, 24 errors at 6.119 ns); the pattern core itself about 668 / 781 (the
+DDS's -61 / -97 included). **The failing paths are not the pattern's**: Atlan's 32-bit divider compare into `sce_q` /
+`swc_sh` (-3.44 ns), the sequencer's accumulator RAM data / address (-2.96 ns on one level: routing to the block RAM), the
+counter's `k_mx` (-1.62); the worst pattern path has positive slack. Two earlier builds taught the pipeline: the one-clock
+8:1 prefetch with the shadow bypass missed by 2.75 ns (b1, 7570 LUT), the engine's event into the start's fanout-108 net
+by 1.2 ns (b4); both are register stages now (`nxp_e`, `go`, `pq_take_r`). Conclusion for D3 / the owner: the LE count,
+not the LUT count, is what the contract's budget (1.1) should have tracked; at 93 % LEs the placer does not route the
+old long paths. The cuts the contract names, measured: `STEPS = 4` -172 / -208 (parameter of `pat_gen`; `tb_pattern.v`
+assumes 8 entries), the routed single qualifier about -300 net (not built: the no-engine variant shows it does not close
+timing by itself), C0's cruft -78 / -19 and div20 -53 / -24 (the latter shortens the worst path). `~/d2/b5` holds the
+build (`FPGA.bin` sha256 in README section 15); `~/d2/var-noeng`, `~/d2/var-steps4` the variants. **The merged source**
+(this branch after the merge of origin/main with C2's peak detect, `~/d2/b6`): 7351 LUT (85.1 %) / 6416 reg / 8321 LE
+(96.3 %), `clk_200MHz` 22 errors at 6.492 ns (the divider compare -3.8, the accumulator RAM -3.4), the other clocks clean;
+D1's logger is not in it yet.
+
+**If the owner cuts the pattern for a plain accurate fractional square** (coordinator, 15:5x): a two-step generator
+with n_h / f_h and n_l / f_l written directly (no table, no shadows, no bursts, no engine, no marker) is the `cnt` /
+`acc` / `acc_sum` core of `pat_gen` with the entry select reduced to one bit: about 150 .. 190 LUT / 180 .. 270 reg
+(the contract's prototype measured +48 LUT / +231 reg for a u24 + u16 two-step core with the double buffer on top of the
+DDS-less design, before the pipelining; the registered load adder, the frozen-sign counter and the fraction pipeline add
+about 100 LUT), i.e. about 900 LUT / 650 reg less than D2 as built, roughly the C1 + C2 + C3 LE count plus 200 (about 81 %
+of the LEs). The glitch-free change needs the two shadow entries (+96 reg, +10 LUT) or the firmware's "duty first" write
+order of the DDS days. The square's registers would stay 0x6C (indices 0 and 1) and 0x6D mode 3 / commit so fw-d5's
+generator path (`gen_calc`, 0x33 / 0x23) is unchanged; drop 0x6E / 0x6F / 0x76-0x7D / 0x39 bytes 1..3 / 0x42 and 0x15 = 3.
+
+**For D3 (integration)**: the version byte 0x3D; `tb_pattern.v` accepts 0x06 >= 0x153B; merge with D1 touches the
+decoder / read mux / `mcu_state` lines (append-only on both sides) and the run.sh header. If the merged build misses
+`clk_200MHz` on pattern paths, look at `u_pat/rd_e` (the one-hot table read into `nxp_e`, 3 levels), the `cnt` load adder,
+`pq_s` into `qual_pat`; otherwise it is the congestion above. Bench (contract 9.2 items 10 / 10b): README section 15.
+
+**For the firmware (D5, fw-d5)**: everything in "Semantics as built"; the write sequences fw-d5 modelled (0x6D = 0, idx 0,
+idx 1, 0x6D = 0x33 to enable; idx 0, idx 1, 0x6D = 0x23 for a change; 0x7D = 0, 0x76 .. 0x7C, 0x7D = armed | rearm << 1 |
+4) are the ones `tb_pattern.v` uses.
+
+**Commands.** Long jobs under an attached `wsl.exe`: a PowerShell background tool call running `wsl -d Ubuntu -- bash
+<scratch>/waitrun.sh <seed> <step> ...` where the script starts the run.sh steps (or `build.sh`) with `&` and `wait`s for
+them; detached `setsid nohup` jobs died within a minute of the tool call's end (the coordinator's finding, 10:4x), as did
+`Start-Process wsl` launches. Logs: `~/d2/run-<step>-<seed>.log`, `~/d2/build-b<N>.log`, read from Windows through
+`//wsl$/Ubuntu/home/<user>/d2/`. This session's worktree guard refused heredocs with quotes and `wsl` inside Bash /
+Monitor: edit scripts went to the scratchpad and ran as `python3 -I <script> <file>`, WSL commands through PowerShell.
+Kill only by PID or by a pattern with the own work dir (`pkill -f 'd2/sim-'`), never a shared one.
+## 0x153D D1 logger, fpga-d1 (2026-10-21)
+
+Brief (coordinator): item D1 of `docs/plans/fpga-0x153c.md` section 10: the streaming logger registers 0x69 (stream on,
+clear lap) and 0x6A (reader position), read 0x38 (8-byte snapshot), the `stream` gating of the capture logic, the word
+counter, the lap detection; `tb/tb_stream.v` as run.sh step 17; `src/FPGA commands.txt`; README "Changes" section 16 (C2 took 14, C4 15 in the merges). RTL
+and testbench only; no version byte change (D3), no dist, no flash. Branch `fpga-d1` from main 55e5f6b (C1 + C3 merged;
+C2's peak detect and D2's pattern generator are not on this branch). fw-d4 (the logger firmware) was told the semantics
+as built on 2026-10-21 and adopted them (`fpga_model.c` on branch `fw-d4` models the occ detector).
+
+**What is in `src/zaklad.v`** (+161 lines): the header bullet; declarations after C1's `wire ho_act` (`str`, `lc_t`, `rd_hi`,
+`log_rd`, `rd_t`, `l_req`, `str_q` / `str_200`, `str_s`); the two capture-logic lines D1 owns: `assign sampling_enable =
+str_s | ~(...)` (one new term in front of the unchanged expression) and `trigger_check_enable` with `& ~str_200` appended
+after C1's `& ~ho_act`; the block "Streaming logger" after the counter's `m_*` snapshot block (the `l_req` toggle on
+`i_mcu_clk`, the one write-clock flop `str_s`, the clk_200MHz bookkeeping `p_*` / `lg_*` / `occ` / `lap` / `rd_200` and the
+snapshot `l_*`); the decoder cases 0x69 and 0x6A appended after C3's 0x62; the read case 0x38 appended after C3's 0x35;
+one line each in the `mcu_state` lists (0x6A write, 0x38 read, commented "0x153D logger"). The write address block is
+unchanged (the logger reads the address through the snapshot instead of adding a counter there).
+
+**Semantics as built** (README section 16 has the full map; deviations from the contract are listed there and were
+agreed with fw-d4): 0x69 bit 0 stream (the write never stops, no trigger is accepted, both through synchronised copies of
+the bit: `str_s` on the write clock into `sampling_enable`, `str_200` on clk_200MHz into `trigger_check_enable`), bit 1
+clear lap (a toggle into clk_200MHz); 0x6A = the next ring word the MCU reads (13 bits, whole on the low byte, a toggle
+into clk_200MHz; 0x01 = 1 forces the FPGA's copy to 0); read 0x38 = { stream, lap, 0, W[12:8] } (one reserved bit: the
+contract's three do not fit 13 address bits), W[7:0], u32 words written since 0x01 = 0, u16 unread 0 .. 8192. The lap
+detector is a **full detector**: `occ` = unread words, loaded with (W - R) mod 8192 at a 0x6A write, +1 per written word,
+saturating at 8192; a write at 8192 while streaming sets `lap`; the contract's literal "a write lands on R" would flag a
+false lap after every complete drain (R = W). W = the address after the last word written (frozen after a stop), equal to
+the counter mod 8192 in every snapshot. 0x69 = 0 hands the capture back to the 0x153B rules at the next write clock edge
+(auto mode with 0x0E = 0: the write stops, 0x14 = W, the tail drains; normal mode: runs on until a trigger). The lap flag
+survives 0x01 = 1 (only 0x69 bit 1 clears it, contract). Latencies: a word written at edge E is counted from E + 12.5 ns;
+R takes effect 15 .. 20 ns after the 0x6A low byte; the stream bit within 15 ns + one write clock (write it before
+0x01 = 1).
+
+**Design pattern** (for D2 / D3): the write clock is read only through the sequencer's settled snapshot (`swc_rise_q`
+with `adv_d`, `swe_d`, `ssr_d`, `sample_write_address`), one pipeline stage later the counters update, so W and the count
+are consistent at every clk_200MHz edge and the 0x38 copy (the 0x35 toggle pattern) never tears. Nothing is added to the
+write clock domain but one flop (`str_s`) and one OR term; nothing to the half-cycle compare path but the `~str_200`
+AND beside `~ho_act`.
+
+**Tests**: `tb/tb_stream.v` (step 17, `ONLY=stream`): **757 checks, 0 errors, PASS on seeds 12345 and 4242** (README
+section 16 lists the seven case groups with the measured rates: 100.02 Mwords/s at D 0 and K 1 D 1, 498.7 kwords/s at D 199,
+the three contract tiers 250.8 / 248.3 / 124.6 kwords/s with the reader keeping up at 300 ns strobes, the lap exactly at
+word R + 8192 at 100 and 5 Mwords/s, the empty ring, stop, restart). **Full `tb/run.sh`, 17 steps, ALL PASS on seeds 12345
+(13793 s) and 4242 (13414 s)**, started 09:50 and finished about 13:40 on 2026-10-21 on the WSL shared with fpga-c4 and fpga-d2
+(hence the time): ext 39, decim 98 + cic_model 1876 / 1873, fir 163 / 165 + cic_model 1612 / 1638, long 8, seg 53 + seg_model
+22, trigpos 882, contract 12 (= contract_0x153B.txt), encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85,
+trigtypes 1293, counter 115, stream 757; every equivalence phase 0 mismatches. The source of the runs is commit 9607b13 (the
+RTL) with ed8b9d4 (the tb); the one-chunk smoke runs (516 checks) passed on both seeds too (378 s / 595 s). **Merge with
+origin/main at c5ecf09** (fpga-c2's peak detect, 50cbc71): `zaklad.v` auto-merged (C2's blocks and mine touch no common
+line), conflicts only in `run.sh` (usage line, step headers), `FPGA commands.txt` (header bullets) and the README (C2 took
+section 14, the logger is section 16), resolved "keep both, theirs first"; on the merged source the stream step (516 checks,
+`STREAM_CHUNKS=1`, seed 12345) and the ext equivalence step (39 checks, seed 4242) pass; the full 17-step run above is the
+pre-merge source, as C1's was (D3's integration run repeats every step on the merged 0x153D source anyway).
+
+**Build**: TD 4.6.8 SP1 headless (`~/d1/td/b2`, this branch = C1 + C3 + logger, version byte 0x3B): **6208 LUT (71.9 %) / 5363
+reg / 6977 LE**, block RAM and M18x18 unchanged: **+129 LUT / +186 reg / +155 LE** over the merged C1 + C3 build (6079 / 5177 /
+6822). `FPGA.bin` sha256 `5c4b51a8...8083`. `clk_200MHz` **4 setup errors, 5.383 ns (-0.383 ns)**, all on C3's `c_mx > k_mx`
+compare into the min / max register enable (an existing path, the lottery; not chased, as briefed); `sample_write_clock`
+9.498 ns, `i_mcu_clk` 22.3 ns, `clkc[1]` 2.434 ns 0 errors, `clkc[0]` 62 (SDC artefact). Build b1 (one 32-bit increment for
+the word counter) missed by 0.979 ns on that counter's carry chain (37 endpoints): a 32-bit +1 in one 200 MHz clock does
+not fit this device at 72 %; the counter is two 16-bit halves with a registered carry since (D2 / D3: keep adders on
+clk_200MHz at 16 bits or pipeline them).
+
+**For D3 (integration)**: the merge with D2 conflicts only where both append (the decoder after 0x62, the read mux after
+0x35, the `mcu_state` lines, run.sh's header / usage line / last step block, `FPGA commands.txt`, README section numbers:
+D1 = 15, C2 = 14, so D2 takes 16); keep both, either order. `tb_stream.v` accepts 0x06 = 0x153B .. 0x153D. Step 17 takes about
+15 min per seed. Bench items 8 and 9 of the contract's 9.2 are the logger's.
+
+**For fw-d4 / D6**: the arm and drain sequences the tb runs are the ones fw-d4 described (README section 16 "Arm"); after
+a lap resync with 0x6A = W of a fresh 0x38 and 0x69 = 3; the firmware's own loss rule (count > consumed + 8192) agrees
+with the lap bit.
+
+**Commands**: `wsl -d <distro> -- bash <launcher>` writing a small script that exports `REF_SRC_DIR=$HOME/g11/refs
+SIM_WORK=$HOME/d1/sim-<name> ONLY=stream` and `exec`s `tb/run.sh <seed>`, started with `setsid nohup bash <script> > log
+2>&1 < /dev/null &` (the first attempt with `setsid nohup env ... bash run.sh ... &` inline died when the wsl call
+returned; the script indirection survived); `STREAM_CHUNKS=1` for a quick run. The TD build of a Windows worktree: copy
+`build.sh`, `build.tcl`, `src/` to a WSL directory and run `bash ./build.sh <workdir>` there (`SRC_REV` needs WSL git).
+Logs read from Windows through `//wsl.localhost/<distro>/home/<user>/d1/logs/`. The worktree guard refuses heredocs that
+also contain git commands and compound git commands: one git command per call, commit messages from a file.
 ## 0x153C built, fpga-c4 (2026-10-21)
 
 Brief (coordinator): items C0 (cruft removal, folded into C4 after the three merges) and C4 (integration, build, contract)

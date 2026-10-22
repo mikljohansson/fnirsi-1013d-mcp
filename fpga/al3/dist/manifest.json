@@ -176,6 +176,26 @@
    ],
    "status": "unbenched",
    "bench": "built 2026-10-21 10:45 (fpga-c4, build h4 = the committed source: clk_200MHz 0 errors, min period 4.772 ns; sample_write_clock 9.053 ns, i_mcu_clk 19.538 ns, clkc[1] 2.197 ns, 0 errors; 6126 LUT / 5451 reg / 7103 LE, all block RAM, 2 M18x18; capture margins >= 1.31 ns at the power-on stages at TT: retrain the stages after flashing as for 0x153B); tb/run.sh 16 steps: first full two-seed run on the pre-fix source 1f1ded4 (2026-10-21 10:50 ..): steps 1-15 PASS on both seeds (seed 12345: ext 39, decim 98 + cic_model 1868, long 8, seg 52 + seg_model 22 runs, trigpos 882, contract 24 = contract_0x153C.txt, encphase PASS, mcuread 70 + 26, adccap 2274, firstrec 38, timeout 85, trigtypes 1293, peak 45; seed 4242: 39, 98 + 1874, fir 162 + cic_model 1572, 8, 55 + 22, 882, 24, encphase, 70 + 26, 2274, 38, 85, 1293, 45), the counter step (16) still running at the push, except tb_fir on seed 12345 (158 checks, 1 failed): a simulator event-ordering artefact of the div20 alias wire (an 0x0D write on the same instant as a write clock edge, resolved the other way than in the 0x1534 reference), fixed in bd24bdf with the bitstream byte-identical and the fixed source re-checked over the divergence with 0 mismatches; the two-seed rerun of all 16 steps on the final source bd24bdf: ALL PASS on seed 12345 (wall clock 11174 s) and seed 4242 (9929 s), every step including tb_fir (158 / 162 checks) and the counter (115 checks); finished by 2026-10-21 16:5x, recorded by the coordinator from ~/c4/logs/full2-*.log; not flashed: the owner flashes from dist per fpga/al3/AGENTS.md '0x153C built, fpga-c4' and benches docs/plans/fpga-0x153c.md section 9.2 items 1-7 before this entry becomes recommended"
+  },
+  {
+   "version": "0x153D",
+   "file": "al3-0x153D.bin",
+   "size": 282898,
+   "sha256": "0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e",
+   "flash_image_sha256": "04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7",
+   "source_commit": "50b4abe25154059bb8eb56c12f74870d30bd5284",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.2.105",
+   "features": [
+    "as 0x153C",
+    "the ADC encodes always run at full rate (100 MHz per core, antiphase) at every setting; with K = 0 the write path stores one captured pair per D + 1 write clock edges (0x0D = D), the same word rate and record layout as 0x153C, the two samples of a word 5 ns apart; the 0x05 ready wait is 60 ns at every rate; the hardware counter, the outlier counters and the encode self-check see the full-rate stream at every rate",
+    "streaming logger: 0x69 stream / clear lap, 0x6A reader position, read 0x38 (8-byte snapshot: write address, words written, unread words, lap flag); the capture never stops and never triggers while streaming",
+    "accurate fractional square generator in place of Atlan4's DDS: 0x6C entries 0 (high) and 1 (low) with u32 + u16/65536 clock durations, 0x6D mode 3 / 0 with commit (double-buffered, glitch-free and phase-continuous changes), start and the idle level, read 0x39; 0x51 / 0x52 retired; every edge within one 5 ns clock of ideal, the mean period exact",
+    "the pulse pattern generator, bursts, marker trigger source and pattern trigger engine of the fpga-d2 branch (0x6E, 0x6F, 0x76-0x7D, read 0x42, 0x15 = 3) are not in this bitstream (the owner's cut of 2026-10-21): writes to those codes are ignored, 0x15 = 3 acts as EXT",
+    "capability bits the firmware derives from the version word: 2 HOLDOFF, 20 TRIG_TYPES, 21 PEAK_DETECT, 22 COUNTER, 23 LOGGER, 1 GENERATOR (the square)"
+   ],
+   "status": "unbenched",
+   "bench": ""
   }
  ]
 }

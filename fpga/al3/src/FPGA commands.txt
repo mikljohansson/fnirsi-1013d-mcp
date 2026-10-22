@@ -1,9 +1,11 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x3C (0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
+//  - 0x06 returns 0x15 0x3D (0x153D = 0x153C with the streaming logger, the pattern generator in place of the DDS
+//    and its trigger engine, see the 0x153D bullets below; 0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
 //    the cruft removal listed last below; 0x153B = 0x153A with records that end on the auto time-out or the forced stop
 //    reported at the write pointer; 0x153A = 0x1539 with the ADC data captured through IOB registers at a per-core stage
-//    (write 0x63, read 0x36 with outlier counters, write 0x64), B first by T/2 at every rate; 0x1539 = 0x1538 with the
+//    (write 0x63, read 0x36 with outlier counters, write 0x64), B first by T/2 at every rate (0x153D: by 5 ns); 0x1539 =
+//    0x1538 with the
 //    read byte loaded on the falling edge of the MCU clock, the
 //    start of the strobe, so it is settled on the pins before the MCU reads it; values, pointer advance and dummy strobe
 //    unchanged; 0x1538 = 0x1537 with the encode timing fix and read 0x33; 0x1537 = 0x1536 with the
@@ -40,6 +42,27 @@
 //  - 0x56 bit 1 (0x153C), 0x29 byte 1 bits 7 / 6: peak detect, { max, min } words of the window's raw samples on the
 //    16-bit path, a one-register switch (0x53 may stay 0: K = 1 geometry, N from 0x0D). With bit 1 = 0 (power-on) the
 //    design behaves exactly as 0x153B.
+//  - 0x69, 0x6A (new writes), 0x38 (new read, 8 bytes; 0x153D D1): streaming logger. 0x69 bit 0 makes the capture never
+//    stop and never trigger after a normal arm, so the sample ring free-runs at the programmed rate (legacy or 16-bit
+//    words); 0x6A is the next ring word the MCU reads; 0x38 reports the write address, the words written since
+//    0x01 = 0 and the unread words with a lap flag (set when a write overwrites the oldest unread word, cleared by 0x69
+//    bit 1). With 0x69 = 0 (power-on) the capture is cycle-identical to 0x153C. Write 0x38 (display brightness) is
+//    unchanged (docs/plans/fpga-0x153c.md section 6, fpga/al3/README.md section 16).
+//  - 0x6C (index 0 / 1), 0x6D (new writes), 0x39 (new read), 0x51 / 0x52 retired (0x153D D2 / D3, docs/plans/fpga-0x153c.md
+//    section 7 reduced by the owner's cut of 2026-10-21; fpga/al3/README.md section 17): the generator is an accurate
+//    fractional square. Atlan4's DDS is gone; 0x50 = 1 drives the calibration pin with the square generator's level
+//    (power-on: the idle level 0). The square is a two-step continuous pattern (high n_h + f_h / 65536 clocks of 5 ns,
+//    low n_l + f_l / 65536), double-buffered behind 0x6D bit 5 so a change on the run is glitch-free and phase-continuous.
+//    The pulse pattern generator's steps 2..7, bursts, gap, marker, trigger source 0x15 = 3 and its trigger engine (0x6E,
+//    0x6F, 0x76-0x7D, read 0x42) of the fpga-d2 branch are not in this bitstream: writes to those codes are ignored, 0x15
+//    = 3 acts as EXT as up to 0x153C.
+//  - The ADC encodes always run at full rate (0x153D D3, the owner's decision of 2026-10-21 17:59): 100 MHz per core,
+//    antiphase, whatever 0x0D and 0x53 say. With K = 0 at a divider D > 0 the write path stores one captured pair per
+//    D + 1 write clock edges (no new register: 0x0D keeps its meaning of one word per 10 (D + 1) ns, B before A, the
+//    same record layout), but the two samples of a word are 5 ns apart instead of half a word, and the hardware counter
+//    (0x35), the capture window (0x63 / 0x36) and the encode self-check (0x33) see the full-rate stream at every rate
+//    (up to 0x153C the counter miscounted with the filter off at D > 0: bench 2026-10-21 17:53). The 0x05 ready wait is
+//    six write clocks (60 ns) at every rate. fpga/al3/README.md section 17, "Full-rate encodes and sample skipping".
 //  - 0x0B, 0x0C, 0x1F high bytes: zaklad.v takes io_mcu_data[5:0] into [12:8] (bit 5 is dropped by the
 //    13-bit register); this file showed [4:0].
 //  - Gone in 0x153C (docs/plans/fpga-0x153c.md section 13, the one-bitstream rule: our firmware never wrote or read
@@ -215,8 +238,36 @@
                   4'hF:  o_mcu_data <= max;   //maximum; 255 / 0 when no sample (EXT source, or before the first gate)
                   //frequency = E / (T x 5 ns), period = T x 5 ns / E, +width = W x 5 ns / E, duty = W / T. One read per
                   //screen pass: the command byte plus 16 data strobes.
+
+            8'h38: //Streaming logger (0x153D), 8 bytes from a snapshot taken when the command byte 0x38 is written (copied on
+                   //the 200 MHz side 15 .. 20 ns after the command strobe, as 0x35; the bytes are static for the read)
+                  4'h0:  o_mcu_data <= { stream, lap, 1'b0, W[12:8] };    //stream = 0x69 bit 0 in effect; lap: a write
+                                       //overwrote the oldest unread word since the last 0x69 bit 1 (sticky, survives 0x01 = 1)
+                  4'h1:  o_mcu_data <= W[7:0];     //W: the ring address after the last word written (= the next word to be
+                                       //written while streaming; frozen after a stop); word 0 of a capture is ring word 0;
+                                       //0x01 = 1 sets W = 0 (since 9ba3ddf: with the 60 ns ready wait no stored word need
+                                       //fall in the reset window at K = 0, D > 0, and W read the previous record's end
+                                       //until the first stored word, up to D + 1 write clocks = 2 ms at 1 kSa/s)
+                  4'h2..4'h5: count[31:0]          //words written since 0x01 = 0 (memory words, high byte first, wraps at
+                                       //2^32); W == count mod 8192 in every snapshot
+                  4'h6..4'h7: unread[15:0]         //unread words since the reader position 0x6A: 0 .. 8192 (8192 = the ring is
+                                       //full, nothing lost yet; the next write sets lap). Bits 15..14 read 0.
+                  //A word written at a write clock edge E is in the count from E + 12.5 ns and readable through
+                  //0x1F / 0x20..0x23 at once. Read cost: the command byte plus 8 data strobes.
 //---------------------------------------------------------------------------------------
             //0x41 (touch panel address): gone in 0x153C
+            8'h39: //Square generator status (0x153D), 4 bytes; asynchronous (the generator runs on the 200 MHz clock)
+                  4'h0:  o_mcu_data <= { running, 1'b0, pending, 4'b0000, step };
+                    //bit7 the square runs (mode 3 started); bit5 a commit (0x6D bit 5) not yet taken: always 0 (the pair is
+                    //taken on the clock the commit is seen); bit0 the step in
+                    //progress (0 = the high step / entry 0, 1 = the low step / entry 1; 0 when idle). Bits 6, 4..1 read 0
+                    //(the pattern generator's in-gap bit and step index of the fpga-d2 branch)
+                  4'h1..4'h2: 0                      //(the fpga-d2 branch's bursts count) read 0
+                  4'h3:  o_mcu_data <= { 7'd0, mode_active };
+                    //bit0 0x6D mode == 3; bit1 (the fpga-d2 branch's marker seen) reads 0
+
+            //0x41 (touch panel address): gone in 0x153C; 0x42 (the fpga-d2 branch's pattern trigger engine status): not
+            //decoded, a read returns the previous read byte
 
 //***************************************************************************************
 //********************************* WRITING commands ************************************
@@ -238,7 +289,11 @@
                     total_samples[7:0] <= io_mcu_data;
         
             8'h0D: //Loading of the four bytes of the sample rate divider high byte first
-                   //0x153C: bits 31..20 are ignored (div20); the write clock toggles every (divider + 1) clocks of 200 MHz
+                   //0x153C: bits 31..20 are ignored (div20). 0x153D: the write clock and the encodes run at full rate (one
+                   //write clock edge per 10 ns) whatever the divider; with K = 0 the write path stores one captured pair
+                   //per divider + 1 edges (a word every 10 (divider + 1) ns, as before), with K >= 1 the divider sets the
+                   //filter geometry (N = 2 (floor(divider / 2) + 1)). Up to 0x153C the write clock itself toggled every
+                   //(divider + 1) clocks of 200 MHz with K = 0 (the encodes gated).
                   4'h0:
                     sample_rate_divider[31:24] <= io_mcu_data;
                   4'h1:
@@ -271,6 +326,7 @@
                     //EXT: calibration pin P133, 3.3 V logic, generator must be off (cmd 0x50 = 0).
                     //Edge from cmd 0x16, mode/pretrigger/total/time-out unchanged, level (0x17) unused.
                     //trigger_address (cmd 0x14) = last sample written before the EXT edge, as for CH1/CH2.
+                    //0x153D: value 3 stays EXT (the pattern marker source of the fpga-d2 branch was cut).
 
             8'h16: //Setting the trigger edge (0x153C: the polarity per type, see 0x5E; edge type unchanged)
                     trigger_edge <= io_mcu_data[0] ^ (0x5E type is pulse width);   //the detect direction: the
@@ -331,26 +387,12 @@
                     
             8'h50: //Setting the output on or tristate (off = pin usable as EXT trigger input)
                    gen_out_enable <= io_mcu_data[0];
-                    
-            8'h51: //Loading of the four bytes of the clk out divider high byte first 
-                  4'h0:
-                    clk_out_divider[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_divider[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_divider[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_divider[7:0] <= io_mcu_data;
-            
-            8'h52: //Loading four bytes of the clk_out_duty divider high byte first
-                  4'h0:
-                    clk_out_duty[31:24] <= io_mcu_data;
-                  4'h1:
-                    clk_out_duty[23:16] <= io_mcu_data;
-                  4'h2:
-                    clk_out_duty[15:8] <= io_mcu_data;
-                  4'h3:
-                    clk_out_duty[7:0] <= io_mcu_data;               
+                    //0x153D: 1 = the pin carries the square generator's level (0x6C / 0x6D below; with the generator
+                    //off, the idle level of 0x6D bit 2, power-on 0). Every data byte writes bit 0 (the firmware's
+                    //4-byte write ends with the low byte).
+
+            8'h51, 8'h52: //Retired in 0x153D (the DDS phase increment and duty of 0x1532 .. 0x153C): no decoder entry,
+                          //the bytes are ignored. The square wave is the two-step generator of 0x6C / 0x6D.
 
 //---------------------------------------------------------------------------------------
 // Decimation filter (0x1534). Details: fpga/al3/README.md "Changes" section 3.
@@ -450,8 +492,9 @@
 // clock edge and captured against it, core B on the rising edge and captured against that, so each core's data
 // window has the same position relative to its own edge at every sample rate; stages 3 and 4 lie inside it with
 // 1.3..2 ns to spare against the AD9288 limits (tV 2 ns, tPD 6 ns) on the owner's unit per TD's numbers, 2 and 5
-// are reserves for a drifted window. A word holds the B sample encoded T/2 before its A sample (B first) at every
-// rate. Setting a core inside its transition gives rail values and jumps, not a shifted trace: train with 0x36.
+// are reserves for a drifted window. A word holds the B sample encoded 5 ns before its A sample (B first) at every
+// rate (0x153D: the encodes run at 100 MHz per core whatever the divider; up to 0x153C T/2 of the divided write clock
+// with K = 0). Setting a core inside its transition gives rail values and jumps, not a shifted trace: train with 0x36.
 
             8'h63: //ADC capture stages and B reference, 2 bytes high byte first; power-on 0x08E4
                   4'h0:
@@ -501,12 +544,55 @@
                                                        //(one-shot, consumed by that 0x01 = 1)
 
 //---------------------------------------------------------------------------------------
+// Fractional square generator (0x153D, D2 / D3). Details: fpga/al3/README.md "Changes" section 17, docs/plans/fpga-0x153c.md
+// section 7 (reduced by the owner's cut of 2026-10-21 to the square the firmware's generator path uses). The generator
+// since the DDS went: 0x50 = 1 drives the calibration pin with the generator's level. Two entries (0x6C index 0 = the
+// high step, 1 = the low step), each a level and a duration of n + f / 65536 clocks of 5 ns (n >= 2): the edges land
+// within one clock of their ideal time and the mean period is exactly (n_h + n_l) + (f_h + f_l) / 65536 clocks (one
+// Bresenham accumulator, cleared at a start only). Mode (0x6D bits 1..0): 3 = continuous, 0 = off (the pin at the idle
+// level); 1 and 2 are not modes of this design and act as 0. A start = the write of mode 3 while idle (bit 4 accepted
+// with it); a mode-3 write while running is not a restart. The two entries are double-buffered: their writes land in
+// shadows, 0x6D bit 5 commits the pair; it is taken at once when the step in progress has at least three clocks left
+// (always, for the firmware's steps of 4 clocks and more), else at that step's boundary, so the step in progress completes
+// with its old duration and every step from the next boundary on is new: glitch-free, phase-continuous, the accumulator
+// kept. The square wave of the generator menu: entry 0 = high (n_h, f_h), entry 1 = low (n_l, f_l), mode 3: f = 200 MHz x
+// 65536 / P16, P16 = the period in 1/65536 clocks (section 7.4's P16 / H16 arithmetic, gen_pat.c). Power-on: everything 0
+// (off, the pin hi-Z until 0x50 = 1, then the idle level 0). The firmware's sequences (fpga_bus.c fpga_pat_square):
+// enable = 0x6D = 0, entry 0, entry 1, 0x6D = 0x33; a change on the run = entry 0, entry 1, 0x6D = 0x23; a static level =
+// 0x6D = 0x04 / 0x00 (fpga_pat_level); the pin = 0x50 (fpga_pat_drive).
+
+            8'h6C: //Square generator step, 7 bytes
+                  4'h0:
+                    { -, -, level, index[4:0] } <= io_mcu_data;   //index 0 = the high step, 1 = the low step (2 .. 31: the
+                                                    //write is ignored); bits 7, 6 (the fpga-d2 branch's end and mark
+                                                    //flags) are ignored
+                  4'h1..4'h4:
+                    n[31:0] <= io_mcu_data;         //integer duration, 5 ns clocks, high byte first; >= 2
+                  4'h5..4'h6:
+                    f[15:0] <= io_mcu_data;         //fraction, 1/65536 clock, high byte first; the entry is handed to the
+                                                    //generator's shadow on this byte
+
+            8'h6D: //Square generator control, 1 byte
+                    mode      <= io_mcu_data[1:0];  //3 continuous (starts by itself when written while idle), 0 off (the
+                                                    //pin at the idle level, at once); 1 and 2 act as 0
+                    idle      <= io_mcu_data[2];    //the level while off
+                    start     <= io_mcu_data[4];    //start now (meaningful with mode 3 only, which starts by itself)
+                    commit    <= io_mcu_data[5];    //the shadow entries 0 / 1 become the active pair (see above)
+                    //bits 3, 7..6 (the fpga-d2 branch's marker enable and start source) are ignored.
+                    //A 0x6D write takes effect 3 .. 4 clocks (15 .. 20 ns) after the data strobe's rising edge; step 0 of a
+                    //start begins 6 clocks after that (8 .. 9 clocks, 40 .. 45 ns after the strobe; tb_square.v measures it).
+
+            //0x6E, 0x6F, 0x76 .. 0x7D (the fpga-d2 branch's bursts, gap and pattern trigger engine): not decoded, the bytes
+            //are ignored (no mcu_state step either: every byte of such a write is the same ignored byte)
+
+//---------------------------------------------------------------------------------------
 // Hardware counter with min / max (0x153C, C3). Details: fpga/al3/README.md "Changes" section 13, the contract
 // docs/plans/fpga-0x153c.md section 5. Power-on: 0x61 = 0 (off), 0x62 = 0 / 0 (the firmware writes 128 / 6 at boot).
 // Source stream: EXT = the filtered pin level (one bit per 5 ns); CH1 / CH2 = the captured pair of every write clock
 // (core B then core A, T/2 apart) through a Schmitt trigger: high at code >= level, low at code < level - hysteresis
-// (hysteresis >= level: never low). 5 ns resolution at 200 MSa/s (divider 0 or any K >= 1), each sample held half a word
-// at slower legacy rates. The gate is exactly 2e6 / 2e7 / 2e8 clocks of the 200 MHz clock; from the first rising edge
+// (hysteresis >= level: never low). 5 ns resolution at every divider and filter setting (0x153D: the encodes always run
+// at full rate; up to 0x153C each sample was held half a word at the divided legacy rates and the counter miscounted
+// there). The gate is exactly 2e6 / 2e7 / 2e8 clocks of the 200 MHz clock; from the first rising edge
 // in the gate to the last: E periods, T clocks, W high clocks, plus the pair's min and max over the whole gate (both
 // cores). Published with a sequence number at the end of every gate; a 0x61 write restarts the gate (the first result
 // one gate after it). Range: about 1 Hz (two edges in a 1 s gate) to 100 MHz; T and W are 28 bits.
@@ -519,5 +605,33 @@
             8'h62: //Counter level and hysteresis, 2 bytes
                   4'h0: cnt_lvl <= io_mcu_data;        //raw ADC code: high at >= level
                   4'h1: cnt_hys <= io_mcu_data;        //low below level - hysteresis
+
+//---------------------------------------------------------------------------------------
+// Streaming logger (0x153D, D1). Details: fpga/al3/README.md "Changes" section 16, the contract
+// docs/plans/fpga-0x153c.md section 6. The sample ring is the FIFO: with 0x69 bit 0 the capture never stops and never
+// triggers after a normal arm (0x69 = 1, 0x57 = 0, 0x1A = 0, 0x0B = 0x0C = 0, 0x01 = 1, the 0x05 wait, 0x0E = 0, 0x01 = 0),
+// so the ring free-runs with the decimator's words at the programmed rate (0x0D, 0x53 .. 0x56: legacy two samples per word
+// per channel, or one 16-bit word per channel; the peak format too), 0x0E and 0x1A are irrelevant, 0x0A reads 0 and 0x18
+// reads 0, 0x14 is not meaningful. The MCU reads 0x38, drains [R, W) with 0x1F / 0x20..0x23 exactly as READ_RAW (one 0x1F,
+// command and dummy strobe per lane pass, split at the ring end), then writes 0x6A = the next word to read; after a lap it
+// writes 0x6A = W of a fresh 0x38 and 0x69 = 3 (the words in between are the gap). 0x01 = 1 resets the FPGA's reader
+// position, W, the unread count and the counter to 0 (write 0x6A only after 0x01 = 0). Power-on 0x69 = 0: the capture is
+// cycle-identical to 0x153C; nothing here touches it.
+
+            8'h69: //Logger control, 1 byte
+                    str  <= io_mcu_data[0];            //1 = stream: the write never stops, no trigger is accepted (takes
+                                                       //effect within 15 ns + one write clock; write it before 0x01 = 1).
+                                                       //0 = hand the capture back to the 0x153B rules at the next write
+                                                       //clock edge: in auto mode with 0x0E = 0 the write stops there (0x0A =
+                                                       //1, W and the count freeze, 0x14 = W: drain the tail), in normal mode
+                                                       //it runs on until a trigger
+                    if(io_mcu_data[1]) clear lap;      //bit 1 = 1 clears the lap flag (self-clearing); bits 7..2 write 0
+
+            8'h6A: //Reader position R, 2 bytes high byte first (13 bits): the next ring word the MCU reads
+                  4'h0..4'h1: R[12:8], R[7:0]          //taken as a whole on the low byte, in effect 15 .. 20 ns later: the
+                                                       //unread count becomes (W - R) mod 8192 (R = W: empty), then +1 per
+                                                       //word written, saturating at 8192 (full); a write while it is 8192
+                                                       //and stream is on sets the lap flag (the oldest unread word was
+                                                       //overwritten). R must lie between the previous R and W.
 
 //=======================================================================================

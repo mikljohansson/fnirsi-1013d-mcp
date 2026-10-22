@@ -431,12 +431,14 @@ module tb;
       $fdisplay(logf, "RUN case %0d K %0d fir %0d D %0d src %0d pre %0d tot %0d stb %0.0f stale %0d ta %0d wa_edge %0d trig %0d ci %0d off %0d wcross %0d tns %0.2f fx %0.3f lat %0.1f membad %0d ndbad %0d dab %0.2f",
                 c, c_k[c], c_fir[c], c_d[c], c_src[c], pre_w, tot_w, stb, stale_pre, ta, wa_edge, trig, ci, o_s, wcross,
                 tns, fx, lat, mem_bad, nd_bad, (wB[(start + pre_w) & 8191] * 1.0 - wA[(start + pre_w) & 8191]) / 1000.0);
-      // A/B order: core B's sample of a word lies half a word after (or before) core A's, the same way in every run
+      // A/B order: core B's sample of a word lies 5 ns after (or before) core A's, the same way in every run. 0x153D: the
+      // encodes run at 100 MHz per core at every rate, so the two samples of a legacy word are half a full-rate word
+      // (5 ns) apart whatever the divider (up to 0x153C: half the divided word, 5 (D + 1) ns)
       if (is_legacy) begin
         dab = (wB[(start + pre_w) & 8191] * 1.0 - wA[(start + pre_w) & 8191]) / 1000.0;
         if (dab_sign == 0) dab_sign = (dab > 0) ? 1 : -1;
-        check(((dab > 0) ? 1 : -1) == dab_sign && (dab * dab_sign > 0.5 * tw_ns - 0.5) && (dab * dab_sign < 0.5 * tw_ns + 0.5),
-              "legacy A/B order: core B half a word from core A, same sign in every run");
+        check(((dab > 0) ? 1 : -1) == dab_sign && (dab * dab_sign > 4.5) && (dab * dab_sign < 5.5),
+              "legacy A/B order: core B 5 ns from core A at every rate (0x153D), same sign in every run");
       end
       check(done == 1 && trig == 1 && ci > 0, "capture triggered and the step is in the record");
       check(bus_ta_ok, "0x14 over the bus equals trigger_address");

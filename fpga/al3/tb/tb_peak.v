@@ -338,7 +338,9 @@ module tb;
       end
     $display("  K = 0, peak off: %0d legacy words, %0d not the raw samples of their edge; %0d edges for %0d words", nleg, bad, nedge, nwr);
     check(nleg > 0 && bad == 0, "K = 0 with 0x56 = 0: legacy words { 2B, 2A, 1B, 1A } again");
-    check(nedge < 2 * nwr + 40, "K = 0 with 0x56 = 0: the write clock runs at the divided rate again");
+    // 0x153D: the write clock stays at full rate at every setting; with K = 0 one pair per D + 1 = 20 edges is stored
+    // (up to 0x153C the write clock itself ran at the divided rate: nedge < 2 nwr + 40)
+    check(nedge > 15 * nwr && nedge < 25 * nwr + 40, "K = 0 with 0x56 = 0: the write clock at full rate, one legacy word per 20 edges (0x153D)");
 
     // peak off at K = 1: 0x29 byte 1 bits 7..6 = 0, the CIC output (no { max, min } words)
     setup(1, 19, 8'h00);

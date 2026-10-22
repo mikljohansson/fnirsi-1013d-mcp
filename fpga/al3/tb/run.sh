@@ -18,7 +18,7 @@
 #      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
 #      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
 #   8. tb_seqcontract.v: the firmware's sequencer byte sequences (protocol 1.17) against the simulated FPGA; the
-#      transcript must equal tb/contract_0x153C.txt (the reference for the firmware's host tests).
+#      transcript must equal tb/contract_0x153D.txt (the reference for the firmware's host tests).
 #   9. encphase.sh MODE=check (0x1538): tb_encphase.v, the encode pins against the write clock after the firmware's
 #      UI and host arm sequences at swept write phases, plain and with delay-annotated encode flop inputs, and the
 #      0x33 self-check catching a late CH2 A flop.
@@ -50,7 +50,29 @@
 #      E / T / W and min / max of every gate against a model of the input stream and of the captured pair, accuracy against
 #      the stimulus on EXT and CH1 (200 MSa/s, 10 MSa/s, K = 1), the source select (0x61 bits 3..2 and the 0x15 follow),
 #      the Schmitt thresholds at their boundaries, the hysteresis against noise, the "new" flag and the snapshot read.
-# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter runs one testbench.
+#  17. tb_stream.v (0x153D D1): the streaming logger (0x69, 0x6A, read 0x38): the write never stops and never triggers
+#      while streaming at legacy and filtered rates (0x0A / 0x18 read 0 with the time-out elapsed or the level crossed),
+#      the 0x38 snapshot against a mirror of the write port (counter, W, unread), chunks read with the firmware's
+#      sequences at the contract's rate tiers contiguous across the ring end, the lap flag exactly at the write that
+#      overwrites the oldest unread word, the resync, the empty ring, stop and restart, normal captures before and after
+#      (0x69 = 0 = 0x153C). STREAM_CHUNKS chunks per keep-up tier (default 2).
+#  18. tb_square.v (0x153D D2 / D3): the fractional square generator (0x6C index 0 / 1, 0x6D, 0x50, read 0x39; the pulse
+#      pattern generator of the D2 branch was cut to this by the owner): the generator on 0x50 alone (the cut registers
+#      and the retired DDS registers change nothing), the start latency, the firmware's SET_GEN square waves (1 kHz,
+#      999.5 Hz, 10 kHz 25 %, 1 MHz, 10 MHz, 7.3 MHz, 3.5 + 2.25 clocks, 2 + 2 clocks) with every edge within one clock
+#      of ideal and the mean period exact, the double buffer (glitch-free change at once, accumulator kept, two commits
+#      in a row, a commit while idle, modes 1 / 2 as off, stop, index >= 2 ignored).
+#  19. tb_skip.v (0x153D D3): the encodes always at full rate with sample skipping for K = 0 (the owner's decision of
+#      2026-10-21 17:59): at D in {1, 2, 3, 9, 19, 199, 399} every stored word is the captured pair of its write clock edge
+#      and consecutive words are D + 1 edges apart (the write clock toggles every 10 ns at every rate), the auto time-out,
+#      0x14, the 0x05 ready wait and a CH1 step's trigger position on the stored words, EXT at D = 49, the hardware counter
+#      with the filter off at D = 399 (E, T, duty exact: the 0x153C bench miscount), divider changes while idle, K = 1 as
+#      before, and (fpga-d3c's register audit) at D = 199999 (1 kSa/s) 0x14, 0x0A, 0x18, 0x38 and 0x34 read their reset
+#      values between the 0x05 ready and the first stored word after a record that left them non-zero, then 0x38 W = 1.
+#      The K = 0 lockstep random phases of steps 1, 2, 4 and 6 run at D = 0 since 0x153D (the references gate their
+#      encodes at D > 0 and cannot model the skipping); steps 1 and 2 end with 12 more random K = 0 captures at D = 1 .. 9
+#      checked against the model of the dut's own pair stream instead (the reference is out of step after them).
+# Usage: ./run.sh [seed] ; DUT=<file> for mutation runs; ONLY=ext|decim|fir|long|seg|trigpos|contract|encphase|mcuread|adccap|firstrec|timeout|trigtypes|peak|counter|stream|square|skip runs one testbench.
 # Needs iverilog (as root: apt-get install -y iverilog) and python3. Work files go to ~/al3-sim.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -129,8 +151,8 @@ if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
   iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
-  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153C.txt"; then echo "contract transcript = tb/contract_0x153C.txt"
-  else echo "contract transcript differs from tb/contract_0x153C.txt"; RC=1; fi
+  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153D.txt"; then echo "contract transcript = tb/contract_0x153D.txt"
+  else echo "contract transcript differs from tb/contract_0x153D.txt"; RC=1; fi
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = encphase ]; then
   MODE=check SIM_WORK="$WORK" DUT="$DUT" bash "$HERE/encphase.sh" "$SEED" | tee "$WORK/sim_encphase.log"
@@ -170,6 +192,21 @@ if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
   iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_counter.vvp" +seed=$SEED | tee "$WORK/sim_counter.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = stream ]; then
+  iverilog -g2012 -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_stream.vvp" +seed=$SEED +chunks=${STREAM_CHUNKS:-2} | tee "$WORK/sim_stream.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_stream.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = square ]; then
+  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_square.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_square.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_square.vvp" +seed=$SEED +logfile="$WORK/square.log" | tee "$WORK/sim_square.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_square.log" || RC=1
+fi
+if [ "$ONLY" = all ] || [ "$ONLY" = skip ]; then
+  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_skip.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_skip.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_skip.vvp" +seed=$SEED | tee "$WORK/sim_skip.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_skip.log" || RC=1
 fi
 echo "wall clock $(( $(date +%s) - T0 )) s"
 [ $RC -eq 0 ] && echo "ALL PASS (seed $SEED)" || echo "SOMETHING FAILED (seed $SEED)"

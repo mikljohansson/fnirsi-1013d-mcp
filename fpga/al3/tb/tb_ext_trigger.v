@@ -6,7 +6,7 @@
 // Phase 1 (equivalence): random CH1/CH2 trigger captures, generator settings and EXT pin activity
 //   with trigger source 0/1. Every output pin, the MCU read bus and the capture registers of dut
 //   and ref are compared continuously and must stay identical.
-// Phase 2 (directed): version word, 0x28 status, generator, EXT rising/falling trigger and
+// Phase 2 (directed): version word, 0x28 status, generator (0x153D: the 1 MHz pattern), EXT rising/falling trigger and
 //   trigger_address, glitch filter, short pulses, EXT ignored for source 0/1, EXT vs ADC trigger.
 `timescale 1ns / 1ps
 
@@ -322,9 +322,34 @@ module tb;
   reg [12:0] pre_r, tot_r;
   reg gen_on;
 
+  // fpga-d3c (0x153D): the K = 0 random phase at D > 0 as a model check (skip_mode = 1, after the last lockstep phase).
+  // The reference gates its encodes at D > 0 and cannot follow the dut, so nothing is compared with it there; instead
+  // every stored word must be the captured pair of its own write clock edge (adc*_w at that edge), consecutive words of
+  // a record exactly D + 1 edges apart and the first word within D + 1 edges of the last reset edge, under the phase's
+  // random trigger / EXT / generator settings (tb_skip.v has the directed D > 0 cases).
+  reg        skip_mode = 0;
+  reg        sm_on = 0, sm_arm = 0;       // sm_arm: a reset edge seen since sm_on (the previous capture may still write)
+  integer    sm_d = 0, sm_edge = 0, sm_last = -1, sm_rel = 0, sm_nwr = 0, sm_valbad = 0, sm_gapbad = 0, sm_firstbad = 0;
+  integer    sm_caps = 0, sm_done = 0;
+  always @(posedge dut.sample_write_clock) begin
+    if (sm_on) begin
+      if (dut.cap_rst) begin
+        sm_last = -1; sm_rel = sm_edge; sm_arm = 1;
+      end else if (sm_arm && dut.sample_write_enable && dut.swc_adv) begin
+        if (dut.sample_dia !== { dut.adc2B_w, dut.adc2A_w, dut.adc1B_w, dut.adc1A_w }) sm_valbad = sm_valbad + 1;
+        if (sm_last >= 0) begin
+          if (sm_edge - sm_last != sm_d + 1) sm_gapbad = sm_gapbad + 1;
+        end else if (sm_edge - sm_rel > sm_d + 1)
+          sm_firstbad = sm_firstbad + 1;
+        sm_last = sm_edge; sm_nwr = sm_nwr + 1;
+      end
+      sm_edge = sm_edge + 1;
+    end
+  end
+
   task random_phase(input integer iterations);
     begin
-      eq_on = 1; bus_cmp_on = 1;
+      eq_on = !skip_mode; bus_cmp_on = !skip_mode;
       for (it = 0; it < iterations; it = it + 1) begin
         rnd = $random(seed);
         // configuration through the MCU bus exactly as firmware would
@@ -332,7 +357,11 @@ module tb;
         wr1(8'h16, {7'd0, rnd[1]});                       // edge
         wr1(8'h17, 8'd60 + (rnd[15:8] % 8'd130));         // level
         wr1(8'h1A, {7'd0, rnd[2]});                       // auto / normal
-        wr4(8'h0D, rnd[5:4]);                             // 100, 50, 33, 25 MHz write clock
+        sm_d = skip_mode ? 1 + rnd[5:4] + (rnd[3] ? 5 : 0) : 0;   // fpga-d3c: D 1 .. 9 in skip_mode
+        wr4(8'h0D, sm_d);                                 // 0x153D: K = 0 is compared with the reference at 200 MSa/s only (the
+                                                          // dut stores every (D + 1)-th full-rate pair at D > 0, the reference
+                                                          // gates its encodes: tb_skip.v checks D > 0 against a model); rnd[5:4]
+                                                          // was the divider 0 .. 3 up to 0x153C
         pre_r = 13'd20 + (rnd[24:16] % 13'd280);
         tot_r = pre_r + 13'd20 + ($random(seed) & 13'h00FF);
         wr2(8'h0B, {3'd0, pre_r});
@@ -346,7 +375,7 @@ module tb;
         gen_on = rnd[6];
         wr1(8'h50, {7'd0, gen_on});
         wr4(8'h51, 32'd85899346 + ($random(seed) & 32'h00FFFFFF)); // about 1 MHz
-        wr4(8'h52, $random(seed));
+        wr4(8'h52, $random(seed) & 32'd0);               // 0x153D: 0x52 retired; the reference's DDS stays low (= the pattern's idle level)
         d1 = 1 + (rnd[27:25]); d2 = -(1 + rnd[30:28]);
         // EXT activity only while the generator is off (else it would fight the pin)
         if (!gen_on) begin
@@ -361,16 +390,20 @@ module tb;
           join_none
         end else
           ext_en = 0;
+        sm_arm = 0; sm_on = skip_mode;
         start_capture;
-        wait_done(4000);
+        wait_done(100000);                                // 0x153D: an EXT capture with the pin driven (pattern off) never
+                                                          // triggers and runs to its time-out (up to 1.8 ms at divider 9)
         // 0x153B: a capture that ended on the auto time-out reports W - total + pretrigger (reference: pretrigger) and
         // never a trigger after the stop: these two reads are checked against the formula instead of the reference
-        bus_cmp_on = rnd[2];
+        sm_on = 0;
+        if (skip_mode) begin sm_caps = sm_caps + 1; sm_done = sm_done + done; end
+        bus_cmp_on = rnd[2] & !skip_mode;
         rd2(8'h14);
         rd1(8'h18);
         if (!rnd[2] && !rd_d[0])
           check(rd16_d[12:0] == ((dut.w_last - tot_r + pre_r) & 13'h1FFF), "auto time-out: 0x14 = W - total + pretrigger");
-        bus_cmp_on = 1;
+        bus_cmp_on = !skip_mode;
         wr2(8'h1F, {3'd0, rnd_ptr[12:0]});
         nread = 4 + (rnd[31:30] * 4);
         for (k = 0; k < nread; k = k + 1) rd1(8'h20 + (k % 4));
@@ -397,6 +430,22 @@ module tb;
 
     // Let the PLL model and the dividers start
     #200;
+    //0x153D: the DUT has no DDS (its pin carries the pattern's idle level, 0, while driven); the reference's DDS output is
+    //set low for good (0x52 duty 0, retired on the DUT) and a reset pulse clears ext_activity in both after its pin fell
+    wr4(8'h52, 32'd0);
+    wr1(8'h01, 8'h01); #200; wr1(8'h01, 8'h00); #200;
+    // 0x153D: the dut's write clock toggles on every clk_200MHz edge from power-on, the reference's from its divider
+    // counter's first count one cycle later, so their phases differ by an edge (the reference's A / B samples swapped
+    // against the dut's): copy the dut's write clock and encode flops into the reference at divider 0, half a clock from
+    // the toggling (negative) edges, as tb_decim.v does before its phase 4. Repeated wherever a K = 0 capture at D > 0
+    // (the reference's gated encodes) precedes a lockstep phase.
+    wr4(8'h0D, 32'd0); #200;
+    @(posedge dut.clk_200MHz); #0.6;
+    refd.sample_write_clock = dut.sample_write_clock;
+    refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
+    refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
+    refd.sample_rate_counter = 32'd1;
+    #500;
 
     //-------------------------------------------------------------------------------
     // Phase 1: equivalence with Atlan4's 0x1532 design for trigger sources 0/1
@@ -409,34 +458,36 @@ module tb;
     // Version word and status read
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153C, "cmd 0x06 reads 0x153C");
+    check(rd16_d == 16'h153D, "cmd 0x06 reads 0x153D");
     check(rd16_r == 16'h1532, "reference cmd 0x06 reads 0x1532");
 
     //-------------------------------------------------------------------------------
-    // Generator mode unchanged: 1 MHz, 50 %, compared with the reference on the pin
-    mm0 = eq_mismatch;
-    eq_on = 1;
+    // Generator: 1 MHz, 50 % on the pin. 0x153D: the two-step continuous pattern (0x6C / 0x6D) replaced the DDS, so
+    // the pin is checked on its own (the reference's DDS is not written: its pin stays low, the pattern's idle level)
+    eq_on = 0;
     ext_en = 0;
     wr1(8'h50, 8'h01);
-    wr4(8'h51, 32'd85899346);
-    wr4(8'h52, 32'h80000000);
+    wr_cmd(8'h6C); wr_byte(8'h20); wr_byte(0); wr_byte(0); wr_byte(0); wr_byte(8'd100); wr_byte(0); wr_byte(0);   // entry 0: high 100 clocks
+    wr_cmd(8'h6C); wr_byte(8'h81); wr_byte(0); wr_byte(0); wr_byte(0); wr_byte(8'd100); wr_byte(0); wr_byte(0);   // entry 1: low 100 clocks, end
+    wr1(8'h6D, 8'h33);                                    // mode 3 | start | commit
     @(posedge pad_dut); t_rise1 = $time;
     repeat (10) @(posedge pad_dut);
     t_rise2 = $time;
     period_ns = (t_rise2 - t_rise1) / 10;
     $display("generator: mean period %0d ns over 10 cycles (expect 1000)", period_ns);
-    check(period_ns >= 990 && period_ns <= 1010, "generator 1 MHz period");
+    check(period_ns == 1000, "generator 1 MHz period (the 100 + 100 clock pattern)");
     $sformat(strength, "%v", pad_dut);
     check(strength[23:0] == "St1" || strength[23:0] == "St0", "generator drives the pin strongly when enabled");
     rd1(8'h28);
     check(rd8_d[1] == 1'b1, "0x28 bit1 = 1 while the generator is on");
+    wr1(8'h6D, 8'h00);                                    // pattern off: the pin at the idle level 0 while driven
+    #100;
+    check(pad_dut === 1'b0, "pattern off: the pin holds the idle level");
     wr1(8'h50, 8'h00);
     #100;
     $sformat(strength, "%v", pad_dut);
     $display("pin strength with generator off: %0s", strength[23:0]);
     check(strength[23:0] == "We0", "pin hi-Z with generator off (only the pull-down)");
-    check(eq_mismatch == mm0, "generator pin identical to reference");
-    eq_on = 0;
 
     //-------------------------------------------------------------------------------
     // 0x28 live level
@@ -596,10 +647,12 @@ module tb;
     $display("step: CH1 trigger_address - edge = %0d, EXT trigger_address - edge = %0d",
              $signed(adc_addr - wa_at_edge), $signed(ext_addr - wa_at_edge));
     // 0x153A: the ADC data reaches the trigger compare and the memory 2.5 T + 15 ns after the pins (A core, stage 4;
-    // fpga/al3/README.md "Changes" section 10), EXT is not delayed: at divider 49 (T = 500 ns) CH1 triggers 1265 ns = 2.53
-    // words later than EXT, i.e. 2 or 3 words depending on where the step falls in the word (0x1532..0x1539: the same word)
-    check((adc_addr - ext_addr == 13'd2) || (adc_addr - ext_addr == 13'd3),
-          "EXT and CH1 level trigger on the same step: CH1 2 or 3 words later than EXT at divider 49 (0x153A data latency)");
+    // fpga/al3/README.md "Changes" section 10), EXT is not delayed. 0x153D: the encodes run at full rate at every divider,
+    // so T is the 10 ns full-rate word and the data lag is 40 ns whatever the divider: at divider 49 (500 ns stored words)
+    // CH1 triggers in the same stored word as EXT, or one word later when the step falls in the last 40 ns of a word
+    // (0x153A .. 0x153C with the gated encodes: 2.53 divided words = 2 or 3 words later)
+    check((adc_addr - ext_addr == 13'd0) || (adc_addr - ext_addr == 13'd1),
+          "EXT and CH1 level trigger on the same step: CH1 in the same stored word as EXT or one later at divider 49 (0x153D: full-rate encodes, 40 ns data lag)");
     step_mode = 0;
 
     //-------------------------------------------------------------------------------
@@ -616,7 +669,7 @@ module tb;
     check(done && rd16_d[12:0] == dut.w_last - 13'd200 + 13'd100, "auto mode time-out with EXT source: trigger_address = W - total + pretrigger");
 
     //-------------------------------------------------------------------------------
-    // Source 3 (reserved) acts as EXT
+    // Source 3 (reserved) acts as EXT (0x153D as built: the pattern marker source of the D2 branch was cut)
     setup_capture(2'd3, 1'b0, 1'b1, 32'd49, 13'd100, 13'd200);
     ext_val = 0;
     start_capture;
@@ -637,6 +690,14 @@ module tb;
     flat_mode = 1; flat_val = 8'd20;
     wr1(8'h15, 8'h00);
     wr1(8'h17, 8'd128);
+    // 0x153D: the EXT captures at divider 49 above ran the reference's encodes gated: copy the dut's write clock phase again
+    wr4(8'h0D, 32'd0); #200;
+    @(posedge dut.clk_200MHz); #0.6;
+    refd.sample_write_clock = dut.sample_write_clock;
+    refd.adc1_encA = dut.adc1_encA; refd.adc1_encB = dut.adc1_encB;
+    refd.adc2_encA = dut.adc2_encA; refd.adc2_encB = dut.adc2_encB;
+    refd.sample_rate_counter = 32'd1;
+    #500;
     setup_capture(2'd0, 1'b0, 1'b0, 32'd0, 13'd100, 13'd200);
     wr4(8'h0E, 32'd9000);
     start_capture;
@@ -647,6 +708,16 @@ module tb;
     random_phase(10);
     $display("phase 3: total %0d equivalence samples, %0d mismatches, %0d captures the reference cut at its time-out", eq_samples, eq_mismatch, cut_caps);
     check(eq_mismatch == mm0, "after EXT use, CH1/CH2 again identical to Atlan4 0x1532");
+
+    // fpga-d3c: K = 0 at D = 1 .. 9 under the random settings, against the model of the dut's own pair stream (the
+    // reference is out of step from here on, so this runs last)
+    skip_mode = 1;
+    random_phase(12);
+    skip_mode = 0;
+    $display("skip phase: %0d captures (%0d ended, the others normal mode without a trigger), %0d stored words, %0d not the pair of their edge, %0d gaps other than D + 1 edges, %0d first words late",
+             sm_caps, sm_done, sm_nwr, sm_valbad, sm_gapbad, sm_firstbad);
+    check(sm_nwr > 0 && sm_valbad == 0, "K = 0, D > 0 (random settings): every stored word is the captured pair of its write clock edge");
+    check(sm_gapbad == 0 && sm_firstbad == 0, "K = 0, D > 0 (random settings): words D + 1 edges apart, the first within D + 1 edges of the release");
 
     $display("RESULT: %0d checks, %0d failed -> %0s", checks, errors, errors ? "FAIL" : "PASS");
     $finish;

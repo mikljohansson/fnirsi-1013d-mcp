@@ -255,7 +255,7 @@ module tb;
     wr1(8'h50, 8'h00);                                   // generator off: EXT is the pad
     ext_en = 1;
     rd2(8'h06);
-    check(rd16 == 16'h153B || rd16 == 16'h153C, "cmd 0x06 reads 0x153B or 0x153C");
+    check(rd16 == 16'h153B || rd16 == 16'h153C || rd16 == 16'h153D, "cmd 0x06 reads 0x153B .. 0x153D");
     check(dut.k_seq == 0 && dut.cnt_gate == 0 && dut.cnt_lvl == 0 && dut.cnt_hys == 0, "counter off at power-on, thresholds 0");
     // power-on read: nothing published, min reads 255, everything else 0
     rd_counter;
@@ -292,10 +292,11 @@ module tb;
     gate_result(1.0e9 / a_p, a_h / a_p, 3.0e-6, 58, 62, 198, 202, "CH1 (src 1, 0x15 = CH2) square 777.7 ns, 200 MSa/s");
     check(r_st[5:4] == 2'b00, "status: source CH1");
 
-    // the same at 10 MSa/s (divider 9): samples 50 ns apart
+    // the same at 10 MSa/s (divider 9). 0x153D: the encodes run at full rate at every divider, so the counter still sees
+    // one sample per 5 ns and keeps the 200 MSa/s tolerance (up to 0x153C samples 50 ns apart, tolerance 2e-5)
     wr4(8'h0D, 32'd9);
     select(2'd1, 2'd0);
-    gate_result(1.0e9 / a_p, a_h / a_p, 2.0e-5, 58, 62, 198, 202, "CH1 square 777.7 ns, 10 MSa/s");
+    gate_result(1.0e9 / a_p, a_h / a_p, 3.0e-6, 58, 62, 198, 202, "CH1 square 777.7 ns, 10 MSa/s (5 ns resolution)");
     wr4(8'h0D, 32'd0);
 
     // K = 1 (0x53 = 1, divider 1): the decimator forces the full-rate write clock, the counter keeps 5 ns resolution
