@@ -1632,3 +1632,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   2070188 2069209 2069803 / 0 0 1296 0; CH2 B 8082 8113 8179 8263 / 0 0 0 0; result CH1 A3 B4, CH2 A3 B3 (0x06E3). The A
   cores' q is ~160x the B cores' and flat across stages: the metric does not discriminate on A (suspected firmware read
   bug; fw-capmetric2 dispatched 17:21). The picks equal the outlier rule's, so the training result is usable.
+- 2026-10-22 18:01 (lead, owner present): **A/B on the gated 0x153D** (fd0be7a2, fw 0.2.105 8c70c2fc, stages 0x06E3 = CH1
+  A3 B4, CH2 A3 B3 from the wizard read at 17:21, trained on stale data), CH2 on the filter's second node, generator 1 kHz, Filter
+  Off, `e_ab.py`: 200 MSa/s A **3.78 %** / hot zone 2.14 %, B 0.40 % / 0.42 %; **2 MSa/s A 0 / 0, B 0 / 0** (owner: the CH2
+  squiggles are gone). Against 0x153C (11:36: A 1.01 / 0.92, B 0.86 / 0.17) the slow rates pass and 200 MSa/s CH2 A fails
+  the acceptance. Next: a PC_DEBUG build of main 07c2bbf (fw-capmetric2's fix, `backups/fw-0.2.105-dbg_64e5d382.bin`),
+  retrain with the inputs open, rerun the A/B, then a CH2 A stage scan with debug 0x63 writes.
