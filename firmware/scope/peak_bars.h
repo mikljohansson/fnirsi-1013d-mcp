@@ -6,7 +6,7 @@
 // each column from the lowest min to the highest max of the samples the column covers, walking the record with the
 // linear trace's step held as an integer (Q16 samples per column, converted once per pass: no soft-float per column).
 // Column c covers samples floor(p) .. floor(p + step) - 1 with p = first + c x step, at least floor(p) (zoomed in, several
-// columns show the same sample's bar). The two bytes go through the mean-core correction the midpoint took
+// columns show the same sample's bar). The two bytes go through the mean-core full-class correction the midpoint took
 // (pc_decim.h pc_peak_code), so the bar brackets the trace; with the channel inverted min and max swap.
 //
 // Integer only, no globals, no hardware: built for the scope and on the host (host_tests/test_peak_bars.c). The

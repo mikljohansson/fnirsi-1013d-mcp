@@ -345,34 +345,33 @@ def seq_cases():
 
 # Calibration data v3 (protocol row 51, adc_cal.h, firmware/README.md section 6.3): the sector 708 block at byte 128 and
 # GET_CAL bytes 112..255. Example content = host_tests/test_adc_cal.c example_channels(): unit_ch1() on both channels plus
-# edits on CH2. (The v2 section was dropped in fw 0.2.47: nothing reads it any more.) fw 0.2.105: one clock class, the
-# layout keeps its two class slots, slot 1 (the gated class of fw 0.2.45-0.2.104) written as zeros, header classes 1.
+# edits on CH2. (The v2 section was dropped in fw 0.2.47: nothing reads it any more.)
 ADC_CAL_PWM = [904, 900, 908, 903, 908, 903]
 
 
 def adc_cal_v3_channel(edits=False):
-    zero = [[2107] * 6, [2067] * 6]           # [core A, B][range], 1/16 code
-    slope = [[-17257] * 6, [-16572] * 6]      # [core][range], Q16 codes per count
-    noise = [[12] * 6, [19] * 6]              # [core][range], 1/16 code
-    gain = [32607, 33678]                     # [core], Q15
+    zero = [[[2107] * 6, [2067] * 6], [[2094] * 6, [2009] * 6]]           # [class full, gated][core A, B][range]
+    slope = [[[-17257] * 6, [-16572] * 6], [[-17308] * 6, [-17026] * 6]]  # [class][core][range], Q16 codes per count
+    noise = [[[12] * 6, [19] * 6], [[10] * 6, [21] * 6]]                   # [class][core][range], 1/16 code
+    gain = [[32607, 33678], [32699, 32837]]                                # [class][core], Q15
     meta = {"gain_range": 2, "gain_flags": 0, "gain_lever": 1416}
     if edits:
-        zero[1][4] = -77
-        slope[0][5] = -20000
-        noise[1][2] = 47
-        gain[1] = 31000
+        zero[0][1][4] = -77
+        slope[0][0][5] = -20000
+        noise[0][1][2] = 47
+        gain[1][1] = 31000
         meta = {"gain_range": 0xFF, "gain_flags": 1, "gain_lever": 0}
     return dict({"pwm": list(ADC_CAL_PWM), "zero": zero, "slope": slope, "noise": noise, "gain": gain}, **meta)
 
 
 def adc_cal_v3_pack(chs):
-    b = struct.pack("<IHHHH", 0x4C414341, 3, 304, 1, 0)
+    b = struct.pack("<IHHHH", 0x4C414341, 3, 304, 2, 0)
     for c in chs:
         b += struct.pack("<6H", *c["pwm"])
-        b += struct.pack("<12h", *[v for core in c["zero"] for v in core]) + bytes(24)
-        b += struct.pack("<12h", *[v for core in c["slope"] for v in core]) + bytes(24)
-        b += struct.pack("<12B", *[v for core in c["noise"] for v in core]) + bytes(12)
-        b += struct.pack("<2H", *c["gain"]) + bytes(4)
+        b += struct.pack("<24h", *[v for cls in c["zero"] for core in cls for v in core])
+        b += struct.pack("<24h", *[v for cls in c["slope"] for core in cls for v in core])
+        b += struct.pack("<24B", *[v for cls in c["noise"] for core in cls for v in core])
+        b += struct.pack("<4H", *[v for cls in c["gain"] for v in cls])
         b += struct.pack("<BBH", c["gain_range"], c["gain_flags"], c["gain_lever"])
     return b + struct.pack("<I", zlib.crc32(b))
 
@@ -383,16 +382,14 @@ def adc_cal_v3_section():
     assert len(blk) == 304
     return {
         "notes": "Calibration data v3 block (protocol 1.12, row 51), sector 708 bytes 128..431, little-endian: u32 magic "
-                 "'ACAL', u16 version 3, u16 length 304, u16 classes (1 written since fw 0.2.105; 2 by fw 0.2.45-0.2.104, "
-                 "still read, slot 1 ignored), u16 0; per channel (CH1, CH2, 144 bytes): u16 pwm[6] (the "
-                 "dc_calibration_offset values it was measured at; ignored unless equal to sector 709's), i16 "
-                 "zero[slot][core][range] (slot 0 the calibration, slot 1 reserved = 0, the gated class up to fw 0.2.104; "
-                 "core 0 A = FPGA 0x20/0x22, 1 B = 0x21/0x23; 1/16 code), i16 slope[slot][core][range] (Q16 codes per "
-                 "PWM count), u8 noise[slot][core][range] (RMS, 1/16 code), u16 gain[slot][core] (Q15, 32768 = 1), u8 "
-                 "gain_range (0xFF = never measured), u8 gain_flags (bit 0 carried over), u16 gain_lever (1/16 code); "
-                 "u32 zlib.crc32 of the 300 bytes before it. GET_CAL (1.12) bytes 112..255 carry the same per-channel "
-                 "layout for the requested channel. channels[] give slot 0 only: zero / slope / noise [core][range], gain "
-                 "[core].",
+                 "'ACAL', u16 version 3, u16 length 304, u16 clock classes 2, u16 0; per channel (CH1, CH2, 144 bytes): "
+                 "u16 pwm[6] (the dc_calibration_offset values it was measured at; ignored unless equal to sector "
+                 "709's), i16 zero[class][core][range] (class 0 full rate = divider 0 and filtered, 1 gated = legacy "
+                 "divider >= 1; core 0 A = FPGA 0x20/0x22, 1 B = 0x21/0x23; 1/16 code), i16 slope[class][core][range] "
+                 "(Q16 codes per PWM count), u8 noise[class][core][range] (RMS, 1/16 code), u16 gain[class][core] (Q15, "
+                 "32768 = 1), u8 gain_range (0xFF = never measured), u8 gain_flags (bit 0 carried over), u16 gain_lever "
+                 "(1/16 code); u32 zlib.crc32 of the 300 bytes before it. GET_CAL (1.12) bytes 112..255 carry the same "
+                 "per-channel layout for the requested channel.",
         "block_hex": blk.hex(),
         "channels": chs,
     }

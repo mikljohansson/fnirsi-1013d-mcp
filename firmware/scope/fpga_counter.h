@@ -36,9 +36,15 @@
 //   misfit. Misfit results are not VALID and do not feed the cards (the record's measurement shows). EXT results and
 //   results dropped by the rate-change rule do not move the thresholds.
 // - A host configuration (GET_COUNTER what = 1) is only noted; the next pass writes it (0x62, 0x61 = 0, 0x61 = value).
+// - Gated encodes (fw-gated, owner 2026-10-22): the counter compares the ADC stream, which runs at 200 MSa/s only at
+//   divider 0, with any filter and with peak detect. Filter Off at a divided rate gates the encodes with the divider (FPGA
+//   0x153C and the rebuilt 0x153D), so the stream is the divided one and the count is wrong for anything faster than a
+//   few samples per period (bench 2026-10-21 17:53 on 0x153C). A CH1 / CH2 result taken while the FPGA holds such a
+//   setting is marked gated (GET_COUNTER flags bit 4): not VALID, the cards show the record's measurement. The rate-change
+//   rule above drops a gate that spans a 0x0D / 0x53 write, so the setting at the pass is the one the gate ran at.
 // - A result is current while the gate is on and it is younger than three gates plus 100 ms (the configured gate);
-//   with E >= 1 and not misfit it feeds the measurement cards of its source channel (ui_meas.c) and GET_COUNTER's VALID
-//   bit (fpga_counter_usable).
+//   with E >= 1, not misfit and not gated it feeds the measurement cards of its source channel (ui_meas.c) and
+//   GET_COUNTER's VALID bit (fpga_counter_usable).
 //
 // Arithmetic (64-bit integers, no floating point; one clock = 5 ns): frequency = E x 2e8 / T Hz, in uHz through a
 // two-stage division (E x 2e8 fits, E x 2e14 does not); period = T x 5000 / E ps; high time = W x 5000 / E ps; low time
@@ -96,6 +102,7 @@ typedef struct
   uint8_t  min, max;
   uint32_t res_ms;              //when it was read (the pass's clock)
   uint8_t  misfit;              //auto: counted at thresholds its own min / max do not ask for, or no signal (not VALID)
+  uint8_t  gated;               //CH1 / CH2 counted while the ADC encodes ran gated (Filter Off at a divided rate): not VALID
 
   //Derived from E / T / W (fpga_counter_derive); 0 when E = 0
   uint8_t  has_period;          //E >= 1
@@ -124,13 +131,14 @@ void fpga_counter_boot(void);
 void fpga_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst);
 
 //Once per main-loop pass after the capture readout: the rate-change rule, the 0x35 read, the auto thresholds and a
-//pending configuration (see above). now_ms = the pass's clock
-void fpga_counter_pass(uint32_t now_ms);
+//pending configuration (see above). now_ms = the pass's clock; full_rate = the ADC encodes run at 200 MSa/s for what the
+//FPGA holds (divider 0, any filter, peak detect: pc_glue_adc_full_rate), else a CH1 / CH2 result taken is gated
+void fpga_counter_pass(uint32_t now_ms, int full_rate);
 
 //The held result is current: the gate is on and it is younger than three configured gates plus 100 ms
 int fpga_counter_current(uint32_t now_ms);
 
-//The held result is usable (VALID, the cards): current, with a period, not misfit
+//The held result is usable (VALID, the cards): current, with a period, not misfit, not gated
 int fpga_counter_usable(uint32_t now_ms);
 
 //The derived values of E / T / W as above; 0 when e == 0 (the outputs are then 0)

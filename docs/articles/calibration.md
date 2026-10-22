@@ -48,16 +48,17 @@ full step already shows at 20 MSa/s.
 From then on the calibration has two clock classes. FULL covers 200 MSa/s and every filtered capture. GATED covers
 every slower legacy rate.
 
-**2026-10-21: one class again.** The 0x153C hardware counter showed the same gating from another side: with Filter Off at
-a divided rate it miscounted, because the gated encodes sampled the input too slowly. The owner decided that in FPGA
-0x153D the ADC encodes always run at 200 MSa/s (100 MHz per core). At a divided rate with Filter Off the FPGA keeps one
-sample pair in every D + 1, so the record looks as before. Every capture now has the full-rate zeros and gains.
-fw 0.2.105 therefore merged the two classes into one. The wizard keeps its quick centre search at 2 MSa/s, but the
-calibration is the 200 MSa/s points alone. The class probe that compared the classes in the background is gone. A
-calibration saved by an older firmware still loads: its full-rate values are used and its gated values ignored. Those
-full-rate gains already carry the gated scale the volts calibration was fitted on, and a new gain step keeps that
-scale, so the volts stay right without a new volts calibration. The sections below are the history of the two-class
-design.
+**2026-10-21 to 22: one class tried, and reverted.** The 0x153C hardware counter miscounted with Filter Off at a
+divided rate, because the gated encodes fed it the divided stream. The owner decided that FPGA 0x153D should run the
+ADC encodes at 200 MSa/s at every rate and keep one sample pair in every D + 1, and fw 0.2.105 merged the two classes
+into one for it (fw-fullrate). The bench the next morning (11:36, the same probes and script on both bitstreams, share
+of samples at least 4 codes off a 3-sample median, Filter Off) turned that around. 0x153D read core A 3.04 % and core
+B 1.29 % at 200 MSa/s and 1.32 % / 0.92 % at 2 MSa/s; 0x153C with fw 0.2.104 read 1.01 % / 0.86 % at 200 MSa/s and
+**0 / 0 at 2 MSa/s**. The full-rate encodes had brought the partner cores' coupling to every time base, and 0x153D's
+encode timing was worse at 200 MSa/s too. The owner reverted both (11:45): 0x153D takes 0x153C's encode generation
+back, the calibration its GATED class (fw-gated), and the counter feeds the cards only while the encodes run at full
+rate (200 MSa/s, a filter, Peak). A calibration saved by the single-class builds still loads, with its 200 MSa/s values
+standing in for the gated ones until the next Calibrate.
 
 ## Calibration v2: per-core zeros (fw 0.2.43)
 

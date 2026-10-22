@@ -137,8 +137,9 @@ void     pc_decim_config(uint8_t k_req, uint8_t flags, uint32_t divider, uint32_
                          pc_decim_cfg *c);
 
 //C6 peak records: the two raw 8-bit codes of a word come from either core, so one 8-bit correction is applied to both:
-//the mean of the two cores' corrections (adc_cal.h acal_corr gain_a / gain_b / off_a / off_b, Q16, GET_CAL
-//92..107). The gain is the arithmetic mean rounded, the offset the mean (C division)
+//the mean of the two cores' corrections in the full clock class (the ADCs run at 200 MSa/s under peak detect, as on the
+//16-bit filter path; adc_cal.h acal_corr gain_a / gain_b / off_a / off_b, Q16, GET_CAL 92..107 at divider 0). The gain
+//is the arithmetic mean rounded, the offset the mean (C division)
 uint32_t pc_peak_gain(uint32_t gain_a, uint32_t gain_b);
 int32_t  pc_peak_off(int32_t off_a, int32_t off_b);
 //One raw code through it: clamp((raw x gain + off + 2^15) >> 16, 0, 255), the 8-bit loop's formula without the dither

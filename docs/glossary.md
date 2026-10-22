@@ -37,13 +37,14 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 - **Zero level, gain, calibration**: per range and per core, the code at 0 V (zero) and the codes per volt (gain). The
   calibration wizard measures the zero with the inputs open and the gain from the calibration post's square wave.
   **Volts calibration** is the older 1.00o5 procedure for the attenuator scale factors using an external DC source.
-- **Clock classes, full-rate and gated**: history. Up to FPGA 0x153C and fw 0.2.104 the ADC cores ran continuously only
-  at 200 MS/s and with a filter on (**full-rate**); at slower rates with Filter Off the FPGA slowed their clock
-  (**gated**), the cores read slightly differently, and the calibration kept values per class. Since FPGA 0x153D and
-  fw 0.2.105 the cores always run at full rate, and the calibration has one set of values.
-- **Tracker**: background code (fw 0.2.50+) that keeps measuring the small difference between the two ADC cores (A-B)
-  while the scope runs and corrects the readout. Up to fw 0.2.104 a **class probe** also compared the two clock classes
-  every 30 s; it went with the gated class.
+- **Clock classes, full-rate and gated**: at 200 MS/s, with any filter and with Peak the ADC cores run continuously at
+  100 MHz each (**full-rate**); at slower rates with Filter Off the FPGA slows their clock with the sample-rate divider
+  (**gated**). The cores read slightly differently in the two cases, so the calibration keeps values per class. (FPGA
+  0x153D first ran the cores at full rate at every rate and fw 0.2.105 dropped the gated class for it, 2026-10-21; both
+  were reverted the next day.) The hardware counter needs full-rate cores: with Filter Off below 200 MS/s the cards show
+  the record's measurement.
+- **Tracker, class probe**: background code (fw 0.2.50+) that keeps measuring the small A-B and class differences while
+  the scope runs and corrects the readout; it switches the sample rate briefly every 30 s to do so.
 
 ## Sampling and filtering
 

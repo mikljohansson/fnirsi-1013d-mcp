@@ -670,8 +670,9 @@ def _scope_cal_summary(c: P.CalResp) -> dict[str, Any]:
         return {"version": 2, "in_use": "v2 (not decoded)",
                 "note": "firmware 0.2.43-0.2.44 calibration v2: update to >= 0.2.45 and re-run the base calibration"}
     flags = [n for b, n in ((P.CAL_LOADED, "block_loaded"), (P.CAL_BOUND, "bound_to_pwm_centres"),
-                            (P.CAL_GAINS_MEASURED, "gains_measured"),
-                            (P.CAL_GAINS_KEPT, "gains_kept_from_earlier_run")) if c.cal_flags & b]
+                            (P.CAL_GATED, "current_divider_gated"), (P.CAL_GAINS_MEASURED, "gains_measured"),
+                            (P.CAL_GAINS_KEPT, "gains_kept_from_earlier_run"),
+                            (P.CAL_FULL_ONLY, "gated_class_copied_from_full")) if c.cal_flags & b]
     out: dict[str, Any] = {
         "version": c.cal_version, "in_use": "v3" if c.v3 else "1.00o5 compensations", "flags": flags,
         "current": {"comp": {"A": c.comp_a + c.frac_a / 16, "B": c.comp_b + c.frac_b / 16},
@@ -680,18 +681,26 @@ def _scope_cal_summary(c: P.CalResp) -> dict[str, Any]:
                     "gain16": _r6(c.gain16 / 65536), "zero_code": _r6(c.cal_zero_q8 / 256),
                     "corr16_codes": _r6(c.corr16 / 16), "shift": c.cal_shift}}
     if c.cal_flags & P.CAL_LOADED:
+        names = P.CAL_CLASS_NAMES
         measured = c.gain_range != P.CAL_GAIN_NONE
         out["stored"] = {
             "pwm_centres": list(c.pwm),
-            "zero_codes": {core: [_r6(c.zero_raw(i, r)) for r in range(6)] for i, core in enumerate("AB")},
-            "slope_codes_per_count": {core: [_r6(c.slope_codes(i, r)) for r in range(6)]
-                                      for i, core in enumerate("AB")},
-            "noise_rms_codes": {core: [_r6(c.noise_rms(i, r)) for r in range(6)] for i, core in enumerate("AB")},
-            "gain_correction": {core: _r6(c.gain_corr(i)) for i, core in enumerate("AB")},
-            "gain16": _r6(c.stored_gain16() / 65536),
+            "zero_codes": {names[k]: {core: [_r6(c.zero_raw(k, i, r)) for r in range(6)]
+                                      for i, core in enumerate("AB")} for k in (0, 1)},
+            "slope_codes_per_count": {names[k]: {core: [_r6(c.slope_codes(k, i, r)) for r in range(6)]
+                                                 for i, core in enumerate("AB")} for k in (0, 1)},
+            "noise_rms_codes": {names[k]: {core: [_r6(c.noise_rms(k, i, r)) for r in range(6)]
+                                           for i, core in enumerate("AB")} for k in (0, 1)},
+            "gain_correction": {names[k]: {core: _r6(c.gain_corr(k, i)) for i, core in enumerate("AB")}
+                                for k in (0, 1)},
+            "gain16_full": _r6(c.gain16_full() / 65536),
             "gains_measured_on_range": c.gain_range if measured else None,
             "gain_lever_codes": _r6(c.gain_lever / 16) if measured else None,
-            "gains_carried_over": bool(c.gain_flags & 1)}
+            "gains_carried_over": bool(c.gain_flags & P.CAL_GAIN_FLAG_KEPT)}
+        if c.gain_flags & P.CAL_GAIN_FLAG_FULL_ONLY:
+            out["stored"]["note"] = ("a single-class fw 0.2.105 block: the gated class is a copy of the full one, so "
+                                     "Filter Off below 200 MSa/s reads up to a few codes and about 1 % off: run "
+                                     "Calibrate on the scope")
     if c.has_tracker:
         out["tracking"] = _tracker_summary(c)
     return out
@@ -779,8 +788,7 @@ TRACK_FROZEN_S = 60.0
 
 
 def _tracker_summary(c: P.CalResp) -> dict[str, Any]:
-    """GET_CAL bytes 256..279 (protocol 1.15, row 54) in words: the A - B tracker (the class probe of fw
-    0.2.50-0.2.104, bytes 280..287, is gone with the gated class in fw 0.2.105)."""
+    """GET_CAL bytes 256..287 (protocol 1.15, row 54) in words: the full-rate A - B tracker and the class probe."""
     f = c.track_flags
     words = []
     if not f & P.TRACK_RECORD:
@@ -800,14 +808,24 @@ def _tracker_summary(c: P.CalResp) -> dict[str, Any]:
     if f & P.TRACK_RECORD and not f & P.TRACK_E:
         words.append(f"slope e held: the input's spread of codes is {c.track_spread16 / 16:.1f} RMS (< 8 needed)")
     if not f & P.TRACK_APPLIES:
-        words.append("not applied to this channel's next 8-bit readout (needs a bound v3 calibration and the filter "
-                     "off at the last arm; filtered readouts weigh both cores equally, so A - B cancels there)")
+        words.append("not applied to this channel's next 8-bit readout (needs a bound v3 calibration, 200 MSa/s and "
+                     "the filter off at the last arm); cm still applies to full-rate and filtered readouts")
+    if f & P.TRACK_PROBE_DATA:
+        cm = f"common mode {c.track_cm:+.2f} code from {c.cm_probes} probes, the last {_age_text(c.cm_age_ms)}"
+        if not f & P.TRACK_PROBE_VALID:
+            cm += " (the last probe was not valid: the value is held)"
+        words.append(cm)
+    else:
+        words.append("no valid class probe since the reset: cm = 0 (a probe needs a quiet input on this channel, the "
+                     "scope running with no menu open and no host capture in flight)")
     return {"state": state, "applies_to_next_8bit_readout": bool(f & P.TRACK_APPLIES),
             "d_codes": _r6(c.track_d), "e": _r6(c.track_e),
             "q_per_code2": _r6(c.track_q), "q_identified": bool(f & P.TRACK_Q),
             "e_identified": bool(f & P.TRACK_E), "records": c.track_records,
             "age_s": None if c.track_age_ms == P.CAL_AGE_NONE else round(c.track_age_ms / 1000, 1),
             "last_pairs": c.track_last_pairs, "spread_codes": round(c.track_spread16 / 16, 2),
+            "cm_codes": _r6(c.track_cm), "cm_probes": c.cm_probes,
+            "cm_age_s": None if c.cm_age_ms == P.CAL_AGE_NONE else round(c.cm_age_ms / 1000, 1),
             "in_words": words}
 
 
@@ -1337,8 +1355,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     ) -> dict[str, Any]:
         """Diagnostic (firmware 0.2.67+, protocol 1.21, provisional): the scope runs its calibration wizard's zero
         measurement of one channel and range and returns what the wizard saw: the verdict (OK, CLIP, NOISE, ZERO,
-        SPREAD, SLOPE, DRIFT, TIMING, READOUT), the failing point, its rate and core, and per point (coarse and slope
-        search at 2 MSa/s, zero and slope at 200 MSa/s) per core the mean, RMS, extremes and clipped samples. Nothing is
+        SPREAD, SLOPE, DRIFT, CLASS, TIMING, READOUT), the failing point, class and core, and per point (coarse, gated
+        slope and zero, full-rate zero and slope) per core the mean, RMS, extremes and clipped samples. Nothing is
         stored; the relays click and the scope's settings come back afterwards. Needs the inputs at 0 V (probes off
         or shorted) like the wizard. The scope's own acquisition is stopped for it (STOP; RUN is restored after)."""
         args = {"channel": channel, "range_index": range_index, "whole_step": whole_step,
@@ -1372,9 +1390,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     async def scope_calibration_info() -> dict[str, Any]:
         """Which code-to-volts conversion is in effect per channel (the scope's calibration v3, the per-unit
         calibration file or the firmware formula), the scope's own calibration state (protocol 1.12: version 1 or
-        3, flags, the correction for the current settings, and the stored per-core zeros, slopes and noise with the
-        per-core gain corrections, the range and lever they were measured with; one calibration class since fw
-        0.2.105), the calibration file and its fitted numbers: per range and ADC core the raw 0 V code at the
+        3, flags, the correction for the current settings, and the stored per-core zeros, slopes and noise per clock
+        class with the per-core, per-class gain corrections, the range and lever they were measured with), the calibration file and its fitted numbers: per range and ADC core the raw 0 V code at the
         reference offset, the offset-PWM slope, volts per code and the fit residual, plus the per-core channel
         model (0 V code at dcoffset 0, slope). Also the live conversion for each channel's current range and offset.
         Read-only; scope_calibrate_volts adds points."""
@@ -1409,9 +1426,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     "summary": describe_cal(cal)})
             out["caveats"] = [SCALING_CAVEAT, CAL_OUTPUT_NOTE]
             if any(v.get("in_use") == "v3" for v in scope_cal.values()):
-                out["caveats"].insert(0, "the scope's calibration v3 sets the 0 V codes and the per-core gains "
-                                         "(READ_TRACE is already corrected; raw reads get the stored zeros and "
-                                         "gains); the per-unit file only contributes its per-core gains")
+                out["caveats"].insert(0, "the scope's calibration v3 sets the 0 V codes and the per-core, per-class "
+                                         "gains (READ_TRACE is already corrected; raw reads get the stored zeros and "
+                                         "gains); the per-unit file only contributes its gated gains")
             return out
         return await run("scope_calibration_info", 0, {}, go)
 
@@ -2972,7 +2989,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         setting, as a bench counter's): after each gate the firmware centres the band on the gate's raw min / max
         midpoint with hysteresis round(span / 6), at least 6 codes, so slow noisy edges are not counted twice; a level
         in volts or a hysteresis in codes pins that one, 'auto' releases it. A gate counted while the thresholds were
-        being retuned (a new signal or range) is not valid; the next gate is. Needs no capture; `readings` > 1 returns
+        being retuned (a new signal or range) is not valid; the next gate is. CH1 / CH2 counts are valid only while
+        the ADCs run at 200 MSa/s (200 MSa/s, any filter, Peak): Filter Off at a slower rate gates the ADC encodes and
+        the result says `gated`. Needs no capture; `readings` > 1 returns
         every snapshot and the spread, and saves them as a .npz for scope_report."""
         args = {k: v for k, v in dict(gate=gate, source=source, level=level, hysteresis=hysteresis,
                                       readings=readings).items() if v is not None}
@@ -3046,7 +3065,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             for r in snaps:
                 row: dict[str, Any] = {"seq": r.seq, "valid": r.valid, "frequency_hz": _r6(r.frequency_hz),
                                        "period_s": _r6(r.period_s), "width_s": _r6(r.width_s), "duty": _r6(r.duty),
-                                       "edges": r.e, "min_code": r.min, "max_code": r.max,
+                                       "edges": r.e, "min_code": r.min, "max_code": r.max, "gated": r.gated,
                                        "firmware_frequency_hz": _r6(r.freq_mhz / 1000) if r.freq_mhz else None}
                 if sc is not None:
                     row["vmin"] = _r6(float(sc.volts_mean_raw(np.array([float(r.min)]))[0]))
@@ -3059,6 +3078,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                    "level_auto": s.counter_level_cfg == P.COUNTER_AUTO,
                                    "hysteresis_codes": last.hysteresis,
                                    "hysteresis_auto": s.counter_hyst_cfg == P.COUNTER_AUTO, "valid": last.valid,
+                                   "gated": last.gated,
                                    "frequency_hz": _r6(last.frequency_hz), "period_s": _r6(last.period_s),
                                    "width_s": _r6(last.width_s), "duty": _r6(last.duty), "edges": last.e,
                                    "readings": rows}
@@ -3072,8 +3092,14 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             out["resolution"] = (f"one 5 ns clock in {last.t} over the {fmt_si(gate_s, 's')} gate: "
                                  f"{res_rel:.2g} relative ({fmt_si(res_rel * (last.frequency_hz or 0), 'Hz')}); the "
                                  "50 MHz crystal's accuracy (about 1e-5, uncalibrated) dominates above that"
-                                 if last.valid else "no valid count: fewer than two edges in the gate")
-            if not last.valid:
+                                 if last.valid else "no valid count: counted on the gated ADC encodes" if last.gated
+                                 else "no valid count: fewer than two edges in the gate")
+            if last.gated:
+                notes.append("not valid: counted while Filter Off at a divided sample rate gates the ADC encodes (the "
+                             "counter then sees the divided sample stream, not the signal). Set a filter "
+                             "(scope_set_decimation), Peak, or 200 MSa/s for the counter; the scope's cards show the "
+                             "record's measurement meanwhile")
+            elif not last.valid:
                 notes.append("no valid count in the gate: raise the gate time, check the level against the signal "
                              "(scope_capture shows it) or the source")
                 lo_thr = max(0, last.level - last.hysteresis)

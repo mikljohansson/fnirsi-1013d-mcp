@@ -1,7 +1,6 @@
 // test_adc_cal.c - per-core ADC calibration v3 (adc_cal.c): sector block, correction maths, measurement checks, the gain
 // step, an end-to-end model of the 8-bit readout loop (gain + dither, rail rule) and the 16-bit filter path, and a model
-// of the owner's CH1 built from the 2026-10-18 gain bench (docs/hardware-status.md), run natively. One clock class since
-// fw 0.2.105 (FPGA 0x153D runs the ADCs at full rate at every rate): the model is the bench's full-rate class.
+// of the owner's CH1 built from the 2026-10-18 gain bench (docs/hardware-status.md), run natively.
 
 #include <stdio.h>
 #include <string.h>
@@ -50,8 +49,8 @@ static int32_t loop_code(int32_t raw, const acal_corr *k, int core, uint32_t *lf
   return (s < 0) ? 0 : ((s > 255) ? 255 : s);
 }
 
-//The owner's CH1 (bench 2026-10-18) at full rate: zeros A 131.7 / B 129.2, slopes -0.2633 / -0.2529 codes per count,
-//the bench gains A 0.9951 / B 1.0278 (on the gated scale of the fw 0.2.45-0.2.104 block they come from)
+//The owner's CH1 (bench 2026-10-18): gated A 130.9 / B 125.6, full rate A 131.7 / B 129.2, gated slopes -0.2641 /
+//-0.2598, the bench gains (full A 0.9951 / B 1.0278, gated A 0.9979 / B 1.0021)
 static void unit_ch1(acal_channel *c, const uint16_t *pwm)
 {
   uint32_t r;
@@ -61,16 +60,24 @@ static void unit_ch1(acal_channel *c, const uint16_t *pwm)
   for(r=0;r<ACAL_RANGES;r++)
   {
     c->pwm[r] = pwm[r];
-    c->zero[0][r]  = (int16_t)(131.7 * 16);
-    c->zero[1][r]  = (int16_t)(129.2 * 16);
-    c->slope[0][r] = -17257;
-    c->slope[1][r] = -16572;
-    c->noise[0][r] = 12;
-    c->noise[1][r] = 19;
+    c->zero[ACAL_GATED][0][r] = (int16_t)(130.9 * 16);
+    c->zero[ACAL_GATED][1][r] = (int16_t)(125.6 * 16);
+    c->zero[ACAL_FULL][0][r]  = (int16_t)(131.7 * 16);
+    c->zero[ACAL_FULL][1][r]  = (int16_t)(129.2 * 16);
+    c->slope[ACAL_GATED][0][r] = -17308;
+    c->slope[ACAL_GATED][1][r] = -17026;
+    c->slope[ACAL_FULL][0][r]  = -17257;
+    c->slope[ACAL_FULL][1][r]  = -16572;
+    c->noise[ACAL_GATED][0][r] = 10;
+    c->noise[ACAL_GATED][1][r] = 21;
+    c->noise[ACAL_FULL][0][r]  = 12;
+    c->noise[ACAL_FULL][1][r]  = 19;
   }
 
-  c->gain[0] = 32607;
-  c->gain[1] = 33678;
+  c->gain[ACAL_FULL][0]  = 32607;
+  c->gain[ACAL_FULL][1]  = 33678;
+  c->gain[ACAL_GATED][0] = 32699;
+  c->gain[ACAL_GATED][1] = 32837;
   c->gain_range = 2;
   c->gain_flags = 0;
   c->gain_lever = 1416;
@@ -83,10 +90,10 @@ static void example_channels(acal_channel ch[2])
 
   unit_ch1(&ch[0], pwm);
   unit_ch1(&ch[1], pwm);
-  ch[1].zero[1][4]  = -77;
-  ch[1].slope[0][5] = -20000;
-  ch[1].noise[1][2] = 47;
-  ch[1].gain[1]     = 31000;
+  ch[1].zero[ACAL_FULL][1][4]  = -77;
+  ch[1].slope[ACAL_FULL][0][5] = -20000;
+  ch[1].noise[ACAL_FULL][1][2] = 47;
+  ch[1].gain[ACAL_GATED][1]    = 31000;
   ch[1].gain_range = ACAL_GAIN_NONE;
   ch[1].gain_flags = ACAL_GAIN_KEPT;
   ch[1].gain_lever = 0;
@@ -115,24 +122,15 @@ static void test_crc_and_block(void)
   T_EQ(blk[0], 'A'); T_EQ(blk[1], 'C'); T_EQ(blk[2], 'A'); T_EQ(blk[3], 'L');
   T_EQ(blk[4], 3); T_EQ(blk[5], 0);                           //version
   T_EQ(blk[6] | (blk[7] << 8), ACAL_BLOCK_BYTES);
-  T_EQ(blk[8], ACAL_BLOCK_CLASSES); T_EQ(blk[8], 1); T_EQ(blk[9], 0); T_EQ(blk[10], 0); T_EQ(blk[11], 0);
+  T_EQ(blk[8], 2); T_EQ(blk[9], 0); T_EQ(blk[10], 0); T_EQ(blk[11], 0);
   T_EQ(blk[12] | (blk[13] << 8), 904);                        //CH1 pwm[0]
   T_EQ(blk[ACAL_HDR_BYTES + ACAL_CH_BYTES] | (blk[ACAL_HDR_BYTES + ACAL_CH_BYTES + 1] << 8), 904);   //CH2 pwm[0]
   p = blk + ACAL_HDR_BYTES;
-  T_EQ(p[12] | (p[13] << 8), 2107);                           //zero[slot 0][A][0] = 131.7 x 16
-  T_EQ((int16_t)(p[60] | (p[61] << 8)), -17257);              //slope[0][A][0]
-  T_EQ(p[108], 12);                                           //noise[0][A][0]
-  T_EQ(p[132] | (p[133] << 8), 32607);                        //gain[0][A]
-  T_EQ(p[134] | (p[135] << 8), 33678);                        //gain[0][B]
-  //slot 1 (the gated class of fw 0.2.45-0.2.104): zeros
-  for(i=0;i<24;i++)
-  {
-    T_EQ(p[36 + i], 0); T_EQ(p[84 + i], 0);
-  }
-  for(i=0;i<12;i++)
-    T_EQ(p[120 + i], 0);
-  for(i=0;i<4;i++)
-    T_EQ(p[136 + i], 0);
+  T_EQ(p[12] | (p[13] << 8), 2107);                           //zero[full][A][0] = 131.7 x 16
+  T_EQ((int16_t)(p[60] | (p[61] << 8)), -17257);              //slope[full][A][0]
+  T_EQ(p[108], 12);                                           //noise[full][A][0]
+  T_EQ(p[132] | (p[133] << 8), 32607);                        //gain[full][A]
+  T_EQ(p[138] | (p[139] << 8), 32837);                        //gain[gated][B]
   T_EQ(p[140], 2); T_EQ(p[141], 0); T_EQ(p[142] | (p[143] << 8), 1416);
   p += ACAL_CH_BYTES;
   T_EQ(p[140], ACAL_GAIN_NONE); T_EQ(p[141], ACAL_GAIN_KEPT);
@@ -156,46 +154,57 @@ static void test_crc_and_block(void)
   T_EQ(acal_unpack(b2, out), ACAL_E_VERSION);
   memcpy(b2, blk, sizeof(b2)); b2[8] = 3;
   T_EQ(acal_unpack(b2, out), ACAL_E_VERSION);
-  memcpy(b2, blk, sizeof(b2)); b2[8] = 0;
-  T_EQ(acal_unpack(b2, out), ACAL_E_VERSION);
-
-  //A block of fw 0.2.45-0.2.104 (classes 2, slot 1 the gated class): loads, slot 0 only, no forced recalibration
-  {
-    uint32_t ch, crc;
-
-    memcpy(b2, blk, sizeof(b2));
-    b2[8] = 2;
-
-    for(ch=0;ch<2;ch++)
-    {
-      uint8_t *q = b2 + ACAL_HDR_BYTES + ch * ACAL_CH_BYTES;
-
-      for(i=0;i<24;i++) { q[36 + i] = (uint8_t)(0x31 + i); q[84 + i] = (uint8_t)(0x91 + i); }
-      for(i=0;i<12;i++) q[120 + i] = (uint8_t)(7 + i);
-      for(i=0;i<4;i++)  q[136 + i] = (uint8_t)(0x80 + i);
-    }
-
-    crc = acal_crc32(b2, ACAL_BLOCK_BYTES - 4);
-    b2[300] = (uint8_t)crc; b2[301] = (uint8_t)(crc >> 8); b2[302] = (uint8_t)(crc >> 16); b2[303] = (uint8_t)(crc >> 24);
-    memset(out, 0, sizeof(out));
-    T_EQ(acal_unpack(b2, out), ACAL_OK);
-    T_MEM(&in[0], &out[0], sizeof(acal_channel));
-    T_MEM(&in[1], &out[1], sizeof(acal_channel));
-
-    //and saves back as a one-class block
-    acal_pack(out, b2);
-    T_MEM(b2, blk, sizeof(blk));
-  }
   memcpy(b2, blk, sizeof(b2)); b2[100] ^= 1;
   T_EQ(acal_unpack(b2, out), ACAL_E_CRC);
+
+  //fw-gated: a single-class block (header classes 1, slot 1 written 0: the fw 0.2.105 builds on the full-rate 0x153D)
+  //loads with the gated class copied from the full one and ACAL_GAIN_FULL_ONLY; the next save writes classes 2 with the
+  //flag, which loads the same again (and 0.2.104 reads the copies)
+  memcpy(b2, blk, sizeof(b2)); b2[8] = 0;
+  T_EQ(acal_unpack(b2, out), ACAL_E_VERSION);
+  b2[8] = 1;
+  for(i=0;i<2;i++)
+  {
+    uint8_t *c = b2 + ACAL_HDR_BYTES + i * ACAL_CH_BYTES;
+
+    memset(c + 36, 0, 24); memset(c + 84, 0, 24); memset(c + 120, 0, 12); memset(c + 136, 0, 4);
+  }
+  {
+    uint32_t crc = acal_crc32(b2, ACAL_BLOCK_BYTES - 4);
+
+    b2[ACAL_BLOCK_BYTES - 4] = (uint8_t)crc; b2[ACAL_BLOCK_BYTES - 3] = (uint8_t)(crc >> 8);
+    b2[ACAL_BLOCK_BYTES - 2] = (uint8_t)(crc >> 16); b2[ACAL_BLOCK_BYTES - 1] = (uint8_t)(crc >> 24);
+  }
+  memset(out, 0, sizeof(out));
+  T_EQ(acal_unpack(b2, out), ACAL_OK);
+  for(i=0;i<2;i++)
+  {
+    T_MEM(out[i].zero[ACAL_GATED], in[i].zero[ACAL_FULL], sizeof(in[i].zero[ACAL_FULL]));
+    T_MEM(out[i].zero[ACAL_FULL], in[i].zero[ACAL_FULL], sizeof(in[i].zero[ACAL_FULL]));
+    T_MEM(out[i].slope[ACAL_GATED], in[i].slope[ACAL_FULL], sizeof(in[i].slope[ACAL_FULL]));
+    T_MEM(out[i].noise[ACAL_GATED], in[i].noise[ACAL_FULL], sizeof(in[i].noise[ACAL_FULL]));
+    T_EQ(out[i].gain[ACAL_GATED][0], in[i].gain[ACAL_FULL][0]); T_EQ(out[i].gain[ACAL_GATED][1], in[i].gain[ACAL_FULL][1]);
+    T_EQ(out[i].gain_flags, in[i].gain_flags | ACAL_GAIN_FULL_ONLY);
+    T_EQ(out[i].gain_range, in[i].gain_range);
+  }
+  {
+    acal_channel again[2];
+    uint8_t      b3[ACAL_BLOCK_BYTES];
+
+    acal_pack(out, b3);
+    T_EQ(b3[8], 2);
+    T_EQ(acal_unpack(b3, again), ACAL_OK);
+    T_MEM(&again[0], &out[0], sizeof(acal_channel));
+    T_MEM(&again[1], &out[1], sizeof(acal_channel));
+  }
 
   T_TRUE(acal_bound(&in[0], pwm));
   pwm[3] = 860;
   T_TRUE(!acal_bound(&in[0], pwm));
 
   //gains as applied: Q15 x 2, unity when never measured
-  T_EQ(acal_gain16(&in[0], 1), 2 * 33678);
-  T_EQ(acal_gain16(&in[1], 1), 65536);
+  T_EQ(acal_gain16(&in[0], ACAL_FULL, 1), 2 * 33678);
+  T_EQ(acal_gain16(&in[1], ACAL_GATED, 1), 65536);
 }
 
 static void test_round_pair(void)
@@ -239,29 +248,29 @@ static void test_correction(void)
   acal_channel c;
   acal_corr k;
   int16_t ca, cb;
-  int32_t d, core, raw;
+  int32_t d, cls, core, raw;
 
   unit_ch1(&c, pwm);
 
   //1.00o5 fallback: no block, or not bound: whole-code offsets, unity gains, 1.00o5 rail limits
-  acal_correction(0, pwm, 3, 0, 385, -2, 2, &k);
+  acal_correction(0, pwm, 3, 99, 0, 385, -2, 2, &k);
   T_EQ(k.version, 1); T_EQ(k.comp_a, -2); T_EQ(k.comp_b, 2); T_EQ(k.frac_a, 0); T_EQ(k.frac_b, 0);
   T_EQ(k.gain_a, 65536); T_EQ(k.gain_b, 65536); T_EQ(k.off_a, -2 * 65536); T_EQ(k.off_b, 2 * 65536);
   T_EQ(k.clip_lo, 2); T_EQ(k.clip_hi, 253); T_EQ(k.gain16, 65536);
   T_EQ(k.zero_q8, 128 * 256); T_EQ(k.corr16, 0); T_EQ(k.shift, 0);
-  acal_correction(0, pwm, 3, 100, 385, -2, 3, &k);
+  acal_correction(0, pwm, 3, 99, 100, 385, -2, 3, &k);
   T_EQ(k.shift, 25);                                          //100 x 100 / 385 = 25.97, C truncation
   T_EQ(k.zero_q8, 128 * 256 - 6649);                          //1.00o5 formula, 25600 x 100 / 385 = 6649.35
   T_EQ(k.corr16, 8);
   pwm[0] = 1;
-  acal_correction(&c, pwm, 3, 0, 385, -2, 2, &k);
+  acal_correction(&c, pwm, 3, 99, 0, 385, -2, 2, &k);
   T_EQ(k.version, 1);
   pwm[0] = 904;
 
   //dither never adds a code to a whole-code offset: the 1.00o5 arithmetic exactly
   {
     uint32_t lfsr = 1;
-    acal_correction(0, pwm, 3, 0, 385, -2, 2, &k);
+    acal_correction(0, pwm, 3, 99, 0, 385, -2, 2, &k);
     for(raw=0;raw<256;raw++)
     {
       T_EQ(loop_code(raw, &k, 0, &lfsr), (raw - 2 < 0) ? 0 : raw - 2);
@@ -273,26 +282,28 @@ static void test_correction(void)
   {
     acal_channel u = c;
     acal_gain_carry(0, &u);
-    acal_correction(&u, pwm, 3, 0, 385, -2, 2, &k);
-    T_EQ(k.version, 3);
-    T_EQ(16 * k.comp_a + k.frac_a, 2048 - u.zero[0][3]);
-    T_EQ(16 * k.comp_b + k.frac_b, 2048 - u.zero[1][3]);
+    acal_correction(&u, pwm, 3, 99, 0, 385, -2, 2, &k);
+    T_EQ(k.version, 3); T_EQ(k.cls, ACAL_GATED);
+    T_EQ(16 * k.comp_a + k.frac_a, 2048 - u.zero[ACAL_GATED][0][3]);
+    T_EQ(16 * k.comp_b + k.frac_b, 2048 - u.zero[ACAL_GATED][1][3]);
     T_EQ(k.gain_a, 65536); T_EQ(k.gain_b, 65536); T_EQ(k.gain16, 65536);
-    T_EQ(k.off_a, 4096 * (2048 - u.zero[0][3]));
-    T_EQ(k.off_b, 4096 * (2048 - u.zero[1][3]));
-    T_EQ(k.corr16, 2048 - (u.zero[0][3] + u.zero[1][3] + 1) / 2);
+    T_EQ(k.off_a, 4096 * (2048 - u.zero[ACAL_GATED][0][3]));
+    T_EQ(k.off_b, 4096 * (2048 - u.zero[ACAL_GATED][1][3]));
+    T_EQ(k.corr16, 2048 - (u.zero[ACAL_FULL][0][3] + u.zero[ACAL_FULL][1][3] + 1) / 2);
   }
 
-  //with gains: the corrected mean (raw x gain + off) / 65536 = T + G (raw - z) for every raw code and offset
-  for(d=-600;d<=600;d+=37)
+  //with gains: the corrected mean (raw x gain + off) / 65536 = T + G (raw - z) for every raw code, class and offset
+  for(cls=0;cls<2;cls++)
+    for(d=-600;d<=600;d+=37)
     {
-      acal_correction(&c, pwm, 3, (int16_t)d, 385, -2, 2, &k);
+      acal_correction(&c, pwm, 3, cls ? 99 : 0, (int16_t)d, 385, -2, 2, &k);
+      T_EQ(k.cls, cls);
       T_EQ(k.zero_q8, 256 * (128 - k.shift));
 
       for(core=0;core<2;core++)
       {
-        int32_t z16 = c.zero[core][3] + off16(c.slope[core][3], d);
-        int64_t g   = acal_gain16(&c, core);
+        int32_t z16 = c.zero[cls][core][3] + off16(c.slope[cls][core][3], d);
+        int64_t g   = acal_gain16(&c, cls, core);
         uint32_t gk = core ? k.gain_b : k.gain_a;
         int32_t  ok = core ? k.off_b : k.off_a;
 
@@ -318,30 +329,31 @@ static void test_correction(void)
       }
     }
 
-  //range 6 uses range 5
-  c.zero[0][5] = 2100;
-  acal_correction(&c, pwm, 6, 0, 385, -2, 2, &k);
+  //range 6 uses range 5; the full class uses its own zeros, slopes and gains
+  c.zero[ACAL_GATED][0][5] = 2100;
+  acal_correction(&c, pwm, 6, 99, 0, 385, -2, 2, &k);
   T_EQ(16 * k.comp_a + k.frac_a, 2048 - 2100);
-  acal_correction(&c, pwm, 3, 0, 385, -2, 2, &k);
-  T_EQ(16 * k.comp_b + k.frac_b, 2048 - c.zero[1][3]);
+  acal_correction(&c, pwm, 3, 0, 0, 385, -2, 2, &k);
+  T_EQ(k.cls, ACAL_FULL);
+  T_EQ(16 * k.comp_b + k.frac_b, 2048 - c.zero[ACAL_FULL][1][3]);
   T_EQ(k.gain_b, 2 * 33678);
 
-  //16-bit path gain: harmonic mean of the gains, corr16 with it
+  //16-bit path gain: harmonic mean of the full-class gains, corr16 with it
   {
     uint64_t ga = 2 * 32607, gb = 2 * 33678;
-    int64_t  zs = c.zero[0][3] + c.zero[1][3];
+    int64_t  zs = c.zero[ACAL_FULL][0][3] + c.zero[ACAL_FULL][1][3];
     T_EQ(k.gain16, (2 * ga * gb + (ga + gb) / 2) / (ga + gb));
-    T_TRUE(k.gain16 > 66200 && k.gain16 < 66350);             //1.0112: the full rate on the old block's gated scale
+    T_TRUE(k.gain16 > 66200 && k.gain16 < 66350);             //1.0112: the full class pulled onto the gated gain
     T_EQ(k.corr16, (2048 * 131072 - (int64_t)k.gain16 * zs - 65536) / 131072);
   }
   T_EQ(acal_scale(1u << 24, 65536), 1u << 24);
   T_EQ(acal_scale(100000, 66000), 100708);                   //100000 x 66000 / 65536 = 100708.0
 
-  //1.00o5 fields from the v3 zeros averaged over the ranges
+  //1.00o5 fields from v3 zeros (gated, averaged over the ranges)
   unit_ch1(&c, pwm);
   acal_atlan_comps(&c, &ca, &cb);
-  T_EQ(ca, -4);                                               //131.7 -> 127.7
-  T_EQ(cb, -1);                                               //129.2 -> 128.2
+  T_EQ(ca, -3);                                               //130.9 -> 127.9
+  T_EQ(cb, 2);                                                //125.6 -> 127.6
 }
 
 static void test_measurement(void)
@@ -386,39 +398,41 @@ static void test_measurement(void)
   memset(&c, 0, sizeof(c));
   memset(&m, 0, sizeof(m));
   m.pwm_lo = 753; m.pwm_hi = 1053; m.pwm = 903;
-  m.search16_lo[0] = 2095 + 634; m.search16_hi[0] = 2095 - 634;   //the 2 MSa/s search points: not stored
-  m.search16_lo[1] = 2010 + 623; m.search16_hi[1] = 2010 - 623;
-  m.mean16_lo[0] = 2107 + 632; m.mean16_hi[0] = 2107 - 632;
-  m.mean16_lo[1] = 2067 + 607; m.mean16_hi[1] = 2067 - 607;
-  m.zero16[0] = 2107; m.zero16[1] = 2067;
-  m.noise16[0] = 9; m.noise16[1] = 18;
+  m.mean16_lo[ACAL_GATED][0] = 2095 + 634; m.mean16_hi[ACAL_GATED][0] = 2095 - 634;   //-0.2641 codes per count
+  m.mean16_lo[ACAL_GATED][1] = 2010 + 623; m.mean16_hi[ACAL_GATED][1] = 2010 - 623;
+  m.mean16_lo[ACAL_FULL][0]  = 2107 + 632; m.mean16_hi[ACAL_FULL][0]  = 2107 - 632;
+  m.mean16_lo[ACAL_FULL][1]  = 2067 + 607; m.mean16_hi[ACAL_FULL][1]  = 2067 - 607;
+  m.zero16[ACAL_GATED][0] = 2095; m.zero16[ACAL_GATED][1] = 2010;
+  m.zero16[ACAL_FULL][0]  = 2107; m.zero16[ACAL_FULL][1]  = 2067;
+  m.noise16[ACAL_GATED][0] = 10; m.noise16[ACAL_GATED][1] = 15;   //gated limit 1.0 code (fw 0.2.100)
+  m.noise16[ACAL_FULL][0]  = 9;  m.noise16[ACAL_FULL][1]  = 18;
   T_EQ(acal_range_store(&m, &c, 3), ACAL_OK);
   T_EQ(c.pwm[3], 903);
-  T_EQ(c.slope[0][3], -17258);                                //-1264 x 4096 / 300
-  T_EQ(c.slope[1][3], -16575);
-  T_EQ(c.zero[0][3], 2107);
-  T_EQ(c.zero[1][3], 2067);
-  T_EQ(c.noise[0][3], 9);
-  T_EQ(c.noise[1][3], 18);
+  T_EQ(c.slope[ACAL_GATED][0][3], -17312);                    //-1268 x 4096 / 300
+  T_EQ(c.slope[ACAL_GATED][1][3], -17012);
+  T_EQ(c.slope[ACAL_FULL][0][3], -17258);
+  T_EQ(c.slope[ACAL_FULL][1][3], -16575);
+  T_EQ(c.zero[ACAL_FULL][1][3], 2067);
+  T_EQ(c.noise[ACAL_GATED][1][3], 15);
+  T_EQ(c.noise[ACAL_FULL][0][3], 9);
 
   {
     acal_range_meas x;
     acal_channel before = c;
 
     x = m; x.clipped = 1;                         T_EQ(acal_range_store(&x, &c, 2), ACAL_E_CLIP);
-    x = m; x.noise16[1] = 49;                     T_EQ(acal_range_store(&x, &c, 2), ACAL_E_NOISE);
-    x = m; x.drift16[0] = -9;                     T_EQ(acal_range_store(&x, &c, 2), ACAL_E_DRIFT);
-    x = m; x.mean16_hi[0] = x.mean16_lo[0] - 900; T_EQ(acal_range_store(&x, &c, 2), ACAL_E_SLOPE);  //-0.1875
-    x = m; x.mean16_hi[1] = x.mean16_lo[1] - 1400;
-                                                  T_EQ(acal_range_store(&x, &c, 2), ACAL_E_SLOPE);  //A/B 0.026 apart
-    x = m; x.zero16[1] = 2048 - 257;              T_EQ(acal_range_store(&x, &c, 2), ACAL_E_ZERO);
-    x = m; x.zero16[0] = 2048 + 170; x.zero16[1] = 2048 - 170;
+    x = m; x.noise16[ACAL_FULL][1] = 49;          T_EQ(acal_range_store(&x, &c, 2), ACAL_E_NOISE);
+    x = m; x.drift16[ACAL_GATED][0] = -9;         T_EQ(acal_range_store(&x, &c, 2), ACAL_E_DRIFT);
+    x = m; x.mean16_hi[ACAL_GATED][0] = x.mean16_lo[ACAL_GATED][0] - 900;
+                                                  T_EQ(acal_range_store(&x, &c, 2), ACAL_E_SLOPE);  //-0.1875
+    x = m; x.mean16_hi[ACAL_GATED][1] = x.mean16_lo[ACAL_GATED][1] - 1450;
+                                                  T_EQ(acal_range_store(&x, &c, 2), ACAL_E_SLOPE);  //A/B 0.038 apart
+    x = m; x.mean16_hi[ACAL_FULL][1] = x.mean16_lo[ACAL_FULL][1] - 1450;
+                                                  T_EQ(acal_range_store(&x, &c, 2), ACAL_E_SLOPE);  //full class too
+    x = m; x.zero16[ACAL_GATED][1] = 2048 - 257;  T_EQ(acal_range_store(&x, &c, 2), ACAL_E_ZERO);
+    x = m; x.zero16[ACAL_FULL][0] = 2048 + 170; x.zero16[ACAL_FULL][1] = 2048 - 170;
                                                   T_EQ(acal_range_store(&x, &c, 2), ACAL_E_SPREAD);
-    x = m; x.search16_lo[0] = 0; x.search16_hi[1] = 4000;
-                                                  T_EQ(acal_range_store(&x, &c, 2), ACAL_OK);       //search points
-    c = before;
-    T_MEM(&before, &c, sizeof(c));
-    x = m; x.noise16[0] = 49;                     T_EQ(acal_range_store(&x, &c, 2), ACAL_E_NOISE);
+    x = m; x.zero16[ACAL_FULL][0] = 2095 + 193;   T_EQ(acal_range_store(&x, &c, 2), ACAL_E_CLASS);
     T_MEM(&before, &c, sizeof(c));                            //nothing stored on a reject
   }
 
@@ -503,7 +517,7 @@ static void test_zero_noise_bench(void)
 
     for(k=0;k<2;k++)
     {
-      T_TRUE(z.noise16[k] < ACAL_MAX_NOISE16);
+      T_TRUE(z.noise16[k] < ACAL_MAX_NOISE16_FULL);
       T_TRUE(z.noise16[k] - z.within16[k] <= 1);
       T_TRUE(z.drift16[k] >= 3 && z.drift16[k] <= 7);
     }
@@ -511,13 +525,13 @@ static void test_zero_noise_bench(void)
     z = zero_sim(convs, ch2_lvl, ch2_sd, 5, 0, 0);
     T_TRUE(z.noise16[0] >= 26 && z.noise16[0] <= 30);
     T_TRUE(z.noise16[1] >= 33 && z.noise16[1] <= 37);
-    T_TRUE(z.noise16[1] < ACAL_MAX_NOISE16);
+    T_TRUE(z.noise16[1] < ACAL_MAX_NOISE16_FULL);
   }
 
   //What does trip the limit: +-3 codes moving between conversions (pickup on the open input, ripple). The total
   //reads 3.2 codes, inside a capture it is still the bench's 1.1: the result line shows both
   z = zero_sim(64, ch1_lvl, ch1_sd, 0, 48, 0);
-  T_TRUE(z.noise16[1] > ACAL_MAX_NOISE16);
+  T_TRUE(z.noise16[1] > ACAL_MAX_NOISE16_FULL);
   T_TRUE(z.within16[1] >= 17 && z.within16[1] <= 20);
 
   //A bus glitch of 64 codes on one sample in 500 per conversion: 2.9 codes RMS, inside the captures as well
@@ -525,38 +539,46 @@ static void test_zero_noise_bench(void)
   T_TRUE(z.noise16[0] >= 44 && z.noise16[0] <= 50);
   T_TRUE(z.noise16[0] - z.within16[0] <= 2);
 
-  //acal_range_check says where: rate (always 200 MSa/s), core, value, within
+  //acal_range_check says where: class, core, value, within
   memset(&m, 0, sizeof(m));
   m.pwm_lo = 753; m.pwm_hi = 1053; m.pwm = 903;
   for(k=0;k<2;k++)
   {
-    m.mean16_lo[k] = 2048 + 634;
-    m.mean16_hi[k] = 2048 - 634;
-    m.zero16[k]    = 2048;
-    m.noise16[k]   = 18;
-    m.within16[k]  = 17;
+    m.mean16_lo[ACAL_GATED][k] = m.mean16_lo[ACAL_FULL][k] = 2048 + 634;
+    m.mean16_hi[ACAL_GATED][k] = m.mean16_hi[ACAL_FULL][k] = 2048 - 634;
+    m.zero16[ACAL_GATED][k] = m.zero16[ACAL_FULL][k] = 2048;
+    m.noise16[ACAL_GATED][k] = 12;
+    m.noise16[ACAL_FULL][k] = 18;
+    m.within16[ACAL_GATED][k] = m.within16[ACAL_FULL][k] = 17;
   }
   T_EQ(acal_range_check(&m, &f), ACAL_OK);
   T_EQ(f.value, 0);
-  m.noise16[1] = 52;
+  m.noise16[ACAL_FULL][1] = 52;
   T_EQ(acal_range_check(&m, &f), ACAL_E_NOISE);
-  T_EQ(f.rate, ACAL_RATE_FULL); T_EQ(f.core, 1); T_EQ(f.value, 52); T_EQ(f.within16, 17);
-  //fw 0.2.100 (owner 2026-10-20 18:13): the limit Diagnostics shows, 3.0 codes; one since the gated class's 1.0 went
-  //(fw 0.2.105). The owner's unit: stored 1.19 / 2.75 at the worst range per channel
-  T_EQ(ACAL_MAX_NOISE16, 48);
-  m.noise16[0] = 19; m.noise16[1] = 48;
+  T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, 1); T_EQ(f.value, 52); T_EQ(f.within16, 17);
+  m.noise16[ACAL_FULL][1] = 18;
+  //fw 0.2.100 (owner 2026-10-20 18:13): the limits per class, the ones Diagnostics shows: full rate 3.0 codes, gated
+  //1.0 (it was 3.0 too). The owner's unit: stored full 1.19 / 2.75, gated 0.50 / 0.38 at the worst range per channel
+  T_EQ(ACAL_MAX_NOISE16(ACAL_FULL), 48);
+  T_EQ(ACAL_MAX_NOISE16(ACAL_GATED), 16);
+  m.noise16[ACAL_FULL][0] = 19; m.noise16[ACAL_FULL][1] = 44;
+  m.noise16[ACAL_GATED][0] = 8; m.noise16[ACAL_GATED][1] = 6;
   T_EQ(acal_range_check(&m, &f), ACAL_OK);
-  m.noise16[0] = 49;
+  m.noise16[ACAL_FULL][1] = 48;
+  m.noise16[ACAL_GATED][0] = 16;
+  T_EQ(acal_range_check(&m, &f), ACAL_OK);
+  m.noise16[ACAL_GATED][0] = 17;
   T_EQ(acal_range_check(&m, &f), ACAL_E_NOISE);
-  T_EQ(f.rate, ACAL_RATE_FULL); T_EQ(f.core, 0); T_EQ(f.value, 49);
-  m.noise16[0] = m.noise16[1] = 18;
-  m.drift16[0] = -11;
+  T_EQ(f.cls, ACAL_GATED); T_EQ(f.core, 0); T_EQ(f.value, 17);
+  m.noise16[ACAL_GATED][0] = 12;
+  m.noise16[ACAL_FULL][0] = m.noise16[ACAL_FULL][1] = 18;
+  m.drift16[ACAL_GATED][0] = -11;
   T_EQ(acal_range_check(&m, &f), ACAL_E_DRIFT);
-  T_EQ(f.core, 0); T_EQ(f.value, -11);
-  m.drift16[0] = 0;
-  m.zero16[0] = 2048 + 300;
+  T_EQ(f.cls, ACAL_GATED); T_EQ(f.core, 0); T_EQ(f.value, -11);
+  m.drift16[ACAL_GATED][0] = 0;
+  m.zero16[ACAL_FULL][0] = 2048 + 300;
   T_EQ(acal_range_check(&m, &f), ACAL_E_ZERO);
-  T_EQ(f.rate, ACAL_RATE_FULL); T_EQ(f.core, 0); T_EQ(f.value, 300);
+  T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, 0); T_EQ(f.value, 300);
   T_EQ(acal_range_check(&m, 0), ACAL_E_ZERO);
 }
 
@@ -566,7 +588,7 @@ static void test_gain_step(void)
   uint16_t pwm[7] = { 904, 900, 908, 903, 908, 903, 903 };
   acal_channel c, before, old;
   acal_gain_meas m, x;
-  uint32_t k;
+  uint32_t cl, k;
 
   //x1 probe: about 88 codes at range 2 stays there (176 at range 3 is too wide); x10: 8.8 codes -> range 5 (88);
   //nothing on the post: measure at the probe range (and fail the lever); huge: range 0
@@ -585,56 +607,48 @@ static void test_gain_step(void)
 
   //centring: 9 codes above the zero with slopes about -0.262 codes per count -> 34 counts more PWM
   unit_ch1(&c, pwm);
-  T_EQ(acal_gain_pwm(&c, 2, 144), 908 + 35);                 //the full-rate slopes, -0.258 mean
-  T_EQ(acal_gain_pwm(&c, 2, -144), 908 - 35);
+  T_EQ(acal_gain_pwm(&c, 2, 144), 908 + 34);
+  T_EQ(acal_gain_pwm(&c, 2, -144), 908 - 34);
   T_EQ(acal_gain_pwm(&c, 2, 0), 908);
   T_EQ(acal_gain_pwm(&c, 2, 1000000), ACAL_PWM_MAX);
 
-  //a clean measurement at range 2 (200 MSa/s): lows 93.0, highs 181.3 (A) and 178.4 (B)
+  //a clean measurement at range 2: lows 93.0, highs 181.0 (A) and 178.6 (B), full rate B 2.7 % lower
   memset(&m, 0, sizeof(m));
-  for(k=0;k<2;k++)
-  {
-    m.mean16[0][k] = 93 * 16;
-    m.mean16[2][k] = 93 * 16 + 2;
-  }
-  m.mean16[1][0] = 1488 + 1414;
-  m.mean16[1][1] = 1488 + 1366;
-
-  //No gains in use (a first calibration): mean G 1; reference (span A + span B) / 2 = (2826 + 2730) / 2 = 2778
-  //(1/32 code)
-  acal_gain_carry(0, &c);
+  for(cl=0;cl<2;cl++)
+    for(k=0;k<2;k++)
+    {
+      m.mean16[cl][0][k] = 93 * 16;
+      m.mean16[cl][2][k] = 93 * 16 + 2;
+    }
+  m.mean16[ACAL_GATED][1][0] = 1488 + 1408;                   //span 88.0 - 1/16 (A)
+  m.mean16[ACAL_GATED][1][1] = 1488 + 1400;                   //87.5 (B)
+  m.mean16[ACAL_FULL][1][0]  = 1488 + 1414;
+  m.mean16[ACAL_FULL][1][1]  = 1488 + 1366;
+  memset(&c, 0, sizeof(c));
   T_EQ(acal_gain_store(&m, 2, &c), ACAL_OK);
-  T_EQ(c.gain[0], (2778 * 32768 + 1413) / 2826);
-  T_EQ(c.gain[1], (2778 * 32768 + 1365) / 2730);
-  T_EQ(c.gain_range, 2); T_EQ(c.gain_flags, 0); T_EQ(c.gain_lever, 1389);
+  //reference (span A + span B) / 2 gated = (2814 + 2798) / 2 = 2806 (1/32 code)
+  T_EQ(c.gain[ACAL_GATED][0], (2806 * 32768 + 1407) / 2814);
+  T_EQ(c.gain[ACAL_GATED][1], (2806 * 32768 + 1399) / 2798);
+  T_EQ(c.gain[ACAL_FULL][0], (2806 * 32768 + 1413) / 2826);
+  T_EQ(c.gain[ACAL_FULL][1], (2806 * 32768 + 1365) / 2730);
+  T_EQ(c.gain_range, 2); T_EQ(c.gain_flags, 0); T_EQ(c.gain_lever, 1403);
 
-  //Gains in use (a fw 0.2.45-0.2.104 block: the full-rate class on the gated scale, about 1.1 % up): the new gains
-  //give the mean of both cores the corrected span those gains give this measurement, so the volts calibration fitted
-  //on it stays right; the split is the new measurement's. Again: unchanged
-  c.gain[0] = 32607; c.gain[1] = 33678; c.gain_range = 1; c.gain_flags = ACAL_GAIN_KEPT;
-  {
-    int64_t keep = 32607LL * 2826 + 33678LL * 2730, now;
-
-    T_EQ(acal_gain_store(&m, 2, &c), ACAL_OK);
-    T_EQ(c.gain[0], (keep + 2826) / (2 * 2826));
-    T_EQ(c.gain[1], (keep + 2730) / (2 * 2730));
-    now = (int64_t)c.gain[0] * 2826 + (int64_t)c.gain[1] * 2730;
-    T_TRUE(now - keep <= 2826 && keep - now <= 2826);
-  }
-  T_EQ(c.gain_range, 2); T_EQ(c.gain_flags, 0);
   before = c;
-  T_EQ(acal_gain_store(&m, 2, &c), ACAL_OK);
-  T_TRUE(iabs_t(c.gain[0] - before.gain[0]) <= 1 && iabs_t(c.gain[1] - before.gain[1]) <= 1);
-
+  x = m; x.clipped = 3;                            T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_CLIP);
+  x = m; x.mean16[ACAL_FULL][2][1] += 9;           T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_DRIFT);
+  x = m; x.mean16[ACAL_GATED][2][0] -= 7;          T_EQ(acal_gain_store(&x, 2, &c), ACAL_OK);   //0.56 - 0.13 code: in
   c = before;
-  x = m; x.clipped = 3;                     T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_CLIP);
-  x = m; x.mean16[2][1] += 9;               T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_DRIFT);
-  x = m; x.mean16[2][0] -= 7;               T_EQ(acal_gain_store(&x, 2, &c), ACAL_OK);   //0.56 - 0.13 code: in
+  x = m; x.mean16[ACAL_GATED][1][0] = 1488 + 630;  T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_LEVER);
+  for(cl=0;cl<2;cl++) for(k=0;k<2;k++) x.mean16[cl][1][k] = m.mean16[cl][0][k] - 1408;   //levels swapped
+                                                   T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_LEVER);
+  x = m; x.mean16[ACAL_FULL][1][1] = 1488 + 1270;  T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_SPLIT);  //A/B 1.11
+  x = m; x.mean16[ACAL_FULL][1][0] = 1488 + 1250; x.mean16[ACAL_FULL][1][1] = 1488 + 1240;
+                                                   T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_CLASS);  //1.13
+  x = m; x.mean16[ACAL_FULL][1][0] = 1488 + 1300; x.mean16[ACAL_FULL][1][1] = 1488 + 1290;
+                                                   T_EQ(acal_gain_store(&x, 2, &c), ACAL_OK);            //1.085
   c = before;
-  x = m; x.mean16[1][0] = 1488 + 630;       T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_LEVER);
-  for(k=0;k<2;k++) x.mean16[1][k] = m.mean16[0][k] - 1408;                       //levels swapped
-                                            T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_LEVER);
-  x = m; x.mean16[1][1] = 1488 + 1270;      T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_SPLIT);  //A/B 1.11
+  x = m; x.mean16[ACAL_FULL][1][0] = 1488 + 1580; x.mean16[ACAL_FULL][1][1] = 1488 + 1575;
+                                                   T_EQ(acal_gain_store(&x, 2, &c), ACAL_E_GAIN_CLASS);  //0.89
   T_MEM(&before, &c, sizeof(c));
 
   //carry-over: measured gains survive a new zero calibration, flagged; never measured -> unity
@@ -642,50 +656,47 @@ static void test_gain_step(void)
   memset(&c, 0x5A, sizeof(c));
   acal_gain_carry(&old, &c);
   T_MEM(c.gain, old.gain, sizeof(c.gain));
-  T_EQ(c.gain_range, 2); T_EQ(c.gain_flags, ACAL_GAIN_KEPT); T_EQ(c.gain_lever, 1389);
+  T_EQ(c.gain_range, 2); T_EQ(c.gain_flags, ACAL_GAIN_KEPT); T_EQ(c.gain_lever, 1403);
   old.gain_range = ACAL_GAIN_NONE;
   acal_gain_carry(&old, &c);
-  T_EQ(c.gain[1], ACAL_GAIN_ONE); T_EQ(c.gain_range, ACAL_GAIN_NONE); T_EQ(c.gain_flags, 0);
+  T_EQ(c.gain[ACAL_FULL][1], ACAL_GAIN_ONE); T_EQ(c.gain_range, ACAL_GAIN_NONE); T_EQ(c.gain_flags, 0);
   memset(&c, 0x5A, sizeof(c));
   acal_gain_carry(0, &c);
-  T_EQ(c.gain[0], ACAL_GAIN_ONE); T_EQ(c.gain_range, ACAL_GAIN_NONE); T_EQ(c.gain_lever, 0);
+  T_EQ(c.gain[ACAL_GATED][0], ACAL_GAIN_ONE); T_EQ(c.gain_range, ACAL_GAIN_NONE); T_EQ(c.gain_lever, 0);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Model of the owner's CH1 at range 2 (gain bench 2026-10-18, +-1.0045 V from a DMM-read reference against the shorted-input
-//raw zeros), the full-rate class (every capture since FPGA 0x153D): codes per volt per core, the raw zeros at dcoffset 0,
-//the offset slopes. The calibration post sits at -1.24 V (generator low) and +1.87 V (high) against probe ground.
-//bm_gated_ref: the mean gated gain of both cores, the scale a fw 0.2.45-0.2.104 block's gains (and its volts calibration)
-//are on.
+//raw zeros): codes per volt per core and class, the raw zeros at dcoffset 0, the gated offset slopes. The calibration post
+//sits at -1.24 V (generator low) and +1.87 V (high) against probe ground.
 
-static const double bm_gain[2]  = { 28.62, 27.71 };                              //[core A, B]
-static const double bm_zero[2]  = { 131.73, 127.86 };
-static const double bm_slope[2] = { -0.2648, -0.2533 };                          //codes per count
-static const double bm_gated_ref = (28.54 + 28.42) / 2;
-static double bm_bow = 0.0;                                                      //core A: -bow x (x - zero)^2
+static const double bm_gain[2][2] = { { 28.62, 27.71 }, { 28.54, 28.42 } };    //[class full, gated][core A, B]
+static const double bm_zero[2][2] = { { 131.73, 127.86 }, { 131.09, 125.33 } };
+static const double bm_slope[2]   = { -0.2641, -0.2598 };                        //gated, codes per count
+static double bm_bow = 0.0;                                                      //gated core A: -bow x (x - zero)^2
 
-//True level (1/1024 code) of core k for input v at PWM offset dp from the centre
-static int32_t bm_level(int k, double v, int32_t dp)
+//True level (1/1024 code) of core k in class cls for input v at PWM offset dp from the centre
+static int32_t bm_level(int cls, int k, double v, int32_t dp)
 {
-  double x = v * bm_gain[k] + bm_slope[k] * dp;                                //codes from the core's 0 V code
+  double s = bm_slope[k] * bm_gain[cls][k] / bm_gain[ACAL_GATED][k];          //the PWM moves the ADC input too
+  double x = v * bm_gain[cls][k] + s * dp;                                     //codes from the core's 0 V code
 
-  if(k == 0)
+  if((cls == ACAL_GATED) && (k == 0))
     x -= bm_bow * x * x;
 
-  return (int32_t)((bm_zero[k] + x) * 1024.0 + 0.5);
+  return (int32_t)((bm_zero[cls][k] + x) * 1024.0 + 0.5);
 }
 
-//One conversion: 500 samples per core, noise 1 code; at 200 MSa/s (full) a 25 kHz PWM ripple phase common to both
-//cores per readout, at 2 MSa/s the record spans the ripple
-static void bm_convert(int full, double v, int32_t dp, acal_acc acc[2])
+//One conversion: 500 samples per core, noise 1 code, full rate with a 25 kHz PWM ripple phase common to both cores
+static void bm_convert(int cls, double v, int32_t dp, acal_acc acc[2])
 {
-  int32_t ripple = full ? (int32_t)(rnd() % 1024) - 512 : 0;                     //+-0.5 code, one phase per readout
+  int32_t ripple = (cls == ACAL_FULL) ? (int32_t)(rnd() % 1024) - 512 : 0;      //+-0.5 code, one phase per readout
   uint8_t s[2][500];
   int32_t i, k;
 
   for(k=0;k<2;k++)
   {
-    int32_t lv = bm_level(k, v, dp) + ripple;
+    int32_t lv = bm_level(cls, k, v, dp) + ripple;
 
     for(i=0;i<500;i++)
       s[k][i] = (uint8_t)adc(lv, 1024);
@@ -694,7 +705,7 @@ static void bm_convert(int full, double v, int32_t dp, acal_acc acc[2])
   }
 }
 
-static void bm_mean(int full, double v, int32_t dp, int convs, int32_t mean16[2])
+static void bm_mean(int cls, double v, int32_t dp, int convs, int32_t mean16[2])
 {
   acal_acc acc[2];
   int i;
@@ -702,28 +713,28 @@ static void bm_mean(int full, double v, int32_t dp, int convs, int32_t mean16[2]
   memset(acc, 0, sizeof(acc));
 
   for(i=0;i<convs;i++)
-    bm_convert(full, v, dp, acc);
+    bm_convert(cls, v, dp, acc);
 
   mean16[0] = acal_mean16(&acc[0]);
   mean16[1] = acal_mean16(&acc[1]);
 }
 
-//The firmware's gain step (cal_wiz_ui.c cal_gain_check / cal_gain_measure) on the model; returns the rc, c gets the
-//gains. symmetric = 0 skips the centring (levels at -35 / +53 codes from the zero)
+//The firmware's gain step (scope_functions.c cal_gain_channel) on the model; returns the rc, c gets the gains.
+//symmetric = 0 skips the centring (levels at -35 / +53 codes from the zero)
 static int bm_gain_step(acal_channel *c, int symmetric, uint8_t *range)
 {
   static const double lev[3] = { -1.24, 1.87, -1.24 };
   int32_t lo[2], hi[2], span16, mid16, zm16, dp;
   acal_gain_meas m;
   uint8_t r;
-  int l;
+  int l, cls;
 
-  //probe at range 2, 2 MSa/s, 2 conversions per level
-  bm_mean(0, -1.24, 0, 2, lo);
-  bm_mean(0, 1.87, 0, 2, hi);
+  //probe at range 2, gated, 2 conversions per level
+  bm_mean(ACAL_GATED, -1.24, 0, 2, lo);
+  bm_mean(ACAL_GATED, 1.87, 0, 2, hi);
   span16 = (hi[0] + hi[1] - lo[0] - lo[1]) / 2;
   mid16  = (hi[0] + hi[1] + lo[0] + lo[1]) / 4;
-  zm16   = (c->zero[0][2] + c->zero[1][2]) / 2;
+  zm16   = (c->zero[ACAL_GATED][0][2] + c->zero[ACAL_GATED][1][2]) / 2;
   r      = acal_gain_range(span16);
   *range = r;
 
@@ -735,25 +746,26 @@ static int bm_gain_step(acal_channel *c, int symmetric, uint8_t *range)
   memset(&m, 0, sizeof(m));
 
   for(l=0;l<3;l++)
-    bm_mean(1, lev[l], dp, 64, m.mean16[l]);
+    for(cls=ACAL_GATED;cls>=ACAL_FULL;cls--)
+      bm_mean(cls, lev[l], dp, (cls == ACAL_GATED) ? 8 : 64, m.mean16[cls][l]);
 
   return acal_gain_store(&m, r, c);
 }
 
-//Corrected per-core means (codes) at input v through acal_correction and the readout loop
-static void bm_corrected(const acal_channel *c, const uint16_t *pwm, double v, double mean[2])
+//Corrected per-core means (codes) at input v in class cls through acal_correction and the readout loop
+static void bm_corrected(const acal_channel *c, const uint16_t *pwm, int cls, double v, double mean[2])
 {
   acal_corr k;
   uint32_t lfsr = 7;
   int64_t  sum[2] = { 0, 0 };
   int32_t  i, n = 40000, core;
 
-  acal_correction(c, pwm, 2, 0, 385, 0, 0, &k);
+  acal_correction(c, pwm, 2, cls ? 99 : 0, 0, 385, 0, 0, &k);
 
   for(i=0;i<n;i++)
   {
     core = i & 1;
-    sum[core] += loop_code(adc(bm_level(core, v, 0), 1024), &k, core, &lfsr);
+    sum[core] += loop_code(adc(bm_level(cls, core, v, 0), 1024), &k, core, &lfsr);
   }
 
   mean[0] = (double)sum[0] / (n / 2);
@@ -771,7 +783,7 @@ static double bm_cic2(const acal_channel *c, const uint16_t *pwm, double v)
   uint32_t scale;
 
   pc_decim_config(PC_DECIM_CIC2, 0, 199, 3000, PC_DECIM_HAS_CIC, &cfg);
-  acal_correction(c, pwm, 2, 0, 385, 0, 0, &k);
+  acal_correction(c, pwm, 2, 199, 0, 385, 0, 0, &k);
   scale = acal_scale(cfg.scale_q24, k.gain16);
 
   for(i=0;i<m;i++)
@@ -781,7 +793,7 @@ static double bm_cic2(const acal_channel *c, const uint16_t *pwm, double v)
 
     //a constant input: CIC2 output = N^2 x the mean of the window's samples (half A, half B)
     for(j=0;j<200;j++)
-      y += (uint64_t)adc(bm_level(j & 1, v, 0), 1024);
+      y += (uint64_t)adc(bm_level(ACAL_FULL, j & 1, v, 0), 1024);
 
     y = (y * cfg.n) >> cfg.shift;
     q = ((double)y * scale + (double)k.corr16 * 1048576.0) / 16777216.0;
@@ -801,9 +813,9 @@ static void test_bench_model(void)
 {
   static const uint16_t pwm[7] = { 904, 900, 908, 903, 908, 903, 903 };
   acal_channel c;
-  double  p[2], n[2], g_ref = (bm_gain[0] + bm_gain[1]) / 2, cic_p, cic_n;
+  double  p[2][2], n[2][2], g_ref = (bm_gain[1][0] + bm_gain[1][1]) / 2, cic_p, cic_n;
   uint8_t r;
-  int     k;
+  int     cls, k;
 
   rng = 4242;
   bm_bow = 0.0;
@@ -811,90 +823,95 @@ static void test_bench_model(void)
   //the calibration's zero step on the model gives these zeros (exact here) and slopes
   memset(&c, 0, sizeof(c));
   memcpy(c.pwm, pwm, sizeof(c.pwm));
-  for(k=0;k<2;k++)
-  {
-    int32_t rr;
-    for(rr=0;rr<ACAL_RANGES;rr++)
+  for(cls=0;cls<2;cls++)
+    for(k=0;k<2;k++)
     {
-      c.zero[k][rr]  = (int16_t)(bm_zero[k] * 16 + 0.5);
-      c.slope[k][rr] = (int16_t)(bm_slope[k] * 65536 - 0.5);
+      int32_t rr;
+      for(rr=0;rr<ACAL_RANGES;rr++)
+      {
+        c.zero[cls][k][rr]  = (int16_t)(bm_zero[cls][k] * 16 + 0.5);
+        c.slope[cls][k][rr] = (int16_t)(bm_slope[k] * bm_gain[cls][k] / bm_gain[ACAL_GATED][k] * 65536 - 0.5);
+      }
     }
-  }
   acal_gain_carry(0, &c);
 
-  //Without gains (v2): the bench's numbers. A - B grows with the signal (0.91 code per volt, the fs/2 spur)
-  bm_corrected(&c, pwm, 1.0045, p);
-  bm_corrected(&c, pwm, -1.0045, n);
-  T_TRUE(dabs((p[0] - p[1]) - 0.91) < 0.1);
-  T_TRUE(dabs((n[0] - n[1]) + 0.91) < 0.1);
-  T_TRUE(dabs((p[0] + p[1] - n[0] - n[1]) / 2 / 2.009 - 28.17) < 0.03);
-  printf("bench model v2: A-B %+.3f / %+.3f, %.3f codes/V\n", p[0] - p[1], n[0] - n[1],
-         (p[0] + p[1] - n[0] - n[1]) / 2 / 2.009);
+  //Without gains (v2): the bench's numbers. Full rate A - B grows with the signal (0.91 code per volt, the fs/2 spur),
+  //and the full class reads 1.1 % below the gated one
+  bm_corrected(&c, pwm, ACAL_FULL, 1.0045, p[0]);
+  bm_corrected(&c, pwm, ACAL_FULL, -1.0045, n[0]);
+  bm_corrected(&c, pwm, ACAL_GATED, 1.0045, p[1]);
+  bm_corrected(&c, pwm, ACAL_GATED, -1.0045, n[1]);
+  T_TRUE(dabs((p[0][0] - p[0][1]) - 0.91) < 0.1);
+  T_TRUE(dabs((n[0][0] - n[0][1]) + 0.91) < 0.1);
+  T_TRUE(dabs((p[1][0] - p[1][1]) - 0.12) < 0.1);
+  T_TRUE(dabs((p[0][0] + p[0][1] - n[0][0] - n[0][1]) / 2 / 2.009 - 28.17) < 0.03);
+  T_TRUE(dabs((p[1][0] + p[1][1] - n[1][0] - n[1][1]) / 2 / 2.009 - 28.48) < 0.03);
+  printf("bench model v2: full A-B %+.3f / %+.3f, gated %+.3f / %+.3f, full %.3f codes/V vs gated %.3f\n",
+         p[0][0] - p[0][1], n[0][0] - n[0][1], p[1][0] - p[1][1], n[1][0] - n[1][1],
+         (p[0][0] + p[0][1] - n[0][0] - n[0][1]) / 2 / 2.009, (p[1][0] + p[1][1] - n[1][0] - n[1][1]) / 2 / 2.009);
 
-  //The gain step at the post, no gains in use: G_k = mean gain / g_k (mean G 1)
+  //The gain step at the post
   T_EQ(bm_gain_step(&c, 1, &r), ACAL_OK);
   T_EQ(r, 2);
-  for(k=0;k<2;k++)
-    T_TRUE(dabs(c.gain[k] / 32768.0 - g_ref / bm_gain[k]) < 0.0015);
+  for(cls=0;cls<2;cls++)
+    for(k=0;k<2;k++)
+      T_TRUE(dabs(c.gain[cls][k] / 32768.0 - g_ref / bm_gain[cls][k]) < 0.0015);
   T_TRUE(c.gain_lever > 85 * 16 && c.gain_lever < 92 * 16);
 
-  //With the gains: A - B under 0.1 code at +-1 V; the 8-bit path and CIC2 the mean codes per volt of both cores
-  bm_corrected(&c, pwm, 1.0045, p);
-  bm_corrected(&c, pwm, -1.0045, n);
+  //With the gains: A - B under 0.1 code at +-1 V in both classes; both classes (and CIC2) the gated codes per volt
+  bm_corrected(&c, pwm, ACAL_FULL, 1.0045, p[0]);
+  bm_corrected(&c, pwm, ACAL_FULL, -1.0045, n[0]);
+  bm_corrected(&c, pwm, ACAL_GATED, 1.0045, p[1]);
+  bm_corrected(&c, pwm, ACAL_GATED, -1.0045, n[1]);
   cic_p = bm_cic2(&c, pwm, 1.0045);
   cic_n = bm_cic2(&c, pwm, -1.0045);
-  T_TRUE(dabs(p[0] - p[1]) < 0.1);
-  T_TRUE(dabs(n[0] - n[1]) < 0.1);
-  T_TRUE(dabs((p[0] + p[1]) / 2 - (128 + 1.0045 * g_ref)) < 0.1);
-  T_TRUE(dabs((n[0] + n[1]) / 2 - (128 - 1.0045 * g_ref)) < 0.1);
+
+  for(cls=0;cls<2;cls++)
+  {
+    T_TRUE(dabs(p[cls][0] - p[cls][1]) < 0.1);
+    T_TRUE(dabs(n[cls][0] - n[cls][1]) < 0.1);
+    T_TRUE(dabs((p[cls][0] + p[cls][1]) / 2 - (128 + 1.0045 * g_ref)) < 0.1);
+    T_TRUE(dabs((n[cls][0] + n[cls][1]) / 2 - (128 - 1.0045 * g_ref)) < 0.1);
+  }
   T_TRUE(dabs(cic_p - (128 + 1.0045 * g_ref)) < 0.1);
   T_TRUE(dabs(cic_n - (128 - 1.0045 * g_ref)) < 0.1);
-  printf("bench model v3: A-B %+.3f / %+.3f, means %.2f / %.2f, CIC2 %.2f / %.2f (target %.2f / %.2f)\n",
-         p[0] - p[1], n[0] - n[1], (p[0] + p[1]) / 2, (n[0] + n[1]) / 2, cic_p, cic_n, 128 + 1.0045 * g_ref,
-         128 - 1.0045 * g_ref);
+  printf("bench model v3: full A-B %+.3f / %+.3f, gated %+.3f / %+.3f, means full %.2f / %.2f gated %.2f / %.2f, "
+         "CIC2 %.2f / %.2f (target %.2f / %.2f)\n", p[0][0] - p[0][1], n[0][0] - n[0][1], p[1][0] - p[1][1],
+         n[1][0] - n[1][1], (p[0][0] + p[0][1]) / 2, (n[0][0] + n[0][1]) / 2, (p[1][0] + p[1][1]) / 2,
+         (n[1][0] + n[1][1]) / 2, cic_p, cic_n, 128 + 1.0045 * g_ref, 128 - 1.0045 * g_ref);
 
-  //A unit calibrated by fw 0.2.45-0.2.104: its full-rate gains carry the gated scale its volts calibration was fitted
-  //on (G_k = gated mean / g_k). Every capture is full rate now and reads on that scale with those gains, and a new gain
-  //step keeps it (the mean G of the gains in use): within 0.1 % of the gated scale, A - B still under 0.1 code
-  for(k=0;k<2;k++)
-    c.gain[k] = (uint16_t)(32768.0 * bm_gated_ref / bm_gain[k] + 0.5);
-  c.gain_flags = ACAL_GAIN_KEPT;
-  bm_corrected(&c, pwm, 1.0045, p);
-  bm_corrected(&c, pwm, -1.0045, n);
-  T_TRUE(dabs((p[0] + p[1] - n[0] - n[1]) / 2 / 2.009 / bm_gated_ref - 1) < 0.001);
-  T_EQ(bm_gain_step(&c, 1, &r), ACAL_OK);
-  bm_corrected(&c, pwm, 1.0045, p);
-  bm_corrected(&c, pwm, -1.0045, n);
-  T_TRUE(dabs(p[0] - p[1]) < 0.1);
-  T_TRUE(dabs((p[0] + p[1] - n[0] - n[1]) / 2 / 2.009 / bm_gated_ref - 1) < 0.001);
-  printf("bench model, an older block's scale kept: %.3f codes/V (gated scale %.3f)\n",
-         (p[0] + p[1] - n[0] - n[1]) / 2 / 2.009, bm_gated_ref);
-
-  //Core A's bow (0.53 code at +-1 V, the bench's gated figure): with the levels centred the gain estimate stays within
-  //0.15 %; uncentred (-35 / +53 codes) it is about 0.6 % off (A's span 1.2 % short, half of it in the reference). The
-  //bow itself is INL and stays
-  bm_bow = 0.53 / (1.0045 * 28.62) / (1.0045 * 28.62);
+  //Core A's gated bow (0.53 code at +-1 V, the bench): with the levels centred the gain estimate stays within 0.15 %;
+  //uncentred (-35 / +53 codes) it is about 0.6 % off (A's span 1.2 % short, half of it in the reference). The bow
+  //itself is INL and stays
+  bm_bow = 0.53 / (1.0045 * 28.54) / (1.0045 * 28.54);
   acal_gain_carry(0, &c);
   T_EQ(bm_gain_step(&c, 1, &r), ACAL_OK);
-  T_TRUE(dabs(c.gain[0] / 32768.0 - g_ref / bm_gain[0]) < 0.0015);
+  T_TRUE(dabs(c.gain[ACAL_GATED][0] / 32768.0 - g_ref / bm_gain[1][0]) < 0.0015);
   {
-    double centred = c.gain[0] / 32768.0;
+    double centred = c.gain[ACAL_GATED][0] / 32768.0;
     acal_gain_carry(0, &c);
     T_EQ(bm_gain_step(&c, 0, &r), ACAL_OK);
-    T_TRUE(dabs(c.gain[0] / 32768.0 - g_ref / bm_gain[0]) > 0.004);
-    printf("bench model, core A bow 0.53: gain A error %+.2f %% centred, %+.2f %% uncentred\n",
-           (centred / (g_ref / bm_gain[0]) - 1) * 100, (c.gain[0] / 32768.0 / (g_ref / bm_gain[0]) - 1) * 100);
+    T_TRUE(dabs(c.gain[ACAL_GATED][0] / 32768.0 - g_ref / bm_gain[1][0]) > 0.004);
+    printf("bench model, core A bow 0.53: gated gain A error %+.2f %% centred, %+.2f %% uncentred\n",
+           (centred / (g_ref / bm_gain[1][0]) - 1) * 100,
+           (c.gain[ACAL_GATED][0] / 32768.0 / (g_ref / bm_gain[1][0]) - 1) * 100);
   }
   bm_bow = 0.0;
 
   //no probe on the post: both levels read the open input -> lever too small
   {
     acal_gain_meas m;
-    int l;
+    int32_t z[2];
+    int l, cl;
 
     memset(&m, 0, sizeof(m));
     for(l=0;l<3;l++)
-      bm_mean(1, 0.0, 0, 4, m.mean16[l]);
+      for(cl=0;cl<2;cl++)
+      {
+        bm_mean(cl, 0.0, 0, 4, z);
+        m.mean16[cl][l][0] = z[0];
+        m.mean16[cl][l][1] = z[1];
+      }
     T_EQ(acal_gain_store(&m, 2, &c), ACAL_E_GAIN_LEVER);
   }
 }
@@ -906,19 +923,22 @@ static void test_end_to_end(void)
   uint16_t pwm[7] = { 904, 900, 908, 903, 908, 903, 903 };
   acal_channel c;
   acal_corr k;
-  int32_t  d, zero1024[2], i, n = 20000;
+  int32_t  d, zero1024[2], i, n = 20000, cls;
   uint32_t lfsr = 1;
   int64_t  sum[2];
 
   unit_ch1(&c, pwm);
 
-  for(d=-300;d<=300;d+=150)
+  for(cls=0;cls<2;cls++)
+    for(d=-300;d<=300;d+=150)
     {
-      acal_correction(&c, pwm, 3, (int16_t)d, 385, -2, 2, &k);
+      uint32_t divider = cls ? 199 : 0;
+
+      acal_correction(&c, pwm, 3, divider, (int16_t)d, 385, -2, 2, &k);
 
       //true zeros of the two cores at this offset (the model, with exact slopes)
-      zero1024[0] = c.zero[0][3] * 64 + (int32_t)(((int64_t)c.slope[0][3] * d) / 64);
-      zero1024[1] = c.zero[1][3] * 64 + (int32_t)(((int64_t)c.slope[1][3] * d) / 64);
+      zero1024[0] = c.zero[cls][0][3] * 64 + (int32_t)(((int64_t)c.slope[cls][0][3] * d) / 64);
+      zero1024[1] = c.zero[cls][1][3] * 64 + (int32_t)(((int64_t)c.slope[cls][1][3] * d) / 64);
 
       sum[0] = sum[1] = 0;
 
@@ -942,7 +962,7 @@ static void test_end_to_end(void)
   {
     int32_t a, b, lo, hi;
 
-    acal_correction(&c, pwm, 3, 0, 385, -2, 2, &k);
+    acal_correction(&c, pwm, 3, 0, 0, 385, -2, 2, &k);
     lo = k.clip_lo;
     hi = k.clip_hi;
     T_TRUE(lo <= 0 && hi < 255);                              //both cores reach 0, core A tops out at 250
@@ -970,7 +990,7 @@ static void test_end_to_end(void)
 
     pc_decim_config(PC_DECIM_BOXCAR, 0, 199, 3000, PC_DECIM_HAS_CIC, &cfg);
     T_EQ(cfg.n, 200);
-    acal_correction(&c, pwm, 3, 0, 385, -2, 2, &k);
+    acal_correction(&c, pwm, 3, 199, 0, 385, -2, 2, &k);
 
     for(i=0;i<m;i++)
     {
@@ -978,7 +998,7 @@ static void test_end_to_end(void)
       int32_t code;
 
       for(j=0;j<200;j++)
-        y += (uint64_t)adc(c.zero[j & 1][3] * 64, 1000);
+        y += (uint64_t)adc(c.zero[ACAL_FULL][j & 1][3] * 64, 1000);
 
       y >>= cfg.shift;
       code = pc_decim_to_code((uint16_t)y, acal_scale(cfg.scale_q24, k.gain16), k.corr16);
@@ -1105,40 +1125,36 @@ static void test_points(void)
   T_EQ(acc[0][1].lo, 125); T_EQ(acc[0][1].hi, 255); T_EQ(acc[1][1].lo, 0); T_EQ(acc[1][1].hi, 127);
 
   memset(pt, 0, sizeof(pt));
-  acal_point_set(&pt[ACAL_PT_F_HI], 962, ACAL_RATE_FULL, 2, acc);
-  T_EQ(pt[ACAL_PT_F_HI].pwm, 962); T_EQ(pt[ACAL_PT_F_HI].rate, ACAL_RATE_FULL); T_EQ(pt[ACAL_PT_F_HI].convs, 2);
+  acal_point_set(&pt[ACAL_PT_F_HI], 962, ACAL_FULL, 2, acc);
+  T_EQ(pt[ACAL_PT_F_HI].pwm, 962); T_EQ(pt[ACAL_PT_F_HI].cls, ACAL_FULL); T_EQ(pt[ACAL_PT_F_HI].convs, 2);
   T_EQ(pt[ACAL_PT_F_HI].lo[0], 128); T_EQ(pt[ACAL_PT_F_HI].hi[0], 131);
   T_EQ(pt[ACAL_PT_F_HI].lo[1], 0); T_EQ(pt[ACAL_PT_F_HI].hi[1], 255);
   T_EQ(pt[ACAL_PT_F_HI].clipped[0], 0); T_EQ(pt[ACAL_PT_F_HI].clipped[1], 2);
   T_EQ(pt[ACAL_PT_F_HI].mean16[0], ((777 + 391) * 16 + 4) / 9);
   T_TRUE(pt[ACAL_PT_F_HI].rms16[1] > 16 * 70);
 
-  //Clip: the first measured point after the coarse ones, its rate and the core with more clipped samples; a clipped
-  //coarse point is never named; a 2 MSa/s slope point before a 200 MSa/s one
+  //Clip: the first measured point after the coarse ones, its class and the core with more clipped samples; a clipped
+  //coarse point is never named
   pt[ACAL_PT_COARSE_HI] = pt[ACAL_PT_F_HI];
-  pt[ACAL_PT_COARSE_HI].rate = ACAL_RATE_SEARCH;
+  pt[ACAL_PT_COARSE_HI].cls = ACAL_GATED;
   memset(&f, 0, sizeof(f));
   acal_fail_point(pt, ACAL_E_CLIP, &f);
-  T_EQ(f.point, ACAL_PT_F_HI); T_EQ(f.pwm, 962); T_EQ(f.rate, ACAL_RATE_FULL); T_EQ(f.core, ACAL_CORE_B);
+  T_EQ(f.point, ACAL_PT_F_HI); T_EQ(f.pwm, 962); T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, ACAL_CORE_B);
   T_EQ(f.clipped[1], 2); T_EQ(f.lo[1], 0); T_EQ(f.hi[1], 255); T_EQ(f.mean16[0], pt[ACAL_PT_F_HI].mean16[0]);
-  pt[ACAL_PT_S_HI] = pt[ACAL_PT_COARSE_HI];
-  acal_fail_point(pt, ACAL_E_CLIP, &f);
-  T_EQ(f.point, ACAL_PT_S_HI); T_EQ(f.rate, ACAL_RATE_SEARCH);
-  memset(&pt[ACAL_PT_S_HI], 0, sizeof(acal_point));
 
-  //Noise: the 200 MSa/s zero point, not measured here -> none; measured -> it
+  //Noise in the full class: the full-rate zero point, not measured here -> none; measured -> it
   memset(&f, 0, sizeof(f));
-  f.core = 1; f.value = 115;
+  f.cls = ACAL_FULL; f.core = 1; f.value = 115;
   acal_fail_point(pt, ACAL_E_NOISE, &f);
   T_EQ(f.point, ACAL_PT_NONE);
   pt[ACAL_PT_F_ZERO] = pt[ACAL_PT_F_HI];
   pt[ACAL_PT_F_ZERO].pwm = 812;
   acal_fail_point(pt, ACAL_E_NOISE, &f);
-  T_EQ(f.point, ACAL_PT_F_ZERO); T_EQ(f.pwm, 812); T_EQ(f.rate, ACAL_RATE_FULL); T_EQ(f.core, 1); T_EQ(f.value, 115);
+  T_EQ(f.point, ACAL_PT_F_ZERO); T_EQ(f.pwm, 812); T_EQ(f.cls, ACAL_FULL); T_EQ(f.core, 1); T_EQ(f.value, 115);
 
-  //Response: the coarse point and its rate; OK: nothing
+  //Response: the coarse point and its class; OK: nothing
   acal_fail_point(pt, ACAL_E_RESPONSE, &f);
-  T_EQ(f.point, ACAL_PT_COARSE_HI); T_EQ(f.rate, ACAL_RATE_SEARCH);
+  T_EQ(f.point, ACAL_PT_COARSE_HI); T_EQ(f.cls, ACAL_GATED);
   acal_fail_point(pt, ACAL_OK, &f);
   T_EQ(f.point, ACAL_PT_NONE);
 
@@ -1154,26 +1170,24 @@ static void test_points(void)
   }
 
   //CAL_PROBE body: 248 bytes, header then 28 bytes per point
-  f.core = 1; f.value = 115; f.within16 = 113;
+  f.cls = ACAL_FULL; f.core = 1; f.value = 115; f.within16 = 113;
   acal_fail_point(pt, ACAL_E_NOISE, &f);
   memset(b, 0xAA, sizeof(b));
   n = acal_probe_pack(b, 1, 4, ACAL_E_NOISE, ACAL_PROBE_GARBLED, 800, 812, 3, 2, &f, pt);
   T_EQ(n, ACAL_PROBE_BYTES); T_EQ(n, 252); T_EQ(b[252], 0xAA); T_EQ(b[248], 0); T_EQ(b[249], 0); T_EQ(b[250], 0);
   T_EQ(b[0], 1); T_EQ(b[1], 4); T_EQ(b[2], ACAL_E_NOISE); T_EQ(b[3], 0);
-  T_EQ(b[4], ACAL_PT_F_ZERO); T_EQ(b[5], ACAL_RATE_FULL); T_EQ(b[6], 1); T_EQ(b[7], ACAL_PROBE_GARBLED);
+  T_EQ(b[4], ACAL_PT_F_ZERO); T_EQ(b[5], ACAL_FULL); T_EQ(b[6], 1); T_EQ(b[7], ACAL_PROBE_GARBLED);
   T_EQ(b[8], 115); T_EQ(b[12], 113);
   T_EQ(b[16] | (b[17] << 8), 800); T_EQ(b[18] | (b[19] << 8), 812); T_EQ(b[20], 3); T_EQ(b[22], 2);
   {
     const uint8_t *q = b + 24 + 28 * ACAL_PT_F_HI;
 
-    T_EQ(q[0] | (q[1] << 8), 962); T_EQ(q[2], ACAL_RATE_FULL); T_EQ(q[3], 2);
+    T_EQ(q[0] | (q[1] << 8), 962); T_EQ(q[2], ACAL_FULL); T_EQ(q[3], 2);
     T_EQ((int32_t)(q[4] | (q[5] << 8) | (q[6] << 16) | ((uint32_t)q[7] << 24)), pt[ACAL_PT_F_HI].mean16[0]);
     T_EQ(q[12], 128); T_EQ(q[13], 131); T_EQ(q[14] | (q[15] << 8), 0);
     T_EQ(q[24], 0); T_EQ(q[25], 255); T_EQ(q[26] | (q[27] << 8), 2);
-    q = b + 24 + 28 * ACAL_PT_S_LO;
+    q = b + 24 + 28 * ACAL_PT_G_LO;
     T_EQ(q[3], 0);                                              //not measured
-    q = b + 24 + 28 * 4;
-    T_EQ(q[3], 0);                                              //point 4 (the gated zero up to fw 0.2.104): never
   }
 }
 
@@ -1226,6 +1240,8 @@ static void test_readout_fault(void)
   //Range 0 of the bench: zero 127.6 codes at the centre PWM 860, -0.44 codes per count (the READ_RAW sweep)
   const int32_t centre = 860, z1024 = 127 * 1024 + 614, slope1024 = -451;   //-0.44 code per count
   acal_acc   acc[2][2];
+  acal_point pt[ACAL_POINTS];
+  int32_t    k;
   uint32_t   clipped = 0;
 
 #define LEVEL(pwm) (z1024 + slope1024 * ((pwm) - centre))
@@ -1241,13 +1257,35 @@ static void test_readout_fault(void)
     acal_acc all = acc[0][1];
 
     acal_acc_merge(&all, &acc[1][1]);
-    T_TRUE(acal_rms16(&all) > ACAL_MAX_NOISE16);
+    T_TRUE(acal_rms16(&all) > ACAL_MAX_NOISE16_FULL);
     T_EQ(all.hi, 255);
   }
   fault_measure(LEVEL(centre), 64, 0, acc);
   T_EQ(acc[0][0].clipped + acc[1][1].clipped, 0);
-  //fw 0.2.105: the step fails with ACAL_E_CLIP at the zero point (fail fast). The "gated twin" rule that called it
-  //ACAL_E_READOUT (fw 0.2.67-0.2.104) needed the gated class; ACAL_E_READOUT is now the capture-stage training's
+
+  //Classification: rail samples only at full rate with the gated twin quiet and near 128 -> the readout fault
+  memset(pt, 0, sizeof(pt));
+  for(k=ACAL_PT_G_LO;k<ACAL_POINTS;k++)
+  {
+    pt[k].convs = 8;
+    pt[k].cls   = (k >= ACAL_PT_F_ZERO) ? ACAL_FULL : ACAL_GATED;
+    pt[k].mean16[0] = pt[k].mean16[1] = (k == ACAL_PT_G_ZERO || k == ACAL_PT_F_ZERO) ? 2050 :
+                                        ((k == ACAL_PT_G_LO || k == ACAL_PT_F_LO) ? 2048 + 640 : 2048 - 640);
+  }
+  T_EQ(acal_readout_fault(pt), 0);                              //nothing clipped
+  pt[ACAL_PT_F_ZERO].clipped[1] = 24;
+  T_EQ(acal_readout_fault(pt), 1);
+  pt[ACAL_PT_G_ZERO].clipped[0] = 1;                            //the gated twin clips too: the input
+  T_EQ(acal_readout_fault(pt), 0);
+  pt[ACAL_PT_G_ZERO].clipped[0] = 0;
+  pt[ACAL_PT_G_ZERO].mean16[0] = pt[ACAL_PT_G_ZERO].mean16[1] = 2048 + 9 * 16;   //not near 128
+  T_EQ(acal_readout_fault(pt), 0);
+  pt[ACAL_PT_G_ZERO].mean16[0] = pt[ACAL_PT_G_ZERO].mean16[1] = 2050;
+  pt[ACAL_PT_F_HI].clipped[0] = 3;                              //a full-rate slope point 40 codes off 128 clips
+  T_EQ(acal_readout_fault(pt), 0);
+  pt[ACAL_PT_F_HI].clipped[0] = 0;
+  pt[ACAL_PT_G_LO].clipped[1] = 2;                              //any gated clip: the input
+  T_EQ(acal_readout_fault(pt), 0);
 #undef LEVEL
 }
 

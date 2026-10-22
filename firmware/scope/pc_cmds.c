@@ -494,12 +494,12 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 }
 
 //Correction for the channel's current settings (adc_cal.h): calibration data v3 when loaded and bound, with the v4
-//tracking folded in exactly as the readout does it (acal_track_apply; protocol row 54)
+//tracking folded in exactly as the readout does it (acal_v4_apply; protocol row 54)
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
-  acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->dcoffset, c->dc_shift_value, c->adc_a_comp,
-                  c->adc_b_comp, k);
-  acal_track_apply(&c->trk, k);
+  acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
+                  c->adc_a_comp, c->adc_b_comp, k);
+  acal_v4_apply(&c->trk, &c->cm, k);
 }
 
 //uV per code x 256 at the BNC with a 1x probe, and the processed code of 0 V x 256 (P-8.5, protocol 1.10+: the v2 / v3
@@ -1431,7 +1431,7 @@ static int h_get_counter(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   }
 
   pc_hal_counter_read(&c);
-  valid = (uint8_t)(c.held && c.current && c.has_period && !c.misfit && (c.t != 0));
+  valid = (uint8_t)(c.held && c.current && c.has_period && !c.misfit && !c.gated && (c.t != 0));
 
   if(c.held && (!s->cnt_seen || (s->cnt_seen_seq != c.seq)))
     flags |= 0x01;
@@ -1439,6 +1439,7 @@ static int h_get_counter(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   if(valid)                    flags |= 0x02;
   if(c.res_src == 2)           flags |= 0x04;
   if(c.res_src == 1)           flags |= 0x08;
+  if(c.held && c.gated)        flags |= 0x10;   //fw-gated: counted on the gated encodes (Filter Off at a divided rate)
 
   s->cnt_seen     = c.held;
   s->cnt_seen_seq = c.seq;
@@ -2631,10 +2632,10 @@ void pc_cal_body(int ch, uint8_t *resp)
   bound = c.cal2_loaded && acal_bound(&c.cal2, c.cal_offset);
   memset(resp + 72, 0, PC_CAL_RESP_LEN - 72);
   resp[72] = k.version;
-  //bit 2: the gated class in use (fw 0.2.45-0.2.104), reserved since one class (0.2.105)
-  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | (bound ? 2 : 0) |
+  resp[73] = (uint8_t)((c.cal2_loaded ? 1 : 0) | (bound ? 2 : 0) | ((k.cls == ACAL_GATED) ? 4 : 0) |
                        ((c.cal2_loaded && (c.cal2.gain_range != ACAL_GAIN_NONE)) ? 8 : 0) |
-                       ((c.cal2_loaded && (c.cal2.gain_flags & ACAL_GAIN_KEPT)) ? 16 : 0));
+                       ((c.cal2_loaded && (c.cal2.gain_flags & ACAL_GAIN_KEPT)) ? 16 : 0) |
+                       ((c.cal2_loaded && (c.cal2.gain_flags & ACAL_GAIN_FULL_ONLY)) ? 32 : 0));
   pc_put_u16(resp + 74, (uint16_t)k.comp_a);
   pc_put_u16(resp + 76, (uint16_t)k.comp_b);
   resp[78] = k.frac_a;
@@ -2648,7 +2649,6 @@ void pc_cal_body(int ch, uint8_t *resp)
   pc_put_u32(resp + 104, (uint32_t)k.off_b);
   pc_put_u32(resp + 108, k.gain16);
 
-  //The stored block (slot 1 reserved: zeros)
   if(c.cal2_loaded)
     acal_pack_channel(&c.cal2, resp + 112);
 
@@ -2661,9 +2661,12 @@ void pc_cal_body(int ch, uint8_t *resp)
 
     pc_hal_decim_current(&dc, &written);
 
-    //Applied to the next readout: v3 and the 8-bit path (any divider since one class, fw 0.2.105)
-    if((k.version == 3) && (!written || !dc.k))
+    if((k.version == 3) && (k.cls == ACAL_FULL) && (!written || !dc.k))
       f |= 0x10;
+    if(c.cm.flags & ACAL_CM_DATA)
+      f |= 0x20;
+    if(c.cm.flags & ACAL_CM_LAST)
+      f |= 0x40;
 
     resp[256] = f;
     pc_put_u16(resp + 258, (uint16_t)c.trk.d_q8);
@@ -2673,7 +2676,9 @@ void pc_cal_body(int ch, uint8_t *resp)
     pc_put_u32(resp + 272, c.trk.records);
     pc_put_u16(resp + 276, c.trk.last_pairs);
     pc_put_u16(resp + 278, c.trk.spread16);
-    //280..287: the class probe's common mode (fw 0.2.50-0.2.104), 0 since the probe went with the gated class (0.2.105)
+    pc_put_u16(resp + 280, (uint16_t)c.cm.cm_q8);
+    pc_put_u16(resp + 282, c.cm.probes);
+    pc_put_u32(resp + 284, (c.cm.flags & ACAL_CM_DATA) ? now - c.cm.last_ms : 0xFFFFFFFFu);
   }
 
   //1.16: provenance (sector 708 bytes 432..487) and the age in power-ons and operating minutes (row 55)
@@ -3906,9 +3911,10 @@ static int pc_dispatch(pc_session *s, int ctx)
 
 //fw 0.2.62: every full-rate host capture is checked before READ_RAW can read it (enc_heal.h): 0x1538+ by FPGA read 0x33,
 //0x1532..0x1537 by the B-against-A residual of the record's first words. A bad one is discarded and re-armed with the same
-//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2). fw-fullrate
-//(0x153D: the encodes at 200 MSa/s at every rate): the 0x33 check covers every capture, the residual divider-0 legacy
-//records only (its core A neighbours are 5 ns away only there).
+//setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2). Since
+//fw 0.2.105 the 0x33 check covers every capture (its prediction includes the divider's enable, so the gated encodes of
+//Filter Off at a divided rate are checked too), the residual divider-0 legacy records only (its core A neighbours are
+//5 ns away only there).
 static uint8_t pc_enc_status(void *ctx)
 {
   (void)ctx;

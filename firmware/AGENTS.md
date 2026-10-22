@@ -6330,6 +6330,9 @@ waits on nothing; USB drive's loop waits on the touch only.
 
 ## 83. fw-fullrate: one calibration clock class, FPGA 0x153D's full-rate encodes (fw 0.2.105, protocol 1.27 row 67)
 
+**Superseded by section 91 (fw-gated, 2026-10-22): the single class, the class probe's removal and the host-test model's
+full-rate write clock are reverted with the full-rate encodes; the encode check on every capture stays.**
+
 Branch `fw-fullrate` from main 895bff7 (fw 0.2.105, `PC_FW_VERSION` and `PC_FW_FPGA_VERSION` 0x153D unchanged). Brief:
 the owner's decision of 2026-10-21 17:59 (docs/plans/task-queue.md "## Firmware"): the 0x153C counter is exact at full
 rate but miscounts with Filter Off at divided rates, because Atlan's K = 0 sample-skipping path gated the ADC encodes with
@@ -6835,3 +6838,90 @@ The old code fails 15 of its 55 checks. `make -s test`, the vector check and the
 sector 708 bytes 488..511 unchanged, and the script's "0x63 changed under the sweep" check never fires. Restore sector
 708 from the backup if a value the guard stored during the earlier sweeps (0x08A2 / 0x08A3) is still on the card, or
 Calibrate again.
+
+## 91. fw-gated: gated encodes at Filter Off again, two calibration classes, the counter at full rate only (fw 0.2.105, protocol 1.27 additive)
+
+Branch `fw-gated` from main 1bb027f (`PC_FW_VERSION` 0.2.105 and `PC_FW_FPGA_VERSION` 0x153D unchanged). Owner decisions
+2026-10-22 11:45 (docs/plans/task-queue.md "## Firmware", after the 11:36 A/B in docs/hardware-status.md: 0x153D's
+full-rate encodes showed 1-2 % CH2 code errors at 2 MSa/s where 0x153C's gated encodes read 0 / 0, and 0x153D's encode
+timing was worse at 200 MSa/s too): fpga-d3gate rebuilds 0x153D with 0x153C's encode generation (K = 0 at D > 0 gated by
+the divider; full rate with any filter, peak detect and divider 0); the cards take the counter only at full rate; the
+calibration gets its GATED class back. **Nothing benched**; it needs the rebuilt 0x153D (branch fpga-d3gate, ebf3645).
+
+**Commits**: 42f2e6e (encode check comments), 9748de6 (host-test model), 9c7f59d (calibration classes and probe),
+ed6c283 (counter), a8cf41c (mcp), then the docs commit with this section.
+
+**Calibration (9c7f59d)**: a revert of c8649f4 and 5aafcdb against everything merged since; conflicts only in comments
+(cap_stage.h, cal_wiz_ui.c, enc_heal.h: the newer text kept, "2 MSa/s slope points" now "gated 2 MSa/s"). Back as in
+0.2.104: `acal_channel` per class, `acal_correction`'s class from the divider (FULL at divider 0; the 16-bit path uses
+gain16 / corr16 of the full class; peak records `fpga_channel_correction_full`), the wizard's gated zero point and gated
+gain levels, `ACAL_E_CLASS` / `ACAL_E_GAIN_CLASS`, `acal_readout_fault`, `ACAL_MAX_NOISE16_FULL` (3) / `_GATED` (1, also
+the capture-stage training's quiet check again), the gain scale g_ref = mean gated gain, the class probe (`acal_cm_*`,
+`acal_live_service`, `FPGA_WHO_PROBE`, the "Full-rate offset" line), the tracker on full-class records only, Diagnostics'
+class gain ratio and gated / full noise rows, GET_CAL 73 bit 2, the gated slots, 256 bits 5..6 and 280..287, CAL_PROBE
+point 4, `ACAL_BLOCK_CLASSES` 2 (a block written here loads on 0.2.104), the `adc_cal_v3` vector with classes 2.
+**Kept from fw-fullrate**: nothing of the class change itself. Its tracker change (d / e applied to every 8-bit readout,
+learnt from divider-0 records) is not class-independent: the tracked A - B is a full-rate property and the gated class
+has its own per-core zeros and gains, so the tracker applies to full-class readouts again. Kept: the encode check on
+every capture (below). Merged since and unaffected: capstage's pick / tie pass / guard, ctrauto, relay, guardfix,
+stoprate, usbback, acqui.
+
+**Single-class blocks (decision)**: a block with header classes 1 (the 0.2.105 builds of 2026-10-21/22, slot 1 written
+0) still loads. `acal_unpack` accepts classes 1 or 2; for 1 it copies slot 0 (zero, slope, noise, gain) into slot 1 and
+sets `gain_flags` bit 1 `ACAL_GAIN_FULL_ONLY`. Gated readouts then use the 200 MSa/s values (on the owner's unit core B
+up to about 4 codes and the gain about 1 % off at Filter Off below 200 MSa/s), better than zero gated values or refusing
+the block (which would drop to the 1.00o5 compensations). The flag is stored with the block (the next save writes
+classes 2; 0.2.104 then reads the copies), carried by the zero step's gain carry (`old->gain_flags | KEPT`) and cleared
+by a gain step (gain_flags = 0). **What the UI shows**: Diagnostics Status verdict Check "Calibration lacks the gated
+rates (a 0.2.105 test build): run Calibrate." (after the REPEAT reason, before "Gains not measured"), GET_CAL byte 73 bit
+5, the report line ", gated class copied from the full rate (single-class 0.2.105 block: run Calibrate)". Tests:
+test_adc_cal (a classes-1 block: the copies, the flag, classes 0 refused, the repack loads identically), test_ui_diag
+(the verdict, also with gains not measured).
+
+**Counter (ed6c283)**: `pc_glue_adc_full_rate()` (pc_hal_scope.c) = `fpga_divider == 0 || pc_decim_wide(&pc_dec_cur)`
+(the 16-bit path: any filter, peak detect) for what the FPGA holds. `fpga_counter_pass(now_ms, full_rate)` marks a CH1 /
+CH2 result taken at a gated setting (`fpga_cnt.gated`); `fpga_counter_usable` needs !gated, so the cards
+(`pc_glue_counter_pass`) show the record's measurement; GET_COUNTER clears VALID (freq_mHz 0) and sets **flags bit 4
+GATED** (documented additive flag, bits 4-7 were 0, no new minor). EXT is never gated. The gate the pass reads ran at
+the setting the pass sees: a 0x0D / 0x53 write in between is the rate-change rule's drop. fw-ctrauto's thresholds
+unchanged (a gated gate still retunes them from its min / max). Tests: test_fpga_bus `test_counter_gated` (gated CH1
+held but not usable, EXT usable, full rate usable), test_session (flags 0x11, VALID back when cleared).
+
+**Encode check (42f2e6e)**: the brief said "restore the 0x153C rule (check where the encodes ran at full rate)".
+fpga-d3gate (2026-10-22) confirmed that 0x33 bit 0 is meaningful for K >= 1 at any D, peak detect and K = 0 at D > 0
+gated: the FPGA compares the encode flops against the predicted write clock (`swc_sh ^ sce_q`) on every falling 200 MHz
+edge and the prediction includes the divider's enable; the only false flag is the one miss after an asynchronous 0x0D /
+0x53 write, which the firmware's DATA mode and 0x01 = 1 handle. So fw-fullrate's FLAG check after every capture stays
+(more coverage than 0.2.104's divider-0 rule); the DATA residual stays divider-0 legacy only. Comments updated.
+
+**Host-test model (9748de6)**: revert of f0f1f06 (one stored word per 10 (D + 1) ns write clock edge at K = 0, D > 0;
+`fm_store_edge`, `raw_words`, `fm_fullrate_pair`, `test_fullrate` gone). 0x05 reads ready after **six** write-clock
+edges in reset on 0x153C / 0x153D (fpga/al3/README.md section 17: six stored words, 6 (D + 1) x 10 ns legacy; the model
+had one edge), older versions one. `test_gated_ready`: D 0 / 4 / 399, at least six edges in reset, the ready polls grow
+with D, 150 words in 150 x 10 (D + 1) ns.
+
+**MCP (a8cf41c)**: mcp/AGENTS.md "fw-gated".
+
+**Verification**: `make -s test` green, vector check (161) OK, GCC 10 build without warnings in the touched files, mcp
+ruff clean and 542 tests.
+
+**Bench (owner; after flashing the rebuilt 0x153D from fpga-d3gate; FEL load of this build; back up SD 700-710 first: the
+wizard's Save writes sector 708)**
+1. Before calibrating (a card saved by an earlier 0.2.105 build): Diagnostics Status reads Check "Calibration lacks the
+   gated rates (a 0.2.105 test build): run Calibrate."; GET_CAL byte 73 bit 5 set on both channels.
+2. Calibrate with both inputs open (probes off, USB cable away from the inputs), then the gain steps with the probes on
+   the post; Save. The zero step passes on both channels (gated noise limit 1.0 code again); Diagnostics Status OK, the
+   class gain ratio and the gated / full noise rows within their limits; the Calibration page shows gated and full zero
+   columns and, after half a minute, the "Full-rate offset" line. GET_CAL 73 bit 5 clear; sector 708 byte 136 (the
+   block's classes) = 2.
+3. The counter card, 1 kHz on CH1 (the post): with Filter Hi-Res the Freq card reads 1.000 kHz from the counter
+   (`scope_counter`: `valid` true, `gated` false, 1000.000 Hz within a few mHz); with Filter Off at 500 kSa/s the card
+   shows the record's measurement (still about 1.000 kHz) and `scope_counter` returns `gated` true, `valid` false with
+   the "gates the ADC encodes" caveat; at 200 MSa/s the counter again.
+4. CH2 on the RC ladder node at 2 MSa/s, Filter Off: no squiggles on the trace (the 11:36 e_ab.py metric 0 / 0 as on
+   0x153C); at 200 MSa/s no worse than 0x153C's 1.01 % / 0.86 %.
+5. GET_HEALTH 88..103 after a few captures at 500 kSa/s Filter Off: the 0x33 check counts those captures too (none
+   flagged on a quiet signal).
+Regression signs: the Freq card flickering between counter and record at a steady setting (the full-rate test wrong),
+the zero step failing "zero moves with the sample rate" (reason 11: the classes' zeros over 12 codes apart, the gated
+encodes not as on 0x153C), Diagnostics still asking for Calibrate after step 2 (FULL_ONLY not cleared).

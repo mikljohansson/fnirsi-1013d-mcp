@@ -62,34 +62,13 @@ void fm_peak_word(uint32_t ch, uint32_t w, uint8_t *mn, uint8_t *mx)
   *mx = hi;
 }
 
-//fw-fullrate (0x153D, legacy K = 0): the ADC encodes and the write clock run at 100 MHz at every rate, a word is stored
-//on every (D + 1)-th write clock edge after the release; before 0x153D the write clock itself was divided
-static int fm_fullrate(void)
-{
-  return (fm.version >= 0x153D) && !fm_dec_on();
-}
-
-//Write clock edges: 10 (D + 1) ns in the legacy layout up to 0x153C, 10 ns on 0x153D (fm_fullrate), N x 5 ns on the
-//16-bit path (filter or peak, one word per edge)
+//One word per write clock edge: 10 (D + 1) ns in the legacy layout, N x 5 ns on the 16-bit path (filter or peak)
 static uint64_t fm_period_ps(void)
 {
   if(fm_dec_on())
     return (uint64_t)5000 * fm_window();
 
-  if(fm_fullrate())
-    return 10000;
-
   return (uint64_t)10000 * (fm.divider + 1);
-}
-
-//The legacy pair of word w on 0x153D: pair p = w (D + 1) of the full-rate stream, core B the earlier sample (2p),
-//core A 5 ns later (2p + 1)
-void fm_fullrate_pair(uint32_t ch, uint32_t w, uint8_t *a, uint8_t *b)
-{
-  uint64_t j = 2ull * w * (fm.divider + 1);
-
-  *b = fm_raw_sample(ch, j);
-  *a = fm_raw_sample(ch, j + 1);
 }
 
 //fw-c5 (0x153C): the hold-off of the last trigger still runs (0x37 bit 4); 0x1B = 0 releases it at once
@@ -147,12 +126,6 @@ static void fm_capture_edge(void)
       fm_peak_word(0, fm.n, &fm.mem[w][0], &fm.mem[w][1]);
       fm_peak_word(1, fm.n, &fm.mem[w][2], &fm.mem[w][3]);
     }
-    else if(fm.raw_words && fm_fullrate())
-    {
-      //fw-fullrate: lanes 0x20 / 0x22 core A, 0x21 / 0x23 core B of the stored pair
-      fm_fullrate_pair(0, fm.n, &fm.mem[w][0], &fm.mem[w][1]);
-      fm_fullrate_pair(1, fm.n, &fm.mem[w][2], &fm.mem[w][3]);
-    }
     else
       for(l=0;l<4;l++)
         fm.mem[w][l] = (uint8_t)(fm.n >> (8 * l));
@@ -194,21 +167,9 @@ static void fm_capture_edge(void)
   fm.e++;
 }
 
-//fw-fullrate: 1 when this write clock edge stores a word (every edge but on 0x153D's legacy path at D > 0)
-static int fm_store_edge(void)
-{
-  uint32_t s = fm.wphase;
-
-  if(!fm_fullrate())
-    return 1;
-
-  fm.wphase = (s >= fm.divider) ? 0 : s + 1;
-  return s == 0;
-}
-
 static void fm_edge(void)
 {
-  if(fm.capture && !fm.in_reset && fm_store_edge())
+  if(fm.capture && !fm.in_reset)
     fm_capture_edge();
 
   if(fm.in_reset)
@@ -721,7 +682,6 @@ static void fm_apply(uint8_t cmd, uint32_t v)
         fm.we        = 1;
         fm.n         = 0;
         fm.e         = 0;
-        fm.wphase    = 0;
         fm.triggered = 0;
         fm.taddr     = 0;
         fm.stop_n    = 0;
@@ -871,7 +831,9 @@ uint8_t fpga_io_strobe_read(void)
 
     case 0x05:
       fm.ready_polls++;
-      out = (uint8_t)(!fm.ready_never && fm.in_reset && fm.edges_in_reset);
+      //Ready after one write clock edge in reset; 0x153C / 0x153D: after six (six stored words, 6 x 10 (D + 1) ns
+      //legacy, fpga/al3/README.md section 17; fw-fullrate's 60 ns at every rate went with the full-rate encodes)
+      out = (uint8_t)(!fm.ready_never && fm.in_reset && (fm.edges_in_reset >= ((fm.version >= 0x153C) ? 6u : 1u)));
       break;
 
     case 0x06:

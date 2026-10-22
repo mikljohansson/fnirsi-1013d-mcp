@@ -140,29 +140,28 @@ sections 74 to 79.
   class probe no longer runs under the notice (it could arm conversions with an unbounded ready wait on the mismatched
   bitstream). (f08b5b1)
 
-**One calibration clock class (fw-fullrate).**
+**Gated encodes at Filter Off again: two calibration classes, the counter at full rate only (fw-gated).**
 
-- **One clock class**: FPGA 0x153D runs the ADC encodes at 200 MSa/s at every rate (owner, 2026-10-21: the 0x153C
-  counter miscounted with Filter Off at divided rates because the encodes were gated), so the calibration's gated class
-  is gone. Every readout (8-bit at any divider, the 16-bit filter path, peak) uses one set of per-core zeros, slopes and
-  gains; the A - B tracker applies at every divider (it learns from 200 MSa/s records). The wizard keeps its 2 MSa/s
-  centre search and stores the 200 MSa/s points; the gated zero point and gain levels, the "zero moves with the sample
-  rate" and "gain: clock classes" checks and the "gated twin" readout rule are gone; one noise limit, 3 codes. A gain
-  step keeps the mean corrected span of the gains in use, so the volts calibration keeps its scale. (c8649f4)
-- **Saved calibrations keep working**: a block saved by fw 0.2.45-0.2.104 loads with its full-rate values (the gated
-  ones ignored), no recalibration. The block layout is unchanged; its gated slots are written 0 and its header says one
-  class, so an older firmware falls back to the 1.00o5 compensations rather than misread it. GET_CAL keeps its 364
-  bytes: the gated fields, byte 73 bit 2 and the class probe's bytes 280..287 read 0 (protocol 1.27, row 67). (c8649f4)
-- **The class probe is removed**: the background comparison of the two classes every 30 s (fw 0.2.50) and its common
-  mode cm. (5aafcdb)
-- **Diagnostics**: the Status page shows the core gain split (limit 8 %) and one noise row (limit 3.0 code) per
-  channel; the Calibration page one zero column, one gains line, one noise line. (c8649f4)
-- **Host**: the mcp host decodes GET_CAL's one class (`Scope.scale` and `channel_scale` without `clock_class`,
-  `cal_clock_class` gone), reads sector 708 blocks with one or two classes, and the simulator has one gain per core.
-  (0e7a0a4) The host-test FPGA model runs 0x153D's write clock at 100 MHz and stores every (D + 1)-th pair. (f0f1f06)
-- **The encode check covers every capture**: with the encodes at full rate at every rate, FPGA read 0x33 checks every
-  capture (fpga-d3), so a garbled capture at a divided rate or with a filter is re-armed like a 200 MSa/s one (UI and
-  host ARM); the data check stays at divider 0.
+- **Two calibration clock classes, as up to 0.2.104** (owner, 2026-10-22, after the 11:36 A/B: 0x153D's full-rate
+  encodes brought 1-2 % CH2 code errors to the slow time bases where 0x153C's gated encodes were clean): the rebuilt
+  FPGA 0x153D gates the ADC encodes with the divider at Filter Off again (full rate at 200 MSa/s, with any filter and
+  with Peak). The single class of the earlier 0.2.105 builds (fw-fullrate, c8649f4 / 5aafcdb, tried 2026-10-21) is
+  reverted: per-class zeros, slopes, noise and gains, the wizard's gated zero point and gain levels, the class checks,
+  two noise limits, the class probe, Diagnostics' class rows and GET_CAL's gated fields (73 bit 2, 280..287) are back,
+  and a saved block says two classes, so 0.2.104 loads it. (9c7f59d)
+- **Calibrations saved by the single-class builds still load**: their gated values are taken from the full rate (core B
+  up to about 4 codes and the gain about 1 % off at Filter Off below 200 MSa/s), GET_CAL byte 73 bit 5 says so and
+  Diagnostics reads "Calibration lacks the gated rates (a 0.2.105 test build): run Calibrate." until a calibration with
+  the gain step replaces them. (9c7f59d) The mcp host reads such sector 708 blocks the same way. (a8cf41c)
+- **The counter feeds the cards only at full rate**: with Filter Off below 200 MSa/s the counter sees the divided
+  sample stream, so a CH1 / CH2 result counted there is not valid: the Freq, Period, Width and Duty cards show the
+  record's measurement, GET_COUNTER clears VALID and sets flags bit 4 GATED (additive, protocol 1.27 unchanged), and
+  `scope_counter` says why. With a filter (Hi-Res, Anti-alias), Peak or at 200 MSa/s the cards take the counter.
+  (ed6c283, a8cf41c)
+- **The encode check still covers every capture**: FPGA read 0x33 predicts the encodes with the divider's enable, so
+  the gated captures are checked as the full-rate ones (fpga-d3gate); the data check stays at divider 0. (42f2e6e)
+- The host-test FPGA model gates K = 0 at D > 0 again, and 0x05 reads ready after six write clocks on 0x153C / 0x153D.
+  (9748de6)
 
 **USB drive: Back in the header (fw-usbback).**
 
