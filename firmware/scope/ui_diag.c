@@ -1252,7 +1252,10 @@ static int ud_cap_line(const ud_input *in, char *p)
   p = s_str(p, "ADC capture stages ");
   p = cs_text(p, (uint16_t)g16(h));
 
-  if(h[2] & PC_CAPF_TRAINED)
+  //fw 0.2.105: the runtime guard moved a flagged core to another stage of its trained clean set (event 23)
+  if((h[2] & (PC_CAPF_TRAINED | PC_CAPF_MOVED)) == (PC_CAPF_TRAINED | PC_CAPF_MOVED))
+    p = s_str(p, " (trained, a flagged core moved): ");
+  else if(h[2] & PC_CAPF_TRAINED)
     p = s_str(p, " (trained): ");
   else if(h[2] & PC_CAPF_OTHER)
   {

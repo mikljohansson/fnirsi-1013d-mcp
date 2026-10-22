@@ -2761,6 +2761,9 @@ void pc_glue_ui_service(void)
   //fw 0.2.52: settings changed since the last save, once per second
   pc_diag_service();
 
+  //fw 0.2.105: a capture stage the runtime guard moved to, into sector 708
+  fpga_capture_service();
+
   //Roll mode or a viewer ends the spectrum view and the phosphor view; the right bar follows the mode
   spectrum_service();
   phosphor_service();

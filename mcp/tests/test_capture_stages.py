@@ -70,6 +70,12 @@ def test_health_capture_words():
     assert rep["flagged_repeatedly"]
     assert rep["text"] == ("capture stages CH1 A3 B4, CH2 A3 B4 (trained); capture clean; a core was flagged in 3 "
                            "captures within a minute: run the calibration wizard")
+    # fw 0.2.105: GET_HEALTH 106 bit 6, the runtime guard moved a core this boot
+    mv = P.HealthResp(cap_value=0x08E3, cap_flags=P.CAPF_HAS | P.CAPF_TRAINED | P.CAPF_READ | P.CAPF_MOVED,
+                      cap_reads=9).describe_capture()
+    assert mv["moved_by_guard"] and not rep["moved_by_guard"]
+    assert mv["text"] == ("capture stages CH1 A3 B4, CH2 A3 B4 (trained); capture clean; a flagged core was moved to "
+                          "another trained stage this boot (stored)")
     assert P.HealthResp(cap_flags=0).describe_capture() == {
         "has_stages": False, "text": "no ADC capture stages on this bitstream (FPGA 0x153A and later)"}
 
@@ -133,6 +139,9 @@ def test_event_23_in_words():
         "adc_capture training ended: now CH1 A4 B3, CH2 A3 B4 (0x08DC)"
     assert P.DeviceEvent(5, 23, 0x12, P.CAP_POWER_ON).describe() == \
         "adc_capture training ended: no clean stage for CH1 B, kept CH1 A4 B4, CH2 A3 B4 (0x08E4)"
+    # fw 0.2.105: the runtime guard moved CH1 A off its flagged stage 4 (a bit 5)
+    assert P.DeviceEvent(5, 23, 0x21, 0x08E3).describe() == \
+        "adc_capture guard moved CH1 A: now CH1 A3 B4, CH2 A3 B4 (0x08E3)"
 
 
 def test_cal_probe_zero_split_zero_since_0_2_79():

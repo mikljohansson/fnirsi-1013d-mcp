@@ -1697,6 +1697,54 @@ static void test_gen_status(void)
   T_EQ(fm_pin(), 0);
 }
 
+//fw 0.2.105 (fw-capstage): the bus side of one capture stage training capture on 0x153D at the measured 0.30 us per
+//strobe: 0x63, the arm of 8000 words at divider 0 with the input quiet (auto time-out), the 0x0A polls, the 0x36 read.
+//The wizard's poll also scans the touch panel (fpga_done_conversion, not modelled); the training's time budget is
+//firmware/AGENTS.md section 86
+static void test_train_capture_cost(void)
+{
+  fpga_arm_cfg cfg;
+  uint64_t     t0, us;
+  uint32_t     polls = 0, k;
+
+  fm_reset(0x153D, 0, 31);
+  fm.strobe_ns = 300;
+  fm.capture   = 1;
+  fm.trig_at   = -1;
+  write_0d(0);
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+  t0 = fm.t_ps;
+
+  fpga_write_cmd(0x63);
+  fpga_write_short(0x08E3);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.pre_words    = 4000;
+  cfg.total_words  = 8000;
+  cfg.write_0e     = 1;
+  cfg.auto_timeout = 8000;
+  T_EQ(fpga_arm_reset(&cfg), 0);
+
+  do
+  {
+    fpga_write_cmd(0x0A);
+    polls++;
+  } while(!(fpga_read_byte() & 1) && (polls < 100000));
+
+  fpga_write_cmd(0x36);
+
+  for(k=0;k<10;k++)
+    (void)fpga_read_byte();
+
+  us = (fm.t_ps - t0) / 1000000;
+  printf("  training capture on 0x153D: %u us of bus and capture, %u polls\n", (unsigned)us, (unsigned)polls);
+
+  //8000 words at 10 ns are 80 us; the rest is the strobes. Under 0.2 ms each (section 86)
+  T_TRUE(us >= 80);
+  T_TRUE(us < 200);
+}
+
 int main(void)
 {
   test_write_record();
@@ -1717,5 +1765,6 @@ int main(void)
   test_gen_square();
   test_gen_change();
   test_gen_status();
+  test_train_capture_cost();
   return t_report("test_fpga_bus");
 }
