@@ -164,6 +164,11 @@ BASIC_CMDS = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY,
                         Cmd.GET_BAD_FRAME, Cmd.GET_EVENT_LOG, Cmd.GET_HEALTH, Cmd.READ_SPECTRUM, Cmd.SD_INFO,
                         Cmd.SD_READ_SECTORS, Cmd.SD_STAGE, Cmd.SD_WRITE_SECTORS, Cmd.SAVE_REPORT, Cmd.GET_CAL,
                         Cmd.READ_SCREEN, Cmd.FFT_BENCH, Cmd.ENTER_FEL})
+#: fw 0.2.105 (fw-relay, owner 2026-10-22): the requests that set up or run the scope's acquisition (pc_cmds.c F_SCOPE).
+#: With the Bode view open they close it first (its settings from before come back, as Menu > Scope), then apply;
+#: SET_ACQ_STATE RUN closes it too (its handler). No Bode sweep starts from them; BODE_CTRL and the reads keep the view.
+BODE_LEAVE_CMDS = frozenset({Cmd.SET_CHANNEL, Cmd.SET_TIMEBASE, Cmd.SET_TRIGGER, Cmd.SET_TRIGGER2, Cmd.LOG_START,
+                             Cmd.ARM, Cmd.SET_DECIM, Cmd.SET_SEQ, Cmd.SET_GEN, Cmd.CAL_PROBE})
 #: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
 #: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
 #: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.

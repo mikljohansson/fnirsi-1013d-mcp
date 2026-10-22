@@ -25,6 +25,7 @@
 #define F_CONTROL   0x04      //accepted while a deferred request is pending
 #define F_BASIC     0x10      //works on an unknown FPGA variant
 #define F_MODAL     0x20      //fw 0.2.94: read-only, answered inside a modal loop (PC_CTX_MODAL) without closing it
+#define F_SCOPE     0x40      //fw-relay: sets up or runs the scope's acquisition: the Frequency response view closes first
 
 #define PC_DEFERRED 0x10000   //handler result: response comes later
 #define PC_HOLD     0x20000   //handler result: not yet, run the request again at the next MAIN poll
@@ -1651,6 +1652,11 @@ static int h_set_acq_state(pc_session *s, const uint8_t *req, uint32_t len, uint
     return pc_error(s, PC_E_BAD_ARG, 0, "state 0..1");
 
   pc_host_abort(s);
+
+  //fw-relay: RUN is the scope's acquisition: the Frequency response view closes first and no Bode sweep starts
+  if(req[0])
+    (void)pc_hal_ui_leave_bode();
+
   pc_hal_ui_set_run(req[0]);
 
   *rl = pc_status_body(s, resp);
@@ -3483,17 +3489,17 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_EVENT_LOG, F_BUSY | F_CONTROL | F_BASIC, 0, h_get_event_log },
   { PC_CMD_GET_HEALTH,   F_BUSY | F_CONTROL | F_BASIC, 0, h_get_health },
   { PC_CMD_GET_CHANNEL,  F_MODAL,                      0, h_get_channel },
-  { PC_CMD_SET_CHANNEL,  0,                            0, h_set_channel },
+  { PC_CMD_SET_CHANNEL,  F_SCOPE,                      0, h_set_channel },
   { PC_CMD_GET_TIMEBASE, F_MODAL,                      0, h_get_timebase },
-  { PC_CMD_SET_TIMEBASE, 0,                            0, h_set_timebase },
+  { PC_CMD_SET_TIMEBASE, F_SCOPE,                      0, h_set_timebase },
   { PC_CMD_GET_TRIGGER,  F_MODAL,                      0, h_get_trigger },
-  { PC_CMD_SET_TRIGGER,  0,                            0, h_set_trigger },
-  { PC_CMD_SET_TRIGGER2, 0,                            PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
+  { PC_CMD_SET_TRIGGER,  F_SCOPE,                      0, h_set_trigger },
+  { PC_CMD_SET_TRIGGER2, F_SCOPE,                      PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
   { PC_CMD_GET_COUNTER,  F_MODAL,                      PC_CAP_COUNTER, h_get_counter },       //C7 counter (memory only)
-  { PC_CMD_LOG_START,    0,                            PC_CAP_LOGGER, h_log_start },          //D4 logger
+  { PC_CMD_LOG_START,    F_SCOPE,                      PC_CAP_LOGGER, h_log_start },          //D4 logger
   { PC_CMD_LOG_READ,     0,                            PC_CAP_LOGGER, h_log_read },           //D4 logger (MAIN: the drain's ring)
   { PC_CMD_LOG_STOP,     F_CONTROL,                    PC_CAP_LOGGER, h_log_stop },           //D4 logger
-  { PC_CMD_ARM,          0,                            0, h_arm },
+  { PC_CMD_ARM,          F_SCOPE,                      0, h_arm },
   { PC_CMD_FORCE,        0,                            PC_CAP_FORCE_TRIGGER, h_force },
   { PC_CMD_STOP,         F_CONTROL,                    0, h_stop },
   { PC_CMD_WAIT,         0,                            0, h_wait },
@@ -3505,8 +3511,8 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_CAPTURE_INFO, F_BUSY | F_CONTROL,       0, h_get_capture_info },
   { PC_CMD_READ_SPECTRUM, F_BASIC,                     0, h_read_spectrum },
   { PC_CMD_GET_DECIM,    F_MODAL,                      PC_CAP_DECIM, h_get_decim },
-  { PC_CMD_SET_DECIM,    0,                            PC_CAP_DECIM, h_set_decim },
-  { PC_CMD_SET_SEQ,      0,                            PC_CAP_SEQ, h_set_seq },
+  { PC_CMD_SET_DECIM,    F_SCOPE,                      PC_CAP_DECIM, h_set_decim },
+  { PC_CMD_SET_SEQ,      F_SCOPE,                      PC_CAP_SEQ, h_set_seq },
   { PC_CMD_GET_SEQ,      F_MODAL,                      PC_CAP_SEQ, h_get_seq },
   { PC_CMD_READ_SEQ,     0,                            PC_CAP_SEQ, h_read_seq },
   { PC_CMD_BODE_CTRL,    0,                            PC_CAP_DECIM, h_bode_ctrl },
@@ -3517,10 +3523,10 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SD_WRITE_SECTORS, F_BASIC,                  PC_CAP_SD_SECTORS, h_sd_write },
   { PC_CMD_SAVE_REPORT,  F_BASIC,                      PC_CAP_SD_SECTORS, h_save_report },
   { PC_CMD_GET_GEN,      F_MODAL,                      0, h_get_gen },
-  { PC_CMD_SET_GEN,      0,                            PC_CAP_GENERATOR, h_set_gen },
+  { PC_CMD_SET_GEN,      F_SCOPE,                      PC_CAP_GENERATOR, h_set_gen },
   { PC_CMD_GET_CAL,      F_MODAL | F_BASIC,            0, h_get_cal },      //sector 708: no FPGA
   { PC_CMD_READ_SCREEN,  F_BASIC | F_MODAL,            PC_CAP_SCREENSHOT, h_read_screen },   //BENCH: T9
-  { PC_CMD_CAL_PROBE,    0,                            0, h_cal_probe },
+  { PC_CMD_CAL_PROBE,    F_SCOPE,                      0, h_cal_probe },
   { PC_CMD_DEBUG_FPGA,   0,                            PC_CAP_DEBUG_RAW, h_debug_fpga },
   { PC_CMD_ENTER_FEL,    F_BASIC,                      PC_CAP_ENTER_FEL, h_enter_fel },
   { PC_CMD_FFT_BENCH,    F_BASIC,                      0, h_fft_bench },
@@ -3860,6 +3866,13 @@ static int pc_dispatch(pc_session *s, int ctx)
     //read-only F_MODAL set (READ_SCREEN, GET_*) are answered with it open
     if((ctx == PC_CTX_MAIN) && !(e->flags & (F_BUSY | F_MODAL)) && pc_hal_ui_leave_screen())
       s->yields++;
+
+    //fw-relay (owner 2026-10-22; bench soak: a device sweep left the Frequency response view open and every
+    //SET_ACQ_STATE RUN started a sweep, its relays clicking): a request that sets up or runs the scope's acquisition
+    //(F_SCOPE; SET_ACQ_STATE RUN in its handler) closes the view first, as Menu > Scope does: the settings from before
+    //it come back, then the request applies to them. BODE_CTRL, READ_BODE, STOP and the reads keep it open
+    if((ctx == PC_CTX_MAIN) && (e->flags & F_SCOPE))
+      (void)pc_hal_ui_leave_bode();
 
     //Zero extended copy of the request (missing trailing fields read as 0)
     s->ctx = (uint8_t)ctx;                                 //fw-d5: GET_GEN reads 0x39 in the main loop only

@@ -2726,6 +2726,15 @@ int pc_hal_ui_leave_screen(void)
   return ui_diag_leave();
 }
 
+int pc_hal_ui_leave_bode(void)
+{
+  if(!bode_view_active())
+    return 0;
+
+  bode_view_close();
+  return 1;
+}
+
 int pc_glue_ui_hold(int why)
 {
   int prev = pc_ui_hold_why;

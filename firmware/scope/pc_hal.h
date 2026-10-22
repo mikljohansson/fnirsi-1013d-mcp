@@ -250,6 +250,11 @@ uint8_t  pc_hal_ui_hold(void);
 //neither F_BUSY nor read-only (F_MODAL) runs, so the request's redraws reach the view, not that screen. 1 when a
 //screen was left, 0 when none showed. [UI] MAIN only
 int      pc_hal_ui_leave_screen(void);
+//fw-relay (owner 2026-10-22): ARM and SET_ACQ_STATE RUN are scope-acquisition requests. With the Frequency response
+//view open they close it first (its settings given back, as Menu > Scope does), so neither starts a Bode sweep (the
+//view's RUN did, with a range switch per planned point); sweeps come from the view's own controls and BODE_CTRL.
+//1 when the view was open. [UI] MAIN only
+int      pc_hal_ui_leave_bode(void);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 // Transport (pc_transport.c on the target). Safe in every context.

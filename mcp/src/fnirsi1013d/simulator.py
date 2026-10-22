@@ -16,7 +16,8 @@ It models what the host can observe through docs/protocol.md:
 - The on-device Bode plot (protocol 1.20, BODE_CTRL / READ_BODE, display mode 5) on every bitstream with the filter
   and the generator: ``SimBode`` runs the host tool's ``bode.BodeRunner`` against this device through an in-process
   link (the firmware's bode_sweep.c is a port of it), so device and host sweeps of a ``dut_in`` / ``dut_out`` DUT
-  agree within noise; a host ARM during a sweep ends it (reason 5).
+  agree within noise; an acquisition request (``P.BODE_LEAVE_CMDS``) or SET_ACQ_STATE RUN closes the view first
+  (fw 0.2.105), so a sweep in progress ends as stopped (reason 6).
 - The sample ring (section 7.2): four 8-bit cores, one word per write clock (2 dt), core B before core A in
   time by default (``--true-order`` changes the physical order so the host can test T4 handling), core B
   offset against core A (compensated by the calibration values), trigger on core A only with 2-dt
@@ -2488,6 +2489,8 @@ class Device:
             handler = getattr(self, f"_cmd_{cmd.name.lower()}")
             before = self.settings_key()
             try:
+                if cmd in P.BODE_LEAVE_CMDS and not self._internal and self.bode.shown:
+                    self.bode.close()  # fw 0.2.105 (fw-relay): back to the scope view first (a sweep ends, reason 6)
                 out = handler(req)
             except _DevErr as e:
                 out = self._err(req, e.status, e.detail, e.text)
@@ -3149,8 +3152,6 @@ class Device:
             raise _DevErr(P.Status.E_STATE, 0, "already ARMED; STOP first")
         if self.seq_setting.mode != P.SEQ_OFF and self._seq_fit(self.seq_setting) != P.SEQ_FIT_OK:
             raise _DevErr(P.Status.E_STATE, 3, "sequencer setting no longer fits the geometry (GET_SEQ byte 16)")
-        if not self._internal and self.bode.running:
-            self.bode.host_armed()  # 1.20: the PC took over the acquisition (reason 5)
         self.arm()
         return self._ok(req, self.status_bytes())
 
@@ -3189,6 +3190,8 @@ class Device:
         r = P.SetAcqStateReq.unpack(req.payload)
         if r.state not in (P.RunState.STOP, P.RunState.RUN):
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"state {r.state}: 0 STOP, 1 RUN")
+        if r.state == P.RunState.RUN and self.bode.shown and not self._internal:
+            self.bode.close()  # fw 0.2.105 (fw-relay): RUN is the scope's acquisition, never a Bode sweep
         self._set_run_state(r.state)
         return self._ok(req, self.status_bytes())
 
@@ -4353,14 +4356,6 @@ class SimBode:
         if self.abort_reason and not self.abort_raised:
             self.abort_raised = True
             raise _BodeAbort(self.abort_reason)
-
-    def host_armed(self) -> None:
-        """A host ARM (not the engine's) ends the sweep with reason 5; the engine's capture in flight is dropped."""
-        d = self.dev
-        self.abort_reason, self.abort_raised = 5, False
-        if d.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
-            d.acq_state = P.AcqState.ABORTED
-            d._pending_capture = None
 
     def estimate_ms(self) -> int:
         from . import bode as BD

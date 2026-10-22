@@ -110,6 +110,16 @@ typedef struct
   //screen_read_under is ui_screen at the last READ_SCREEN rows read
   uint8_t  ui_screen;
   uint32_t ui_screen_leaves;
+  //fw-relay: the Frequency response view (pc_hal_ui_leave_bode closes it, the run state from before it comes back);
+  //bode_sweeps counts the sweeps a RUN starts while it is open (bode_view_service's rule), relay_writes the range /
+  //coupling relay writes pc_hal_channel_write sends (fpga_relay_write's rule: only a value the hardware does not hold;
+  //range 6 is relay setting 5)
+  uint8_t  bode_view;
+  uint8_t  bode_saved_run;
+  uint32_t bode_leaves;
+  uint32_t bode_sweeps;
+  uint8_t  relay_held[2][2];      //[ch][0 range, 1 coupling]: value + 1, 0 unknown
+  uint32_t relay_writes;
   uint32_t under_screen;
   uint8_t  screen_read_under;
 

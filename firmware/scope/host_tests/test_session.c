@@ -4505,10 +4505,77 @@ static void test_logger(void)
   T_EQ(r.p[0], FPGA_LOG_ERROR);
 }
 
+//fw-relay (bench soak 2026-10-22: the relays clicked on every cycle with the Frequency response view left open by a
+//device sweep): a host capture + RUN restore cycle with unchanged settings writes no relay and starts no Bode sweep;
+//ARM and SET_ACQ_STATE RUN close the view first; a range change writes the relay once
+static void test_relay_cycle(void)
+{
+  uint8_t run[4] = { 1, 0, 0, 0 }, p[16];
+  resp_t  r;
+  int     i;
+
+  setup(PC_FW_FPGA_VERSION);
+  r = req(PC_CMD_SET_CHANNEL, "\0\x06\0\x03\0", 5);                 //CH1 range 3, DC: the boot state, written once
+  T_EQ(r.h.status, 0);
+  r = req(PC_CMD_SET_CHANNEL, "\1\x06\0\x04\0", 5);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.relay_writes, 4);
+
+  //The view open (a device sweep left it), the UI in RUN when it opened
+  mock.bode_saved_run = 1; mock.bode_leaves = 0; mock.bode_sweeps = 0;
+  mock.ui_run = 0;
+  mock.relay_writes = 0;
+
+  for(i=0;i<3;i++)
+  {
+    mock.bode_view = 1;
+    r = req(PC_CMD_ARM, 0, 0);
+    T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_ARMED);
+    T_EQ(mock.bode_view, 0); T_EQ(mock.ui_run, 0);
+    mock.polls_to_done = 3;
+    r = wait_done(1000);
+    T_EQ(r.p[1], PC_ACQ_DONE);
+    memset(p, 0, 16); p[0] = 0x0F; p[1] = 1; pc_put_u32(p + 8, 512);
+    r = req(PC_CMD_READ_RAW, p, 16);
+    T_EQ(r.h.status, 0);
+    r = req(PC_CMD_SET_ACQ_STATE, run, 4);
+    T_EQ(r.h.status, 0); T_EQ(mock.ui_run, 1);
+    r = status();
+    T_EQ(r.h.status, 0);
+
+    //The soak's order the other way round: RUN with the view open again closes it too
+    mock.bode_view = 1;
+    r = req(PC_CMD_SET_ACQ_STATE, run, 4);
+    T_EQ(r.h.status, 0); T_EQ(mock.bode_view, 0); T_EQ(mock.ui_run, 1);
+  }
+
+  T_EQ(mock.bode_leaves, 6); T_EQ(mock.bode_sweeps, 0);
+  T_EQ(mock.relay_writes, 0);
+
+  //STOP and the reads leave the view open (STOP stops the view's sweep)
+  mock.bode_view = 1;
+  run[0] = 0;
+  r = req(PC_CMD_SET_ACQ_STATE, run, 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.bode_view, 1);
+  r = req(PC_CMD_GET_CHANNEL, "\0", 1);
+  T_EQ(r.h.status, 0); T_EQ(mock.bode_view, 1);
+
+  //A setting for the scope's acquisition closes it first (F_SCOPE): the request applies to the settings given back
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(mock.bode_view, 0); T_EQ(mock.bode_leaves, 7);
+
+  //Same range again: nothing; another range: one write
+  r = req(PC_CMD_SET_CHANNEL, "\0\x02\0\x03", 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.relay_writes, 0);
+  r = req(PC_CMD_SET_CHANNEL, "\0\x02\0\x02", 4);
+  T_EQ(r.h.status, 0); T_EQ(mock.relay_writes, 1);
+}
+
 int main(void)
 {
   test_diag_wire();
   test_info();
+  test_relay_cycle();
   test_modal_yield();
   test_modal_read_only();
   test_main_screen_leave();

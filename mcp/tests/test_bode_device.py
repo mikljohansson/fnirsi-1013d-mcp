@@ -1,6 +1,6 @@
 """Protocol 1.20 (fw 0.2.66, docs/protocol.md row 60): the on-device Bode plot. BODE_CTRL / READ_BODE codecs against
 the firmware vectors, the simulator's engine (SimBode), ``bode.device_sweep`` against a host sweep of the same DUT,
-the thru, STOP / abort / a host ARM (reason 5), the view's restore, and scope_bode_sweep(where='device')."""
+the thru, STOP / abort / a host ARM (leaves the view, fw 0.2.105), the view's restore, and scope_bode_sweep(where='device')."""
 
 from __future__ import annotations
 
@@ -166,10 +166,16 @@ def test_device_and_host_sweeps_agree(sim_factory):
         dev = B.device_sweep(s, 30e3, 1e6, 8, settle="fast", sleep=lambda x: time.sleep(0.005),
                              progress=lambda i, n, t: progress.append((i, n)))
         assert s.status().display_mode == P.DisplayMode.BODE and dev.meta["view_shown"]
-        host = B.BodeRunner(s, settle="fast", sleep=lambda x: None, busy_retry_s=0).run(B.plan_sweep(30e3, 1e6, 8))
         s.bode_ctrl(P.BODE_CLOSE)
         assert s.status().display_mode == P.DisplayMode.SCOPE
         assert _state(s) == before  # the view gave every setting back
+        host = B.BodeRunner(s, settle="fast", sleep=lambda x: None, busy_retry_s=0).run(B.plan_sweep(30e3, 1e6, 8))
+        assert _state(s) == before
+        # fw 0.2.105 (fw-relay): with the view open, the first acquisition request (here SET_CHANNEL) closes it and
+        # gives the settings back before it applies
+        s.bode_ctrl(P.BODE_OPEN)
+        s.set_channel(0, range_index=2)
+        assert s.status().display_mode == P.DisplayMode.SCOPE and s.get_channel(0, cached=False).range == 2
     assert dev.stopped_early is None and dev.meta["where"] == "device" and progress and progress[-1][1] == 8
     assert len(dev.points) == len(host.points) == 8
     for a, b in zip(dev.points, host.points):
@@ -235,14 +241,20 @@ def test_stop_abort_host_arm_and_errors(sim_factory):
         assert not rows[-1].measured and rows[-1].period and rows[0].measured
         res = B.result_from_device(h, rows)
         assert len(res.points) == h.measured and "stopped: stopped" in res.stopped_early
-        # a host capture during a sweep ends it (reason 5)
+        # fw 0.2.105 (fw-relay): a host capture leaves the view first: the sweep ends as stopped (reason 6), the
+        # scope view is back; SET_ACQ_STATE RUN leaves it too and starts no sweep
         s.bode_ctrl(P.BodeCtrlReq.make(P.BODE_RUN, 30e3, 1e6, 60, settle=0))
         while s.read_bode()[0].measured < 1:
             time.sleep(0.005)
         assert s.capture(["CH1"]) is not None
-        h, _ = _wait_done(s)
-        assert (h.state_name, h.reason, h.sweep_id) == ("error", 5, 2)
-        assert h.reason_text == "the PC armed its own capture during the sweep"
+        h = s.bode_ctrl().hdr
+        assert (h.state_name, h.reason, h.sweep_id) == ("stopped", 6, 2) and not h.view & 1
+        assert s.status().display_mode == P.DisplayMode.SCOPE
+        s.bode_ctrl(P.BODE_OPEN)
+        s.set_acq_state(True)
+        h = s.bode_ctrl().hdr
+        assert not h.view & 1 and not h.running and h.sweep_id == 2
+        assert s.status().display_mode == P.DisplayMode.SCOPE
         # abort, then close
         s.bode_ctrl(P.BodeCtrlReq.make(P.BODE_RUN, 30e3, 1e6, 60, settle=0))
         s.bode_ctrl(P.BODE_ABORT)

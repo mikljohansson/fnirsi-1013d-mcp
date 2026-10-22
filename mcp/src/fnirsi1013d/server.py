@@ -514,9 +514,10 @@ MENU_CLOSED_NOTE = ("a menu or dialog was open on the scope: the firmware closed
 SPECTRUM_VIEW_NOTE = ("the scope's screen shows its spectrum view: the person at the scope sees the spectrum of each "
                       "capture, not the trace (the data returned here are unaffected; scope_spectrum reads what the "
                       "screen shows)")
-BODE_VIEW_NOTE = ("the scope's screen shows its Bode plot (protocol 1.20): the scope's own acquisition is off; a host "
-                  "capture ends a device sweep in progress (READ_BODE reason 5). The person leaves it with Menu > "
-                  "Scope; scope_bode_sweep(where='device', close_view=true) closes it and gives the settings back")
+BODE_VIEW_NOTE = ("the scope's screen showed its Bode plot (protocol 1.20): fw 0.2.105+ closes it at the first host "
+                  "setting, capture or RUN and gives the scope settings from before it back (a device sweep in "
+                  "progress ends; RUN never starts a sweep); older firmware keeps it open with the scope's own "
+                  "acquisition off (Menu > Scope, or scope_bode_sweep(where='device', close_view=true) closes it)")
 
 
 def _spectrum_cross_check(s: Scope, ch: str, sp: Spectrum) -> dict[str, Any]:
