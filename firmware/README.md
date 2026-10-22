@@ -2527,6 +2527,24 @@ Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel 
 `python firmware/tools/cal_probe.py <port> both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,
 settle, prestrobe, mode). Nothing is stored.
 
+**Quiet stages (fw 0.2.105, fw-capmetric, protocol 1.28, row 68; `cap_stage.h` "Quiet stages").** The 2026-10-22 sweep
+(fpga/al3/README.md section 18) showed that the capture errors next to a clean stage are bitwise mixes of two
+neighbouring codes at a carry (0x5F / 0x60 read 0x6E, 0x97 / 0x98 read 0x9F), a few codes off: the 0x36 counters (jumps
+over 32 codes) pass them on the quiet input, so the training kept CH1 A5 and CH2 A4. The band now parks the quiet input
+at the carries, codes 8k - 0.5 for k = 8..24 (63.5, 71.5, .. 191.5; `cs_band_code16`, `cs_band_pwm` in 1/16 code), where
+the input's noise flips 4 or more bits, with 2 captures per stage and point. After each capture the wizard reads both
+cores of the parked channel, 2048 words each from the record's middle through READ_RAW's path, and scores them with
+`cs_resid`: E = the sum of (x[j] - median(x[j - 1], x[j], x[j + 1]))^2 over j = 1 .. n - 2 (integers only). Per core and
+stage q is the sum over the band of E / 127 (1/16 code^2 per sample). A stage is **quiet** when its 0x36 sum is 0 (the
+outlier rule stays the first gate) and q <= q_min x 5 / 4 + 4, q_min the smallest q of the core's outlier-clean stages
+(`cs_quiet`). `cs_pick`, the tie pass (unchanged: 0x36 counts at codes 126, 128, 130) and the stored set (sector 708
+bytes 504..511, the runtime guard's bound) use the quiet set; the guard itself is unchanged. On the sweep's numbers the
+rule gives CH1 A {3}, CH1 B {3, 4, 5}, CH2 A {3}, CH2 B {3, 4, 5}: 0x08E3. A noise floor that every stage shares (the
+ADC's own code errors) raises every q alike and changes nothing. The wizard's training takes about 1.5 s per channel (17
+parks of 60 ms, 180 ms after a jump of more than 16 codes; 136 captures with two 2048-word reads; the tie pass). GET_CAL
+364..431 report each channel's last training since boot (flags, quiet sets, q and the 0x36 sums per core and stage;
+mcp `scope_calibration_info` `capture_training`). Bench list: firmware/AGENTS.md section 92.
+
 **Full-rate capture check (fw 0.2.61, per capture since fw 0.2.62, `enc_heal.h`).** Every 200 MSa/s conversion of the
 zero and gain steps is checked before the wizard reads it, like every other full-rate capture (section 5 "Full-rate
 capture check"): on FPGA 0x1538 by the FPGA's own encode check (read 0x33), on 0x1532..0x1537 by the RMS of core B

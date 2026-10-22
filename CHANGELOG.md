@@ -32,7 +32,7 @@ by CI from the tag commit and has its own hash.
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.105 - 2026-10-21 (protocol 1.27, row 67): built for FPGA 0x153D
+#### 0.2.105 - 2026-10-21 (protocol 1.28, rows 67 and 68): built for FPGA 0x153D
 
 One firmware for bitstream 0x153D (`PC_FW_FPGA_VERSION` 0x153D; any other word shows the mismatch notice): the streaming
 logger, the generator as a fractional square, roll mode on the logger stream, three small fixes and what 0x153C dropped.
@@ -211,6 +211,14 @@ sections 74 to 79.
   moved a core from the firmware's value and stored it in sector 708). The self-check reads the 0x63 value the FPGA
   holds with the counts; a capture taken at a value the firmware did not write still shows its counts in GET_HEALTH
   but counts toward neither the guard nor REPEAT, and nothing is logged or stored. (bfbb7ed)
+- **The capture-stage training scores the data, not only the 0x36 counters** (fw-capmetric, firmware/AGENTS.md section
+  92, fpga/al3/README.md section 18; protocol 1.28, row 68). The 2026-10-22 sweep found capture errors that mix two
+  neighbouring codes at a carry, a few codes off, which the 32-code counters pass (CH1 A5, CH2 A4 on the owner's unit).
+  The band now parks the quiet input at the carries 63.5, 71.5, .. 191.5 with 2 captures per stage, reads 2048 words of
+  each core per capture and keeps only the stages whose 3-sample-median residual is within 25 % (+ 1/4 code^2) of the
+  core's best outlier-free stage; the pick, the tie pass and the stored set work on that quiet set. GET_CAL is 432
+  bytes: 364..431 the channel's last training (quiet sets, residuals, outlier sums); mcp `scope_calibration_info`
+  `capture_training`. (b9eae5a, 8921016, 2f11674)
 
 **Counter thresholds follow the signal (fw-ctrauto).**
 
