@@ -12,6 +12,7 @@ has been flashed from this folder.
 |---|---|
 | `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\path\to\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
 | `tb/` | iverilog testbenches and reference models: `run.sh` (nine steps, `ONLY=ext/decim/fir/long/seg/trigpos/contract/encphase`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `tb_trigpos.v`, `tb_seqcontract.v` (+ its transcript `contract_0x1538.txt`), `tb_encphase.v` + `encphase.sh`, `edge_phase.py`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
+| `tools/` | Bench scripts for the coordinator: `capwin_sweep.py` (per-core, per-band noise of every capture stage, section 18). |
 | `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `dist/` | The released bitstreams 0x1533 onwards, committed: `al3-0x15xx.bin` (raw bitgen output), `manifest.json` (sha256, padded-image sha256, source commit, minimum firmware, status), `BITSTREAMS.md` (the page attached to each release: which to use, how to flash, rollback). `tools/bitstreams.py check` runs in CI; `release.yml` packs them. Add a version there once it is pinned and benched. |
@@ -2899,6 +2900,146 @@ generator share the crystal, so this checks the arithmetic, not the crystal); th
 Scope view shows the square leaves no glitch in 50 traces (persistence); the calibration wizard's gain step passes (the
 static levels of `fpga_pat_level`); a host chirp 1 kHz .. 100 kHz in 1 s on the Spectrum view; the Frequency response
 sweep 100 Hz .. 1 MHz (the Bode planner on P = 4 M, fw-d5) gives the RC's -3 dB as before.
+
+### 18. CH2 A capture window, 0x153D (fpga-capwin, 2026-10-22)
+
+**Bench** (owner's unit, 0x153D, fw 0.2.105, trained 0x08E3 = CH1 A3 B4, CH2 A3 B4; CH2 on the RC ladder's second node
+with the 1 kHz square, a slow falling slope through codes 90..185; raw 200 MSa/s, Filter Off; noise = rms of each core's
+sample minus its own 9-sample running median, per band of 8 codes):
+
+| CH2 A stage | 90-97 | 98-105 | 106-113 | 114-121 | 122-129 | 0x36 |
+|---|---|---|---|---|---|---|
+| 2 | 5.69 | 2.2 | 2.88 | 2.46 | | 0 |
+| 3 (trained) | 1.4 | 1.7 | 0.96 | 1.24 | | 0 |
+| 4 | 5.38 | 2.26 | 2.34 | 2.99 | | 0 |
+| 5 | 12.95 | 9.94 | 2.62 | 1.22 | 12.3 | 0 |
+
+CH2 B (stage 4) stays at 1.0..1.2 throughout; the owner's "squiggles in one spot of every pulse" are the 98-105 band at
+stage 3. Earlier the same morning CH1 A at stage 4 counted 146..177 outliers in a few captures on the post's square while
+2, 3 and 5 counted 0 (`docs/hardware-status.md` 2026-10-22 08:35). None of the CH2 A errors reach the 32-code outlier
+threshold, so the training (quiet input, 120..140) found 2..5 clean.
+
+**What the FPGA contributes: no per-bit skew.** The committed source rebuilt in `~/capwin/base` gives the dist image
+(`0e2cdbce...150e`); `FPGA_phy.area` `#ireg 33`: every ADC pin is in its IOB DDR register, as 0x153A intended.
+`tb/capture_margins.py --bits` (new option) prints each pin's setup / hold point from TD's re-timing: **all 32 pins
+-0.11 / +0.12 ns, skew 0.00 in every core** (pad path 1.224 ns, IOB clock 0.938 ns on every pin, the clock-capable pins
+88..91 of CH2 A d3..d0 included). The pins and their banks are fixed by the board (`zaklad.adc`); there is no placement
+or IOB constraint left to add. TD cannot see board or ADC skew; the bench script below can.
+
+What does move with every placement is the encode pad: 0x153D CH1 A 7.11, CH1 B 7.10, CH2 A 6.90, CH2 B 6.97 ns after
+the write clock edge (+0.3 ns board in the margins); a functionally neutral rewrite of the IDDR loop (a generate-if, no
+logic change) re-rolled CH2 A to 7.68 ns; 0x153A's three builds had 7.38..7.93 (section 10).
+
+**The single-window model does not fit.** `capture_margins.py` with typical AD9288 timing (tV 3, tPD 4.5 ns,
+`capture_margins.py io.timing 3.0 4.5 0.3`) gives, start / end margin in ns:
+
+| Core (encode) | k2 | k3 | k4 | k5 |
+|---|---|---|---|---|
+| CH1 A (7.41) | 7.98 / 0.30 | 5.48 / 2.80 | 2.98 / 5.30 | 0.48 / 7.80 |
+| CH2 A (7.20) | 8.19 / 0.08 | 5.69 / 2.58 | 3.19 / 5.08 | 0.69 / 7.58 |
+| CH2 B (7.27) | 8.13 / 0.15 | 5.63 / 2.65 | 3.13 / 5.15 | 0.62 / 7.65 |
+
+(The datasheet worst case, tV 2 / tPD 6: CH2 A k3 4.19 / 1.58, k4 1.69 / 4.08.) In this model k4 is the safest stage of
+every core, yet CH1 A garbled at k4 and not at k3 or k5 on either side of it, and CH2 A is as bad at k4 as at k2 (0.08 ns
+from its window's end). A core cannot be clean at 3 and 5 and dirty at 4 if its window is one interval.
+
+**Cause (inference; it fits every bench observation and the script tests it): the partner core's output switching.**
+The two cores of a chip are encoded in antiphase and the chip runs with data-align off (section 10), so each core's
+outputs switch T/2 after its partner's, in the middle of the partner's valid window. In a core's own frame (ns after its
+write clock edge, modulo the 10 ns encode period, typical AD9288, encode about 7.3 ns): own transition [0.2, 1.7], the
+partner's [5.3, 6.8]; the stages sample at k2 0.0, k3 7.5, k4 5.0, k5 2.5. If the partner's switching disturbs the core's
+outputs (the AD9288's sixteen outputs share DRVDD / DRGND, and the A and B buses run side by side to the FPGA: ground
+bounce and crosstalk), each core has two clean halves of about 3.5 ns, (1.7, 5.3) and (6.8, 10.2), and the 2.5 ns grid
+puts k5 and k3 0.7..0.8 ns inside them, k4 0.3 ns before the partner's transition and k2 0.2 ns before the core's own.
+- CH1 A: k4 dirty, k2 / k3 / k5 free of outliers: as predicted.
+- CH2 A: k2 and k4 equally dirty, k3 best: as predicted. k5 dirty: CH2 A's own transition ends about 1 ns later than
+  typical (tPD or the encode trace). The same 1 ns moves CH2 A's transition in CH2 B's frame to [6.2, 7.7], which gives
+  CH2 B's k4 1.2 ns and puts its k3 inside: B4 clean, as trained.
+- Code dependence: the disturbance grows with the number of partner bits that switch, which on a slow signal (both cores
+  at the same code, a few codes of noise) is largest at the carries: 0x5F / 0x60 (band 90-97, the worst band of k2, k4,
+  k5), 0x67 / 0x68 (98-105), 0x7F / 0x80 (122-129, k5). Most disturbances flip a low bit or two (errors under 32 codes,
+  invisible to 0x36); CH1 A k4's outliers are the large case.
+- At stage 3 CH2 A keeps 0.7 ns typical to the partner's transition: the residual 1.4..1.7 codes rms in 90-105 against
+  CH2 B's 1.0 are that edge (inference).
+
+Ruled out: FPGA per-bit skew (0, above), a capture register outside the IOB (`#ireg 33`), the own-window margins
+(>= 2.6 ns typical at k3 and k4 on every core). Not ruled out by the data so far: board-level skew between the CH2 A bits
+(TD cannot see it; the script's bit columns would show it as stage 2 and stage 4 failing in different bits).
+
+**Finer delays on the AL3 (TD 4.6.8, `arch/al3_macro.v`, `sim/al/al_phy_pad.v`).**
+- `AL_LOGIC_IDELAY #(.INDEL(n))` (n = 1..31, an integer parameter: a sized literal such as `5'd16` crashes TD's
+  elaborator with `bad_lexical_cast`) in front of an `AL_LOGIC_IDDR` packs into the same IOB (`INDELMUX = "FIXDEL"`; the
+  CH2 A experiment kept `#ireg 33`). TD's timing model (CH2 A's eight pins, setup / hold point against -0.11 / +0.12
+  without it): n = 1 -0.63 / -0.41 (0.52 ns), n = 16 -2.27 / -2.03 (2.16 ns), n = 31 -3.84 / -3.61 (3.73 ns), so
+  0.52 ns + about 0.107 ns per tap above 1 (the simulation model `al_phy_pad.v` says 0.12). The three builds placed
+  identically (same encode pads, 7.01 ns for CH2 A): the tap count does not re-roll the placement, only adding or
+  removing the IDELAY does. Static: one value per pin per
+  bitstream, no runtime control. It moves a core's sampling instants earlier by the delay, between the 2.5 ns stages.
+- The PLL (`al_ip/pll.v`): VCO 1 GHz (C0 and C1 = VCO / 5 = 200 MHz, feedback from C0), static phase per output in 1/8 VCO cycle = 125 ps
+  (`CLKC1_CPHASE` / `CLKC1_FPHASE` give clk_ADC's 90 degrees), and a dynamic phase shift (`DPHASE_SOURCE "ENABLE"`, ports
+  `phasestep`, `phcntsel`, `phaseupdown`, `phasedone`; datasheet DS001 section 2.4, "PHASECOUNTERSELECT") in the same
+  125 ps steps. Outputs C2..C4 are unused: a capture clock per core group with a runtime phase is possible.
+- The input register on the other edge is already in use: the IDDR's two edges are what makes the 2.5 ns grid.
+- Input hysteresis (DS001 p.62: 250 or 450 mV, LVCMOS33) would raise the pins' immunity to a small bounce; whether TD 4.6.8
+  exposes it for the AL3 in `zaklad.adc` is not checked (no such property in `al3_macro.v`'s `AL_PHY_PAD`).
+
+**Recommended fix, in order.**
+1. **Measure** (no flash, a PC_DEBUG image): `fpga/al3/tools/capwin_sweep.py` (below) on every core, CH2 on the ladder
+   node and CH1 on the post's square. It confirms the cause when the bad samples of CH1 A k4 and CH2 A k4 show the partner
+   switching more bits inside their window than in the control, and tells board skew apart (stage 2 and stage 4 failing in
+   different single bits).
+2. **Firmware, the training and the guard see small errors** (no bitstream; specified below for the firmware agent). With
+   it the pick on this unit stays CH2 A3 (its only stage without excess noise on the bench numbers), and a unit whose best stage is
+   at a half's edge is picked by noise instead of by the 32-code counters.
+3. **0x153E, only if the bench confirms the cause and the stage-3 residual matters:** two capture clocks from the free PLL
+   outputs, one for the A cores' IDDRs and one for the B cores', each with the PLL's dynamic phase (125 ps steps over a
+   period), so the training centres each group in its larger clean half: from about 0.7 ns to about 1.75 ns typical margin.
+   Cost: two global clocks, a phase-dependent hand-over from the capture clock into `clk_200MHz` (the edge chosen per
+   phase range, so the word association stays fixed), its constraints, a `tb_adccap.v` phase sweep, a new firmware step
+   (sweep the phase with the residual metric), the full two-seed `run.sh` and the usual 10..20 placement rolls at 86 % of
+   the LEs. The static `AL_LOGIC_IDELAY` cannot do this per unit: it only offsets the grid by a fixed amount for every
+   unit. As a **bench experiment** it is cheap: CH2 A's eight pins at n = 8 (about 1.27 ns) make CH2 A's stage 2 sample at
+   8.73 ns in the frame above, the centre of its later clean half on this unit (inference: needs its own transition 1 ns
+   late, as above), and the sweep script then shows whether k2 + 1.27 ns beats k3 (the same placement
+   at n = 4, 8, 12 gives three offsets from one roll). Any IDELAY edit re-rolls the placement: the n = 1 build
+   missed `clk_200MHz` by 1.79 ns (12 errors, `q_post_reg` into the averaging RAM's address, a path the IDELAY does not
+   touch), so an experiment image needs the usual rolls before it may be flashed.
+
+**Firmware metric for the training and the guard (specification; host-testable in `cap_stage.h` / `test_cap_stage.c`).**
+- Residual of a capture, per core: for j = 1 .. n - 2, m = median(x[j-1], x[j], x[j+1]), d = x[j] - m; E = sum of d^2
+  (u32; d is at most 255, n <= 4096), N = n - 2. Integer only. `uint32_t cs_resid(const uint8_t *x, uint32_t n)`.
+- Data: after each training capture read the parked channel's two cores, 2048 words each (READ_RAW's path; about 1.3 ms of
+  bus at 0.3 us per byte), from the record's middle.
+- Band: park the quiet input at the carries, codes 8k for k = 8 .. 24 (64 .. 192, 17 points; the noise straddles 8k - 1 /
+  8k, so the cores switch 4 or more bits there, 8 at 128), 2 captures per stage and point; the tie pass stays as it is.
+- Per core c and stage s: q[c][s] = the sum over the points and captures of E / (N / 16) (1/16 code^2 per sample, u32
+  arithmetic, no 64-bit division). q_min[c] = the smallest q
+  of the core's stages with 0 outliers. A stage is **quiet** when its outlier sum is 0 and q[c][s] <= q_min[c] * 5 / 4 + 4
+  (within 25 % of the core's best stage, plus 1/4 code^2). The pick (`cs_pick`, unchanged) runs on the quiet set instead of
+  the outlier-clean set; the stored clean set (bytes 504..511) is the quiet set, so the guard only moves within it.
+  On this unit's median-9 numbers (CH2 A variance 1..2.9 at k3 against 4.8..32 at k2 and k4 and up to 168 at k5 in the
+  bands 90..121) only k3 is quiet; the median-3 residual is smaller in absolute terms, the ratios are what the rule uses.
+  Range: one capture's E / (N / 16) is at most 2046 x 65025 / 127, about 1.05e6, so 17 points x 2 captures stay far
+  below 2^32.
+- Warning, not failure: when a core's q_min exceeds its partner's q_min * 3 / 2 + 8, the wizard notes "CH2 A capture
+  window narrow" (Diagnostics, event 23 with a new bit): the residual this section measured at k3.
+- Wizard time: 17 points x 60 ms settling + 17 x 4 stages x 2 captures x (0.5 ms capture + 1.3 ms read + about 1 ms of
+  arithmetic) = about 1.4 s per channel (now about 1 s).
+- Host tests: a mock core that flips bit 3 or bit 4 at a stage only while the partner switches 4 or more bits (the cause
+  above), invisible to the 0x36 model at 32 codes: the old rule keeps the stage, the new one drops it; a clean unit's pick
+  unchanged; the warning on a core with 1.5x its partner's residual.
+
+**Bench script: `fpga/al3/tools/capwin_sweep.py`** (the coordinator runs it; mcp venv; a PC_DEBUG image; SD sectors
+700..710 backed up first, because a stage that the firmware's guard flags three times in a minute is moved and stored in
+sector 708; the script stops if it sees that and always writes the original 0x63 back).
+- `python -I fpga/al3/tools/capwin_sweep.py --port COM10 --out capwin-before.npz`: every core, stages 2..5, 8 captures
+  each (about 2 to 4 minutes). Per core and stage: the residual rms per 8-code band of the core's median (the swept core and,
+  as the reference, its partner at its own stage), the share of samples 4 or more codes off, which single bit explains
+  them (bit 0..7, or none: several bits, the core's own transition), the partner's switching inside the window against the
+  control (one sample away), and the 0x36 sums.
+- `--cores "CH2 A" --stages 2,3,4,5 --captures 16` for one core; `--analyse capwin-before.npz` reprints a saved run;
+  `--selftest` checks the analysis on synthetic data (a late bit 3 at one stage) without a scope.
+- Set up the scope first: 200 MSa/s (divider 0), Filter Off, the signal as above, a trigger that fires.
 
 ## Device facts from the datasheet
 
