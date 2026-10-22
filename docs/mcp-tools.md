@@ -557,7 +557,8 @@ f = 200 MHz / P exactly; the DDS's M up to 1.26), maps the flag bits to the host
 and returns the same structure as the host sweep (plus `device`: sweep id, state, reason, thru state, view), so the
 two compare point by point. Presets only, `ch2_range` auto / fixed, DC; `thru_cal` 'device' applies the scope's stored
 thru, a stored name is applied on the host; `close_view` closes the scope's Bode view afterwards (it restores the
-scope's settings). While the view shows (`display_mode` `bode`) the capture tools add a caveat. A device sweep ended
+scope's settings). Since fw 0.2.105 the next host setting, capture or RUN closes the view first and gives those
+settings back (no RUN starts a Bode sweep); the capture tools say so in a caveat. A device sweep ended
 with READ_BODE reason 8 (ADC readout fault: the capture self-check flagged a core on 0x153A+, fw 0.2.83; the pre-scan
 clipped at 5 V/div on older bitstreams) returns no table and a caveat pointing at `scope_health` and the calibration
 wizard. Host sweeps retake a flat or toneless record once (the 0x153A first record after a configuration change);

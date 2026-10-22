@@ -61,7 +61,8 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
   USB-shell ground only with `ch2_coupling='ac'`). Thru calibration first (`thru_cal='measure'`, both probes on the DUT input), then the DUT with that name.
   Report f_actual, the markers, the calibration used, and leave flagged points (near_floor, clipped, unsettled, ch2_small) out.
   `where='device'` (fw 0.2.66+) lets the scope run the sweep and show the plot itself (same result structure; presets
-  only, ch2_range auto/fixed, DC; the view stays open unless `close_view=true`).
+  only, ch2_range auto/fixed, DC; the view stays open unless `close_view=true` or, fw 0.2.105+, until the next
+  host setting / capture / RUN, which closes it and gives the scope settings back).
 
 ## The screen is shared
 

@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-relay (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: host acquisition requests and SET_ACQ_STATE RUN close the Frequency response view first (no Bode sweep from RUN; the soak's relay clicks), the relay registers written only on a change; section 89.**
 **Branch fw-fullrate (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): one calibration clock class for FPGA 0x153D, whose ADC encodes run at 200 MSa/s at every rate (the gated class, its wizard steps, the class probe gone; old cards load), the host-test model of the full-rate encodes, the encode check over every capture; section 83 has the owner's bench list.**
 **Branch fw-105 (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): the merged fw-d4 / fw-d5 / fw-nopat / fw-roll / fw-small / fw-cruft numbered and built for FPGA 0x153D (`PC_FW_FPGA_VERSION`), the dead checks for a bitstream without the 0x153D features removed (LOG_START E_FPGA detail 1, `fpga_log_start` -2, roll's "needs 0x153D" stop, the wizard's CW_GAIN_NA, the Frequency response's caps test); section 80 has the owner's bench list.**
 **Branch fw-d4 (2026-10-21): fw 0.2.105 (was 0.2.104 + D4), protocol 1.27 (row 67): the FPGA 0x153D streaming logger: LOG_START / LOG_READ / LOG_STOP 0x0214-0x0216, the log loop (drain + MAIN poll, the notice slot's "Logging to the host" line), the 8 MiB NOLOAD `.logring` DDR ring, gaps on a lap or a full ring, acq_state 5, E_STATE 9 while logging, caps bit 23 / features bit 11; built for 0x153D since fw 0.2.105; section 74.**
@@ -6737,3 +6738,65 @@ the RC node still miscounting (span / 6 too small for that noise: go to span / 5
 **Open**
 - docs/plans/fpga-0x153c.md section 5 (the contract) still says the level follows the trigger level: history, left.
 - The RTL comment in `fpga/al3/src/zaklad.v` ("the firmware writes 128 / 6") stays for the next FPGA change.
+
+## 89. fw-relay: quiet relays, host requests close the Frequency response view (fw 0.2.105, protocol 1.27 unchanged)
+
+Branch `fw-relay` from main 032158a. Brief: the 2026-10-22 soak (fw 0.2.105 on 0x153D; every 10 s a host capture of CH1 +
+CH2 then `set_acq_state(True)`, GET_STATUS every 2 s, READ_SPECTRUM every 30 s, no channel change) made the relays click
+on every cycle. Commits 4ca4ea0 (relay shadow), 7b797bd (the view rule, firmware + mcp), then the docs commit with this
+section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.**
+
+**Cause** (confirmed by the owner: the Frequency response plot was on the screen during the soak). The device Bode sweep
+run just before the soak (mcp `device_sweep`, `close_view=False` by default) left the view open. With the view open,
+`bode_view_service` starts a RUN sweep on every rising edge of `scopesettings.runstate`, and SET_ACQ_STATE RUN gave it
+one each cycle; the sweep's plan switches ranges (at its start back to the first point's range and at the planned
+transitions, section 67's "two planned" switches), so the relays really changed; the next ARM
+(`pc_hal_ui_set_run(0)`) stopped it. Not the cause: a rewrite of an unchanged value. zaklad.v latches the 0x33 / 0x36
+byte (`relay1_x <= data`, ignored above 5) and the 0x34 / 0x37 bit, so the same value never switches a relay; no path
+writes the relay commands from a read (every read of 0x33 / 0x34 / 0x36 / 0x37 is cmd + read strobes), and the ISR
+poll does no FPGA access.
+
+**Rule 1: host acquisition requests close the view** (owner 2026-10-22). `pc_cmds.c` flag `F_SCOPE` on SET_CHANNEL,
+SET_TIMEBASE, SET_TRIGGER, SET_TRIGGER2, SET_DECIM, SET_SEQ, SET_GEN, ARM, LOG_START, CAL_PROBE: `pc_dispatch` calls
+`pc_hal_ui_leave_bode` (= `bode_view_close`, the Menu > Scope path) in the MAIN context before the handler, next to the
+Diagnostics leave; `h_set_acq_state` does it for RUN only. The settings from before the view come back first, then the
+request applies to them (closing at ARM after a host SET_* would have overwritten the host's setting with the view's
+saved one: the reason the rule covers the setters, not only ARM / RUN). A sweep in progress ends as stopped (READ_BODE
+reason 6); reason 5 (BODE_ERR_HOST, `bh_poll`'s host-capture check) is no longer reachable from a host ARM but stays as
+the engine's guard. STOP, BODE_CTRL, READ_BODE and the reads keep the view. Sweeps start only from the view's own
+controls and BODE_CTRL. Reads made while the view shows report the view's live settings (unchanged behaviour).
+
+**Rule 2: relays written only on a change.** `fpga_bus.c` `fpga_relay_write(cmd, value)`: `fpga_bus_wr.relay[4]`
+(FPGA_RELAY_INDEX: 0x33, 0x34, 0x36, 0x37) with `FPGA_HELD_RELAY << i` valid bits, updated by `fpga_bus_note_write`
+from every write (so DEBUG_FPGA writes are followed; a range above 5 is not taken, as the FPGA ignores it), counted in
+`relay_writes`. `fpga_set_channel_voltperdiv` / `_coupling` go through it, so every caller (RUN's
+`match_volt_per_div_settings`, menu.c's viewer close, ui_settings_ui's load, ui_diag_view's restore, the wizard's
+`cal_scratch_channel` and restores, host SET_CHANNEL, the Bode engine's `bh_channel`, AUTO SET) writes nothing when the
+hardware already holds the value. Unknown at boot and after a FEL load (BSS): the first write of each goes out. No
+other invalidation is needed: every relay write, the wizard's included, goes through these functions or is seen by
+`fpga_bus_note_write`. Settle delays unchanged: `match_volt_per_div_settings` runs only when sample != display V/div,
+and then the offset changes too (dc_calibration_offset[6] vs [5] when the relay stays), so its 50 ms stays; the wizard
+and AUTO SET waits stay (they settle the offset as well).
+
+**Host tests**: test_fpga_bus `test_relay` (fpga_model relay registers, `relay_writes` / `relay_switches`): boot writes
+4; five host capture + RUN restore cycles (arm, 0x37 / 0x34 status reads, a readout, the 0x33 / 0x36 reads, the restore
+of all four) write 0; a range change writes once, the next restore nothing; AC on CH2 once; a raw write is followed; a
+range 6 write is ignored. test_session `test_relay_cycle` (mock HAL: `bode_view`, `bode_sweeps` = sweeps a RUN starts
+while it shows, `relay_writes` by the shadow rule): three ARM / WAIT / READ_RAW / RUN cycles with the view reopened
+before ARM and before a second RUN: 6 leaves, 0 sweeps, 0 relay writes; STOP and GET_CHANNEL keep the view,
+SET_TIMEBASE closes it; SET_CHANNEL with the same range 0 writes, another range 1. mcp test_bode_device: a host capture
+during a device sweep ends it as stopped (reason 6) with the scope view back; RUN with the view open closes it without a
+sweep; SET_CHANNEL with the view open closes it and then applies; the device / host comparison closes the view before
+the host sweep.
+
+**Bench (owner, FEL load; nothing flashed)**
+1. The soak cycle: a device sweep (`scope_bode_sweep(where='device')`, the view left open), then the soak (a host
+   capture of CH1 + CH2 and `set_acq_state(True)` every 10 s, GET_STATUS every 2 s, READ_SPECTRUM every 30 s) for 3
+   minutes: the first capture closes the Frequency response view (the scope view and its V/div come back, at most one
+   click if the view's last ranges differed), then **no click for the rest of the soak**.
+2. A range change (`scope_set_channel` to another hardware range): **one click**; the same request again: none. AC/DC
+   in the scope's channel menu: one click each way.
+3. Open the Frequency response view on the scope and tap RUN there: the sweep runs (the view's own RUN still sweeps); a
+   host `scope_status` keeps the view; a host `scope_capture` closes it.
+Regression signs: a click per cycle in step 1 (the view still open: check GET_STATUS display_mode), no click on a range
+change in step 2 (the shadow out of step with the hardware: a relay write outside `fpga_relay_write`).

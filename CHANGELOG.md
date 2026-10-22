@@ -224,6 +224,22 @@ sections 74 to 79.
   misfit first gate skipped, caveats for a signal under the auto span or outside pinned thresholds (from fw-hyst), the
   simulator's auto rule and its low threshold saturating at code 0. (f7fa203)
 
+**Quiet relays: the Frequency response view and host requests (fw-relay).**
+
+- **A host acquisition request or RUN closes the Frequency response view first** (bench soak 2026-10-22 on 0x153D: a
+  device sweep had left the view open, so every SET_ACQ_STATE RUN started a RUN sweep whose planned ranges switched the
+  relays, a click every 10 s cycle; owner decision): SET_CHANNEL, SET_TIMEBASE, SET_TRIGGER, SET_TRIGGER2, SET_DECIM,
+  SET_SEQ, SET_GEN, ARM, LOG_START, CAL_PROBE and SET_ACQ_STATE RUN leave the view as Menu > Scope does (the settings
+  from before it come back, then the request applies; a sweep in progress ends as stopped, reason 6, no longer reason
+  5). No host request but BODE_CTRL starts a Bode sweep; STOP, BODE_CTRL, READ_BODE and the reads keep the view. Wire
+  layout and protocol 1.27 unchanged (row 60 updated). The simulator matches (`P.BODE_LEAVE_CMDS`); the mcp caveats
+  and guides say the view closes at the next host setting or capture. (7b797bd)
+- **The front-end relays are written only when their value changes**: `fpga_relay_write` keeps what the FPGA holds for
+  0x33 / 0x34 / 0x36 / 0x37 (any write, including DEBUG_FPGA, updates it; a range above 5 is ignored as by the FPGA),
+  and every range / coupling write (RUN, menu close, settings load, Diagnostics, the wizard, host SET_CHANNEL) goes
+  through it. A rewrite of the same value never switched a relay (the FPGA latches the byte); this removes the bus
+  rounds and makes the relay writes countable (fpga_model, mock HAL). (4ca4ea0)
+
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, flash image `04e3328b...d0e7`, status

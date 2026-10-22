@@ -259,8 +259,8 @@ is tier 3 with a confirmation token.
    rows carry flags but no SNR / leakage / code levels; `device` holds the sweep id and state). Limits there: the
    settle presets only, `ch2_range` 'auto' or 'fixed', DC coupling; `thru_cal='measure'` stores the thru on the
    scope (until power-off) and here, `thru_cal='device'` applies the scope's copy. The view stays on the screen
-   (its own acquisition is off, capture tools then add a caveat) unless `close_view=true`; a host capture during a
-   device sweep ends it. Use it when the person wants to see the plot or the host sweep is too slow; use the host
+   (its own acquisition is off) unless `close_view=true`; since fw 0.2.105 the next host setting, capture or RUN
+   closes it first and gives the scope settings back (a device sweep in progress ends; no RUN starts a sweep). Use it when the person wants to see the plot or the host sweep is too slow; use the host
    sweep for AC coupling, a V/div of your choice or a custom settle.
 
 Accuracy (design estimate, to be confirmed on the bench): +-0.1 dB / +-0.5 deg down to about -30 dB with the thru
