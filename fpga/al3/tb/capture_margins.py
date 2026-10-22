@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """ADC capture margins of a placed AL3 build (0x153A and later), from TD's own numbers and the AD9288 datasheet.
 
-Usage (in WSL):  python3 -I capture_margins.py <io.timing> [tV_min tPD_max board_ns]
+Usage (in WSL):  python3 -I capture_margins.py <io.timing> [tV_min tPD_max board_ns] [--bits]
+
+--bits also prints every data pin's setup / hold point and the per-core skew (fpga/al3/README.md section 18).
 
 <io.timing> is a TD timing report of the placed design with the I/O references of `tb/capture_io.sdc` appended to
 zaklad.sdc (tb/capture_report.sh: import_device, import_db FPGA_pr.db, read_sdc, report_timing -ep_num 2000
@@ -41,10 +43,12 @@ def blocks(txt):
 
 
 def main():
-    txt = open(sys.argv[1]).read()
-    tv = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
-    tpd = float(sys.argv[3]) if len(sys.argv) > 3 else 6.0
-    board = float(sys.argv[4]) if len(sys.argv) > 4 else 0.3
+    bits = "--bits" in sys.argv
+    argv = [a for a in sys.argv if a != "--bits"]
+    txt = open(argv[1]).read()
+    tv = float(argv[2]) if len(argv) > 2 else 2.0
+    tpd = float(argv[3]) if len(argv) > 3 else 6.0
+    board = float(argv[4]) if len(argv) > 4 else 0.3
     enc = {}
     din = {}                                             # pin -> [setup point, hold point] relative to the edge
     for b in blocks(txt):
@@ -80,6 +84,13 @@ def main():
           ", ".join("%s %.2f" % (k, v - 2.5) for k, v in sorted(enc.items())))
     print("AD9288 tV %.1f ns, tPD %.1f ns, board %.1f ns; window relative to the core's edge = "
           "[encode + tPD - T, encode + tV] at every T" % (tv, tpd, board))
+    if bits:
+        print("data pins: setup / hold point in ns relative to the IOB clock edge (the pin must be stable over "
+              "[setup, hold]); per core the spread of the setup points")
+        for core, pin, _ in CORES[:4]:
+            pts = [din["%s[%d]" % (pin, i)] for i in range(8)]
+            print("  core %-3s " % core + " ".join("d%d %+.2f/%+.2f" % (i, p[0], p[1]) for i, p in enumerate(pts))
+                  + "  skew %.2f" % (max(p[0] for p in pts) - min(p[0] for p in pts)))
     bad = 0
     T = 10.0                                             # the margins are the same at every rate (see above)
     for core, pin, encpin in CORES:
