@@ -380,6 +380,14 @@ static void test_zero_fail_note(void)
   T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
   cw_zero_line(&w, 1, t);
   T_STR(t, "CH2: ADC readout fault near code 128: power-cycle and retry; report it if it persists");
+
+  //fw-capmetric2: a training over the noise bound (CS_E_RESID) names the cores the same way, with its own words
+  cw_cap_result(&w, 1, CW_C_NOISY, 0x08E4, 0x0C);
+  cw_zero_note(&w, 1, t);
+  T_STR(t, "Capture stages: data too noisy for CH2 A, CH2 B");
+  T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
+  cw_zero_line(&w, 1, t);
+  T_STR(t, "CH2: ADC readout fault near code 128: power-cycle and retry; report it if it persists");
   rc[1] = ACAL_OK;
   ev(&w, CW_EV_CALIBRATE);
   take(&w);

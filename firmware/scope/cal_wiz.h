@@ -61,6 +61,8 @@
 #define CW_C_NONE          0      //not run (no capture stages in this bitstream, or not reached)
 #define CW_C_DONE          1      //trained: cap_v holds the stages
 #define CW_C_FAIL          2      //a core has no clean stage (cap_bad): the channel fails with ACAL_E_READOUT
+#define CW_C_NOISY         3      //fw-capmetric2: a core's best stage over the noise bound (cap_bad, CS_E_RESID): the
+                                  //channel fails with ACAL_E_READOUT
 
 //A measurement stopped by Cancel (the glue's result code; never an ACAL_* code)
 #define CW_RC_CANCELLED    (-1)

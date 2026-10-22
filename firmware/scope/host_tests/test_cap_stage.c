@@ -33,6 +33,7 @@ typedef struct
   uint32_t edge_hits[CS_CORES];       //of them garbled
   uint8_t  mix[CS_CORES];             //class (a) stages (bit s)
   uint32_t mix_pct, floor_pct;
+  uint32_t e_fix[CS_CORES][CS_STAGES];  //fw-capmetric2: E of every capture at stage s (index s - 2) instead of the data
   uint32_t seed;
   uint32_t code16, parks, measures, resid_reads;
   uint16_t last;
@@ -118,7 +119,9 @@ static int mock_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CO
       }
     }
 
-    if(resid & (1u << k))
+    if((resid & (1u << k)) && (s >= CS_STAGE_MIN) && m->e_fix[k][s - CS_STAGE_MIN])
+      e[k] = m->e_fix[k][s - CS_STAGE_MIN];
+    else if(resid & (1u << k))
       e[k] = mock_resid(m, !(v & cs_ref_bit(k)) && ((m->mix[k] >> s) & 1));
   }
 
@@ -521,6 +524,92 @@ static void test_metric(void)
   T_EQ(t.value & CS_REF_CH2B, CS_REF_CH2B);
 }
 
+//fw-capmetric2: the noise bound (cap_stage.h "Noise bound"). The bench of 2026-10-22 17:20 (0x153D fd0be7a2, fw 0.2.105
+//8c70c2fc, inputs open) read stale ring words for the residual: q per stage 2..5 summed over 34 captures, the 0x36 sums
+//as there. The relative rule took them (0x06E3); the bound fails both channels, every core, and nothing changes
+static void bench_e(mock_fpga *m, uint32_t k, const uint32_t q[CS_STAGES])
+{
+  uint32_t i;
+
+  for(i=0;i<CS_STAGES;i++)
+    m->e_fix[k][i] = q[i] / 34 * CS_RESID_DIV;
+}
+
+static void test_noise_bound(void)
+{
+  static const uint32_t q1a[CS_STAGES] = { 1461590, 1461590, 1461706, 1462218 };
+  static const uint32_t q1b[CS_STAGES] = { 8958, 8972, 8992, 9024 };
+  static const uint32_t q2a[CS_STAGES] = { 2070230, 2070188, 2069209, 2069803 };
+  static const uint32_t q2b[CS_STAGES] = { 8082, 8113, 8179, 8263 };
+  mock_fpga m;
+  cs_io     io = { &m, CS_BAND_POINTS, CS_BAND_REPS, CS_TIE_REPS, mock_park, mock_measure };
+  cs_train  t;
+  uint32_t  i;
+
+  //The bound in the units of q: 128 per capture is sigma 3.2 codes; the bench's B cores were at 263 and 238..243
+  T_EQ(CS_RESID_MAX_Q16, 128);
+  T_TRUE(q1b[1] / 34 > CS_RESID_MAX_Q16);
+  T_TRUE(q2b[0] / 34 > CS_RESID_MAX_Q16);
+
+  //CH1: A with outliers at 4 (34 there: the mock's dirty stage), B at 2
+  mock_init(&m);
+  m.dirty[0] |= 0x10;
+  m.dirty[1] |= 0x04;
+  bench_e(&m, 0, q1a);
+  bench_e(&m, 1, q1b);
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_RESID);
+  T_EQ(t.bad, 0x03);
+  T_EQ(t.value, CS_PO);
+  T_EQ(t.quiet[0], 0x2C);             //what the relative rule alone kept (the bench's [2, 3, 5])
+  T_EQ(t.quiet[1], 0x38);
+
+  //CH2: A with outliers at 4, B none
+  mock_init(&m);
+  m.dirty[2] |= 0x10;
+  bench_e(&m, 2, q2a);
+  bench_e(&m, 3, q2b);
+  T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_E_RESID);
+  T_EQ(t.bad, 0x0C);
+  T_EQ(t.value, CS_PO);
+
+  //One core over it is enough; the bench's A alone, B from the mock's 0.5-code data
+  mock_init(&m);
+  bench_e(&m, 0, q1a);
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_RESID);
+  T_EQ(t.bad, 0x01);
+
+  //The edge: the best stage at 128 per capture passes, 129 fails; a noisier stage beside it does not matter
+  mock_init(&m);
+
+  for(i=0;i<CS_STAGES;i++)
+    m.e_fix[0][i] = 1000 * CS_RESID_DIV;
+
+  m.e_fix[0][3 - CS_STAGE_MIN] = CS_RESID_MAX_Q16 * CS_RESID_DIV;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.q[0][3 - CS_STAGE_MIN], CS_RESID_MAX_Q16 * CS_BAND_POINTS * CS_BAND_REPS);
+  T_EQ(cs_stage(t.value, 0), 3);
+  m.e_fix[0][3 - CS_STAGE_MIN] = (CS_RESID_MAX_Q16 + 1) * CS_RESID_DIV;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_RESID);
+  T_EQ(t.bad, 0x01);
+
+  //The reference pass is the timing in use for a B core dirty with its own encode: its q is the one bounded
+  mock_init(&m);
+  m.dirty[3]     = 0xFF;
+  m.dirty_ref[3] = 0x03;
+
+  for(i=0;i<CS_STAGES;i++)
+    m.e_fix[3][i] = 300 * CS_RESID_DIV;
+
+  T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_E_RESID);
+  T_EQ(t.ref, 0x08);
+  T_EQ(t.bad, 0x08);
+
+  //A clean unit at 3 codes rms (the zero step's full-rate noise limit) passes: q16 about 115 per capture (cap_stage.h)
+  mock_init(&m);
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_TRUE(t.q[0][0] / (CS_BAND_POINTS * CS_BAND_REPS) < 16);   //the mock's 0.5-code noise: about 5
+}
+
 static void test_watch(void)
 {
   cs_watch w;
@@ -789,6 +878,7 @@ int main(void)
   test_resid();
   test_quiet();
   test_metric();
+  test_noise_bound();
   test_watch();
   test_guard();
   test_selfcheck();
