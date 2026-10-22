@@ -162,6 +162,10 @@ like `docs/plans/fpga-0x153c.md` section 13 on the 0x153D source.
    firmware change), the square generator's u32 step count (24 bits saves about 100 reg but raises the lowest square from
    23 mHz to about 6 Hz).
 
+4. **Finer ADC encode / capture phase** (fpga-capwin, 2026-10-22, README section 18): the free PLL outputs (125 ps steps)
+   to centre each core group's capture and to move the encodes away from the partner core's output switching, to get the
+   remaining ~1 % of CH2 code errors at 200 MSa/s below 0x153C's level. Two global clocks, a phase-dependent hand-over.
+
 Dropped by the owner on 2026-10-21 and not candidates: the pulse pattern generator with its trigger engine and marker (cut from
 0x153D at 15:55, it did not fit; chirps stay host-stepped on the square), runt, window and the pulse-width range triggers.
 
