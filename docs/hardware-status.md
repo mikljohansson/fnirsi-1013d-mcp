@@ -1584,3 +1584,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   10 s, a spectrum read every 30 s; no channel or range change) was stopped after about 3 minutes at the owner's question:
   **the relays clicked on every cycle** although nothing asked for a range or coupling change, so the host capture or the
   RUN restore re-writes the relays (wear; queued as fw-relay). No errors were seen while it ran (killed, no summary line).
+- 2026-10-22 09:55: **CH2 "squiggles" (owner: little squiggles at the lower part of the falling slope, a particular spot every
+  pulse) = CH2 A capture timing.** Debug image backups/fw-0.2.105-dbg_28a468ee.bin by FEL, CH2 on the ladder's second node,
+  200 MSa/s, Filter Off, noise = rms against a 9-sample running median per core, by code band (90 / 98 / 106 / 114):
+  CH2 A stage 2: 5.69 / 2.2 / 2.88 / 2.46; **3 (trained): 1.4 / 1.7 / 0.96 / 1.24**; 4: 5.38 / 2.26 / 2.34 / 2.99; 5: 12.95 /
+  9.94 / 2.62 / 1.22; CH2 B 1.0..1.2 throughout. The 0x36 counters stay 0 (32-code threshold), so training and self-check
+  cannot see it. CH2 A's valid window on this placement is narrower than one 2.5 ns stage. fpga-capwin (Opus; the account has
+  no Fable quota left, owner) investigates: per-bit skew, IOB placement, finer delays, a training metric for small errors.

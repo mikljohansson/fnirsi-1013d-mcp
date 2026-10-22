@@ -318,6 +318,12 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   30-minute soak, `v0.3.0-rc1` dry run, tag `v0.3.0`, FEL hash check, announcement once.
 ## Dispatched
 
+- fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
+  fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
+  IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
+  script measuring per-core per-band noise for every stage.
+- fw-relay (Opus explicitly, dispatched 09:5x, branch fw-relay): relay writes only on change; its first finding: the soak's
+  clicks were real Bode RUN sweeps (the device sweep left the Bode view open and every SET_ACQ_STATE RUN restarted it).
 - fpga-d3c done 02:0x (2026-10-22), merged 02:1x (63872af): 0x153D with full-rate encodes, run.sh 19 steps ALL PASS on both
   seeds (on ccf5bc2), bitstream source 50b4abe (roll k4: block order only), raw 0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e,
   padded 04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7, reproducible; 6385 LUT / 5887 reg / 7420 LE (85.9 %, 1220
