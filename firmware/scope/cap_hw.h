@@ -17,7 +17,9 @@ int      fpga_capture_has(void);                     //the running bitstream has
 void     fpga_capture_commit(void);                  //the wizard's Save: the value in effect becomes the stored one
 void     fpga_capture_check(void);                   //after an accepted full-rate capture: read 0x36, flag; a core
                                                      //flagged 3 times in a minute: moved once inside its trained set
-                                                     //(MOVED), else REPEAT; event 23 once
+                                                     //(MOVED), else REPEAT; event 23 once. Only captures at
+                                                     //the 0x63 value the firmware wrote count (0x36's first
+                                                     //word; a DEBUG_FPGA write owns the stages meanwhile)
 void     fpga_capture_counts(uint16_t cnt[4]);       //read 0x36's counts (training captures)
 void     fpga_capture_service(void);                 //MAIN context: store a value the runtime guard moved to (sector 708
                                                      //bytes 488..511)

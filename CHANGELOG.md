@@ -207,6 +207,11 @@ sections 74 to 79.
   stored value (sector 708 bytes 504..511). A core flagged 3 times in a minute moves once per boot to another stage of
   its trained set, at once and stored; event 23 a bit 5, GET_HEALTH 106 bit 6, Diagnostics "(trained, a flagged core
   moved)". (76fbaa2)
+- **The capture-stage guard leaves a 0x63 written from outside alone** (fw-guardfix, firmware/AGENTS.md section 90;
+  bench 2026-10-22: the capture-window sweep wrote 0x63 through DEBUG_FPGA, CH1 A at stage 4 garbled, and the guard
+  moved a core from the firmware's value and stored it in sector 708). The self-check reads the 0x63 value the FPGA
+  holds with the counts; a capture taken at a value the firmware did not write still shows its counts in GET_HEALTH
+  but counts toward neither the guard nor REPEAT, and nothing is logged or stored. (bfbb7ed)
 
 **Counter thresholds follow the signal (fw-ctrauto).**
 
