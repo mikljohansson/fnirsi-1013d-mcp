@@ -31,6 +31,50 @@ int acq_view_rate_free(void)
   return !scopesettings.waveviewmode && (scopesettings.runstate || (scopesettings.triggermode == 1));
 }
 
+//fw-stoprate: the rate tapped in STOP, applied at the next UI arm (acq_view.h)
+static uint8 acq_rate_pending = ACQ_RATE_NONE;
+
+int acq_view_rate_live(void)
+{
+  return !scopesettings.long_mode;
+}
+
+uint32 acq_view_rate_setting(void)
+{
+  return (acq_rate_pending != ACQ_RATE_NONE) ? acq_rate_pending : scopesettings.samplerate;
+}
+
+int acq_view_rate_tap(uint32 r)
+{
+  if(!acq_view_rate_live() || (r >= ACQ_RATES))
+    return 0;
+
+  if(acq_view_rate_free())
+  {
+    acq_rate_pending         = ACQ_RATE_NONE;
+    scopesettings.samplerate = (uint8)r;
+    return ACQ_SET_RATE;
+  }
+
+  acq_rate_pending = (r == scopesettings.samplerate) ? ACQ_RATE_NONE : (uint8)r;
+  return 0;
+}
+
+int acq_view_rate_arm(void)
+{
+  if((acq_rate_pending == ACQ_RATE_NONE) || scopesettings.long_mode)
+    return 0;
+
+  scopesettings.samplerate = acq_rate_pending;
+  acq_rate_pending         = ACQ_RATE_NONE;
+  return 1;
+}
+
+void acq_view_rate_drop(void)
+{
+  acq_rate_pending = ACQ_RATE_NONE;
+}
+
 int acq_view_tb_ok(uint32 timeperdiv)
 {
   uint32 fs = acq_fs();
@@ -40,6 +84,12 @@ int acq_view_tb_ok(uint32 timeperdiv)
 
   if(acq_view_rate_free())
     return tbv_ladder_rate(frequency_per_div[timeperdiv], sample_rate, ACQ_RATES, fpgasettings.totalsamples) >= 0;
+
+  //Stopped: a tap zooms the record, so its rate must show it; with a rate pending, that rate too (what RUN keeps
+  //without a snap)
+  if((acq_rate_pending != ACQ_RATE_NONE) &&
+     !tbv_viable(sample_rate[acq_rate_pending], frequency_per_div[timeperdiv], fpgasettings.totalsamples))
+    return 0;
 
   return tbv_viable(fs, frequency_per_div[timeperdiv], fpgasettings.totalsamples);
 }

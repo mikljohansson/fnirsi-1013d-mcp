@@ -33,8 +33,35 @@
 int acq_view_rate_free(void);
 
 //1 when time/div index `timeperdiv` can be chosen now (short mode): with the rate free, when the ladder has a rate
-//for it; stopped, when it is viable for the record's rate
+//for it; stopped, when it is viable for the record's rate (and, with a rate pending, for that rate too)
 int acq_view_tb_ok(uint32 timeperdiv);
+
+//fw-stoprate (owner 2026-10-22): the ACQ menu's Sample Rate grid takes taps in STOP, as bench scopes do. Stopped, the
+//tapped rate becomes the pending setting: scopesettings.samplerate stays the rate the record on screen was captured
+//at (trace, slider, cursors, measurements and the stopped zoom read it, unchanged), nothing is written to the FPGA,
+//and the next UI arm (scope_acquire_trace_data after RUN) takes it as if it had been tapped while running
+//(acq_view_rate_arm). The grid's green cell and the top bar's ACQ chip show the setting (acq_view_rate_setting).
+//Any write of the FPGA's rate (fpga_set_sample_rate: the host's SET_TIMEBASE, AUTO SET, a settings load, a time/div
+//tap that moves the rate) drops a pending rate: the last setting written wins.
+#define ACQ_RATE_NONE  0xFF
+
+//1 when the Sample Rate grid takes a tap: not in roll (the rate is off the grid there)
+int acq_view_rate_live(void);
+
+//The rate setting: the pending one in STOP, else the record's / FPGA's (scopesettings.samplerate)
+uint32 acq_view_rate_setting(void);
+
+//A tap on rate r (< ACQ_RATES) in the grid: with the rate free (running or Single) scopesettings.samplerate = r and
+//ACQ_SET_RATE (the caller writes the FPGA's rate and fits the time/div); stopped, r is stored as pending (none when it
+//is the record's rate) and 0 is returned (nothing to write). Nothing changes when the grid is not live.
+int acq_view_rate_tap(uint32 r);
+
+//At a UI arm: a pending rate becomes scopesettings.samplerate (returns 1: the caller writes the FPGA's rate and runs
+//acq_view_fit(1), the rules of a rate tapped while running); 0 with none pending or in roll
+int acq_view_rate_arm(void);
+
+//Forget a pending rate (fpga_set_sample_rate: a new rate written wins)
+void acq_view_rate_drop(void);
 
 //Snap the time/div to the nearest viable one when it is not viable (and say so when `notice`), then keep the trigger
 //point inside the record. Returns 1 when the time/div changed. Does nothing in long mode.

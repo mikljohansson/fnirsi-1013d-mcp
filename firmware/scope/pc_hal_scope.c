@@ -226,6 +226,8 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
 {
   if(raw)
   {
+    //fw-stoprate: a rate written wins over one tapped in STOP for the next RUN (acq_view.h)
+    acq_view_rate_drop();
     fpga_write_cmd(0x0D);
     fpga_write_int(t->divider);
     fpga_divider = t->divider;

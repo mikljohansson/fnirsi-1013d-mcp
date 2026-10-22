@@ -9,6 +9,7 @@
 #include "pc_transport.h"
 #include "enc_heal.h"
 #include "fpga_bus.h"
+#include "acq_view.h"
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -388,6 +389,9 @@ void fpga_set_sample_rate(uint32 samplerate)
   
   //This most likely needs to be based on the acquisition speed and no longer the time per div setting, but that needs further investigation
   
+  //fw-stoprate: a rate written wins over one tapped in STOP for the next RUN (acq_view.h)
+  acq_view_rate_drop();
+
   //Make sure the setting is in range of the table
   if(samplerate < (sizeof(sample_rate_settings) / sizeof(uint32)))
   {
