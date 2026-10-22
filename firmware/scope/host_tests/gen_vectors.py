@@ -722,16 +722,18 @@ def build():
         [decoded(CMDS["READ_RAW"], 82, ep, status=4, flags=FLAG_RESPONSE)])
     # 5g. Protocol 1.26 (fw-c7, section 14 row 66): the FPGA 0x153C hardware counter. GET_COUNTER 0x0213 request 8
     # bytes: 0 u8 what (0 read, 1 configure then read), 1 u8 gate (0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s), 2 u8 source
-    # (0 the trigger source, 1 CH1, 2 CH2, 3 EXT), 3 u8 level (0 = follow the UI trigger level), 4 u8 hysteresis, 3 x 0.
+    # (0 the trigger source, 1 CH1, 2 CH2, 3 EXT), 3 u8 level (0 = auto: the band centred on the signal's midpoint;
+    # fw-ctrauto), 4 u8 hysteresis (0 = auto: round(span / 6), at least 6), 3 x 0.
     # Response 24 bytes: 0 flags (bit 0 NEW, 1 VALID, 2 EXT, 3 CH2), 1 seq, 2 gate, 3 source (configured), 4 u32 E, 8 u32
     # T, 12 u32 W, 16 min, 17 max, 18 level, 19 hysteresis (in effect), 20 u32 freq_mHz (round half up, saturating, 0
     # when not VALID). The mcp's own host_ vectors (host_req_get_counter_read / _config, host_resp_get_counter) are kept
     # beside these
-    p = struct.pack("<BBBBB3x", 1, 2, 0, 0, 6)
+    p = struct.pack("<BBBBB3x", 1, 2, 0, 0, 0)
     f = frame(CMDS["GET_COUNTER"], 80, p)
-    add("req_get_counter_follow_trigger", f, [ev_frame(CMDS["GET_COUNTER"], 80, p)],
-        "1.26 (fw-c7): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 = follow the "
-        "UI trigger level, hysteresis 6; the configuration is written by the next main-loop pass",
+    add("req_get_counter_auto", f, [ev_frame(CMDS["GET_COUNTER"], 80, p)],
+        "1.26 (fw-c7, fw-ctrauto): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 "
+        "and hysteresis 0 = auto (after each gate the band is centred on the signal's min / max midpoint, hysteresis "
+        "round(span / 6), at least 6); the configuration is written by the next main-loop pass",
         [decoded(CMDS["GET_COUNTER"], 80, p)])
     p = struct.pack("<BBBBB3x", 1, 1, 3, 128, 0)
     f = frame(CMDS["GET_COUNTER"], 81, p)
@@ -744,7 +746,7 @@ def build():
     add("resp_get_counter_1_26_ch2", f, [],
         "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous "
         "GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 "
-        "clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (the trigger level followed), "
+        "clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (pinned by the host), "
         "hysteresis 6, freq_mHz 1000000000",
         [decoded(CMDS["GET_COUNTER"], 82, cb, flags=FLAG_RESPONSE)])
     cb = struct.pack("<BBBBIIIBBBBI", 0x01, 9, 2, 0, 0, 0, 0, 60, 70, 128, 6, 0)

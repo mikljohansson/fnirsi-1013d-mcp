@@ -8006,9 +8006,9 @@
    "device_events": []
   },
   {
-   "name": "req_get_counter_follow_trigger",
-   "description": "1.26 (fw-c7): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 = follow the UI trigger level, hysteresis 6; the configuration is written by the next main-loop pass",
-   "hex": "a513010013025000000008000000e292010200000600000002917c1b",
+   "name": "req_get_counter_auto",
+   "description": "1.26 (fw-c7, fw-ctrauto): configure the counter to the boot behaviour: gate 100 ms, the trigger source, level 0 and hysteresis 0 = auto (after each gate the band is centred on the signal's min / max midpoint, hysteresis round(span / 6), at least 6); the configuration is written by the next main-loop pass",
+   "hex": "a513010013025000000008000000e2920102000000000000dece173e",
    "frames": [
     {
      "cmd": 531,
@@ -8016,7 +8016,7 @@
      "status": 0,
      "flags": 0,
      "len": 8,
-     "payload": "0102000006000000"
+     "payload": "0102000000000000"
     }
    ],
    "device_events": [
@@ -8026,7 +8026,7 @@
      "status": 0,
      "flags": 0,
      "len": 8,
-     "payload": "0102000006000000",
+     "payload": "0102000000000000",
      "event": "frame"
     }
    ]
@@ -8059,7 +8059,7 @@
   },
   {
    "name": "resp_get_counter_1_26_ch2",
-   "description": "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (the trigger level followed), hysteresis 6, freq_mHz 1000000000",
+   "description": "1.26 (fw-c7) GET_COUNTER response (24 bytes): flags 0x0A = VALID | CH2 (not NEW: the same result as the previous GET_COUNTER's), seq 5, gate 1 (10 ms), source 0 (the trigger source, CH2 at the time), E 10000, T 2000000 clocks, W 1000000 (1.000000 MHz, duty 50 %), min 60, max 200, level 150 (pinned by the host), hysteresis 6, freq_mHz 1000000000",
    "hex": "a513010113025200000018000000aade0a0501001027000080841e0040420f003cc8960600ca9a3bfd119d1d",
    "frames": [
     {
