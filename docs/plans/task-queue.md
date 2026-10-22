@@ -347,6 +347,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   on seeds 12345 and 4242). Raw fd0be7a2, padded aa252fb7 (pinned `backups/al3_d3gate_0x153D_fd0be7a2*.bin`). Encode pads
   equal 0x153C's build except 2B +0.03 ns; the benched full-rate roll had its A encodes level with B (0.37 ns earlier),
   the likely cause of its worse 200 MSa/s A/B (inference). Flash checklist: `fpga/al3/AGENTS.md` fpga-d3gate handoff.
+  fw-capmetric (Opus explicitly, dispatched 15:23, branch fw-capmetric): the noise-aware capture-stage training metric per
+  `fpga/al3/README.md` section 18 (cs_resid, parking at 8k - 0.5, quiet stage = 0 outliers and <= 5/4 best + 4).
+  Bench image for the new 0x153D meanwhile: `backups/fw-0.2.105_a756882f.bin` (main 63df4e7).
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
