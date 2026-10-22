@@ -1583,7 +1583,7 @@ Newest entries at the bottom. Format: date, who, what, result.
 - 2026-10-22 09:49-09:52: the 30-minute soak (status every 2 s, a host capture of CH1 + CH2 and set_acq_state(RUN) every
   10 s, a spectrum read every 30 s; no channel or range change) was stopped after about 3 minutes at the owner's question:
   **the relays clicked on every cycle** although nothing asked for a range or coupling change, so the host capture or the
-  RUN restore re-writes the relays (wear; queued as fw-relay). No errors were seen while it ran (killed, no summary line).
+  RUN restore re-writes the relays (queued as fw-relay). No errors were seen while it ran (killed, no summary line). Cause (fw-relay, confirmed by the owner: the frequency response plot was on screen): the device Bode sweep left the Bode view open, and every SET_ACQ_STATE RUN started a new Bode RUN sweep, whose plan switches ranges; the next host ARM stopped it.
 - 2026-10-22 09:55: **CH2 "squiggles" (owner: little squiggles at the lower part of the falling slope, a particular spot every
   pulse) = CH2 A capture timing.** Debug image backups/fw-0.2.105-dbg_28a468ee.bin by FEL, CH2 on the ladder's second node,
   200 MSa/s, Filter Off, noise = rms against a 9-sample running median per core, by code band (90 / 98 / 106 / 114):
