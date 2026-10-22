@@ -3,7 +3,14 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
-State on 2026-10-21 (fpga-d3c, branch `fpga-d3`):
+State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
+- fpga-d3gate (2026-10-22): **0x153D with 0x153C's gated encodes** (the owner's 11:45 decision after the 11:36 A/B: the
+  full-rate encodes gave CH2 1-3 % code errors at every timebase). ebf3645 reverts 646c453 and its testbench / contract
+  parts (tb_skip.v gone), keeps the logger, the square, version 0x3D and the W fix; e3a23c2 = roll h1 (4.983 ns, every
+  clock 0 errors, 6429 LUT / 5911 reg / 7449 LE = 86.2 %, encode pads on 0x153C's). `dist/al3-0x153D.bin` `fd0be7a2...e96a`,
+  flash image `aa252fb7...63cc`, unbenched, min firmware 0.2.105. Section "0x153D with 0x153C's gated encodes,
+  fpga-d3gate" below: the numbers, run.sh and the owner's flash checklist (the flash holds 0x153C). The fpga-d3c bullet
+  below describes the reverted full-rate build (benched in the A/B, superseded).
 - fpga-d3c (2026-10-21, branch `fpga-d3`): **0x153D with the ADC encodes always at full rate** (the owner's 17:59
   decision; fpga-d3's 646c453, fpga-d3b's W fix 9ba3ddf), a register audit (no other fault), the testbenches for the new
   timing (`tb/tb_skip.v` = run.sh step 19), timing re-rolled (50b4abe: 4.955 ns, 6385 LUT / 5887 reg / 7420 LE = 85.9 %),
@@ -170,8 +177,9 @@ wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compar
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x153D with the full-rate encodes, commit 50b4abe) gives `build/FPGA.bin` sha256
-  `0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e` (= `dist/al3-0x153D.bin`; about 2 min). The
+- Current `src/` (0x153D with 0x153C's gated encodes, commit e3a23c2) gives `build/FPGA.bin` sha256
+  `fd0be7a2c715e3106b1501986640cdf64a1c8af64c534502701e5d836d32e96a` (= `dist/al3-0x153D.bin`; about 2 min). The
+  reverted full-rate 0x153D (50b4abe) gave `0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e`, the
   pre-full-rate 0x153D (ecdc6f0) gave `11b83ce70fddb657127b2e685e4d290281dc53fd6959f9459a071854b7dcba97`. 0x153C
   (commit bd24bdf) gave `2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2`. The testbench scripts compile
   with `-DSIM` (w_last). The older lines below are history.
@@ -418,6 +426,54 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x153D with 0x153C's gated encodes, fpga-d3gate (2026-10-22)
+
+Brief (coordinator, after the owner's decision of 2026-10-22 11:45): 0x153D returns to 0x153C's encode generation (K = 0
+at D > 0 gated by the divider; full rate with any filter, peak detect and D = 0), everything else of 0x153D kept; build
+with every clock closed and the encode pads / capture margins as close to 0x153C's build as a roll gets (owner's
+acceptance rule: at 200 MSa/s no worse than 0x153C); run.sh on two seeds; dist and docs. Branch `fpga-d3gate`.
+
+**Source.** ebf3645 = `git revert` of 646c453, fc367e7, 50b4abe, 25457ff, b5c4d5d, ccf5bc2 (one conflict: 646c453 had
+moved the logger block, resolved by keeping the block at its pre-646c453 place with 9ba3ddf's W term applied there).
+The result is ecdc6f0 plus the W fix; the divider / write clock / encode / self-check blocks equal 0x153C's bd24bdf line
+for line (an extraction of every always block and assign that names `sample_rate_counter`, `sample_clock_enable`,
+`sce_q`, `swc_sh`, `enc_*`, `adc*_enc*`, `swc_rose`, `swc_adv` differs only in the version byte and the 0x38 / 0x39 read
+cases of the read mux). `tb/` equals ecdc6f0's (plus capture_margins --bits): `tb_skip.v` gone (its D = 199999 W check
+cannot fail with the gated encodes: the six-word ready wait puts a stored write in the reset window), the K = 0, D > 0
+lockstep phases against the 0x1533..0x1535 references, `contract_0x153D.txt` = ecdc6f0's (the W fix does not change the
+transcript). e3a23c2 = roll h1 (the hold-off block before "Sample write clock", order only).
+
+**Build** (TD 4.6.8 SP1): 6429 LUT (74.4 %) / 5911 reg (68.4 %) / 7449 LE (86.2 %, 1191 free); clk_200MHz **4.983 ns, 0
+errors**, sample_write_clock 9.584, i_mcu_clk 25.846, clkc[1] 2.197, all 0 errors (clkc[0] the SDC artefact). Encode pads
+1A / 1B / 2A / 2B = 7.28 / 6.92 / 7.46 / 7.10 ns (0x153C's build: 7.28 / 6.92 / 7.46 / 7.07; the benched full-rate build:
+7.11 / 7.10 / 6.90 / 6.97, its A encodes level with B); capture margins at the power-on stages equal 0x153C's (2B 1.49
+vs 1.52 ns). 21 rolls, only h1 closed; README section 17 "Build" has the table. Raw `fd0be7a2c715e3106b1501986640cdf64a1c8af64c534502701e5d836d32e96a`,
+padded `aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc`, reproducible in a fresh work dir.
+
+**Tests.** `tb/run.sh` (18 steps, `REF_SRC_DIR=~/g11/refs`) on e3a23c2 (a snapshot of `src` + `tb`): **ALL PASS on seeds 12345 and 4242** (2026-10-22 12:13 .. 15:18, 3.1 / 2.9 h in parallel; per step 39 / 110-108 / 165-168 + cic_model / 8 / 54-55 + seg_model 22 runs 0 failures / 882 / 42 + the transcript = `contract_0x153D.txt` / encphase / 70 + 26 / 2274 / 38 / 85 / 1293 / 45 / 115 / 757 / 14102 checks); the quick steps also on ebf3645 before the roll.
+
+**Flash-session checklist for the new 0x153D (the owner; the flash holds 0x153C now, after the 11:36 A/B).**
+1. `python -I tools/bitstreams.py pack --out backups/dist-0x153D-gated`: `fnirsi_1013d-fpga-al3-0x153d.bin` (`fd0be7a2...e96a`)
+   and `fnirsi_1013d-fpga-al3-0x153d-flash1m.bin` (`aa252fb7...63cc`); `sha256sum` both, log them in `docs/hardware-status.md`.
+2. FEL-load the firmware built for this 0x153D (fw-gated's, gated class back), scope on battery, USB unplugged, FT2232D
+   channel A on J2; `spiflash_d2xx.py probe` = `ef 40 14`.
+3. `spiflash_d2xx.py read -o backups/<date>-pre-0x153D-gated.bin --twice`: both reads must hash to the 0x153C padded
+   image `07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77`; anything else: stop.
+4. `spiflash_d2xx.py write -i backups/dist-0x153D-gated/fnirsi_1013d-fpga-al3-0x153d-flash1m.bin --yes --confirm-id ef4014`;
+   the verified read-back must hash `aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc`. Rollback = the
+   0x153C padded image (`07393bf5...1f77`) written the same way.
+5. Power-cycle, `#VER` = `fpga=0x153d`; wizard with the inputs open, band sweep at 200 MSa/s, self-check 0 flagged; probe
+   amplitude check; then **the A/B again** (e_ab.py, CH2, Filter Off): 2 MSa/s must read 0 % like 0x153C, 200 MSa/s no
+   worse than 0x153C's A 1.01 % / 0.92 %, B 0.86 % / 0.17 %; then the logger checks of README section 16 and the square
+   checks of section 17. Log each in `docs/hardware-status.md`; set dist to `recommended` only on a clean run and run
+   `tools/bitstreams.py check`.
+
+**Commands** (scratchpad scripts, all under `~/d3gate`): `d3g-build.sh <name> [zaklad override|-] [src dir]` (build +
+`capture_report.sh --bits` + summary), `d3g_verdict.py` (one line per roll: timing per clock, LE, encode pads, deviation
+from 0x153C's pads, A - B skew), `d3g_mv.py <in> <out> <section prefix> <anchor prefix>` (move a section for a roll),
+`d3g-rolls.sh <list> [parallel]`, `d3g-smoke.sh <snap> <seed> <steps...>`, `d3g-full.sh <seed>` (run.sh on the snapshot
+`~/d3gate/full`). Reference builds kept: `~/d3gate/c153c` (0x153C), `~/d3gate/dfull` (the full-rate 0x153D).
 
 ## CH2 A capture window on 0x153D, fpga-capwin (2026-10-22)
 

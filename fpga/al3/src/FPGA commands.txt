@@ -237,9 +237,9 @@
                                        //overwrote the oldest unread word since the last 0x69 bit 1 (sticky, survives 0x01 = 1)
                   4'h1:  o_mcu_data <= W[7:0];     //W: the ring address after the last word written (= the next word to be
                                        //written while streaming; frozen after a stop); word 0 of a capture is ring word 0;
-                                       //0x01 = 1 sets W = 0 (since 9ba3ddf, found with the reverted full-rate encodes, where no stored word need
-                                       //fall in the reset window at K = 0, D > 0, and W read the previous record's end
-                                       //until the first stored word, up to D + 1 write clocks = 2 ms at 1 kSa/s)
+                                       //0x01 = 1 sets W = 0 (9ba3ddf; found with the reverted full-rate encodes,
+                                       //whose short ready wait let W read the previous record's end until the first
+                                       //stored word; with the gated encodes a stored word falls in the reset window)
                   4'h2..4'h5: count[31:0]          //words written since 0x01 = 0 (memory words, high byte first, wraps at
                                        //2^32); W == count mod 8192 in every snapshot
                   4'h6..4'h7: unread[15:0]         //unread words since the reader position 0x6A: 0 .. 8192 (8192 = the ring is
