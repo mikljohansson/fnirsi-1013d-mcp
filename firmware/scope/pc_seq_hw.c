@@ -142,8 +142,9 @@ void pc_hal_seq_read(uint8_t byte, uint32_t first, uint32_t count, uint8_t *dst,
 
 int pc_seq_ui_conversion(int ui, const pc_decim_cfg *c, uint32 divider)
 {
-  uint32 n, log2n, run_us;
-  int    hw;
+  uint32   n, log2n;
+  uint32_t run_us;
+  int      hw;
 
   //The MCU loop's re-arm of record 2..N: the plan stands
   if(ui_rearm)
