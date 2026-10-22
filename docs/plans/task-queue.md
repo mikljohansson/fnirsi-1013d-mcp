@@ -6,6 +6,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Gated encodes back for Filter Off at slow rates** (owner decisions 2026-10-22 11:45, after the 11:36 A/B: 0x153C's
+  gated encodes are clean at 2 MSa/s where 0x153D's full-rate encodes show 1-2 % CH2 code errors, and 0x153D's encode timing is
+  worse at 200 MSa/s too). Supersedes the 2026-10-21 17:59 "ADCs always at full rate": 0x153D returns to 0x153C's encode
+  generation (K = 0 at D > 0 gated; full rate with any filter, Peak and divider 0). The cards take the counter whenever the
+  ADCs run at full rate and the record otherwise (owner: "Counter when full rate"); the calibration gets its GATED class
+  back (revert of fw-fullrate's single class). The noise-aware capture training metric follows (owner, earlier today).
 - [ ] **COM10 unopenable twice under PC_DEBUG images** (bench 2026-10-22: after a debug image's FEL load 08:4x and after a
   host script exited mid-log 08:5x; Windows lists COM10, open says the port does not exist; a replug / restart cleared it;
   the 11:2x case was the USB cable left unplugged after the wizard, owner). Low priority: revisit only if it recurs.
