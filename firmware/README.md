@@ -515,11 +515,13 @@ source change restarts the gate, a same-value write and a level change do not. T
   about 20 Hz, where the record at a slow time base measures it). The cards show a result from the pass after the one
   that read it (at most one pass, 15..40 ms, after the gate ended); at the 100 ms gate they update ten times a second.
 - **Level**: the counter's level follows the UI's trigger level (the marker the user placed inside the signal, so what
-  triggers is what is counted) with hysteresis 6 codes (about three times the 2 LSB noise); boot writes 128 / 6 and the
-  first pass follows the marker. A host configuration with a non-zero level pins it (GET_COUNTER `what` = 1); level 0
-  returns to following.
+  triggers is what is counted) with hysteresis 16 codes (fw-hyst: at 6 the noise on a slow RC edge re-crossed the band
+  and a 1 kHz square read 9.5..13.7 kHz; 16 read 1000.000 Hz). A signal must reach the level and fall below level - 16
+  to be counted, so one under about 32 codes pk-pk (with the marker mid-signal) shows the record's measurement in the
+  cards. Boot writes 128 / 16 and the first pass follows the marker. A host configuration with a non-zero level pins it
+  (GET_COUNTER `what` = 1); level 0 returns to following.
 - **One reader, one copy** (`fpga_counter.c`, host-buildable; `fpga_cnt`): boot (`pc_glue_init`, built-for word only)
-  writes 0x62 = 128 / 6 then 0x61 = gate 100 ms, source 0 (5 strobes). The main loop reads 0x35 once per pass after the
+  writes 0x62 = 128 / 16 then 0x61 = gate 100 ms, source 0 (5 strobes). The main loop reads 0x35 once per pass after the
   capture readout (`PC_COUNTER_PASS` in fnirsi_1013d_scope.c, `pc_glue_counter_pass`): the command byte plus 16 data
   strobes, **17 x 0.3 us = about 5 us** against a 15..40 ms pass; a snapshot with "new" set is taken, derived and
   time-stamped (64-bit integer arithmetic: frequency in uHz through a two-stage division, times in ps, duty in ppm,

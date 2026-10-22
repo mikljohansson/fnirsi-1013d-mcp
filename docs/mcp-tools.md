@@ -385,7 +385,7 @@ the source (CH1 / CH2 through a Schmitt comparator at `level` with `hysteresis` 
 | `gate` | `"10ms"`, `"100ms"`, `"1s"` | as set | configures the gate |
 | `source` | `"trigger"`, `"CH1"`, `"CH2"`, `"EXT"` | as set (boot: trigger = follows the trigger source) | |
 | `level` | float V or `"trigger"` | as set (boot: follows the trigger level) | comparator level at the probe tip, converted to a raw code and pinned (CH1 / CH2); `"trigger"` follows the trigger level again (wire level 0) |
-| `hysteresis` | int codes | as set (boot: 6) | codes below the level that read low |
+| `hysteresis` | int codes | as set (boot: 16) | codes below the level that read low; a signal is counted when it reaches the level and falls below level - hysteresis (so at least about 2 x 16 = 32 codes pk-pk, 1.1 divisions, with the level mid-swing); below 16 the noise on slow edges adds false edges |
 | `readings` | int 1..50 | 1 | snapshots, one per new gate (the tool waits for each gate to end) |
 
 Returns `source` (the effective channel), `gate_s`, `frequency_hz` = E / (T x 5 ns), `period_s`, `width_s` (positive),

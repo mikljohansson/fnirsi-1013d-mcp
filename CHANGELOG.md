@@ -189,6 +189,16 @@ sections 74 to 79.
   212 CIC2+FIR) move to the new defaults on load, so an existing unit's box shows one of the three modes too; any other
   saved mode loads as it is and shows by name (`ui_filter_migrate`).
 
+**The counter's hysteresis (fw-hyst).**
+
+- **Counter hysteresis 16 codes at boot (was 6)**: at 6 a 1 kHz square on an RC node (slow edges with a few codes of
+  noise) read 9.5 to 13.7 kHz on the Freq card and GET_COUNTER, because the noise re-crossed the band on each slow edge;
+  16 read 999.999 to 1000.001 Hz (bench 2026-10-22, 0x153D). The cost: a signal is counted only when it reaches the
+  level and falls below level - 16, so one under about 32 codes pk-pk (1.1 divisions, marker mid-signal) is not counted
+  and its cards show the record's measurement, as before the counter. (9267c02) The mcp's default
+  (`COUNTER_DEFAULT_HYST`) and the simulator follow; the simulator's low threshold saturates at 0 like the FPGA's, and
+  `scope_counter` says when the signal does not reach both thresholds. (08bb55c)
+
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, flash image `04e3328b...d0e7`, status

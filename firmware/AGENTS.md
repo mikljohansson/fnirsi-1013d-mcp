@@ -6494,3 +6494,44 @@ docs commit with this section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.
 **Open**
 - The mockup artboard UsbDrive (docs/mockups/gen_ux/boards.py) still draws the Exit button and "tap Exit"; regenerate it
   with the header Back when the mockups are next refreshed.
+
+## 86. fw-hyst: the counter's hysteresis 16 codes (fw 0.2.105, protocol unchanged)
+
+Branch `fw-hyst` from main 68b733b. Brief: the bench of 2026-10-22 (0x153D, fw 0.2.105, `docs/hardware-status.md`): CH1
+on an RC node (1 kHz square, slow exponential edges with a few codes of noise, raw 88..183, level 145) read 9.5..13.7 kHz
+on GET_COUNTER at the boot hysteresis 6 (the Freq card 15.23 kHz), 999.999..1000.001 Hz at 16 and 999.995..1000.002 Hz
+at 32; on the generator post with fast edges 6 was enough. Commits 9267c02 (firmware, host tests), 08bb55c (mcp), then
+the docs commit with this section. `PC_FW_VERSION` stays 0.2.105. **Nothing benched.**
+
+**What was changed**
+- `FPGA_CNT_HYST_BOOT` 6 -> 16 (`fpga_counter.h`): `fpga_counter_boot` writes 0x62 = 128 / 16 and `cfg_hyst` = 16, so
+  every later 0x62 write while the level follows the trigger marker carries 16 too. Nothing else resets the counter's
+  configuration (a host configuration sets its own hysteresis; GET_COUNTER level 0 with hysteresis 16 restores boot).
+- Why a fixed 16 and not one scaled with the range's noise: 16 is the smallest value that worked on the bench; the
+  calibration's per-range noise (`adc_cal` `noise[][]`, inputs open; a DC level is about 0.9 code rms, CH2 range 0 about 3
+  codes, `cap_stage.h`) would scale to less than 16 on most ranges, and the failure came from the signal's own noise on
+  a slow edge, which no stored figure knows; a value that changes with the range would also restart the gate on every
+  range change.
+- The trade-off: the FPGA's Schmitt trigger is high at code >= level and low below level - hysteresis (the low threshold
+  saturates at 0, so a marker within 16 codes of the bottom never reads low). A signal is counted only when it reaches
+  the level and falls below level - 16: with the marker mid-signal that is at least about 32 codes pk-pk (1.1
+  divisions at 29 codes per division). A smaller signal gives E = 0 each gate: `has_period` 0, `u.valid` 0 in
+  `pc_glue_counter_pass`, and `ui_ms_counter_text` returns 0, so the six timing cards show the record's measurement
+  (test_fpga_bus: a 140..165 square at level 150 publishes E = 0 at 16, counts at 6, and 120..165 counts at 16;
+  test_ui already covers valid 0 -> the record).
+- mcp: `COUNTER_DEFAULT_HYST` 16; the simulator's low threshold saturates like the FPGA's; `scope_counter` adds a caveat
+  when the signal's raw min / max do not reach both thresholds. The 1.26 vectors keep their explicit hysteresis 6 (they
+  are byte examples, not the boot value); `test_session` pins the mock's hysteresis to 6 for the host vector.
+- Docs: `docs/protocol.md` GET_COUNTER, `docs/mcp-tools.md`, `docs/agent-measurement-guide.md`, `firmware/README.md`
+  "Hardware counter", `docs/guide/screens.md` (the cards: the counter on the trigger channel, half a division below the
+  level), CHANGELOG 0.2.105. The RTL comment in `fpga/al3/src/zaklad.v` ("the firmware writes 128 / 6") is left for the
+  next FPGA change (an RTL edit is a bitstream source change).
+
+**Bench (owner, FEL load; nothing flashed)**
+1. CH1 on the RC ladder node with the generator at 1 kHz, the trigger on CH1 with the marker mid-signal, Freq card on:
+   the card reads 1.000 kHz steadily (was 9.5..15 kHz). MCP `scope_counter`: `hysteresis_codes` 16, `frequency_hz`
+   1000.00 within a few mHz over `readings=10`.
+2. CH1 on the generator post (fast edges): Freq 1.000 kHz as before.
+3. The fallback: raise CH1's V/div until the square is under about one division (under 32 codes pk-pk): `scope_counter`
+   reports `valid` false with the "does not reach both thresholds" caveat, and the Freq card still shows about 1 kHz
+   (the record's measurement, four digits, may wobble in the last digit).

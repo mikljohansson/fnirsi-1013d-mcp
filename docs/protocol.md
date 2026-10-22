@@ -850,12 +850,12 @@ latest result; GET_COUNTER answers from that copy without touching the FPGA, so 
 | 1 | u8 | gate | 0 off, 1 = 10 ms, 2 = 100 ms, 3 = 1 s (0x61 bits 1..0); 4+: detail 1 |
 | 2 | u8 | source | 0 the trigger source (0x15, as the UI's trigger menu sets it; the FPGA restarts the gate when it changes), 1 CH1, 2 CH2, 3 EXT (0x61 bits 3..2); 4+: detail 2 |
 | 3 | u8 | level | raw ADC code, the Schmitt trigger is high at code >= level (0x62 byte 0). **0 = follow the UI trigger level** (the boot behaviour: the marker the user placed inside the signal, re-written when it moves); any other value pins it |
-| 4 | u8 | hysteresis | codes below the level for low (0x62 byte 1); hysteresis > a non-zero level: detail 4. Boot: 6 (about three times the 2 LSB noise) |
+| 4 | u8 | hysteresis | codes below the level for low (0x62 byte 1); hysteresis > a non-zero level: detail 4. Boot: 16 (fw-hyst, fw 0.2.105: 6 counted the noise on slow edges; a signal must reach the level and fall below level - hysteresis to be counted, the low threshold saturating at 0) |
 | 5 | 3 x u8 | reserved | 0 |
 
 A configuration is noted and written by the next main-loop pass (0x62, then 0x61 = 0 and 0x61 = the value, which
 restarts the gate; a menu open at the time delays it until the menu closes); the response already reports the gate and
-source asked for, the level and hysteresis still the ones in effect. Boot writes 0x62 = 128 / 6 and 0x61 = gate 100 ms,
+source asked for, the level and hysteresis still the ones in effect. Boot writes 0x62 = 128 / 16 and 0x61 = gate 100 ms,
 source 0 (built-for bitstream only). Response (24 bytes):
 
 | Off | Type | Field | Notes |
