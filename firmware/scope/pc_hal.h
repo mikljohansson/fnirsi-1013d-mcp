@@ -432,7 +432,23 @@ typedef struct
 #define PC_CAPF_MOVED        0x40  //fw 0.2.105: the runtime guard moved a core off a flagged stage this boot, inside its
                                    //trained clean set (cap_stage.h cs_guard; event 23 a bit 5)
 
+//1.28 (fw-capmetric): the last capture stage training of a channel since boot (cap_stage.h "Quiet stages"; GET_CAL
+//364..431). Index 0 = the channel's core A, 1 = core B; stages 2..5 at 0..3. With PC_CAPT_REF core B's numbers are
+//those of the reference pass
+typedef struct
+{
+  uint8_t  flags;           //PC_CAPT_*
+  uint8_t  set[2];          //the quiet stages after the tie pass (bit s = stage s; the stored set when saved)
+  uint32_t q[2][4];         //the residual metric: sum over the band of E / CS_RESID_DIV (1/16 code^2 per sample)
+  uint32_t sum[2][4];       //the 0x36 outlier counts summed over the band
+} pc_hw_cap_train;
+
+#define PC_CAPT_RAN          0x01  //a training of this channel ran since boot (the fields are its)
+#define PC_CAPT_FAILED       0x02  //it failed: a core without a quiet stage, or a capture / park did not complete
+#define PC_CAPT_REF          0x04  //core B was measured again with the A encode (reference bit)
+
 void     pc_hal_cap_state(pc_hw_cap *c);                     //any context
+void     pc_hal_cap_train(uint8_t ch, pc_hw_cap_train *t);   //any context
 void     pc_hal_cap_check(void);                             //[FPGA] after a full-rate host capture: read 0x36
 
 //CAL_PROBE (fw 0.2.67, MAIN, UI stopped): the calibration wizard's zero measurement of one channel and hardware range

@@ -116,7 +116,7 @@ def test_get_cal_364():
     r = P.CalResp(cap_trailer=1, cap_flags=P.CAPF_HAS | P.CAPF_TRAINED, cap_stored=0x08DC, cap_stored_fpga=0x153A,
                   cap_value=0x08DC)
     b = r.pack()
-    assert len(b) == 364 and struct.unpack_from("<BBHHH", b, 356) == (1, 3, 0x08DC, 0x153A, 0x08DC)
+    assert len(b) == 432 and struct.unpack_from("<BBHHH", b, 356) == (1, 3, 0x08DC, 0x153A, 0x08DC)
     c = P.CalResp.unpack(b)
     assert c.has_capture and c.has_provenance and c.cap_stored == 0x08DC
     d = c.describe_capture()
@@ -181,7 +181,7 @@ def test_simulator_al3c(sim_factory):
         h = s.health()
         assert (h.layout, h.length, h.cap_value, h.cap_flags, h.cap_reads) == (3, 128, P.CAP_POWER_ON, P.CAPF_HAS, 0)
         c = s.get_cal(0, cached=False)
-        assert c.nbytes == 364 and (c.cap_trailer, c.cap_flags, c.cap_value) == (0, P.CAPF_HAS, P.CAP_POWER_ON)
+        assert c.nbytes == 432 and (c.cap_trailer, c.cap_flags, c.cap_value) == (0, P.CAPF_HAS, P.CAP_POWER_ON)
         s.set_timebase(divider=0)
         s.capture(["CH1"])
         h = s.health()
@@ -229,6 +229,30 @@ def test_simulator_older_protocol_lengths(sim_factory):
         h = s.health()
         assert (h.layout, h.length) == (1, 104) and not h.has_capture
         assert s.get_cal(0, cached=False).nbytes == 356
+    srv = sim_factory(proto_minor=27)
+    with Scope.connect(srv.url) as s:
+        c = s.get_cal(0, cached=False)
+        assert c.nbytes == 364 and c.has_capture and not c.has_training and c.describe_training() is None
+
+
+def test_get_cal_1_28_vector():
+    raw = frame_payload("resp_get_cal_1_28")
+    assert len(raw) == 432
+    c = P.CalResp.unpack(raw)
+    assert c.has_training and (c.channel, c.cap_trailer, c.cap_value) == (1, 1, 0x08E3)
+    assert (c.train_flags, c.train_set) == (P.CAPT_RAN, (0x08, 0x38))
+    assert c.train_q == (16082, 1098, 2325, 60180, 6324, 632, 612, 625)
+    assert c.train_sum == (0, 0, 0, 0, 2462, 0, 0, 0)
+    d = c.describe_training()
+    assert not d["failed"]
+    assert d["cores"]["A"]["quiet_stages"] == [3] and d["cores"]["B"]["quiet_stages"] == [3, 4, 5]
+    assert d["cores"]["A"]["q_per_stage"]["4"] == 2325 and d["cores"]["B"]["outliers_per_stage"]["2"] == 2462
+    assert not d["cores"]["B"]["reference_timing"]
+    assert c.pack() == raw
+    # no training since boot: None; the reference pass and a failure in words
+    assert P.CalResp.unpack(P.CalResp().pack()).describe_training() is None
+    f = P.CalResp.unpack(P.CalResp(train_flags=P.CAPT_RAN | P.CAPT_FAILED | P.CAPT_REF).pack()).describe_training()
+    assert f["failed"] and f["cores"]["B"]["reference_timing"] and not f["cores"]["A"]["reference_timing"]
 
 
 def test_tools(sim_factory, tmp_path):

@@ -71,7 +71,7 @@ def test_response_layouts():
     cal = P.CalResp(prov_state=1, prov=bytes.fromhex(DIAG["prov"]["hex"]), prov_power_ons_since=3,
                     prov_minutes_since=125)
     raw = cal.pack()
-    assert len(raw) == 364 and raw[288] == 1 and raw[292:348] == cal.prov
+    assert len(raw) == 432 and raw[288] == 1 and raw[292:348] == cal.prov
     assert struct.unpack_from("<II", raw, 348) == (3, 125)
     back = P.CalResp.unpack(raw)
     assert back.has_provenance and back.provenance().version == "0.2.52"

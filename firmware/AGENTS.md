@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-capmetric (2026-10-22): fw 0.2.105, protocol 1.28 (row 68): the capture-stage training parks at the carries 63.5..191.5 and keeps only the quiet stages (0 outliers and the 3-sample-median residual within 25 % + 4 of the core's best); GET_CAL 432 bytes with the last training; section 92.**
 **Branch fw-guardfix (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: the capture-stage guard, the repeat watch and REPEAT act only on captures taken at the 0x63 value the firmware wrote (0x36's first word; a DEBUG_FPGA sweep no longer gets a core moved and stored); section 90.**
 **Branch fw-relay (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: host acquisition requests and SET_ACQ_STATE RUN close the Frequency response view first (no Bode sweep from RUN; the soak's relay clicks), the relay registers written only on a change; section 89.**
 **Branch fw-fullrate (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): one calibration clock class for FPGA 0x153D, whose ADC encodes run at 200 MSa/s at every rate (the gated class, its wizard steps, the class probe gone; old cards load), the host-test model of the full-rate encodes, the encode check over every capture; section 83 has the owner's bench list.**
@@ -6925,3 +6926,77 @@ wizard's Save writes sector 708)**
 Regression signs: the Freq card flickering between counter and record at a steady setting (the full-rate test wrong),
 the zero step failing "zero moves with the sample rate" (reason 11: the classes' zeros over 12 codes apart, the gated
 encodes not as on 0x153C), Diagnostics still asking for Calibrate after step 2 (FULL_ONLY not cleared).
+
+## 92. fw-capmetric: the noise-aware capture-stage training metric (fw 0.2.105, protocol 1.28, row 68)
+
+Branch `fw-capmetric` from main 63df4e7 (`PC_FW_VERSION` 0.2.105 and `PC_FW_FPGA_VERSION` 0x153D unchanged). Commits:
+b9eae5a (the metric, the band, the wizard glue, test_cap_stage), 8921016 (protocol 1.28: GET_CAL 364..431, vector,
+test_diag / test_cap_hw), 2f11674 (mcp), then the docs commit with this section. **Not benched.** The specification is
+fpga/al3/README.md section 18 "Firmware metric for the training and the guard"; the design notes are in `cap_stage.h`
+"Quiet stages".
+
+**What changed in the training** (`cs_train_run`):
+- Band: CS_BAND_POINTS 17 parks at codes 8k - 0.5, k = 8..24 (`cs_band_code16` in 1/16 code: 1016, 1144, .. 3064;
+  `cs_band_pwm` takes 1/16 code), CS_BAND_REPS 2 (was 11 points 120..140, 4 captures).
+- Data: `cs_io.measure(ctx, v, resid, cnt, e)`: after the capture and the 0x36 read, every core in `resid` is read,
+  CS_RESID_WORDS 2048 words from the record's middle (start = `pc_glue_ui_read_start(0x14)` + (8000 - 2048) / 2, through
+  `pc_hal_read_core`, READ_RAW's path), and `e[core] = cs_resid(words, 2048)`.
+- `cs_resid`: sum over j = 1 .. n - 2 of (x[j] - median3)^2, u32, integer only.
+- Per core and stage `q` += E / CS_RESID_DIV (127 = (2048 - 2) / 16) per capture; `cs_quiet(sum, q)`: the stages with
+  sum 0 and q <= q_min x 5 / 4 + 4. `cs_train` gained `quiet`, `quiet_ref`, `q`, `q_ref`, `ref`; `clean` / `clean_ref`
+  stay the outlier-only sets; `set` (stored, the guard's bound) is the quiet set after the tie pass.
+- Runtime guard: unchanged (fw-guardfix's rule; the spec keeps the 0x36 counts there).
+
+**Rules chosen where the spec is not explicit:**
+- The residual is read for the cores the pass trains: both cores of the parked channel in the own-encode pass, only the
+  B core in the reference pass (scored by the same rule on its own sums and q). The tie pass reads no data.
+- The tie pass stays as it was (0x36 counts, 16 captures per candidate and code at 130, 128, 126). Its codes are no band
+  points any more, so `cs_io.park` now takes a code in 1/16 code instead of a band index.
+- E / 127 is truncated per capture before the sum (u32 only; the truncation is under 1 per capture against a noise
+  floor of about 4 per capture at 0.5 code rms).
+- No outlier-clean stage: no quiet stage (a core has a quiet stage exactly when it has a clean one), so the B reference
+  pass and the fail-fast "ADC readout fault near code 128" trigger as before.
+- Settling: 60 ms per park (8 codes, about 32 PWM counts), 180 ms when the park moves more than 16 codes (the band's
+  first point from the zero step's slope point, the tie pass's first code from the band's top). The wizard checks the
+  band's two ends against the PWM range (the PWM is linear in the code, so every point and the tie codes lie inside).
+- Exposure needed a protocol change (GET_CAL reported only the stored value): minor 1.28, GET_CAL 432 bytes, 364 u8 flags
+  (bit 0 ran since boot, bit 1 failed, bit 2 core B from the reference pass), 365 / 366 the quiet sets of core A / B, 367
+  0, 368 / 384 u32[4] q of A / B at stages 2..5, 400 / 416 u32[4] the 0x36 sums. Kept in `cap_hw.c` per channel
+  (`pc_hal_cap_train`), zeros until the wizard trains that channel; a failed training is reported too.
+
+**Wizard time**: per channel about 1.5 s (17 x 60 ms + 180 ms, 136 captures of about 0.5 ms plus two 2048-word reads of
+about 0.6 ms each and 2 x 2046 residual steps, the tie pass 3 x 60 ms + 96 captures), about 0.5 s more than fw-capstage's
+band; the reference pass, when it runs, adds about 1.2 s.
+
+**Tests**: test_cap_stage 284 checks (`test_resid`; `test_quiet` on the sweep's q16 x 34 and 0x36 sums: {3}, {3, 4, 5},
+{3}, {3, 4, 5} -> 0x08E3, the outlier rule alone keeping CH1 A5 and CH2 A2; `test_metric` with the mock's data: a clean
+unit with 0.5-code noise -> 0x08DB as before, class (a) mixes at 3 and 5 (3 % of the samples at 8k read 8k | ((8k - 1) &
+0x0E), invisible to 0x36) -> the outlier rule keeps 2..5 and picks 3, the quiet rule keeps {2, 4} and picks 4; the bench's
+CH1 A (mixes at 2, 4, 5) -> {3}; a class (b) floor at every stage (8k -> 8k + 4 in 9 %) changes neither pick; the
+reference pass scored), test_cap_hw 70 (`test_train_note`: GET_CAL's per-channel record, the reference pass), test_diag
+(bytes 364..431), test_session (1.28, 432 bytes), vector `resp_get_cal_1_28`, mcp test_capture_stages
+`test_get_cal_1_28_vector` and the 1.27 simulator at 364 bytes. `make -s test`, the vector check (162), GCC 10 without
+warnings in the touched files, mcp ruff and pytest (543) green.
+
+**Bench (owner; FPGA 0x153D as flashed; FEL load of this build, `make gcc10`; back up SD sectors 700-710 first: the
+wizard's Save writes sector 708)**
+1. `#VER` reads `proto=1.28`; mcp `scope_calibration_info` has `capture_training` with both channels null (no training
+   since boot).
+2. Calibrate with both inputs open (probes off, USB cable away from the inputs). "CH1: training capture stages..." takes
+   about 1.5 s per channel. Expected notes: "Capture stages: CH1 A3 B4" and "Capture stages: CH2 A3 B4" (0x08E3).
+3. Before Save, `scope_calibration_info` `capture_training` (or GET_CAL 364..431 per channel): CH1 A quiet [3], CH1 B
+   [3, 4, 5], CH2 A [3], CH2 B [3, 4, 5]. Note every core's q per stage (divide by 34 to compare with capwin_sweep's
+   q16) and the outlier sums. **The finding to report**: whether CH1 A5 and CH2 A4 have q more than 25 % above their
+   core's stage 3 on the quiet parked input. If they do not (the mixes need the moving signal of the sweep), the quiet
+   training cannot separate them and the stored set still holds them: report the numbers (the q per stage of all four
+   cores) before deciding anything.
+4. Save. GET_HEALTH 104 = 0x08E3 with TRAINED; sector 708 bytes 504..505 = the sets, 0xE2E2 for the sets of step 3
+   (core k's stages 2..5 in bits 4k..4k + 3).
+5. The 0x36 sweep on the real signal as in section 87 step 2 (CH1 on the post, 200 MSa/s, 1 kHz and 100 kHz, GET_HEALTH
+   108..115 after each capture): every core 0 outliers over 30 captures; GET_HEALTH 106 bits 5 and 6 stay 0.
+6. Optional cross-check: `python -I fpga/al3/tools/capwin_sweep.py --port COM10 --out capwin-after.npz` on the RC
+   ladder signal of section 18: its printed quiet set per core agrees with step 3.
+Regression signs: the zero step failing "offset does not respond" right at the training (the band's ends 63.5 / 191.5
+outside the PWM range 200..1800 on this unit), "ADC readout fault near code 128" (a core with no outlier-free stage, as
+before), a training that picks stage 2 or 5 for an A core, or the wizard's training step taking several seconds per
+channel (the 2048-word reads slower than 0.3 us per byte).

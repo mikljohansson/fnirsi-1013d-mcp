@@ -81,6 +81,7 @@ static void boot(uint16_t stored, uint16_t sets)
   memset(&cap_st, 0, sizeof(cap_st));
   memset(&cap_watch, 0, sizeof(cap_watch));
   cap_fpga = 0; cap_training = 0; cap_stored_sets = 0; cap_sets = 0; cap_sets_v = 0; cap_moved = 0; cap_store = 0;
+  memset(cap_train, 0, sizeof(cap_train));
 
   if(stored)
   {
@@ -230,10 +231,69 @@ static void test_repeat_ignores_foreign_value(void)
   T_EQ(fm.reg63, 0x08E3);
 }
 
+//1.28 (fw-capmetric): a training's quiet sets, residuals and sums per channel for GET_CAL (pc_hal_cap_train). Mock:
+//CH2 A dirty at 2, its residual q per capture 40 at stage 5, 10 at the others (a class (a) mix at 5); CH2 B dirty with
+//its own encode at every stage, clean with the A encode at 3..5, q 1 per capture
+static uint32_t tr_parks;
+
+static int tr_park(void *ctx, uint32_t code16)
+{
+  (void)ctx;
+  (void)code16;
+  tr_parks++;
+  return 0;
+}
+
+static int tr_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CORES], uint32_t e[CS_CORES])
+{
+  uint8_t sa = cs_stage(v, 2), sb = cs_stage(v, 3);
+
+  (void)ctx;
+  memset(cnt, 0, CS_CORES * sizeof(cnt[0]));
+  cnt[2] = (sa == 2) ? 500 : 0;
+  cnt[3] = (!(v & CS_REF_CH2B) || (sb == 2)) ? 400 : 0;
+
+  if(resid & 0x04)
+    e[2] = CS_RESID_DIV * ((sa == 5) ? 40u : 10u);
+  if(resid & 0x08)
+    e[3] = CS_RESID_DIV;
+
+  return 0;
+}
+
+static void test_train_note(void)
+{
+  static const cs_io io = { 0, 2, 1, 0, tr_park, tr_measure };
+  pc_hw_cap_train ct;
+  cs_train        t;
+
+  boot(0, 0);
+  pc_hal_cap_train(1, &ct);
+  T_EQ(ct.flags, 0);
+
+  T_EQ(fpga_capture_train(0x0C, &io, &t), CS_OK);
+  pc_hal_cap_train(0, &ct);
+  T_EQ(ct.flags, 0);                  //CH1 not trained
+  pc_hal_cap_train(1, &ct);
+  T_EQ(ct.flags, PC_CAPT_RAN | PC_CAPT_REF);
+  T_EQ(ct.set[0], 0x18);              //q 20, 20, 80 at 3..5: 20 x 5 / 4 + 4 = 29, 5 out
+  T_EQ(ct.set[1], 0x38);
+  T_EQ(ct.q[0][0], 20);
+  T_EQ(ct.q[0][3], 80);
+  T_EQ(cs_stage(fm.reg63, 2), 3);
+  T_EQ(ct.sum[0][0], 2 * 500);
+  T_EQ(ct.sum[0][1], 0);
+  T_EQ(ct.q[1][1], 2);                //core B: the reference pass's numbers
+  T_EQ(ct.sum[1][0], 2 * 400);
+  T_EQ(ct.sum[1][1], 0);
+  T_EQ(fm.reg63 & CS_REF_CH2B, CS_REF_CH2B);
+}
+
 int main(void)
 {
   test_guard_acts_on_own_value();
   test_guard_ignores_foreign_value();
   test_repeat_ignores_foreign_value();
+  test_train_note();
   return t_report("test_cap_hw");
 }

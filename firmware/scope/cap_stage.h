@@ -13,7 +13,7 @@
 // training only.
 //
 // Training (the calibration wizard's zero step; fw 0.2.81 band training, fw 0.2.105 denser band and tie pass): the quiet
-// input is parked by the offset PWM at CS_BAND_POINTS codes across the band where the most bits flip (120, 122, .. 140;
+// input is parked by the offset PWM at CS_BAND_POINTS codes where many bits flip (the carries since fw-capmetric, below;
 // cs_band_pwm from the zero step's gated 2 MSa/s slope points), and at every point every trained core is captured at stage
 // s = 2, 3, 4, 5 in turn, CS_BAND_REPS 200 MSa/s captures of CS_TRAIN_WORDS words each; the 0x36 counts are summed per
 // core and stage over all points and captures. A stage is clean when its sum is 0: a stage inside the AD9288 data
@@ -21,6 +21,19 @@
 // codes 127..135 only), which 0.2.79's one capture at one code missed and 0.2.81's 6 points x 2 captures missed too
 // (bench 2026-10-22 on 0x153D: 2..5 all clean, 4 picked, and 4 garbles a real signal: 146 outliers in 8 captures, the
 // counter at twice the frequency; 2, 3 and 5 count 0 over 30 captures from 1 kHz to 7.3 MHz).
+//
+// Quiet stages (fw-capmetric, fpga/al3/README.md section 18 "Firmware metric for the training and the guard"): the 0x36
+// counters see only jumps over 32 codes, but the capture errors next to a clean stage are bitwise mixes of two
+// neighbouring codes at a carry (0x5F / 0x60 -> 0x6E, 0x97 / 0x98 -> 0x9F), a few codes off in a few % of the samples
+// (sweep 2026-10-22 11:23: CH1 A5 and CH2 A4 counted 0 on the quiet input and garbled). So the band parks the input at
+// the carries, codes 8k - 0.5 for k = 8 .. 24 (63.5 .. 191.5; cs_band_code16 in 1/16 code), where the noise flips 4 or
+// more bits, CS_BAND_REPS 2 captures per stage and point, and after each capture the trained cores' CS_RESID_WORDS words
+// from the record's middle are read (READ_RAW's path) and scored by cs_resid: the sum of the squared differences to the
+// 3-sample median, E. Per core and stage q = the sum over points and captures of E / CS_RESID_DIV (1/16 code^2 per
+// sample). A stage is quiet (cs_quiet) when its 0x36 sum is 0 (the outlier rule stays the first gate) and q <= the
+// smallest q of the core's outlier-clean stages x 5 / 4 + 4. Pick, tie pass and the stored set run on the quiet set; a
+// stage-independent error (the ADC's own, class b of the sweep) raises every stage's q alike and changes nothing. The
+// tie pass is unchanged (0x36 counts at codes 126, 128, 130).
 //
 // Pick (cs_pick, fw 0.2.105): per core, among its clean stages, the one with the highest score: the width of its run of
 // adjacent clean stages, then 3 or 4 before a reserve (2, 5), then the distance to the nearer end of its run. A run of
@@ -79,12 +92,14 @@
 #define CS_STAGE_MAX      5
 #define CS_NONE           0xFF        //cs_pick: no clean stage
 #define CS_TRAIN_WORDS    8000        //words per training capture (200 MSa/s: 40 us)
-#define CS_BAND_POINTS    11          //training: offset PWM points (cs_band_code; 6 up to the first 0.2.105)
-#define CS_BAND_REPS      4           //training: captures per stage and point (2 up to the first 0.2.105)
-#define CS_BAND_FIRST     120         //training: the first point's code, then every CS_BAND_STEP codes (120 .. 140)
-#define CS_BAND_STEP      2
-#define CS_TIE_CODE       126         //tie pass: the first of CS_TIE_POINTS band points (126, 128, 130)
+#define CS_BAND_POINTS    17          //training: offset PWM points at the carries 8k - 0.5, k = CS_BAND_K0 .. 24
+                                      //(cs_band_code16; fw-capmetric, 11 points 120..140 before)
+#define CS_BAND_K0        8           //the first point's k: code 63.5
+#define CS_BAND_REPS      2           //training: captures per stage and point (4 before fw-capmetric)
+#define CS_TIE_CODE       126         //tie pass: codes CS_TIE_CODE, + 2, + 4 (126, 128, 130), from the top down
 #define CS_TIE_POINTS     3
+#define CS_RESID_WORDS    2048        //training: words per core read for cs_resid, from the record's middle
+#define CS_RESID_DIV      ((CS_RESID_WORDS - 2) / 16)   //q per capture = E / CS_RESID_DIV (N / 16, N = n - 2)
 #define CS_TIE_REPS       16          //tie pass: captures per candidate stage and point
 #define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
 #define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner
@@ -102,23 +117,33 @@ uint16_t cs_ref_bit(uint32_t core);
 uint8_t  cs_pick(uint8_t clean);
 uint8_t  cs_tie(uint8_t clean);
 
-//Training band: the code of point i (CS_BAND_FIRST + i CS_BAND_STEP) and the offset PWM that parks the input there,
-//interpolated from two gated points (pwm_lo reads mean16_lo, pwm_hi reads mean16_hi, 1/16 code; a lower PWM reads a
-//higher code). -1 when the points do not respond (mean16_lo <= mean16_hi or pwm_hi <= pwm_lo)
-uint32_t cs_band_code(uint32_t i);
-int32_t  cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code);
+//Training band: the code of point i in 1/16 code ((CS_BAND_K0 + i) x 8 - 0.5: 1016, 1144, .. 3064) and the offset PWM
+//that parks the input at code16, interpolated from two gated points (pwm_lo reads mean16_lo, pwm_hi reads mean16_hi,
+//1/16 code; a lower PWM reads a higher code). -1 when the points do not respond (mean16_lo <= mean16_hi or
+//pwm_hi <= pwm_lo)
+uint32_t cs_band_code16(uint32_t i);
+int32_t  cs_band_pwm(int32_t pwm_lo, int32_t mean16_lo, int32_t pwm_hi, int32_t mean16_hi, uint32_t code16);
 
-//What a training needs from the target (or a host mock): park the input at band point p (0 .. points - 1: the offset
-//PWM and its settling), and one capture: write 0x63 = v, capture, read 0x36's four counts. 0 = done, else the step did
-//not complete
+//Residual of one core's capture: for j = 1 .. n - 2, d = x[j] - median(x[j - 1], x[j], x[j + 1]); the sum of d^2 (at
+//most 4094 x 65025 for n = 4096). 0 for n < 3
+uint32_t cs_resid(const uint8_t *x, uint32_t n);
+
+//The quiet stages of one core (bit s = stage s) from its 0x36 sums and q per stage (index s - CS_STAGE_MIN): sum 0 and
+//q <= q_min x 5 / 4 + 4, q_min the smallest q of the stages with sum 0. 0 when no stage has sum 0
+uint8_t  cs_quiet(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES]);
+
+//What a training needs from the target (or a host mock): park the input at code16 (1/16 code: the offset PWM and its
+//settling), and one capture: write 0x63 = v, capture, read 0x36's four counts and, for every core in resid (a mask),
+//cs_resid of its CS_RESID_WORDS words from the record's middle into e[core] (the others untouched). 0 = done, else the
+//step did not complete
 typedef struct
 {
   void     *ctx;
   uint32_t points;                    //band points (CS_BAND_POINTS)
   uint32_t reps;                      //captures per stage and point (CS_BAND_REPS)
   uint32_t tie_reps;                  //tie pass: captures per candidate stage and point (CS_TIE_REPS; 0 = no tie pass)
-  int      (*park)(void *ctx, uint32_t p);
-  int      (*measure)(void *ctx, uint16_t v, uint16_t cnt[CS_CORES]);
+  int      (*park)(void *ctx, uint32_t code16);
+  int      (*measure)(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CORES], uint32_t e[CS_CORES]);
 } cs_io;
 
 #define CS_OK             0
@@ -130,15 +155,20 @@ typedef struct
   uint16_t start;                     //0x63 value before the training
   uint16_t value;                     //the result (= start unless CS_OK)
   uint8_t  cores;                     //cores trained (bit i = core i)
-  uint8_t  clean[CS_CORES];           //bit s: stage s clean with the own-encode timing
+  uint8_t  clean[CS_CORES];           //bit s: stage s counted 0 outliers with the own-encode timing
   uint8_t  clean_ref[CS_CORES];       //B cores measured again with the reference bit: bit s clean
-  uint8_t  bad;                       //cores without a clean stage
+  uint8_t  quiet[CS_CORES];           //fw-capmetric: bit s: stage s quiet (cs_quiet), own-encode timing
+  uint8_t  quiet_ref[CS_CORES];       //the same for the reference pass
+  uint8_t  ref;                       //cores measured in the reference pass
+  uint8_t  bad;                       //cores without a quiet stage
   uint16_t captures;                  //captures taken
   uint32_t sum[CS_CORES][CS_STAGES];      //0x36 counts summed over the band, own-encode timing (index s - CS_STAGE_MIN)
   uint32_t sum_ref[CS_CORES][CS_STAGES];  //the same for the reference pass (its B cores only)
+  uint32_t q[CS_CORES][CS_STAGES];        //fw-capmetric: sum of E / CS_RESID_DIV over the band, own-encode timing
+  uint32_t q_ref[CS_CORES][CS_STAGES];    //the same for the reference pass
   uint8_t  tie[CS_CORES];             //tie pass: the two stages measured (bits; 0 = no tie)
   uint32_t tie_sum[CS_CORES][2];      //their counts summed, lower stage first
-  uint8_t  set[CS_CORES];             //the clean stages of the timing in use after the tie pass (the guard's bound)
+  uint8_t  set[CS_CORES];             //the quiet stages of the timing in use after the tie pass (the guard's bound)
 } cs_train;
 
 //Train the cores in mask cores (the parked channel: 0x03 CH1, 0x0C CH2); the others keep their value in start

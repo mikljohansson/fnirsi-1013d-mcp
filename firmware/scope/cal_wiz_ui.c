@@ -226,10 +226,17 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
 }
 
 //fw 0.2.79: one training capture (cap_stage.h): 0x63 = v, CS_TRAIN_WORDS words at 200 MSa/s with the trigger off (the
-//rate and set-up of the zero step), the four 0x36 counts. The UI's record geometry is put back afterwards
-static int cal_cap_measure(void *ctx, uint16_t v, uint16_t cnt[4])
+//rate and set-up of the zero step), the four 0x36 counts. The UI's record geometry is put back afterwards.
+//fw-capmetric: then, for every core in resid, CS_RESID_WORDS words from the record's middle through READ_RAW's path
+//(pc_hal_read_core: the dummy strobe, the ring end restart; about 0.6 ms per core at 0.3 us per byte) and their
+//cs_resid into e[core]
+#define CAL_RING_WORDS      8192    //AL3 sample memory words
+
+static uint8 cal_resid_buf[CS_RESID_WORDS];
+
+static int cal_cap_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[4], uint32_t e[4])
 {
-  uint32 total = fpgasettings.totalsamples;
+  uint32 total = fpgasettings.totalsamples, start, k;
 
   (void)ctx;
   fpga_capture_write(v);
@@ -237,41 +244,65 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint16_t cnt[4])
   fpga_do_conversion();
   while(fpga_done_conversion() == 0) PC_BUSY_POLL();
   fpga_capture_counts(cnt);
+
+  if(resid)
+  {
+    //The record as fpga_do_conversion set it up (the 0x0B words before 0x14), its middle
+    start = pc_glue_ui_read_start(fpga_prepare_for_transfer()) + (CS_TRAIN_WORDS - CS_RESID_WORDS) / 2;
+
+    for(k=0;k<4;k++)
+      if(resid & (1u << k))
+      {
+        pc_hal_read_core((uint8_t)k, start, CS_RESID_WORDS, cal_resid_buf, 1, CAL_RING_WORDS);
+        e[k] = cs_resid(cal_resid_buf, CS_RESID_WORDS);
+      }
+  }
+
   fpgasettings.totalsamples = total;
   return 0;
 }
 
-//fw 0.2.81: the training band's offset PWM per point (cs_band_pwm from the gated 2 MSa/s slope points of cal_centre)
-#define CAL_BAND_SETTLE_MS  60      //per point: 2 codes (about 8 PWM counts) from the last (4 up to the first 0.2.105,
-                                    //as cal_measure's steps); the tie pass's first point is 10 codes from the last
+//fw 0.2.81: the training's offset PWM for a code (cs_band_pwm from the gated 2 MSa/s slope points of cal_centre).
+//fw-capmetric: the band steps 8 codes (about 32 PWM counts) and starts or ends far from the last park (the zero step's
+//slope points, the band's top for the tie pass): 60 ms per park, 180 ms when it moves more than 16 codes
+#define CAL_BAND_SETTLE_MS  60
+#define CAL_BAND_JUMP_MS    180
+#define CAL_BAND_JUMP16     (16 * 16)
 
-static int32_t cal_band_pwm[CS_BAND_POINTS];
+static int32_t  cal_band_lo, cal_band_mlo, cal_band_hi, cal_band_mhi;   //pwm_lo reads mlo, pwm_hi mhi (1/16 code)
+static uint32_t cal_band_last16;
 
-static int cal_cap_park(void *ctx, uint32_t p)
+static int cal_cap_park(void *ctx, uint32_t code16)
 {
+  int32_t pwm = cs_band_pwm(cal_band_lo, cal_band_mlo, cal_band_hi, cal_band_mhi, code16);
+  int32_t d   = (int32_t)code16 - (int32_t)cal_band_last16;
+
   (void)ctx;
 
-  if(p >= CS_BAND_POINTS)
+  //cal_train checked the band's ends (and the tie codes lie between them): outside the range is a bug
+  if((pwm < ACAL_PWM_MIN) || (pwm > ACAL_PWM_MAX))
     return -1;
 
-  calibrationsettings.dc_calibration_offset[0] = (uint16)cal_band_pwm[p];
+  calibrationsettings.dc_calibration_offset[0] = (uint16)pwm;
   fpga_set_channel_offset(&calibrationsettings);
-  timer0_delay(CAL_BAND_SETTLE_MS);
+  timer0_delay(((d > CAL_BAND_JUMP16) || (d < -CAL_BAND_JUMP16)) ? CAL_BAND_JUMP_MS : CAL_BAND_SETTLE_MS);
+  cal_band_last16 = code16;
   return 0;
 }
 
 //fw 0.2.79: FPGA 0x153A capture stage training of channel ch's two cores, the first thing of its zero step: range 0, the
 //gated centre search, a quiet input checked (a signal would count at every stage), then cs_train_run. fw 0.2.81: over
-//the band of codes 120..140 around the centre (cs_band_pwm, CS_BAND_REPS captures per stage and point), since a stage at
-//the edge of the AD9288 data transition garbles only at some codes and in some captures (bench 2026-10-20, CH1 A4).
-//fw 0.2.105: every 2 codes, 4 captures, and the tie pass at codes 126..130 (cap_stage.h "Pick").
+//a band of codes (cs_band_pwm, CS_BAND_REPS captures per stage and point), since a stage at the edge of the AD9288 data
+//transition garbles only at some codes and in some captures (bench 2026-10-20, CH1 A4). fw 0.2.105: the tie pass at
+//codes 126..130 (cap_stage.h "Pick"). fw-capmetric: the band at the carries 63.5 .. 191.5 and the quiet stages
+//(cap_stage.h "Quiet stages").
 //ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage: fail fast)
 static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
 {
   static const cs_io io = { 0, CS_BAND_POINTS, CS_BAND_REPS, CS_TIE_REPS, cal_cap_park, cal_cap_measure };
   acal_range_meas m;
   acal_point      pt[ACAL_POINTS];
-  int32_t         centre, mlo, mhi;
+  int32_t         centre, pwm;
   uint32          k, i;
   int             rc;
 
@@ -296,16 +327,20 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
         return ACAL_E_NOISE;
       }
 
-  //The band's PWM points from the gated slope points (both cores' mean); every one inside the PWM range, else the
-  //offset control cannot reach the band (fail fast as a centre that does not respond)
-  mlo = (m.mean16_lo[ACAL_GATED][0] + m.mean16_lo[ACAL_GATED][1]) / 2;
-  mhi = (m.mean16_hi[ACAL_GATED][0] + m.mean16_hi[ACAL_GATED][1]) / 2;
+  //The band's PWM from the gated slope points (both cores' mean); both ends of the band inside the PWM range (the PWM
+  //is linear in the code, so every point and the tie codes between them are too), else the offset control cannot
+  //reach the band (fail fast as a centre that does not respond)
+  cal_band_lo     = m.pwm_lo;
+  cal_band_hi     = m.pwm_hi;
+  cal_band_mlo    = (m.mean16_lo[ACAL_GATED][0] + m.mean16_lo[ACAL_GATED][1]) / 2;
+  cal_band_mhi    = (m.mean16_hi[ACAL_GATED][0] + m.mean16_hi[ACAL_GATED][1]) / 2;
+  cal_band_last16 = (uint32_t)cal_band_mlo;
 
-  for(i=0;i<CS_BAND_POINTS;i++)
+  for(i=0;i<CS_BAND_POINTS;i+=CS_BAND_POINTS-1)
   {
-    cal_band_pwm[i] = cs_band_pwm(m.pwm_lo, mlo, m.pwm_hi, mhi, cs_band_code(i));
+    pwm = cs_band_pwm(cal_band_lo, cal_band_mlo, cal_band_hi, cal_band_mhi, cs_band_code16(i));
 
-    if((cal_band_pwm[i] < ACAL_PWM_MIN) || (cal_band_pwm[i] > ACAL_PWM_MAX))
+    if((pwm < ACAL_PWM_MIN) || (pwm > ACAL_PWM_MAX))
     {
       acal_fail_point(pt, ACAL_E_RESPONSE, fail);
       return ACAL_E_RESPONSE;
@@ -348,8 +383,9 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   {
     cs_train t;
 
-    //fw 0.2.105: the band training takes about a second per channel (11 points x 60 ms settling, 176 captures, the tie
-    //pass 3 x 60 ms and 96 captures; about 0.75 s more with the reference pass): say so
+    //fw-capmetric: the band training takes about 1.5 s per channel (17 points x 60 ms settling, 136 captures with two
+    //2048-word core reads each, the tie pass 3 x 60 ms and 96 captures; about 1.3 s more with the reference pass): say
+    //so
     if(wiz_progress(ch, CW_PR_TRAIN))
       return CW_RC_CANCELLED;
 

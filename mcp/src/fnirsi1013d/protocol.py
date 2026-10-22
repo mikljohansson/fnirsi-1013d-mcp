@@ -53,8 +53,10 @@ PROTO_MAJOR = 1
 #: acq_state 5 LOGGING, caps LOGGER), the generator as a fractional two-step square (SET_GEN raw modes P16 / H16 on
 #: the 5 ns clock, GET_GEN 40 bytes; the DDS is gone, GET_INFO gen_clock_hz 200 MHz), READ_BODE rows carry the
 #: stimulus period P in 5 ns clocks. The pattern generator of the 1.27 drafts was cut (owner 2026-10-21, fw-nopat):
-#: 0x0217 / 0x021A are unknown commands, caps bits 24 / 27 and features bits 12 / 13 reserved, trigger source 3 gone
-PROTO_MINOR = 27
+#: 0x0217 / 0x021A are unknown commands, caps bits 24 / 27 and features bits 12 / 13 reserved, trigger source 3 gone;
+#: 1.28 (fw 0.2.105, fw-capmetric, row 68): GET_CAL 432 bytes, 364..431 the channel's last capture stage training (the
+#: quiet sets, the residual metric q and the 0x36 sums per core and stage)
+PROTO_MINOR = 28
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -3452,7 +3454,8 @@ class CalResp(Payload):
               ("track_spread16", "H"), ("cm_q8", "h"), ("cm_probes", "H"), ("cm_age_ms", "I"),
               ("prov_state", "B"), ("_r3", "3x"), ("prov", "56s"), ("prov_power_ons_since", "I"),
               ("prov_minutes_since", "I"), ("cap_trailer", "B"), ("cap_flags", "B"), ("cap_stored", "H"),
-              ("cap_stored_fpga", "H"), ("cap_value", "H")]
+              ("cap_stored_fpga", "H"), ("cap_value", "H"), ("train_flags", "B"), ("train_set", "2B"), ("_r4", "x"),
+              ("train_q", "8I"), ("train_sum", "8I")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -3526,6 +3529,13 @@ class CalResp(Payload):
     cap_stored: int = 0
     cap_stored_fpga: int = 0
     cap_value: int = 0
+    #: 1.28 (row 68, 364..431): the channel's last capture stage training since boot: CAPT_* flags, the quiet sets of
+    #: core A / B after the tie pass (bit s = stage s), q (the residual metric, 1/16 code^2 per sample summed over the
+    #: band) and the 0x36 sums, core A at stages 2..5 then core B
+    train_flags: int = 0
+    train_set: tuple[int, ...] = field(default_factory=lambda: (0,) * 2)
+    train_q: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
+    train_sum: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
     nbytes: int = field(default=0, compare=False)
 
     @classmethod
@@ -3583,6 +3593,31 @@ class CalResp(Payload):
                 text += f"; {cap_stages_text(self.cap_value)} in effect (untrained)"
         out["text"] = text
         return out
+
+    @property
+    def has_training(self) -> bool:
+        """The answer carries the 1.28 training fields (432 bytes)."""
+        return self.nbytes >= 432
+
+    def describe_training(self) -> dict[str, Any] | None:
+        """364..431 (protocol 1.28): the channel's last capture stage training since boot; None for an older answer or
+        when no training ran since boot."""
+        if not self.has_training or not self.train_flags & CAPT_RAN:
+            return None
+        f = self.train_flags
+        cores: dict[str, Any] = {}
+        for k, name in enumerate(("A", "B")):
+            q = self.train_q[4 * k:4 * k + 4]
+            sums = self.train_sum[4 * k:4 * k + 4]
+            cores[name] = {
+                "quiet_stages": [s for s in range(2, 6) if self.train_set[k] >> s & 1],
+                "q_per_stage": {str(s): q[s - 2] for s in range(2, 6)},
+                "outliers_per_stage": {str(s): sums[s - 2] for s in range(2, 6)},
+                "reference_timing": bool(k and f & CAPT_REF)}
+        return {"failed": bool(f & CAPT_FAILED), "cores": cores,
+                "note": "q = the residual metric: the squared difference of each sample to its 3-sample median, summed "
+                        "over the training band in 1/16 code^2 per sample; a stage is quiet when it has 0 outliers and q "
+                        "<= the core's best x 5 / 4 + 4 (fpga/al3/README.md section 18)"}
 
     def provenance(self) -> "Provenance | None":
         """The stored provenance when prov_state is 1 (valid), else None."""
@@ -3822,6 +3857,10 @@ CAP_POWER_ON = 0x08E4
 CAP_CORES = ("CH1 A", "CH1 B", "CH2 A", "CH2 B")
 #: self-check: a core is flagged when its outlier count exceeds its chip partner's by more than this
 CAP_EXCESS_LIMIT = 8
+#: GET_CAL 364 (protocol 1.28): the channel's last capture stage training
+CAPT_RAN = 0x01
+CAPT_FAILED = 0x02
+CAPT_REF = 0x04
 #: GET_CAL 356: the stored value's trailer (sector 708 bytes 488..503)
 CAP_TRAILER_STATES = {0: "none", 1: "valid", 2: "bad"}
 CAP_TRAILER_MAGIC = b"ACAP"

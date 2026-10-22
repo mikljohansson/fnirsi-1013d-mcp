@@ -167,6 +167,7 @@ typedef struct
   eh_note    enc_last_note;
   pc_hw_enc  enc;                   //what pc_hal_enc_state answers (counted as the target counts)
   pc_hw_cap  cap;                   //fw 0.2.79: what pc_hal_cap_state answers (0x153A capture stages)
+  pc_hw_cap_train cap_train[2];     //1.28: what pc_hal_cap_train answers per channel
   uint32_t   cap_checks;            //pc_hal_cap_check calls (0x36 reads after full-rate host captures)
   //fw 0.2.72: FPGA writes (fpga_bus.h): a rate / filter write since the last arm, counters, event 22 level
   uint8_t    enc_written;

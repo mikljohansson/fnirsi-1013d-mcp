@@ -836,6 +836,25 @@ def build():
         "999500 mHz, 20 duty 5000 bp, 22 0x39 byte 3 = 1 (mode active), 23 0, 24 P16, 32 H16",
         [decoded(CMDS["SET_GEN"], 91, g, flags=FLAG_RESPONSE)])
 
+    # 5j. Protocol 1.28 (fw-capmetric, section 14 row 68): GET_CAL 432 bytes, 364..431 the channel's last capture stage
+    # training since boot: 364 u8 flags (bit 0 ran, 1 failed, 2 core B from the reference pass), 365 / 366 u8 the quiet
+    # sets of core A / B (bit s = stage s), 367 0, 368 / 384 u32[4] q of core A / B at stages 2..5 (sum over the band of
+    # E / 127, 1/16 code^2 per sample), 400 / 416 u32[4] the 0x36 sums
+    cb = bytearray(432)
+    cb[0] = 1
+    cb[356:364] = struct.pack("<BBHHH", 1, 0x03, 0x08E3, 0x153D, 0x08E3)
+    cb[364:368] = bytes([0x01, 0x08, 0x38, 0])
+    cb[368:432] = struct.pack("<16I", 16082, 1098, 2325, 60180, 6324, 632, 612, 625, 0, 0, 0, 0, 2462, 0, 0, 0)
+    cb = bytes(cb)
+    f = frame(CMDS["GET_CAL"], 98, cb, flags=FLAG_RESPONSE)
+    add("resp_get_cal_1_28", f, [],
+        "1.28 GET_CAL response (432 bytes; 0..355 zero here but byte 0 channel 1; 356..363 as 1.24: trailer valid, flags "
+        "0x03, stored 0x08E3 on 0x153D, in effect 0x08E3): 364 training flags 0x01 (ran, own-encode timing), 365 core A "
+        "quiet set 0x08 ({3}), 366 core B 0x38 ({3, 4, 5}), 368 q A 16082 / 1098 / 2325 / 60180 (stage 4 within the "
+        "0x36 rule but over 1098 x 5 / 4 + 4), 384 q B 6324 / 632 / 612 / 625, 400 sums A 0, 416 sums B 2462 / 0 / 0 / 0 "
+        "(the 2026-10-22 sweep's CH2 q16 x 34)",
+        [decoded(CMDS["GET_CAL"], 98, cb, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")

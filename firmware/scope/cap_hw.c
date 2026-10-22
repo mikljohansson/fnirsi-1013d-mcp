@@ -27,6 +27,7 @@ static uint16    cap_stored_sets, cap_sets, cap_sets_v;
 static uint8     cap_moved;                 //cores the guard moved since boot (once each)
 static uint8     cap_store;                 //the guard's new value waits for fpga_capture_service's sector 708 write
 static uint32    cap_sector[128];            //sector 708 for the guard's write (pc_hal_sd_*: 4-byte aligned)
+static pc_hw_cap_train cap_train[2];          //1.28: the last training per channel (GET_CAL 364..431)
 
 void pc_hal_cap_state(pc_hw_cap *c)
 {
@@ -255,6 +256,36 @@ void pc_hal_cap_check(void)
   fpga_capture_check();
 }
 
+void pc_hal_cap_train(uint8_t ch, pc_hw_cap_train *t)
+{
+  *t = cap_train[ch & 1];
+}
+
+//1.28 (fw-capmetric): what GET_CAL reports of a channel's training (cores 2 ch, 2 ch + 1; the wizard trains one
+//channel at a time: 0x03 or 0x0C)
+static void cap_train_note(const cs_train *t, int rc)
+{
+  pc_hw_cap_train *n;
+  uint32 c, k, s;
+
+  c = (t->cores & 0x03) ? 0 : 2;
+  n = &cap_train[c / 2];
+  n->flags = (uint8)(PC_CAPT_RAN | ((rc != CS_OK) ? PC_CAPT_FAILED : 0) | ((t->ref & (1u << (c + 1))) ? PC_CAPT_REF : 0));
+
+  for(k=0;k<2;k++)
+  {
+    int ref = (n->flags & PC_CAPT_REF) && k;
+
+    n->set[k] = t->set[c + k];
+
+    for(s=0;s<CS_STAGES;s++)
+    {
+      n->q[k][s]   = ref ? t->q_ref[c + k][s] : t->q[c + k][s];
+      n->sum[k][s] = ref ? t->sum_ref[c + k][s] : t->sum[c + k][s];
+    }
+  }
+}
+
 int fpga_capture_train(uint8_t cores, const cs_io *io, cs_train *t)
 {
   int rc;
@@ -262,6 +293,7 @@ int fpga_capture_train(uint8_t cores, const cs_io *io, cs_train *t)
   cap_training = 1;
   rc = cs_train_run(io, cap_st.value, cores, t);
   cap_training = 0;
+  cap_train_note(t, rc);
 
   //fw 0.2.105: the trained cores' clean sets for the new value (the other cores' only while they belong to the start)
   if(rc == CS_OK)

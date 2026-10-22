@@ -1416,6 +1416,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 out["calibration_provenance"] = _provenance_summary(cals[0], s.info)
             if cals[0].has_capture:  # protocol 1.24: the stored FPGA 0x153A capture stages
                 out["capture_stages"] = cals[0].describe_capture()
+            if cals[0].has_training:  # protocol 1.28: each channel's last capture stage training since boot
+                out["capture_training"] = {CHANNEL_NAMES[ch]: cals[ch].describe_training() for ch in (0, 1)}
             if cal is not None:
                 out.update({
                     "unit": cal.unit, "points": len(cal.points),

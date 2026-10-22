@@ -171,7 +171,7 @@ static void test_info(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, PC_INFO_LEN);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 27); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 28); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), PC_FW_FPGA_VERSION); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   caps = pc_get_u32(r.p + 20);
   //The capability word is the firmware's (PC_FW_FPGA_VERSION), never derived from the version word read
@@ -300,7 +300,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.27,fpga=0x153d");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.28,fpga=0x153d");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -2232,7 +2232,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 27);
+  T_EQ(r.p[1], 28);
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -2738,7 +2738,7 @@ static void test_fel_reset_stall(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 27);
+  T_EQ(r.p[1], 28);
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -3245,7 +3245,7 @@ static void test_decim_fir_protocol(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 27);
+  T_EQ(r.p[1], 28);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -3352,7 +3352,7 @@ static void test_seq_segments(void)
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 27);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 28);
   r = status();
   //features: bits 0-8 of 1.26, bit 9 PEAK (fw-c6), bit 10 COUNTER (fw-c7), bit 11 LOGGER (fw-d4); 12 / 13 reserved
   T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x0FFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
@@ -3616,7 +3616,7 @@ static void test_capture_stages(void)
   mock.cap.trailer = CS_T_VALID; mock.cap.stored = 0x0924; mock.cap.stored_fpga = 0x153A; mock.cap.value = 0x0924;
   mock.cap.flags |= PC_CAPF_TRAINED;
   r = req(PC_CMD_GET_CAL, (const uint8_t *)"\x01", 1);
-  T_EQ(r.len, 364); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
+  T_EQ(r.len, 432); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
   T_EQ(pc_get_u16(r.p + 358), 0x0924); T_EQ(pc_get_u16(r.p + 360), 0x153A); T_EQ(pc_get_u16(r.p + 362), 0x0924);
 
   //EXT shifts: legacy 12 samples at divider 0 and 14 above (0x1539: 4 / 8); K >= 1 40 ns more
@@ -4339,7 +4339,7 @@ static void test_logger(void)
 
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_LOGGER, PC_CAP_LOGGER);
-  T_EQ(r.p[1], 27);
+  T_EQ(r.p[1], 28);
   r = status();
   T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_LOGGER, PC_FEAT_W_LOGGER);
 

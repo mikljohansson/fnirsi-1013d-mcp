@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            27   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            28   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -62,6 +62,8 @@
                                         //1.27 (provisional numbering): FPGA 0x153D (fw-d5, fw-nopat): the generator
                                         //      is the fractional two-step square (SET_GEN raw modes P16 / H16, GEN 40
                                         //      bytes, GET_INFO gen clock 200 MHz), READ_BODE row field P
+                                        //1.28 (provisional numbering): the capture stage training's residual metric
+                                        //      (fw-capmetric): GET_CAL 432 bytes (364..431 the last training)
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
