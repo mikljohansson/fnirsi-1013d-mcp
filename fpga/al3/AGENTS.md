@@ -440,8 +440,8 @@ can copy it. K >= 1 is not new (its write clock was full rate in 0x153C). `tb_sk
 
 **Tests.** `tb_skip.v` 125 checks; `tb_ext_trigger.v` / `tb_decim.v` end with 12 random K = 0 captures at D = 1 .. 9 checked
 against the dut's own pair stream; `tb_counter.v` (divider 9 at the 5 ns tolerance), `tb_encphase.v` (20 ns settle at every
-rate); fc367e7's `tb_adccap.v` / `tb_skip.v` edits verified; `tb/contract_0x153D.txt` regenerated (42 checks PASS). **Full
-`tb/run.sh` (19 steps, `REF_SRC_DIR=~/g11/refs`) on 25457ff: @@RUNS@@**
+rate); `tb_fir.v` / `tb_seg.v` (never run on 646c453 before: their random phases now write 0x0D = 0 first and compare from the arm on, seg_model's K = 0 timestamps step by 2); fc367e7's `tb_adccap.v` / `tb_skip.v` edits verified; `tb/contract_0x153D.txt` regenerated (42 checks PASS). **Full
+`tb/run.sh` (19 steps, `REF_SRC_DIR=~/g11/refs`) on ccf5bc2 (a snapshot of `src` + `tb`):** **ALL PASS on seeds 12345 and 4242** (2026-10-21 23:04 .. 2026-10-22 02:08, about 3 h each run in parallel; per step 41 / 109-110 / 168-171 + cic_model / 8 / 53-56 + seg_model 22 runs 0 failures / 882 / 42 + the transcript / encphase / 70 / 26 / 2082 / 38 / 85 / 1293 / 45 / 115 / 757 / 14102 / 125 checks).
 
 **Build** (TD 4.6.8 SP1): **6385 LUT (73.9 %) / 5887 reg (68.1 %) / 7420 LE (85.9 %, 1220 LEs free)**, 48 EMB9K + 2 EMB32K,
 2 of 3 M18x18, 60 pads; `clk_200MHz` **0 errors, 4.955 ns**; `sample_write_clock` 8.966 ns, `i_mcu_clk` 22.694 ns, `clkc[1]`

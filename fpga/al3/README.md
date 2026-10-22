@@ -2801,7 +2801,8 @@ a D = 1 auto record that left 0x14 = 12 and W = 42, the release is placed 1.5 ms
 edge and 0x14, 0x0A, 0x18, 0x38 (W, count, occupancy) read 0 and 0x34 its reset-window value before that word; after it
 0x38 reads W = 1, count 1. The check fails on the 646c453 logger (W read 42: a mutation run with the fix reverted).
 
-**Testbench changes for the full-rate encodes** (every one because the old check encoded the divided write clock):
+**Testbench changes for the full-rate encodes** (every one because the old check encoded the divided write clock).
+Full `tb/run.sh` (19 steps) on ccf5bc2: **ALL PASS on seeds 12345 and 4242** (2026-10-21 23:04 .. 2026-10-22 02:08, about 3 h each run in parallel; per step 41 / 109-110 / 168-171 + cic_model / 8 / 53-56 + seg_model 22 runs 0 failures / 882 / 42 + the transcript / encphase / 70 / 26 / 2082 / 38 / 85 / 1293 / 45 / 115 / 757 / 14102 / 125 checks).
 - `tb_skip.v` (new, run.sh step 19, `ONLY=skip`, 125 checks): the D > 0 model (every stored word is the captured pair of
   its edge, words D + 1 edges apart at D = 1 .. 399, the first within D + 1 edges, the write clock never stops), the
   auto time-out and 0x14 on stored words, the 0x05 ready wait of 60 ns, a CH1 step's trigger position, EXT at D = 49, the
@@ -2813,6 +2814,12 @@ edge and 0x14, 0x0A, 0x18, 0x38 (W, count, occupancy) read 0 and 0x34 its reset-
   counter. `tb_ext_trigger.v` and `tb_decim.v` end with 12 more random K = 0 captures at D = 1 .. 9 under the phase's
   random trigger / EXT / generator settings, checked against the model of the dut's own pair stream (the stored-word,
   stride and first-word checks of tb_skip; the reference is out of step from there, so they run last).
+- `tb_fir.v`, `tb_seg.v` random phases: each iteration writes 0x0D = 0 before the new K and divider and compares from
+  the arm on (fpga-d3c): a rate change under a still-running normal-mode capture passes through K = 0 at the old D > 0,
+  where the dut stores every (D + 1)-th pair and the reference gates its encodes (tb_fir: one word more in the dut at
+  a K = 3 -> 0 change, and the stale 0x14 / filter state of the earlier phases at the start of phase 1).
+- `seg_model.py` via `tb_seg.v`: K = 0 segment timestamps are multiples of 2 (one 10 ns edge), not of 2 (D + 1): a
+  record's first stored word falls on any edge of the skip cycle.
 - `tb_ext_trigger.v` "CH1 2 or 3 words later than EXT at divider 49" -> the same stored word or one later (the data lag
   is 40 ns at every rate).
 - `tb_trigpos.v` "core B half a word from core A" -> 5 ns at every rate.
