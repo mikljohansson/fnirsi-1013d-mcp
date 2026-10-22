@@ -407,6 +407,40 @@ static void test_bodies(void)
   T_EQ(pc_get_u32(cal + 348), 0xFFFFFFFFu);
   mock.life.power_on = 12;
 
+  //1.28 (fw-capmetric): the channel's last capture stage training, 364..431; none since boot: zeros
+  T_EQ(PC_CAL_RESP_LEN, 432);
+  {
+    static const uint8_t zero[68];
+
+    T_MEM(cal + 364, zero, sizeof(zero));
+  }
+  {
+    pc_hw_cap_train *ct = &mock.cap_train[1];
+    uint32_t         s;
+
+    ct->flags  = PC_CAPT_RAN | PC_CAPT_REF;
+    ct->set[0] = 0x08;
+    ct->set[1] = 0x38;
+
+    for(s=0;s<4;s++)
+    {
+      ct->q[0][s]   = 1000 + s;
+      ct->q[1][s]   = 0x01020300u + s;
+      ct->sum[0][s] = s ? 0 : 93;
+      ct->sum[1][s] = 70000u + s;
+    }
+
+    pc_cal_body(0, cal);
+    T_EQ(cal[364], 0);                                      //CH1 not trained
+    pc_cal_body(1, cal);
+    T_EQ(cal[364], 0x05); T_EQ(cal[365], 0x08); T_EQ(cal[366], 0x38); T_EQ(cal[367], 0);
+    T_EQ(pc_get_u32(cal + 368), 1000); T_EQ(pc_get_u32(cal + 380), 1003);
+    T_EQ(pc_get_u32(cal + 384), 0x01020300u); T_EQ(pc_get_u32(cal + 396), 0x01020303u);
+    T_EQ(pc_get_u32(cal + 400), 93); T_EQ(pc_get_u32(cal + 404), 0);
+    T_EQ(pc_get_u32(cal + 416), 70000); T_EQ(pc_get_u32(cal + 428), 70003);
+    memset(ct, 0, sizeof(*ct));
+  }
+
   //SD_INFO identity part
   T_EQ(pc_sd_info_body(&S, 0, 0, sd, scratch, sizeof(scratch)), 0);
   T_EQ(sd[64], PC_ID_NOT_READ);
@@ -460,7 +494,7 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.27, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.28, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
   has("FPGA: version word 0x153d, variant 2, ring 8192 words, caps 0x");
   has("; firmware built for 0x153d\r\n");

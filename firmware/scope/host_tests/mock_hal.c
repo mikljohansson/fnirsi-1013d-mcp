@@ -882,6 +882,7 @@ void     pc_hal_usb_watch(uint32_t *v) { v[0] = 7000; v[1] = 7001; }
 //Full-rate capture check: 0x33 per the last arm, counted as enc_heal_hw.c counts
 void     pc_hal_enc_state(pc_hw_enc *e) { *e = mock.enc; }
 void     pc_hal_cap_state(pc_hw_cap *c) { *c = mock.cap; }
+void     pc_hal_cap_train(uint8_t ch, pc_hw_cap_train *t) { *t = mock.cap_train[ch & 1]; }
 void     pc_hal_cap_check(void) { mock.cap_checks++; mock.cap.reads++; mock.cap.flags |= PC_CAPF_READ; }
 int      pc_hal_enc_written(void)       { return mock.enc_written; }
 

@@ -429,7 +429,7 @@ int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a
 #define PC_COUNTER_LEN    24      //1.26 (fw-c7): GET_COUNTER: flags, seq, gate, source, E, T, W, min, max, level, hysteresis, freq_mHz
 #define PC_HEALTH_LEN     128     //96 in 1.16-1.18, 104 in 1.19-1.23, 124 in 1.24 (layout 2); layout 3: 124 built-for word,
                                   //126 fpga_flags, 127 0
-#define PC_CAL_RESP_LEN   364     //356 in 1.16-1.23, 72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
+#define PC_CAL_RESP_LEN   432     //1.28: + the last capture stage training; 364 in 1.24-1.27, 356 in 1.16-1.23, 72 bytes up to 1.9, 248 in 1.10-1.11 (v2), 256 in 1.12-1.13 (v3), 288 in 1.14-1.15 (v4)
 #define PC_SD_INFO_LEN    112     //64 before 1.16
 uint32_t pc_link_counters(pc_session *s, uint32_t *v);
 void     pc_health_body(uint8_t *p);

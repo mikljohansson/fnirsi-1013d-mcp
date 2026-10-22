@@ -2715,6 +2715,26 @@ void pc_cal_body(int ch, uint8_t *resp)
     pc_put_u16(resp + 360, cp.stored_fpga);
     pc_put_u16(resp + 362, cp.value);
   }
+
+  //1.28 (fw-capmetric): the channel's last capture stage training since boot (cap_stage.h "Quiet stages"): 364 flags
+  //(PC_CAPT_*), 365 / 366 the quiet sets of core A / B after the tie pass, 367 0, then per core A, B and stage 2..5 the
+  //u32 residual metric q (368, 384) and the u32 0x36 sums (400, 416)
+  {
+    pc_hw_cap_train ct;
+    uint32_t        k, s;
+
+    pc_hal_cap_train((uint8_t)ch, &ct);
+    resp[364] = ct.flags;
+    resp[365] = ct.set[0];
+    resp[366] = ct.set[1];
+
+    for(k=0;k<2;k++)
+      for(s=0;s<4;s++)
+      {
+        pc_put_u32(resp + 368 + 16 * k + 4 * s, ct.q[k][s]);
+        pc_put_u32(resp + 400 + 16 * k + 4 * s, ct.sum[k][s]);
+      }
+  }
 }
 
 static int h_get_cal(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
