@@ -1619,3 +1619,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   0.86 % / 0.17 %; **2 MSa/s A 0 / 0, B 0 / 0**. Verdict: (1) the full-rate encodes at slow rates (0x153D) bring the partner-
   core coupling to every timebase (0x153C's gated encodes are clean there); (2) 0x153D's encode timing is worse than 0x153C's
   at full rate as well (A 3x, B hot zone 9x). Unit left on 0x153C + fw 0.2.104 (RAM) pending the owner's decision.
+- 2026-10-22 17:01 (lead, owner present, battery, USB unplugged): **FPGA 0x153D gated-encode build flashed** (fpga-d3gate,
+  roll h1, raw fd0be7a2). Probe ff ff ff at 16:59 (scope was off), then ef 40 14 (W25Q80DV). Double read = 07393bf5.. (0x153C)
+  as `backups/fpga-flash_pre-0x153D-gate_20261022-1700.bin`; wrote `backups/al3_d3gate_0x153D_fd0be7a2_padded.bin` (69
+  sectors, 1104 pages), verified aa252fb7..; independent double read-back aa252fb7... Next: FEL fw 0.2.105 8c70c2fc (main
+  f1f3e15), Calibrate with the capture-training readout, the A/B.
