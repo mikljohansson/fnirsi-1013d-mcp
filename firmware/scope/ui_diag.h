@@ -184,12 +184,12 @@ void ud_cal_verdict(const ud_input *in, ud_verdict *v);
 void ud_cal_provenance(const ud_input *in, char *p);             //the provenance sentence
 int  ud_cal_calibrated(const uint8_t *cal0, const uint8_t *cal1); //both channels use a bound v3 block
 
-//The calibration limits (diagnostics-review.md finding 6). The noise row measures the zero step's open-input condition,
-//so its limit is the zero step's own (adc_cal.h ACAL_MAX_NOISE16, owner 2026-10-20 18:13, fw 0.2.100), here in
-//hundredths of a code: 3.00. The core gain split's is the gain step's own (ACAL_GAIN_MAX_SPLIT, 8.0 %). One clock class
-//since fw 0.2.105: the class gain ratio (limit 2 %) and the gated noise row (limit 1 code) went with the gated class
-#define UD_LIM_SPLIT_TENTHS     ((ACAL_GAIN_MAX_SPLIT * 1000 + ACAL_GAIN_ONE / 2) / ACAL_GAIN_ONE)
-#define UD_LIM_NOISE            (ACAL_MAX_NOISE16 * 100 / 16)
+//The calibration limits (diagnostics-review.md finding 6). The noise rows measure the zero step's open-input condition,
+//so their limits are the zero step's own (adc_cal.h ACAL_MAX_NOISE16_*, owner 2026-10-20 18:13, fw 0.2.100), here in
+//hundredths of a code: gated 1.00, full rate 3.00
+#define UD_LIM_CLASS_TENTHS      20   //class gain ratio full / gated: |ratio - 1| <= 2.0 %
+#define UD_LIM_NOISE_GATED      (ACAL_MAX_NOISE16_GATED * 100 / 16)
+#define UD_LIM_NOISE_FULL       (ACAL_MAX_NOISE16_FULL * 100 / 16)
 #define UD_LIM_PWM_DEV          100   //PWM centre within 860 +- 100
 #define UD_LIM_VOLTS_TENTHS      30   //volts factor within 3.0 % of 1.00o5's default
 #define UD_WARMUP_MS         300000   //calibrated less than 5 minutes after power-on: amber

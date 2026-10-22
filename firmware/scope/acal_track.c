@@ -276,7 +276,7 @@ void acal_track_apply(const acal_track *t, acal_corr *c)
   int64_t e = t->e_q24;
   int64_t k;
 
-  if((c->version != 3) || ((t->d_q8 == 0) && (e == 0)))
+  if((c->version != 3) || (c->cls != ACAL_FULL) || ((t->d_q8 == 0) && (e == 0)))
     return;
 
   //A' = A - (d + e x) / 2 with x = code - 128: gain_a (1 - e/2), off_a (1 - e/2) - 65536 (d - 128 e) / 2; B the
@@ -289,4 +289,91 @@ void acal_track_apply(const acal_track *t, acal_corr *c)
   c->off_b  = (int32_t)(c->off_b + sshr((int64_t)c->off_b * e + k, 25));
 
   acal_clips(c);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//Full-class common mode (class probe)
+
+void acal_cm_reset(acal_cm *m)
+{
+  uint8_t *p = (uint8_t *)m;
+  uint32_t i;
+
+  for(i=0;i<sizeof(*m);i++)
+    p[i] = 0;
+}
+
+int32_t acal_cm_mean_q8(const acal_corr *k, const int32_t mean16[2])
+{
+  //core code = (raw x gain + off) / 65536 with raw = mean16 / 16: x 256 = (mean16 x gain + 16 off) / 4096; both cores / 2
+  int64_t a = (int64_t)mean16[ACAL_CORE_A] * k->gain_a + 16 * (int64_t)k->off_a;
+  int64_t b = (int64_t)mean16[ACAL_CORE_B] * k->gain_b + 16 * (int64_t)k->off_b;
+
+  return (int32_t)sdiv(a + b, 8192);
+}
+
+int acal_cm_probe(acal_cm *m, const acal_cm_meas *p, const acal_corr *gated, const acal_corr *full, uint32_t now_ms,
+                  int32_t *c_q8)
+{
+  int32_t g0, g2, f, c;
+  int     i, k;
+
+  if(c_q8)
+    *c_q8 = 0;
+
+  m->flags &= (uint8_t)~ACAL_CM_LAST;
+
+  if((gated->version != 3) || (full->version != 3) || (gated->cls != ACAL_GATED) || (full->cls != ACAL_FULL) || p->clipped)
+    return 0;
+
+  for(i=0;i<3;i++)
+    for(k=0;k<2;k++)
+      if(p->rms16[i][k] > ACAL_CM_MAX_RMS16)
+        return 0;
+
+  g0 = acal_cm_mean_q8(gated, p->mean16[0]);
+  g2 = acal_cm_mean_q8(gated, p->mean16[2]);
+  f  = acal_cm_mean_q8(full, p->mean16[1]);
+  c  = f - (int32_t)sdiv((int64_t)g0 + g2, 2);
+
+  m->last_c_q8 = c;
+
+  if(c_q8)
+    *c_q8 = c;
+
+  if((g0 - g2 > ACAL_CM_MAX_GATED) || (g2 - g0 > ACAL_CM_MAX_GATED) || (c > ACAL_CM_MAX_Q8) || (c < -ACAL_CM_MAX_Q8))
+    return 0;
+
+  //First valid probe after a reset: take it (a fresh start is right at once); then EMA 1/4
+  if(m->flags & ACAL_CM_DATA)
+    m->cm_q8 += (int32_t)sdiv((int64_t)c - m->cm_q8, 4);
+  else
+    m->cm_q8 = c;
+
+  m->last_ms = now_ms;
+  m->probes  = (uint16_t)((m->probes < 65535) ? m->probes + 1 : 65535);
+  m->flags  |= ACAL_CM_DATA | ACAL_CM_LAST;
+  return 1;
+}
+
+void acal_cm_apply(const acal_cm *m, acal_corr *c)
+{
+  if((c->version != 3) || (m->cm_q8 == 0))
+    return;
+
+  //corr16 in 1/16 code (the 16-bit path is the full class whatever the divider), off_k in Q16 codes
+  c->corr16 -= (int32_t)sdiv(m->cm_q8, 16);
+
+  if(c->cls == ACAL_FULL)
+  {
+    c->off_a -= m->cm_q8 * 256;
+    c->off_b -= m->cm_q8 * 256;
+    acal_clips(c);
+  }
+}
+
+void acal_v4_apply(const acal_track *t, const acal_cm *m, acal_corr *c)
+{
+  acal_cm_apply(m, c);
+  acal_track_apply(t, c);
 }

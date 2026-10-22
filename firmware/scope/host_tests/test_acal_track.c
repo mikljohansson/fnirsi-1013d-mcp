@@ -72,7 +72,7 @@ static int      sq_level;                 //the post square: level of the next r
 
 static void store_channel(const model *md)
 {
-  uint32_t r, k;
+  uint32_t r, k, cls;
 
   memset(&chan, 0, sizeof(chan));
 
@@ -80,24 +80,26 @@ static void store_channel(const model *md)
   {
     chan.pwm[r] = pwm[r];
 
-    for(k=0;k<2;k++)
-    {
-      chan.zero[k][r]  = (int16_t)lround((128.0 + md->off[k]) * 16.0);
-      chan.slope[k][r] = -17000;
-      chan.noise[k][r] = 16;
-    }
+    for(cls=0;cls<ACAL_CLASSES;cls++)
+      for(k=0;k<2;k++)
+      {
+        chan.zero[cls][k][r]  = (int16_t)lround((128.0 + md->off[k]) * 16.0);
+        chan.slope[cls][k][r] = -17000;
+        chan.noise[cls][k][r] = 16;
+      }
   }
 
-  for(k=0;k<2;k++)
-    chan.gain[k] = (uint16_t)lround(32768.0 / md->gain[k]);
+  for(cls=0;cls<ACAL_CLASSES;cls++)
+    for(k=0;k<2;k++)
+      chan.gain[cls][k] = (uint16_t)lround(32768.0 / md->gain[k]);
 
   chan.gain_range = 2;
 }
 
-//The v3 correction of a readout (range 2, dcoffset 0) with the tracker folded in
+//The v3 correction of a full-rate readout (range 2, dcoffset 0, divider 0) with the tracker folded in
 static void correction(const acal_track *t, acal_corr *c)
 {
-  acal_correction(&chan, pwm, 2, 0, 385, 0, 0, c);
+  acal_correction(&chan, pwm, 2, 0, 0, 385, 0, 0, c);
 
   if(t)
     acal_track_apply(t, c);
@@ -825,8 +827,13 @@ static void test_apply(void)
     T_MEM(&k, &c, sizeof(c));
   }
 
-  //Version 1: untouched (every v3 readout gets it since one clock class, fw 0.2.105)
-  acal_correction(0, pwm, 2, 0, 385, -2, 3, &c0);
+  //Gated class and version 1: untouched
+  acal_correction(&chan, pwm, 2, 99, 0, 385, 0, 0, &c0);
+  c = c0;
+  acal_track_apply(&t, &c);
+  T_MEM(&c, &c0, sizeof(c));
+
+  acal_correction(0, pwm, 2, 0, 0, 385, -2, 3, &c0);
   c = c0;
   acal_track_apply(&t, &c);
   T_MEM(&c, &c0, sizeof(c));
@@ -875,8 +882,173 @@ static void test_gate(void)
   T_MEM(t.m, ref.m, sizeof(t.m));
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//(j) class probe: full-class common mode against the gated class (acal_cm_*, design section 8)
+
+//Raw means (1/16 code) the probe would measure for an input of v codes about mid-scale: per class the stored zero plus a
+//drift, divided by the class gain G (raw - z = v / G, so the corrected codes are T + v in both classes)
+static void cm_means(const acal_channel *ch, uint32_t cls, double v, double drift, int32_t mean16[2])
+{
+  int k;
+
+  for(k=0;k<2;k++)
+    mean16[k] = (int32_t)lround(ch->zero[cls][k][2] + 16.0 * (drift + v * 32768.0 / ch->gain[cls][k]));
+}
+
+static void cm_meas(const acal_channel *ch, double v, double drift_full, double drift_g2, acal_cm_meas *m)
+{
+  memset(m, 0, sizeof(*m));
+  cm_means(ch, ACAL_GATED, v, 0.0, m->mean16[0]);
+  cm_means(ch, ACAL_FULL, v, drift_full, m->mean16[1]);
+  cm_means(ch, ACAL_GATED, v, drift_g2, m->mean16[2]);
+  m->rms16[0][0] = m->rms16[0][1] = m->rms16[2][0] = m->rms16[2][1] = 16;
+  m->rms16[1][0] = m->rms16[1][1] = 20;
+}
+
+static void test_class_probe(void)
+{
+  acal_cm cm, ref;
+  acal_cm_meas m;
+  acal_corr kg, kf, c0, c, t1;
+  acal_track trk;
+  model md;
+  int32_t c_q8, mf;
+  double v;
+
+  //Gains as on the bench: full A/B 1.033 (core A 1.6 % high), gated 1.004, full class 1.1 % low
+  reset_model(&md);
+  md.gain[0] = 1.016;
+  md.gain[1] = 0.984;
+  store_channel(&md);
+  chan.gain[ACAL_GATED][0] = 32703; chan.gain[ACAL_GATED][1] = 32834;
+  chan.gain[ACAL_FULL][0]  = 32604; chan.gain[ACAL_FULL][1]  = 33681;
+
+  acal_correction(&chan, pwm, 2, 199, 0, 385, 0, 0, &kg);
+  acal_correction(&chan, pwm, 2, 0, 0, 385, 0, 0, &kf);
+  T_EQ(kg.cls, ACAL_GATED); T_EQ(kf.cls, ACAL_FULL);
+
+  //No drift: c = 0 at any DC level (the corrected gains of both classes agree); +0.8 code full-class drift: c = 0.8 code
+  //at 0 V, +40 and -30 codes (the probe is input-independent for a DC input)
+  acal_cm_reset(&cm);
+
+  for(v=-30.0;v<=40.0;v+=35.0)
+  {
+    cm_meas(&chan, v, 0.0, 0.0, &m);
+    ref = cm;
+    T_EQ(acal_cm_probe(&ref, &m, &kg, &kf, 1000, &c_q8), 1);
+    T_TRUE(c_q8 >= -8 && c_q8 <= 8);      //the means are whole sixteenths: up to 1/32 code per core
+
+    cm_meas(&chan, v, 0.8, 0.0, &m);
+    ref = cm;
+    T_EQ(acal_cm_probe(&ref, &m, &kg, &kf, 1000, &c_q8), 1);
+    printf("(j) DC input %+.0f codes, full class +0.8 code: c %.3f code\n", v, c_q8 / 256.0);
+    T_TRUE(c_q8 >= 205 - 8 && c_q8 <= 205 + 8);
+  }
+
+  //First valid probe takes c, then EMA 1/4
+  acal_cm_reset(&cm);
+  cm_meas(&chan, 0.0, 0.8, 0.0, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 5000, &c_q8), 1);
+  T_EQ(cm.cm_q8, c_q8); T_EQ(cm.probes, 1); T_EQ(cm.last_ms, 5000); T_EQ(cm.flags, ACAL_CM_DATA | ACAL_CM_LAST);
+  mf = cm.cm_q8;
+  cm_meas(&chan, 0.0, 0.0, 0.0, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 35000, &c_q8), 1);
+  T_TRUE(c_q8 >= -8 && c_q8 <= 8);
+  T_TRUE(cm.cm_q8 - (mf + (c_q8 - mf) / 4) >= -1 && cm.cm_q8 - (mf + (c_q8 - mf) / 4) <= 1);
+  T_EQ(cm.probes, 2); T_EQ(cm.last_ms, 35000);
+
+  //Validity: noisy part, clipping, gated parts 0.31 / 0.26 code apart, |c| > 8 codes, gated class not gated: rejected,
+  //nothing but LAST and last_c changes
+  cm_meas(&chan, 0.0, 0.8, 0.0, &m);
+  m.rms16[1][1] = ACAL_CM_MAX_RMS16 + 1;
+  ref = cm;
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, &c_q8), 0);
+  T_EQ(c_q8, 0); T_EQ(cm.cm_q8, ref.cm_q8); T_EQ(cm.probes, ref.probes); T_EQ(cm.flags, ACAL_CM_DATA);
+  m.rms16[1][1] = ACAL_CM_MAX_RMS16;
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, &c_q8), 1);
+  cm = ref;
+
+  cm_meas(&chan, 0.0, 0.8, 0.0, &m);
+  m.clipped = 1;
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, 0), 0);
+  T_EQ(cm.cm_q8, ref.cm_q8);
+
+  cm_meas(&chan, 0.0, 0.8, 0.31, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, &c_q8), 0);
+  T_TRUE(c_q8 != 0);                      //compared, then refused for the gated disagreement
+  T_EQ(cm.cm_q8, ref.cm_q8); T_EQ(cm.flags & ACAL_CM_LAST, 0);
+  cm_meas(&chan, 0.0, 0.8, 0.26, &m);    //0.26 quantised to sixteenths: 0.25 (0.31: 0.3125)
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, 0), 1);
+  cm = ref;
+
+  cm_meas(&chan, 0.0, 8.2, 0.0, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, 0), 0);
+  cm_meas(&chan, 0.0, 7.8, 0.0, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 40000, 0), 1);
+  cm = ref;
+
+  cm_meas(&chan, 0.0, 0.8, 0.0, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kf, &kf, 40000, 0), 0);
+  acal_correction(0, pwm, 2, 199, 0, 385, 0, 0, &c);
+  T_EQ(acal_cm_probe(&cm, &m, &c, &kf, 40000, 0), 0);
+  T_EQ(cm.cm_q8, ref.cm_q8);
+
+  //Apply: full class 8-bit, both cores off by cm, corrected full means equal the gated ones again; corr16 by cm / 16;
+  //gains, gain16, zero_q8, comp / frac unchanged
+  acal_cm_reset(&cm);
+  cm_meas(&chan, 0.0, 0.8, 0.0, &m);
+  T_EQ(acal_cm_probe(&cm, &m, &kg, &kf, 5000, &c_q8), 1);
+  c0 = kf;
+  c  = kf;
+  acal_cm_apply(&cm, &c);
+  T_EQ(c.off_a, c0.off_a - cm.cm_q8 * 256); T_EQ(c.off_b, c0.off_b - cm.cm_q8 * 256);
+  T_EQ(c.corr16, c0.corr16 - (cm.cm_q8 + 8) / 16);
+  T_EQ(c.gain_a, c0.gain_a); T_EQ(c.gain_b, c0.gain_b); T_EQ(c.gain16, c0.gain16);
+  T_EQ(c.zero_q8, c0.zero_q8); T_EQ(c.comp_a, c0.comp_a); T_EQ(c.frac_a, c0.frac_a);
+  t1 = c;
+  acal_clips(&t1);
+  T_MEM(&t1, &c, sizeof(c));
+  {
+    int32_t g = (acal_cm_mean_q8(&kg, m.mean16[0]) + acal_cm_mean_q8(&kg, m.mean16[2])) / 2;
+    int32_t f = acal_cm_mean_q8(&c, m.mean16[1]);
+
+    printf("(j) after apply: full %.3f gated %.3f code\n", f / 256.0, g / 256.0);
+    T_TRUE(f - g >= -1 && f - g <= 1);
+  }
+
+  //Gated correction: corr16 moves (the 16-bit path is the full class), the 8-bit loop does not
+  c = kg;
+  acal_cm_apply(&cm, &c);
+  T_EQ(c.corr16, kg.corr16 - (cm.cm_q8 + 8) / 16);
+  T_EQ(c.off_a, kg.off_a); T_EQ(c.off_b, kg.off_b); T_EQ(c.clip_lo, kg.clip_lo);
+
+  //Version 1: untouched; cm 0: untouched
+  acal_correction(0, pwm, 2, 0, 0, 385, -2, 3, &c0);
+  c = c0;
+  acal_cm_apply(&cm, &c);
+  T_MEM(&c, &c0, sizeof(c));
+  ref = cm;
+  ref.cm_q8 = 0;
+  c = kf;
+  acal_cm_apply(&ref, &c);
+  T_MEM(&c, &kf, sizeof(c));
+
+  //acal_v4_apply = cm first, then the split; the split keeps the mean of the cores (and corr16)
+  acal_track_reset(&trk);
+  trk.d_q8 = 300;
+  trk.e_q24 = 200000;
+  c = kf;
+  acal_v4_apply(&trk, &cm, &c);
+  t1 = kf;
+  acal_cm_apply(&cm, &t1);
+  acal_track_apply(&trk, &t1);
+  T_MEM(&c, &t1, sizeof(c));
+  T_EQ(c.corr16, kf.corr16 - (cm.cm_q8 + 8) / 16);
+}
+
 int main(void)
 {
+  test_class_probe();
   test_gate();
   test_apply();
   test_solve();

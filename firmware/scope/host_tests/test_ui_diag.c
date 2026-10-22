@@ -49,7 +49,7 @@ static void dump_tile(int i)
 //A healthy, calibrated unit as the owner's: fw from RAM equal to the card, AL3 0x153B, USB configured
 static void healthy(ud_input *in)
 {
-  uint32_t ch, r, k;
+  uint32_t ch, r, k, m;
 
   memset(health, 0, sizeof(health));
   memset(cal, 0, sizeof(cal));
@@ -96,23 +96,28 @@ static void healthy(ud_input *in)
     p32(c + 56, 100);
     p32(c + 60, 59136);
 
-    //Slot 0 of the block; slot 1 (the gated class up to fw 0.2.104) is reserved, 0
-    for(k=0;k<2;k++)
-      for(r=0;r<6;r++)
-      {
-        p16(b + 12 + 2 * (6 * k + r), (uint32_t)(int16_t)(16 * 131 + k * 90));
-        b[108 + 6 * k + r] = 12;          //0.75 code
-      }
+    for(m=0;m<2;m++)
+      for(k=0;k<2;k++)
+        for(r=0;r<6;r++)
+        {
+          p16(b + 12 + 2 * (12 * m + 6 * k + r), (uint32_t)(int16_t)(16 * 131 + k * 90));
+          b[108 + 12 * m + 6 * k + r] = m ? 2 : 12;      //gated 0.13, full 0.75
+        }
 
-    p16(b + 132, 33000);                  //A
-    p16(b + 134, 32570);                  //B: 1.3 % apart
+    p16(b + 132, 33000);                  //full A
+    p16(b + 134, 32570);                  //full B: 1.3 % apart
+    p16(b + 136, 32400);                  //gated: full/gated 1.1 % off
+    p16(b + 138, 32400);
     b[140] = 2;
 
     //Tracking data
-    c[256] = 0x01;
+    c[256] = 0x01 | 0x20;
     p16(c + 258, 31);                     //+0.12 code
     p32(c + 260, 52000);                  //+0.31 %
     p32(c + 268, 3000);
+    p16(c + 280, 179);                    //+0.70 code
+    p16(c + 282, 4);
+    p32(c + 284, 12000);
 
     //Provenance (both channels carry the same)
     c[288] = ACAL_PROV_VALID;
@@ -312,9 +317,9 @@ static void test_pages(void)
   T_TRUE(has_text("18 of 20"));
   T_TRUE(has_text("RTC module 31 C."));
   T_TRUE(has_text("Calibrated, every value within its limit."));
-  T_TRUE(has_text("1.3 %"));                  //core gain split A / B
+  T_TRUE(has_text("1.2 %"));
+  T_TRUE(has_text("0.13 code"));
   T_TRUE(has_text("0.75 code"));
-  T_TRUE(!has_text("gated"));
   T_TRUE(has_text("Calibrated on fw 0.2.59, FPGA 0x153b, 12 min after power-on, 1 power-on ago."));
   T_TRUE(has_text("Updates every second"));
   T_EQ(text_colour("18 of 20"), UD_C_OK);
@@ -332,10 +337,10 @@ static void test_pages(void)
   T_TRUE(has_text("Calibration block (sector 708): CH1 in use, CH2 in use."));
   T_TRUE(has_text("131.0 / 136.6"));
   T_TRUE(has_text("+0.2 %"));
-  T_TRUE(has_text("Gains A 1.0071, B 0.9940, range 1 V"));
+  T_TRUE(has_text("Gains full A 1.0071, B 0.9940"));
+  T_TRUE(has_text("Gains gated A 0.9888, B 0.9888, range 1 V"));
   T_TRUE(has_text("Tracking A-B +0.12 code, slope +0.31 %, 3 s ago"));
-  T_TRUE(!has_text("Full-rate offset"));                      //the class probe went with the gated class (0.2.105)
-  T_TRUE(!has_text("gated"));
+  T_TRUE(has_text("Full-rate offset +0.70 code, 4 probes, 12 s ago"));
   T_TRUE(has_text("DC shift: centre 870, size 100, value 59136"));
   T_TRUE(has_text("1.00o5 core compensations: not used (v3 in use)"));
   //fw 0.2.63: no supply hedge; the DC shift trim's state is the button's colour, no "off" line
@@ -583,44 +588,47 @@ static void test_verdicts(void)
   healthy(&in);
   verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
 
-  //Over a limit: the core gain split (the gain step's 8 %), the noise with the inputs open: 3.0 codes, the zero step's
-  //own limit (fw 0.2.100, owner 2026-10-20 18:13; one limit since the gated class's 1.0 went, fw 0.2.105)
-  T_EQ(UD_LIM_NOISE, 300);
-  T_EQ(UD_LIM_SPLIT_TENTHS, 80);
-  p16(cal[1] + 112 + 134, 30000);                            //A / B 10 % apart
+  //Over a limit: the class ratio (2 %), the noise with the inputs open: gated 1.0 code, full rate 3.0 codes, the zero
+  //step's own limits (fw 0.2.100, owner 2026-10-20 18:13; 0.30 / 1.00 up to 0.2.99)
+  T_EQ(UD_LIM_NOISE_GATED, 100);
+  T_EQ(UD_LIM_NOISE_FULL, 300);
+  p16(cal[1] + 112 + 136, 31800);
   verdict(&in, UD_V_CHECK, OVER);
   healthy(&in);
-  p16(cal[1] + 112 + 134, 30600);                            //7.8 %
+  cal[0][112 + 108 + 12 + 3] = 16;                           //1.00 code gated: on the limit
   verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
+  cal[0][112 + 108 + 12 + 3] = 17;                           //1.06 code gated
+  verdict(&in, UD_V_CHECK, OVER);
   healthy(&in);
-  cal[0][112 + 108 + 7] = 48;                                //3.00 codes: on the limit
+  cal[0][112 + 108 + 7] = 48;                                //3.00 codes full: on the limit
   verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
   cal[0][112 + 108 + 7] = 49;                                //3.06
   verdict(&in, UD_V_CHECK, OVER);
 
-  //The owner's unit (bench 2026-10-20): stored open-input noise at full rate CH1 core B 1.19, CH2 core A 2.75 codes
-  //(5 V/div): OK on the Status page and the Calibration tab, in the wizard's own terms
+  //The owner's unit (bench 2026-10-20): stored open-input full rate CH1 core B 1.19, CH2 core A 2.75 codes (5 V/div),
+  //gated at most 0.50 / 0.38: OK on the Status page and the Calibration tab, in the wizard's own terms
   healthy(&in);
-  cal[0][112 + 108 + 6 + 0] = 19;                            //CH1 core B, 5 V
-  cal[1][112 + 108 + 0 + 0] = 44;                            //CH2 core A, 5 V
+  cal[0][112 + 108 + 6 + 0] = 19;                            //CH1 full, core B, 5 V
+  cal[1][112 + 108 + 0 + 0] = 44;                            //CH2 full, core A, 5 V
+  cal[0][112 + 108 + 12 + 0] = 8;                            //CH1 gated 0.50
+  cal[1][112 + 108 + 12 + 6] = 6;                            //CH2 gated 0.38
   verdict(&in, UD_V_OK, "Calibrated, every value within its limit.");
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
   check_layout("bench noise", 0);
-  T_TRUE(has_text("Core gain split, A / B"));
-  T_TRUE(has_text("Noise RMS, inputs open"));
-  T_TRUE(has_text("limit 8.0 %"));
+  T_TRUE(has_text("Noise RMS, inputs open, gated"));
+  T_TRUE(has_text("Noise RMS, inputs open, full"));
+  T_TRUE(has_text("limit 1.0 code"));
   T_TRUE(has_text("limit 3.0 code"));
-  T_TRUE(!has_text("limit 1.0 code"));
-  T_TRUE(has_text("1.3 %"));
   T_TRUE(has_text("1.19 code"));
   T_TRUE(has_text("2.75 code"));
   T_TRUE(!has_text("provisional"));
   T_EQ(text_colour("Check"), -1);
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   check_layout("bench noise cal", 0);
-  T_TRUE(has_text("Noise RMS, inputs open: 1.19 code, limit 3.0 code"));
-  T_TRUE(has_text("Noise RMS, inputs open: 2.75 code, limit 3.0 code"));
-  T_EQ(text_colour("Noise RMS, inputs open: 2.75 code, limit 3.0 code"), UD_C_TEXT);
+  T_TRUE(has_text("Noise RMS, inputs open: gated 0.50, full 1.19 code"));
+  T_TRUE(has_text("Noise RMS, inputs open: gated 0.38, full 2.75 code"));
+  T_TRUE(has_text("Gated limit 1.0 code, full limit 3.0 code"));
+  T_EQ(text_colour("Noise RMS, inputs open: gated 0.38, full 2.75 code"), UD_C_TEXT);
 
   //Over: the advice in two lines on the Status page
   cal[1][112 + 108 + 0 + 0] = 49;
@@ -630,7 +638,7 @@ static void test_verdicts(void)
   T_TRUE(has_text("If it stays, the input stage is noisy."));
   T_EQ(text_colour("3.06 code"), UD_C_TEXT);
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
-  T_EQ(text_colour("Noise RMS, inputs open: 3.06 code, limit 3.0 code"), UD_C_WARN);
+  T_EQ(text_colour("Noise RMS, inputs open: gated 0.38, full 3.06 code"), UD_C_WARN);
 
   //Warm-up
   healthy(&in);
@@ -645,6 +653,13 @@ static void test_verdicts(void)
   verdict(&in, UD_V_CHECK, "Gains not measured: run Calibrate with the probes on the post.");
   in.fpga = 0x1432;
   verdict(&in, UD_V_CHECK, "FPGA changed since calibration (0x153b to 0x1432): recalibrate.");
+
+  //fw-gated: a single-class block (0.2.105 test builds) loaded with the gated values copied: before the gains' reasons
+  healthy(&in);
+  cal[0][73] |= 0x20 | 0x10;
+  verdict(&in, UD_V_CHECK, "Calibration lacks the gated rates (a 0.2.105 test build): run Calibrate.");
+  cal[0][73] &= (uint8_t)~0x08;
+  verdict(&in, UD_V_CHECK, "Calibration lacks the gated rates (a 0.2.105 test build): run Calibrate.");
 
   //fw 0.2.81: a 0x153A core flagged 3 times within a minute: amber, calibrate (the last capture may be clean)
   healthy(&in);
