@@ -6,6 +6,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [ ] **COM10 becomes unopenable under PC_DEBUG images** (bench 2026-10-22, three times: after a debug image's FEL load
+  08:4x, after a host script exited mid-log 08:5x, after a wizard run 11:2x; every time a PC_DEBUG image was running; Windows
+  lists COM10, open says the port does not exist; a USB replug or restart clears it; never seen on a release image today).
+  Investigate the USB CDC path differences of PC_DEBUG builds.
 - **A host capture leaves the Bode view** (owner decision 2026-10-22 09:59, "first"): a host ARM / capture or SET_ACQ_STATE
   RUN while the frequency response view is open leaves the view (back to the scope view) and never starts a Bode sweep;
   sweeps come only from the view's own RUN and BODE_CTRL. Implemented in fw-relay.
