@@ -125,6 +125,7 @@ void fpga_trig_status(uint8_t out[4]);
 #define FPGA_HELD_MODE     0x02    //0x53
 #define FPGA_HELD_SHIFT    0x04    //0x54
 #define FPGA_HELD_FIR      0x08    //0x56
+#define FPGA_HELD_RELAY    0x10    //fw-relay: relay[i] is valid, bits 4..7 = 0x33, 0x34, 0x36, 0x37 (FPGA_RELAY_INDEX)
 
 typedef struct
 {
@@ -141,6 +142,8 @@ typedef struct
   uint8_t  shift;           //0x54
   uint8_t  fir;             //0x56 (the whole byte: bit 0 FIR enable, bit 1 peak detect since 0x153C)
   uint32_t divider;         //0x0D
+  uint8_t  relay[4];        //fw-relay: 0x33 CH1 range, 0x34 CH1 coupling, 0x36 CH2 range, 0x37 CH2 coupling
+  uint32_t relay_writes;    //front-end relay writes sent (fpga_relay_write, or any other write of those registers)
 } fpga_bus_writes;
 
 extern fpga_bus_writes fpga_bus_wr;
@@ -154,6 +157,15 @@ int  fpga_bus_note_write(uint8_t cmd, uint32_t value);
 //cannot survive an arm. 1 = the filter must settle: a value differs from what the FPGA held, or the divider changed
 //since the previous call.
 int  fpga_decim_write(uint8_t mode, uint8_t cmd56, uint8_t shift);
+
+//Front-end relays (fw-relay): the range relays (0x33 CH1, 0x36 CH2: values 0..5, the FPGA ignores 6 and up) and the
+//AC/DC relays (0x34 CH1, 0x37 CH2: 1 DC, 0 AC). Written only when the value differs from what the FPGA holds (the last
+//write of that register since boot, tracked by fpga_bus_note_write whoever wrote it): the restores on every RUN, host
+//capture handover, menu close and settings load write nothing when nothing changed, so the relays do not click (the
+//FPGA latches the byte; an equal value never switched a relay, but each write was a bus round and a trap for a stale
+//shadow). Unknown at boot and after a FEL load (BSS): the first write of each register goes out. 1 = written.
+#define FPGA_RELAY_INDEX(cmd)  ((cmd) == 0x33 ? 0 : (cmd) == 0x34 ? 1 : (cmd) == 0x36 ? 2 : 3)
+int  fpga_relay_write(uint8_t cmd, uint8_t value);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator (FPGA 0x153D, fw-d5; cut to the square by fw-nopat, docs/plans/fpga-0x153c.md 2.1). The DDS (0x51 /

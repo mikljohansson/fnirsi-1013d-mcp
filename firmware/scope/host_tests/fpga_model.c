@@ -681,6 +681,21 @@ static void fm_apply(uint8_t cmd, uint32_t v)
 
   switch(cmd)
   {
+    //fw-relay: the front-end relays
+    case 0x33: case 0x36: case 0x34: case 0x37:
+    {
+      uint8_t i = FPGA_RELAY_INDEX(cmd), nv = (uint8_t)(((cmd == 0x34) || (cmd == 0x37)) ? (v & 1) : v);
+
+      if(((cmd == 0x33) || (cmd == 0x36)) && (v > 5))
+        break;
+
+      fm.relay_writes++;
+      if(fm.relay[i] != nv)
+        fm.relay_switches++;
+      fm.relay[i] = nv;
+      break;
+    }
+
     case 0x01:
       if(v & 1)
       {

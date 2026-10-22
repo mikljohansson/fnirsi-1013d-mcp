@@ -325,20 +325,8 @@ void fpga_set_channel_enable(PCHANNELSETTINGS settings)
 
 void fpga_set_channel_coupling(PCHANNELSETTINGS settings)
 {
-  //Send the command for channel 1 coupling to the FPGA
-  fpga_write_cmd(settings->couplingcommand);
-  
-  //Write the needed data based on the setting
-  if(settings->coupling == 0)
-  {
-    //Set the DC coupling for the channel
-    fpga_write_byte(0x01);
-  }
-  else
-  {
-    //Set the AC coupling for the channel
-    fpga_write_byte(0x00);
-  }
+  //AC/DC relay: 1 DC, 0 AC; written only when it differs from what the FPGA holds (fw-relay, fpga_bus.h)
+  (void)fpga_relay_write(settings->couplingcommand, (settings->coupling == 0) ? 0x01 : 0x00);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -346,16 +334,13 @@ void fpga_set_channel_coupling(PCHANNELSETTINGS settings)
 void fpga_set_channel_voltperdiv(PCHANNELSETTINGS settings)
 {
   register uint32 setting = settings->samplevoltperdiv;
-  
-  //Send the command for channel 1 volts per div to the FPGA
-  fpga_write_cmd(settings->voltperdivcommand);
-  
-  //Check if setting in range of what is allowed
+
+  //Range 6 (50 mV/div) is the 100 mV/div relay setting with a software zoom
   if(setting > 5)
     setting = 5;
-  
-  //Write it to the FPGA
-  fpga_write_byte(setting);
+
+  //Range relays: written only when they differ from what the FPGA holds (fw-relay, fpga_bus.h)
+  (void)fpga_relay_write(settings->voltperdivcommand, (uint8)setting);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -215,6 +215,17 @@ int fpga_bus_note_write(uint8_t cmd, uint32_t value)
       fpga_bus_wr.filter++;
       return 1;
 
+    //fw-relay: front-end relays. A range above 5 is ignored by the FPGA (zaklad.v), so the relays keep what they held
+    case 0x33: case 0x36:
+      if(value > 5)
+        return 0;
+      //fall through
+    case 0x34: case 0x37:
+      fpga_bus_wr.relay[FPGA_RELAY_INDEX(cmd)] = (uint8_t)value;
+      fpga_bus_wr.held |= (uint8_t)(FPGA_HELD_RELAY << FPGA_RELAY_INDEX(cmd));
+      fpga_bus_wr.relay_writes++;
+      return 0;
+
     case 0x01:
       if(value != 1)
         return 0;
@@ -270,6 +281,18 @@ int fpga_decim_write(uint8_t mode, uint8_t cmd56, uint8_t shift)
   }
 
   return settle;
+}
+
+int fpga_relay_write(uint8_t cmd, uint8_t value)
+{
+  uint8_t i = FPGA_RELAY_INDEX(cmd);
+
+  if((fpga_bus_wr.held & (FPGA_HELD_RELAY << i)) && (fpga_bus_wr.relay[i] == value))
+    return 0;
+
+  fpga_write_cmd(cmd);
+  fpga_write_byte(value);
+  return 1;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

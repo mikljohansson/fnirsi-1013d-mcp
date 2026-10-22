@@ -1923,6 +1923,82 @@ static void test_train_capture_cost(void)
   T_TRUE(us < 200);
 }
 
+//fw-relay: the front-end relays are written only when the value differs from what the FPGA holds. The bench soak
+//(2026-10-22) heard them click on every host capture + RUN cycle (a Bode sweep each RUN, section 89); the restores
+//(fpga_set_channel_voltperdiv / _coupling on RUN, menu close, settings load, the wizard's and Diagnostics' restores)
+//all go through fpga_relay_write
+static void relay_restore(const uint8_t v[4])
+{
+  (void)fpga_relay_write(0x33, v[0]);
+  (void)fpga_relay_write(0x34, v[1]);
+  (void)fpga_relay_write(0x36, v[2]);
+  (void)fpga_relay_write(0x37, v[3]);
+}
+
+static void test_relay(void)
+{
+  static uint8_t buf[2000];
+  uint8_t  v[4] = { 3, 1, 4, 1 };
+  uint8_t  trig[4];
+  uint32_t i;
+
+  fm_reset(0x153D, 0, 31);
+
+  //Boot (or a FEL load): nothing known, every register written once
+  relay_restore(v);
+  T_EQ(fm.relay_writes, 4u);
+  T_EQ(fpga_bus_wr.relay_writes, 4u);
+
+  //Host capture + RUN restore cycles with unchanged settings: arm, the in-flight status reads (0x37, 0x34), the
+  //readout, the encode check (read 0x33), the 0x36 counts, then the RUN restore: no relay write at all
+  for(i=0;i<5;i++)
+  {
+    arm_once(100, 1500);
+    fm_advance_ns(20000);
+    fpga_trig_status(trig);
+    fpga_read_lane(0x20, 0, 1500, buf, 1, fm.ring);
+    fpga_write_cmd(0x33);
+    (void)fpga_read_byte();
+    fpga_write_cmd(0x36);
+    (void)fpga_read_byte();
+    relay_restore(v);
+  }
+
+  T_EQ(fm.relay_writes, 4u);
+  T_EQ(fm.relay_switches, 4u);                         //boot: all four from the power-on 0
+  T_EQ(fm.relay[0], 3);
+  T_EQ(fm.relay[2], 4);
+
+  //A range change writes once, the next restore nothing
+  v[0] = 2;
+  relay_restore(v);
+  relay_restore(v);
+  T_EQ(fm.relay_writes, 5u);
+  T_EQ(fm.relay_switches, 5u);
+  T_EQ(fm.relay[0], 2);
+
+  //AC coupling on CH2: once
+  v[3] = 0;
+  relay_restore(v);
+  relay_restore(v);
+  T_EQ(fm.relay_writes, 6u);
+  T_EQ(fm.relay[3], 0);
+
+  //Written by someone else (FPGA_WRITE debug request): the shadow follows, the restore puts the setting back once
+  fpga_write_cmd(0x36);
+  fpga_write_byte(1);
+  T_EQ(fm.relay[2], 1);
+  T_EQ(fpga_relay_write(0x36, 1), 0);
+  T_EQ(fpga_relay_write(0x36, 4), 1);
+  T_EQ(fm.relay[2], 4);
+
+  //A range above 5 is ignored by the FPGA, and by the shadow
+  fpga_write_cmd(0x33);
+  fpga_write_byte(6);
+  T_EQ(fm.relay[0], 2);
+  T_EQ(fpga_relay_write(0x33, 2), 0);
+}
+
 int main(void)
 {
   test_write_record();
@@ -1945,5 +2021,6 @@ int main(void)
   test_gen_change();
   test_gen_status();
   test_train_capture_cost();
+  test_relay();
   return t_report("test_fpga_bus");
 }
