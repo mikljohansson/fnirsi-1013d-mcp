@@ -343,6 +343,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   fw-gated merged 12:25 (6 commits, image 5e6af95d at the merge; all local checks green). Kept from the brief's point 3:
   the 0x33 encode-flag check stays on every capture (the FPGA's prediction includes the divider; one line to restrict).
   Its bench steps are `firmware/AGENTS.md` section 91; a card saved by the single-class 0.2.105 asks for Calibrate.
+  fpga-d3gate merged 15:22 (ff87a5a; roll h1, the only one of 21 to close timing, clk_200MHz +0.017 ns; run.sh ALL PASS
+  on seeds 12345 and 4242). Raw fd0be7a2, padded aa252fb7 (pinned `backups/al3_d3gate_0x153D_fd0be7a2*.bin`). Encode pads
+  equal 0x153C's build except 2B +0.03 ns; the benched full-rate roll had its A encodes level with B (0.37 ns earlier),
+  the likely cause of its worse 200 MSa/s A/B (inference). Flash checklist: `fpga/al3/AGENTS.md` fpga-d3gate handoff.
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
