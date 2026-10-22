@@ -1531,3 +1531,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   padded image, as required). write -i backups/dist-0x153D/fnirsi_1013d-fpga-al3-0x153d-flash1m.bin --yes --confirm-id ef4014:
   tool backup backups/20261022-083310-pre-write.bin = 07393bf5.., 69 sectors erased, 1104 pages programmed, verified read-back
   04e3328b85319c7789d776e6df819efbf8d6d510fa3ba6f2a73411efa5a3d0e7 (the 0x153D padded image). Rollback = the 0x153C image.
+- 2026-10-22 08:35-08:50: **0x153D first boot** (fw 0.2.105 e184e47a by FEL): `#VER` fpga=0x153d, no notice. Before the
+  wizard the traces broke into shifted pieces and the counter read 39.72 kHz on 1 kHz (min / max 3 / 255). Wizard with the
+  inputs open (owner): CH1 A4 B4, CH2 A3 B4 (= the power-on 0x08E4). After it the Anti-alias trace was clean, but the
+  counter still read about 2.1 kHz (min / max 3..58 / 255) and 0x36 counted CH1 A outliers (177, cap_flagged 1). With a
+  PC_DEBUG image of the same source (backups/fw-0.2.105-dbg_8a4d174d.bin, FEL; COM10 needed a USB replug once) the 0x63
+  sweep on the real signal (CH1 on the post, 200 MSa/s, 1 kHz and 100 kHz, 8 captures per stage): **CH1 A stage 2: 0,
+  3: 0, 4: 146, 5: 0 outliers**; 2 / 3 / 5 also 0 over 30 captures from 1 kHz to 7.3 MHz. The training on the quiet input
+  finds 2..5 all clean and the tie-break takes the power-on stage 4, which garbles on a moving signal on this placement.
+  With CH1 A = 3 written by hand: counter with **Filter Off at 500 kSa/s: 1 kHz 1000.000 Hz, 1 MHz 1000000.0000 Hz, 999.5 Hz
+  999.5000 Hz (the fractional square exact)**; 7.3 MHz miscounts (26 codes pk-pk through the post's 1 kOhm into the probe,
+  below the hysteresis at level 145). The full-rate fix works; the stage choice is a firmware bug (fw-capstage).
