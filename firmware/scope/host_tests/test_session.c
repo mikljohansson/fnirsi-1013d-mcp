@@ -4235,6 +4235,13 @@ static void test_counter(void)
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
   mock.cnt.misfit = 0;
+  //fw-gated: a result counted on the gated encodes (Filter Off at a divided rate): flags bit 4, not VALID
+  mock.cnt.gated = 1; mock.cnt.seq = 21;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x11); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
+  mock.cnt.gated = 0;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x02);
   //freq_mHz: round half up, saturating above 4294967.295 Hz (1 MHz, 30 MHz, 100 MHz)
   mock.cnt.has_period = 1; mock.cnt.e = 100000; mock.cnt.t = 20000000; mock.cnt.w = 10000000; mock.cnt.seq = 20;
   r = get_counter(0, 0, 0, 0, 0);

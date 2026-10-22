@@ -143,6 +143,7 @@ typedef struct
   uint8_t  current;             //and it is current: the gate on, the result younger than three gates + 100 ms
   uint8_t  has_period;          //E >= 1
   uint8_t  misfit;              //auto thresholds: counted at thresholds its min / max do not ask for, or no signal
+  uint8_t  gated;               //counted while the ADC encodes ran gated (Filter Off at a divided rate, fw-gated)
   uint8_t  seq;                 //the result's sequence number
   uint8_t  res_src;             //the result's source: 0 CH1, 1 CH2, 2 EXT
   uint8_t  res_gate;            //the result's gate code

@@ -91,6 +91,9 @@ extern int16 *pc_decim_src;           //fpga_read_adc_data: converted samples to
 void   pc_glue_ui_decim_arm(void);    //scope_acquire_trace_data: the next fpga_do_conversion uses the UI filter setting
 void   pc_glue_decim_conversion(void);//fpga_do_conversion, before the sampling reset: write the mode, settle
 void   pc_glue_decim_rearm(void);     //the full-rate check re-arms the last conversion: its filter setting again
+//fw-gated: 1 when the ADC encodes run at 200 MSa/s for what the FPGA holds now: divider 0, or the 16-bit path (any
+//filter, peak detect). Filter Off at a divided rate gates them with the divider: the counter does not feed the cards
+int    pc_glue_adc_full_rate(void);
 uint32 pc_glue_decim_words(uint32 samples);       //ring words for a sample count (samples / 2, or samples in 16-bit)
 uint32 pc_glue_decim_pre_words(uint32 samples);   //the same for the pretrigger, less the EXT latency shift in 16-bit
 uint32 pc_glue_ui_read_start(uint32 addr);        //UI record start word: (0x14 - the 0x0B pretrigger words) mod the ring

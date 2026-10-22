@@ -1431,7 +1431,7 @@ static int h_get_counter(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   }
 
   pc_hal_counter_read(&c);
-  valid = (uint8_t)(c.held && c.current && c.has_period && !c.misfit && (c.t != 0));
+  valid = (uint8_t)(c.held && c.current && c.has_period && !c.misfit && !c.gated && (c.t != 0));
 
   if(c.held && (!s->cnt_seen || (s->cnt_seen_seq != c.seq)))
     flags |= 0x01;
@@ -1439,6 +1439,7 @@ static int h_get_counter(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   if(valid)                    flags |= 0x02;
   if(c.res_src == 2)           flags |= 0x04;
   if(c.res_src == 1)           flags |= 0x08;
+  if(c.held && c.gated)        flags |= 0x10;   //fw-gated: counted on the gated encodes (Filter Off at a divided rate)
 
   s->cnt_seen     = c.held;
   s->cnt_seen_seq = c.seq;

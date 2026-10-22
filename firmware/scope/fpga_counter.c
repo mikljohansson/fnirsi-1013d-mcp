@@ -105,7 +105,7 @@ void fpga_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hy
 //----------------------------------------------------------------------------------------------------------------------------------
 // The pass
 
-static void cnt_take(fpga_counter_state *c, uint32_t now_ms)
+static void cnt_take(fpga_counter_state *c, uint32_t now_ms, int full_rate)
 {
   const uint8_t *b = c->raw;
 
@@ -119,6 +119,7 @@ static void cnt_take(fpga_counter_state *c, uint32_t now_ms)
   c->min      = b[14];
   c->max      = b[15];
   c->res_ms   = now_ms;
+  c->gated    = (uint8_t)(!full_rate && (c->res_src != FPGA_CNT_RES_EXT));
   c->has_period = (uint8_t)fpga_counter_derive(c->e, c->t, c->w, &c->freq_uhz, &c->period_ps, &c->width_ps, &c->low_ps,
                                                &c->duty_ppm);
   c->results++;
@@ -207,7 +208,7 @@ static void cnt_auto_check(fpga_counter_state *c, uint8_t *level, uint8_t *hyst)
   }
 }
 
-void fpga_counter_pass(uint32_t now_ms)
+void fpga_counter_pass(uint32_t now_ms, int full_rate)
 {
   fpga_counter_state *c = &fpga_cnt;
   uint32_t i;
@@ -242,7 +243,7 @@ void fpga_counter_pass(uint32_t now_ms)
       c->dropped++;
     else
     {
-      cnt_take(c, now_ms);
+      cnt_take(c, now_ms, full_rate);
       cnt_auto_check(c, &level, &hyst);
 
       if(c->misfit && ((level != c->level) || (hyst != c->hyst)))
@@ -295,5 +296,5 @@ int fpga_counter_current(uint32_t now_ms)
 
 int fpga_counter_usable(uint32_t now_ms)
 {
-  return fpga_counter_current(now_ms) && fpga_cnt.has_period && !fpga_cnt.misfit;
+  return fpga_counter_current(now_ms) && fpga_cnt.has_period && !fpga_cnt.misfit && !fpga_cnt.gated;
 }

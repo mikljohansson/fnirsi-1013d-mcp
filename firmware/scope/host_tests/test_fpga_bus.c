@@ -996,11 +996,13 @@ static void test_peak(void)
 
 #define CNT_PASS_STROBES  17
 
+static int cnt_full_rate = 1;           //fw-gated: what pc_glue_adc_full_rate would say (1: divider 0, a filter, peak)
+
 static uint32_t cnt_pass(uint32_t ms)
 {
   uint32_t s0 = fm.strobes;
 
-  fpga_counter_pass(ms);
+  fpga_counter_pass(ms, cnt_full_rate);
   return fm.strobes - s0;
 }
 
@@ -1076,6 +1078,40 @@ static void test_counter_derive(void)
 
   T_EQ(fpga_counter_gate_ms(0), 0); T_EQ(fpga_counter_gate_ms(1), 10); T_EQ(fpga_counter_gate_ms(2), 100);
   T_EQ(fpga_counter_gate_ms(3), 1000);
+}
+
+//fw-gated: a CH1 / CH2 result taken while the encodes run gated (Filter Off at a divided rate: cnt_full_rate 0) is held
+//and derived but marked gated, so it is not usable (VALID, the cards); EXT is never gated; full rate again: usable
+static void test_counter_gated(void)
+{
+  fm_reset(0x153D, 199, 901);
+  fpga_counter_boot();
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 128, 6);
+  fm_cnt_signal(0, 1000, 500, 35, 60, 200);
+  cnt_full_rate = 0;
+  cnt_pass(1000);
+  fm_advance_ns(100000000);
+  cnt_pass(1100);
+  T_EQ(fpga_cnt.held, 1); T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.has_period, 1);
+  T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_cnt.gated, 1);
+  T_EQ(fpga_counter_current(1100), 1); T_EQ(fpga_counter_usable(1100), 0);
+
+  //EXT counts the trigger input, not the ADC stream: usable at a gated setting
+  fm_cnt_signal(2, 100, 50, 0, 0, 0);
+  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_EXT, 128, 6);
+  cnt_pass(1120);
+  fm_advance_ns(10000000);
+  cnt_pass(1140);
+  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_EXT); T_EQ(fpga_cnt.gated, 0); T_EQ(fpga_counter_usable(1140), 1);
+
+  //CH1 at full rate (the filter on, or divider 0): usable
+  fm_cnt_signal(0, 1000, 500, 35, 60, 200);
+  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_CH1, 128, 6);
+  cnt_full_rate = 1;
+  cnt_pass(1160);
+  fm_advance_ns(10000000);
+  cnt_pass(1180);
+  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.gated, 0); T_EQ(fpga_counter_usable(1180), 1);
 }
 
 static void test_counter(void)
@@ -1957,6 +1993,7 @@ int main(void)
   test_counter_derive();
   test_counter();
   test_counter_auto();
+  test_counter_gated();
   test_gen_formulas();
   test_gen_square();
   test_gen_change();
