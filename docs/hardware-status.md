@@ -1563,3 +1563,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   the post) refused at once: "ADC readout fault: the capture self-check flagged a core". The earlier CH1 A4 flags set the
   REPEAT state (3 flags within a minute), which holds until a training is saved; the hand-written stage 3 does not clear it.
   The Bode sweep and the soak wait for fw-capstage and a wizard run with it.
+- 2026-10-22 09:08: **fw 0.2.105 persisted to the SD card** (owner request; release build of main a1217d2: the USB drive
+  header Back, before fw-capstage / fw-stoprate): backups/fw-0.2.105_ba1a1283.bin (800,768 B, sha256 ba1a1283646eee37..),
+  FEL load then --persist: the card's sectors 750.. backed up first, written in 64 KiB pieces, all 1564 sectors compare
+  identical, sector 750 verified (eGON.EXE, checksum 0x83638191). The card now boots 0.2.105 (was 0.2.102). Known open on
+  this image: CH1 A's trained stage 4 garbles (fw-capstage), the rate grid locked in STOP (fw-stoprate).
