@@ -1555,3 +1555,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   square scrolls right to left on CH1 at full amplitude, CH2 baseline, ACQ chip "Long" 500 Sa/s. **The ACQ menu (five-column
   grids, Filter Off / Hi-Res / Anti-alias), the trigger menu's larger - / + keys and the USB drive screen's header Back
   look good (owner).** Screenshots docs/screenshots/acq-menu.png and acq-menu-roll.png.
+- 2026-10-22 08:5x-09:02: trigger menu screenshot docs/screenshots/trigger-menu-pulse.png (Type Pulse, Width 500 us, Shorter).
+  **Counter on a slow RC edge**: with CH1 on the ladder node (1 kHz, min / max 88 / 183, level 145) the Freq card read 15.23 kHz
+  and GET_COUNTER 9.5..13.7 kHz at the default hysteresis 6 codes (0x36 outliers 0, so not the capture stages); hysteresis 16:
+  999.999..1000.001 Hz, 32: 999.995..1000.002 Hz. The default hysteresis is too small for noisy slow edges (fw-hyst).
