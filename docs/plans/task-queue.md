@@ -340,6 +340,9 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   Bench acceptance (owner 11:5x): at 200 MSa/s the new 0x153D no worse than 0x153C in the same A/B (CH2 A about 1 %, B hot
   zone about 0.2 %), 0 % at 2 MSa/s Filter Off; otherwise it does not ship and is re-rolled. Finer encode / capture phase
   from the free PLL outputs stays a future 0x153E candidate (roadmap section 6).
+  fw-gated merged 12:25 (6 commits, image 5e6af95d at the merge; all local checks green). Kept from the brief's point 3:
+  the 0x33 encode-flag check stays on every capture (the FPGA's prediction includes the divider; one line to restrict).
+  Its bench steps are `firmware/AGENTS.md` section 91; a card saved by the single-class 0.2.105 asks for Calibrate.
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
