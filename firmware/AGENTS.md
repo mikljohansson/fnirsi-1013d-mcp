@@ -7000,3 +7000,54 @@ Regression signs: the zero step failing "offset does not respond" right at the t
 outside the PWM range 200..1800 on this unit), "ADC readout fault near code 128" (a core with no outlier-free stage, as
 before), a training that picks stage 2 or 5 for an A core, or the wizard's training step taking several seconds per
 channel (the 2048-word reads slower than 0.3 us per byte).
+
+**fw-capmetric2 (2026-10-22, branch `fw-capmetric2` from main f1f3e15 + fw-warn; commits 4ba6cf5 the record, a0e0156 the
+noise bound; not benched).** Bench 2026-10-22 17:20 (0x153D fd0be7a2, this section's build 8c70c2fc, inputs open): q per
+stage 2..5 over the 34 captures CH1 A 1461590 / 1461590 / 1461706 / 1462218, CH1 B 8958..9024, CH2 A 2069209..2070230,
+CH2 B 8082..8263, flat to 0.05 %, and the training stored 0x06E3 (CH1 A3 B4, CH2 A3 B3).
+- **Cause: the residual read words the training capture never wrote.** cal_begin sets `scopesettings.samplecount` = 1000
+  (cal_measure reads 500 words per core from word 100) and `cal_set_rate` writes it to 0x0E. With the trigger off the
+  FPGA's auto time-out (`time_base_cnt > time_base_set`, write clock edges = words, zaklad.v) ends the record, and the
+  sampling reset restarts the write address at ring word 0, so every training capture wrote about 1000 words (0..~1001)
+  and stopped. 0x153B reports `trigger_address = W - (total - pre)` for a timed-out record, so the record the firmware
+  reads (0x14 - the 0x0B words) is the newest 8000 words, from ring word about 1194, and its middle (ring about
+  4170..6217, the 2048 words cs_resid scores) was never written by any training capture: the residual scored the ring's
+  stale contents (the UI's last record before the wizard; at the default Filter that is a 16-bit layout, the A lanes the
+  low bytes and the B lanes the high bytes, which fits A noisy and B smoother; inference) and the same words in every
+  capture, hence q flat over the stages and identical at CH1 A2 / A3. The 0x36 counts covered the 1000 words written,
+  not 8000 (inference: the same since fw 0.2.79's training, so every earlier training's outlier sums saw 1/8 of the
+  intended exposure). Not the word layout: zaklad.v writes `{ adc2B_w, adc2A_w, adc1B_w, adc1A_w }` at K = 0 and 0x20..0x23
+  read those lanes, `pc_dec_config(0)` keeps the training at K = 0, and the read path (`pc_hal_read_core`, the dummy
+  strobe) is READ_RAW's; the B lanes are read the same way, so they were stale too (B's 263 and 238..243 per capture are
+  about 4 codes rms, 15..70x the sweep's clean stages, not a reference).
+- **Fix** (`cal_cap_measure`): the time-out is CS_TRAIN_WORDS for the capture (`samplecount` for fpga_do_conversion's arm,
+  which writes 0x0E only at the short time bases, and 0x0E directly for the others) and the wizard's after it. The
+  capture now writes 8001+ words from ring 0, the record is ring ~2..8001, all of it this capture's. Cost about 70 us more
+  per capture (8000 words at 10 ns), about 20 ms per channel.
+- **Host test** (test_fpga_bus `test_train_record`): the training's arm (0x1A = 0, 0x0C = CS_TRAIN_WORDS, pretrigger 0,
+  750, 1500) and read (fpga_ring_start + the middle, fpga_read_lane on all four lanes) on the 0x153D model, ring
+  pre-filled with stale words: at 0x0E = 1000 all 2048 words read are stale (the bench fault), at CS_TRAIN_WORDS none.
+  test_cap_stage's mock hands E to the training directly and could not see this.
+- **Noise bound** (coordinator): `CS_RESID_MAX_Q16` 128. The quiet rule is relative and passed data wrong alike at every
+  stage. The best outlier-clean stage of the timing in use (own encode, or the reference pass for a B core that needed
+  it) must have q <= 128 x points x reps (128 per capture, 1/16 code^2 per sample); else `CS_E_RESID`, `bad` = the cores,
+  the value restored, nothing stored, wizard note "Capture stages: data too noisy for CH1 A, CH1 B" (CW_C_NOISY) with the
+  "ADC readout fault near code 128" line. Derivation: the median-3 residual of Gaussian noise of sigma codes rms gives
+  q16 = 16 E / N of about 12.8 sigma^2 (simulated with 8-bit rounding: 14.4 at 1.0, 26 at 1.4, 115 at 3.0; 5.1 at 0.5);
+  the zero step allows 3 codes rms at full rate (ACAL_MAX_NOISE16_FULL), 115, so 128 is sigma 3.2. Not derived from the
+  bench's B values: those were stale too and are themselves over the bound (263, 238..243). A working unit is 7x below it
+  (sweep at 200 MSa/s: CH1 3.8..3.9, CH2 B 18..19 at the clean stages). The class (a) stages (q16 up to 1770 in the sweep)
+  are not bounded: only the best stage is. Tests: test_cap_stage `test_noise_bound` (the bench's four cores' q and
+  outlier sums: CS_E_RESID with bad 0x03 / 0x0C, the relative rule alone kept [2, 3, 5] / [3, 4, 5]; one core alone; 128
+  passes and 129 fails; the reference pass bounded), test_cal_wizard the note.
+- **CH2 B's stage 3 with [2, 3, 4, 5] quiet**: q does not rank inside the quiet set; the spec (README section 18: "The
+  pick (`cs_pick`, unchanged) runs on the quiet set") keeps fw-capstage's rule (section 87): the widest run 2..5 has two
+  equal centres 3 and 4, `cs_tie` sends them to the tie pass (0x36 counts at codes 130 / 128 / 126, 16 captures each),
+  both stayed clean, and the lower one, 3, is taken. So 3 is the documented result for 2..5, and q2's 0.4 % lead (on
+  stale data) is no reason; a q-ranked pick would be a spec change.
+- **Bench (owner; FEL load of this build; back up SD 700-710 first)**: as steps 1..5 above. Expected now: every core's q
+  over the 34 captures at its best stage near the sweep's q16 x 34 (CH1 about 130..200, CH2 about 400..900; a quiet
+  parked input may be lower than the sweep's moving signal), A and B of a chip within a few x of each other, the stages
+  no longer flat (class (a) stages, if the quiet input shows them, 25 % or more above the best). The outlier sums now
+  cover 8000 words per capture, so a marginal stage may count where it read 0 before. A "data too noisy" note means the
+  read still is not the capture's (report the q numbers) or the input is not quiet.

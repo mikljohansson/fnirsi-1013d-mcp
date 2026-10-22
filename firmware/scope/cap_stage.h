@@ -35,6 +35,15 @@
 // stage-independent error (the ADC's own, class b of the sweep) raises every stage's q alike and changes nothing. The
 // tie pass is unchanged (0x36 counts at codes 126, 128, 130).
 //
+// Noise bound (fw-capmetric2): the quiet rule is relative, so data that are wrong alike at every stage (bench
+// 2026-10-22 17:20: the residual read stale ring words, q16 about 43000 per capture on the A cores and 240..265 on the B
+// cores, flat over the stages) passed it. A trained core's best outlier-clean stage (the timing in use: own encode, or the
+// reference pass) must score at most CS_RESID_MAX_Q16 per capture, else the training fails with CS_E_RESID (nothing
+// stored, the wizard says so). For noise of sigma codes rms the median-3 residual gives q16 = 16 E / N of about
+// 12.8 sigma^2 (simulated, 8-bit rounding, sigma >= 1; 5.1 at 0.5): the zero step's full-rate limit, 3 codes rms
+// (ACAL_MAX_NOISE16_FULL), is 115, and 128 is sigma = 3.2. Bench (capwin sweep, 200 MSa/s): 3.8..3.9 at CH1's clean
+// stages, 18..19 at CH2 B's (1.1 codes rms), so a working unit stays 7x below it.
+//
 // Pick (cs_pick, fw 0.2.105): per core, among its clean stages, the one with the highest score: the width of its run of
 // adjacent clean stages, then 3 or 4 before a reserve (2, 5), then the distance to the nearer end of its run. A run of
 // odd width has one centre. A run of even width has two centres with the same score, and the power-on stage is no
@@ -100,6 +109,8 @@
 #define CS_TIE_POINTS     3
 #define CS_RESID_WORDS    2048        //training: words per core read for cs_resid, from the record's middle
 #define CS_RESID_DIV      ((CS_RESID_WORDS - 2) / 16)   //q per capture = E / CS_RESID_DIV (N / 16, N = n - 2)
+#define CS_RESID_MAX_Q16  128         //fw-capmetric2: the most a core's best quiet-input stage may score per capture
+                                      //(1/16 code^2 per sample; below "Noise bound"), else CS_E_RESID
 #define CS_TIE_REPS       16          //tie pass: captures per candidate stage and point
 #define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
 #define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner
@@ -132,6 +143,9 @@ uint32_t cs_resid(const uint8_t *x, uint32_t n);
 //q <= q_min x 5 / 4 + 4, q_min the smallest q of the stages with sum 0. 0 when no stage has sum 0
 uint8_t  cs_quiet(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES]);
 
+//The smallest q of the stages with sum 0 (index s - CS_STAGE_MIN); 0xFFFFFFFF when no stage has sum 0
+uint32_t cs_q_best(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES]);
+
 //What a training needs from the target (or a host mock): park the input at code16 (1/16 code: the offset PWM and its
 //settling), and one capture: write 0x63 = v, capture, read 0x36's four counts and, for every core in resid (a mask),
 //cs_resid of its CS_RESID_WORDS words from the record's middle into e[core] (the others untouched). 0 = done, else the
@@ -149,6 +163,7 @@ typedef struct
 #define CS_OK             0
 #define CS_E_DIRTY        1           //a core has no clean stage (t->bad says which)
 #define CS_E_IO           2           //a capture did not complete
+#define CS_E_RESID        3           //fw-capmetric2: a core's best stage is noisier than a quiet input can be (t->bad)
 
 typedef struct
 {
@@ -160,7 +175,7 @@ typedef struct
   uint8_t  quiet[CS_CORES];           //fw-capmetric: bit s: stage s quiet (cs_quiet), own-encode timing
   uint8_t  quiet_ref[CS_CORES];       //the same for the reference pass
   uint8_t  ref;                       //cores measured in the reference pass
-  uint8_t  bad;                       //cores without a quiet stage
+  uint8_t  bad;                       //cores without a quiet stage (CS_E_DIRTY) or over the noise bound (CS_E_RESID)
   uint16_t captures;                  //captures taken
   uint32_t sum[CS_CORES][CS_STAGES];      //0x36 counts summed over the band, own-encode timing (index s - CS_STAGE_MIN)
   uint32_t sum_ref[CS_CORES][CS_STAGES];  //the same for the reference pass (its B cores only)

@@ -120,14 +120,21 @@ uint32_t cs_resid(const uint8_t *x, uint32_t n)
   return e;
 }
 
-uint8_t cs_quiet(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES])
+uint32_t cs_q_best(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES])
 {
   uint32_t i, qmin = 0xFFFFFFFFu;
-  uint8_t  quiet = 0;
 
   for(i=0;i<CS_STAGES;i++)
     if((sum[i] == 0) && (q[i] < qmin))
       qmin = q[i];
+
+  return qmin;
+}
+
+uint8_t cs_quiet(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES])
+{
+  uint32_t i, qmin = cs_q_best(sum, q);
+  uint8_t  quiet = 0;
 
   if(qmin == 0xFFFFFFFFu)
     return 0;
@@ -355,6 +362,17 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
 
   if(t->bad)
     return CS_E_DIRTY;
+
+  //fw-capmetric2: the noise bound (cap_stage.h "Noise bound") on the best outlier-clean stage of the timing in use; the
+  //quiet rule is relative and passes data that are wrong alike at every stage
+  for(k=0;k<CS_CORES;k++)
+    if((t->cores & (1u << k)) &&
+       (cs_q_best((v & cs_ref_bit(k)) ? t->sum_ref[k] : t->sum[k], (v & cs_ref_bit(k)) ? t->q_ref[k] : t->q[k]) >
+        CS_RESID_MAX_Q16 * io->points * io->reps))
+      t->bad |= (uint8_t)(1u << k);
+
+  if(t->bad)
+    return CS_E_RESID;
 
   //Two centres of an even run (or two equal reserves): the tie pass decides, then the pick again on what stayed clean
   if(ties && io->tie_reps)

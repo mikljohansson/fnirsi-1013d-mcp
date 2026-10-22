@@ -35,6 +35,7 @@
 #include "fpga_counter.h"
 #include "fpga_model.h"
 #include "pc_decim.h"
+#include "cap_stage.h"
 #include <string.h>
 
 //The model's bitstreams the firmware's sequences are run against: the built-for 0x153D and its predecessors with the
@@ -1900,6 +1901,65 @@ static void test_train_capture_cost(void)
   T_TRUE(us < 200);
 }
 
+//fw-capmetric2: the capture-stage training's record on the built-for bitstream. The wizard captures with the trigger
+//off (FPGA auto), the record geometry of fpga_do_conversion (0x0B = the UI's pretrigger words, 0x0C = CS_TRAIN_WORDS)
+//and reads CS_RESID_WORDS words per core from the record's middle (cal_wiz_ui.c cal_cap_measure). The auto time-out
+//(0x0E, words since the sampling reset, which restarts the write address at 0) ends it: returns how many of the words
+//read were not written by this capture (the model writes word n at ring word n, lanes = the bytes of n)
+static uint32_t train_stale(uint32_t reg0e, uint16_t pre, uint32_t seed)
+{
+  static uint8_t b[4][CS_RESID_WORDS];
+  fpga_arm_cfg c;
+  uint32_t     start, i, l, w, idx, stale = 0;
+
+  to_reset(0x153D, seed);
+  fpga_write_cmd(0x1A);
+  fpga_write_byte(0x00);
+
+  memset(&c, 0, sizeof(c));
+  c.pre_words    = pre;
+  c.total_words  = CS_TRAIN_WORDS;
+  c.write_0e     = 1;
+  c.auto_timeout = reg0e;
+  T_EQ(fpga_arm_reset(&c), 0);
+  T_TRUE(to_wait(200));
+  T_EQ(to_trig(), 0);
+
+  start = (fpga_ring_start(to_addr(), pre, fm.ring) + (CS_TRAIN_WORDS - CS_RESID_WORDS) / 2) % fm.ring;
+
+  for(l = 0; l < 4; l++)
+    fpga_read_lane((uint8_t)(0x20 + l), start, CS_RESID_WORDS, b[l], 1, fm.ring);
+
+  for(i = 0; i < CS_RESID_WORDS; i++)
+  {
+    w   = (start + i) % fm.ring;
+    idx = (uint32_t)b[0][i] | ((uint32_t)b[1][i] << 8) | ((uint32_t)b[2][i] << 16) | ((uint32_t)b[3][i] << 24);
+    stale += (idx != w) || (w >= fm.stop_n);
+  }
+
+  return stale;
+}
+
+static void test_train_record(void)
+{
+  static const uint16_t pres[] = { 0, 750, 1500 };
+  uint32_t p;
+
+  for(p = 0; p < 3; p++)
+  {
+    //The wizard's time-out before fw-capmetric2 (cal_begin's samplecount 1000): about 1000 words written from ring
+    //word 0, the record 0x14 - 0x0B = the newest 8000 words (from ring word about 1194), its middle about 4170 .. 6217,
+    //never written by the capture: every word read is stale (bench 2026-10-22 17:20: q flat over the stages)
+    T_EQ(train_stale(1000, pres[p], 7 + p), CS_RESID_WORDS);
+    T_TRUE(fm.stop_n < 1100);
+
+    //The time-out at CS_TRAIN_WORDS: the whole record is this capture's
+    T_EQ(train_stale(CS_TRAIN_WORDS, pres[p], 7 + p), 0);
+    T_TRUE(fm.stop_n >= CS_TRAIN_WORDS);
+    T_TRUE(fm.stop_n <= fm.ring);
+  }
+}
+
 //fw-relay: the front-end relays are written only when the value differs from what the FPGA holds. The bench soak
 //(2026-10-22) heard them click on every host capture + RUN cycle (a Bode sweep each RUN, section 89); the restores
 //(fpga_set_channel_voltperdiv / _coupling on RUN, menu close, settings load, the wizard's and Diagnostics' restores)
@@ -1999,6 +2059,7 @@ int main(void)
   test_gen_change();
   test_gen_status();
   test_train_capture_cost();
+  test_train_record();
   test_relay();
   return t_report("test_fpga_bus");
 }

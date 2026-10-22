@@ -219,6 +219,12 @@ sections 74 to 79.
   core's best outlier-free stage; the pick, the tie pass and the stored set work on that quiet set. GET_CAL is 432
   bytes: 364..431 the channel's last training (quiet sets, residuals, outlier sums); mcp `scope_calibration_info`
   `capture_training`. (b9eae5a, 8921016, 2f11674)
+- **The capture-stage training scores its own capture** (fw-capmetric2, firmware/AGENTS.md section 92; bench
+  2026-10-22 17:20: the residuals were flat over the stages and the A cores 160x the B cores). The training captures
+  stopped after the wizard's 1000-word auto time-out, so the 2048 words read from the record's middle were stale ring
+  contents and the outlier counts covered 1000 words; the time-out is now the record's 8000 words. A trained core whose
+  best stage is noisier than a quiet input can be (over 128 / 16 code^2 per sample, about 3.2 codes rms) now fails the
+  training: "Capture stages: data too noisy for ..." with the readout fault line, nothing stored. (4ba6cf5, a0e0156)
 
 **Counter thresholds follow the signal (fw-ctrauto).**
 

@@ -444,9 +444,10 @@ char *cw_zero_note(const cal_wiz *w, uint32_t ch, char *p)
     return cs_text_ch(p, w->cap_v[ch], ch);
   }
 
-  if((ch <= 1) && (w->zero_st[ch] == CW_Z_FAIL) && (w->cap_st[ch] == CW_C_FAIL))
+  if((ch <= 1) && (w->zero_st[ch] == CW_Z_FAIL) && ((w->cap_st[ch] == CW_C_FAIL) || (w->cap_st[ch] == CW_C_NOISY)))
   {
-    p = cw_str(p, "Capture stages: no clean stage for ");
+    p = cw_str(p, (w->cap_st[ch] == CW_C_FAIL) ? "Capture stages: no clean stage for " :
+                                                 "Capture stages: data too noisy for ");
 
     for(k=0;k<CS_CORES;k++)
       if(w->cap_bad[ch] & (1u << k))

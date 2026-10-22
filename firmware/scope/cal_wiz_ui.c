@@ -229,18 +229,34 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
 //rate and set-up of the zero step), the four 0x36 counts. The UI's record geometry is put back afterwards.
 //fw-capmetric: then, for every core in resid, CS_RESID_WORDS words from the record's middle through READ_RAW's path
 //(pc_hal_read_core: the dummy strobe, the ring end restart; about 0.6 ms per core at 0.3 us per byte) and their
-//cs_resid into e[core]
+//cs_resid into e[core].
+//fw-capmetric2: the trigger is off, so the FPGA's auto time-out (0x0E, write clock edges = words since the sampling
+//reset, which also restarts the write address at ring word 0) ends the record. The wizard's 1000 (cal_begin's
+//samplecount, for cal_measure's reads at word 100) stopped every training capture after about 1000 words, while the
+//record (0x14 - the 0x0B words: the newest CS_TRAIN_WORDS words, from ring word about 1194) and its middle (about
+//4170 .. 6217) lay in words no training capture wrote: the residual scored the ring's stale contents (bench 2026-10-22
+//17:20: q flat over the stages, A about 160x B) and the 0x36 counts covered 1000 words, not 8000. The time-out is
+//CS_TRAIN_WORDS for the capture (fpga_do_conversion writes samplecount when the UI time base is a short one, 0x0E here
+//for the others; host_tests/test_fpga_bus test_train_record), the wizard's after it
 #define CAL_RING_WORDS      8192    //AL3 sample memory words
 
 static uint8 cal_resid_buf[CS_RESID_WORDS];
 
+static void cal_auto_timeout(uint32 words)
+{
+  scopesettings.samplecount = words;
+  fpga_write_cmd(0x0E);
+  fpga_write_int(words);
+}
+
 static int cal_cap_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[4], uint32_t e[4])
 {
-  uint32 total = fpgasettings.totalsamples, start, k;
+  uint32 total = fpgasettings.totalsamples, count = scopesettings.samplecount, start, k;
 
   (void)ctx;
   fpga_capture_write(v);
   fpgasettings.totalsamples = 2 * CS_TRAIN_WORDS;
+  cal_auto_timeout(CS_TRAIN_WORDS);
   fpga_do_conversion();
   while(fpga_done_conversion() == 0) PC_BUSY_POLL();
   fpga_capture_counts(cnt);
@@ -259,6 +275,7 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[4]
   }
 
   fpgasettings.totalsamples = total;
+  cal_auto_timeout(count);
   return 0;
 }
 
@@ -296,8 +313,9 @@ static int cal_cap_park(void *ctx, uint32_t code16)
 //transition garbles only at some codes and in some captures (bench 2026-10-20, CH1 A4). fw 0.2.105: the tie pass at
 //codes 126..130 (cap_stage.h "Pick"). fw-capmetric: the band at the carries 63.5 .. 191.5 and the quiet stages
 //(cap_stage.h "Quiet stages").
-//ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage: fail fast)
-static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
+//ACAL_OK, ACAL_E_RESPONSE / ACAL_E_NOISE (the input), ACAL_E_READOUT (a core without a clean stage, or fw-capmetric2
+//over the noise bound: fail fast; *cs_rc says which)
+static int cal_train(uint32 ch, cs_train *t, acal_fail *fail, int *cs_rc)
 {
   static const cs_io io = { 0, CS_BAND_POINTS, CS_BAND_REPS, CS_TIE_REPS, cal_cap_park, cal_cap_measure };
   acal_range_meas m;
@@ -307,6 +325,7 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
   int             rc;
 
   memset(t, 0, sizeof(*t));
+  *cs_rc = CS_OK;
   calibrationsettings.samplevoltperdiv = 0;
   fpga_set_channel_voltperdiv(&calibrationsettings);
   timer0_delay(60);
@@ -350,6 +369,7 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail)
   cal_set_rate(CAL_RATE_FULL);
 
   rc = fpga_capture_train((uint8_t)(ch ? 0x0C : 0x03), &io, t);
+  *cs_rc = rc;
   return (rc == CS_OK) ? ACAL_OK : ACAL_E_READOUT;
 }
 
@@ -382,6 +402,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   if(fpga_capture_has())
   {
     cs_train t;
+    int      cs_rc;
 
     //fw-capmetric: the band training takes about 1.5 s per channel (17 points x 60 ms settling, 136 captures with two
     //2048-word core reads each, the tie pass 3 x 60 ms and 96 captures; about 1.3 s more with the reference pass): say
@@ -389,11 +410,11 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     if(wiz_progress(ch, CW_PR_TRAIN))
       return CW_RC_CANCELLED;
 
-    rc = cal_train(ch, &t, fail);
+    rc = cal_train(ch, &t, fail, &cs_rc);
 
     if(rc != ACAL_OK)
     {
-      cal_cap_st[ch]  = (rc == ACAL_E_READOUT) ? CW_C_FAIL : CW_C_NONE;
+      cal_cap_st[ch]  = (rc != ACAL_E_READOUT) ? CW_C_NONE : ((cs_rc == CS_E_RESID) ? CW_C_NOISY : CW_C_FAIL);
       cal_cap_bad[ch] = t.bad;
       return rc;
     }
