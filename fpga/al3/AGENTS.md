@@ -419,6 +419,36 @@ Decimation filter (0x1534), open items:
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
 
+## CH2 A capture window on 0x153D, fpga-capwin (2026-10-22)
+
+Brief (coordinator): CH2 A on the owner's unit shows code-dependent small errors at every stage (2..5), least at the
+trained 3; find the cause, propose the fix. Branch `fpga-capwin`. Full write-up: README section 18. **Nothing flashed,
+no bitstream changed** (`src/` untouched; the IDELAY experiments ran in private copies under `~/capwin/tree*`).
+
+- **Evidence.** The committed source rebuilds to the dist image (`0e2cdbce...`, `~/capwin/base`); `#ireg 33`; the new
+  `tb/capture_margins.py --bits` shows every data pin at -0.11 / +0.12 ns, skew 0.00 in every core: no FPGA per-bit
+  skew, no constraint to add. Typical-timing margins (`capture_margins.py io.timing 3.0 4.5 0.3`) make k4 every core's
+  safest stage, which contradicts CH1 A k4 garbling between clean k3 and k5.
+- **Cause (inference).** Antiphase encodes with data-align off put each core's output transition in the middle of its
+  partner's window; the partner's switching (shared AD9288 output supply, adjacent buses) splits each core's window into
+  two clean halves of about 3.5 ns. On the 2.5 ns grid k3 and k5 sit 0.7..0.8 ns inside them, k4 and k2 0.2..0.3 ns from
+  an edge. Fits CH1 A (k4 dirty), CH2 A (k2 = k4 dirty, k3 best, k5 dirty with a 1 ns later own transition) and CH2 B
+  (B4 clean). Code dependence = how many partner bits switch (the carries 0x5F/60, 0x67/68, 0x7F/80).
+- **Next, in order.** (1) The coordinator runs `fpga/al3/tools/capwin_sweep.py` (mcp venv, PC_DEBUG image, SD 700-710
+  backed up; README section 18 has the setup) and looks at the "partner toggles" columns and the bit columns.
+  (2) The firmware agent implements the residual metric of README section 18 in `cap_stage.h` (quiet set =
+  outlier-clean and within 25 % of the core's best residual; band at the carries 64..192; read 2048 words per core).
+  (3) Only if (1) confirms the cause: 0x153E with two runtime-phase capture clocks (PLL C2 / C3, dynamic phase, 125 ps)
+  for the A and B core groups; cost in README section 18. A static `AL_LOGIC_IDELAY` on CH2 A (n = 8, about 1.27 ns,
+  with stage 2) is the cheap bench experiment for the centring claim; it needs placement rolls (the n = 1 build missed
+  `clk_200MHz` by 1.79 ns on an unrelated path).
+- **TD facts found.** `AL_LOGIC_IDELAY #(.INDEL(n))`, n = 1..31 as a plain integer (a sized literal crashes the
+  elaborator, `bad_lexical_cast`), packs with the IDDR into the IOB (`#ireg` stays 33); TD's timing: 0.52 ns at n = 1,
+  2.16 at 16, 3.73 at 31 (about 0.107 ns per tap); the tap count does not re-roll the placement. The PLL's VCO is 1 GHz: static and dynamic phase steps of 125 ps; C2..C4 free.
+- **Commands.** `build.sh ~/capwin/<name>` then `tb/capture_report.sh ~/capwin/<name> --bits` (the extra argument is
+  passed to `capture_margins.py`). The IDELAY variants: a copy of `fpga/al3` (build.sh, build.tcl, src, tb) per variant
+  with the IDDR loop's `.d(adc_pin[adc_i])` replaced by an `AL_LOGIC_IDELAY` for bits 16..23; work dirs `~/capwin/*`.
+
 ## 0x153D full-rate encodes, fpga-d3c (2026-10-21)
 
 Brief (coordinator): finish fpga-d3's integration after the owner's 17:59 decision (the ADC encodes always at full rate)
