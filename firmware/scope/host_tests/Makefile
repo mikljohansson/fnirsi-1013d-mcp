@@ -128,7 +128,7 @@ $(OUT)/test_bode_sweep: test_bode_sweep.c test_util.h $(BODE_SRCS) $(SRC)/bode_s
 
 # fw 0.2.72: the MCU-FPGA bus sequences (fpga_bus.c: readout start, sampling reset order) against a bus-level model of
 # zaklad.v's MCU interface (fpga_model.c)
-$(OUT)/test_fpga_bus: test_fpga_bus.c test_util.h fpga_model.c fpga_model.h $(SRC)/fpga_bus.c $(SRC)/fpga_bus.h $(SRC)/fpga_counter.c $(SRC)/fpga_counter.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h $(SRC)/gen_pat.c $(SRC)/gen_pat.h | $(OUT)
+$(OUT)/test_fpga_bus: test_fpga_bus.c test_util.h fpga_model.c fpga_model.h $(SRC)/fpga_bus.c $(SRC)/fpga_bus.h $(SRC)/fpga_counter.c $(SRC)/fpga_counter.h $(SRC)/pc_decim.c $(SRC)/pc_decim.h $(SRC)/gen_pat.c $(SRC)/gen_pat.h $(SRC)/cap_stage.h | $(OUT)
 	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_fpga_bus.c fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/pc_decim.c $(SRC)/gen_pat.c
 
 # D4 logger (fw-d4): the DDR ring (pc_logring.c) and the drain (fpga_log.c) against the model's 0x153D stream, with the

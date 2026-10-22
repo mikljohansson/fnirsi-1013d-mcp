@@ -229,18 +229,34 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
 //rate and set-up of the zero step), the four 0x36 counts. The UI's record geometry is put back afterwards.
 //fw-capmetric: then, for every core in resid, CS_RESID_WORDS words from the record's middle through READ_RAW's path
 //(pc_hal_read_core: the dummy strobe, the ring end restart; about 0.6 ms per core at 0.3 us per byte) and their
-//cs_resid into e[core]
+//cs_resid into e[core].
+//fw-capmetric2: the trigger is off, so the FPGA's auto time-out (0x0E, write clock edges = words since the sampling
+//reset, which also restarts the write address at ring word 0) ends the record. The wizard's 1000 (cal_begin's
+//samplecount, for cal_measure's reads at word 100) stopped every training capture after about 1000 words, while the
+//record (0x14 - the 0x0B words: the newest CS_TRAIN_WORDS words, from ring word about 1194) and its middle (about
+//4170 .. 6217) lay in words no training capture wrote: the residual scored the ring's stale contents (bench 2026-10-22
+//17:20: q flat over the stages, A about 160x B) and the 0x36 counts covered 1000 words, not 8000. The time-out is
+//CS_TRAIN_WORDS for the capture (fpga_do_conversion writes samplecount when the UI time base is a short one, 0x0E here
+//for the others; host_tests/test_fpga_bus test_train_record), the wizard's after it
 #define CAL_RING_WORDS      8192    //AL3 sample memory words
 
 static uint8 cal_resid_buf[CS_RESID_WORDS];
 
+static void cal_auto_timeout(uint32 words)
+{
+  scopesettings.samplecount = words;
+  fpga_write_cmd(0x0E);
+  fpga_write_int(words);
+}
+
 static int cal_cap_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[4], uint32_t e[4])
 {
-  uint32 total = fpgasettings.totalsamples, start, k;
+  uint32 total = fpgasettings.totalsamples, count = scopesettings.samplecount, start, k;
 
   (void)ctx;
   fpga_capture_write(v);
   fpgasettings.totalsamples = 2 * CS_TRAIN_WORDS;
+  cal_auto_timeout(CS_TRAIN_WORDS);
   fpga_do_conversion();
   while(fpga_done_conversion() == 0) PC_BUSY_POLL();
   fpga_capture_counts(cnt);
@@ -259,6 +275,7 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[4]
   }
 
   fpgasettings.totalsamples = total;
+  cal_auto_timeout(count);
   return 0;
 }
 
