@@ -350,6 +350,10 @@ tag-day list: `docs/plans/release-checklist.md`. Items below point to the entrie
   fw-capmetric (Opus explicitly, dispatched 15:23, branch fw-capmetric): the noise-aware capture-stage training metric per
   `fpga/al3/README.md` section 18 (cs_resid, parking at 8k - 0.5, quiet stage = 0 outliers and <= 5/4 best + 4).
   Bench image for the new 0x153D meanwhile: `backups/fw-0.2.105_a756882f.bin` (main 63df4e7).
+  fw-capmetric merged 15:49 (protocol 1.28: GET_CAL 432 bytes, bytes 364..431 the last capture training; mcp
+  `capture_training`; 543 tests). Bench steps `firmware/AGENTS.md` section 92; the open question is whether CH1 A5 and
+  CH2 A4 score more than 25 % above stage 3 on the quiet parked input. Pre-existing gcc10 warnings in pc_seq_hw.c:180
+  (incompatible pointer type into pc_seq_ui_plan / pc_seq_ui_plan_mcu, since 09dac96): queued, low priority.
 - fpga-capwin (Opus explicitly; owner 09:5x: no Fable quota left, "have Opus agents try it"; dispatched 09:5x, branch
   fpga-capwin): CH2 A's capture window on 0x153D (code-dependent small errors at every stage, least at 3): per-bit skew,
   IOB placement, finer delay options, a constraint fix with per-bit margins, a training metric for small errors, a bench
