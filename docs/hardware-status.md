@@ -1565,6 +1565,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   The Bode sweep and the soak wait for fw-capstage and a wizard run with it.
 - 2026-10-22 09:08: **fw 0.2.105 persisted to the SD card** (owner request; release build of main a1217d2: the USB drive
   header Back, before fw-capstage / fw-stoprate): backups/fw-0.2.105_ba1a1283.bin (800,768 B, sha256 ba1a1283646eee37..),
-  FEL load then --persist: the card's sectors 750.. backed up first, written in 64 KiB pieces, all 1564 sectors compare
+  FEL load then --persist: the card's sectors 750..2314 backed up first to backups/sdcard/sd_750-2314_20261022-090828.bin, written in 64 KiB pieces, all 1564 sectors compare
   identical, sector 750 verified (eGON.EXE, checksum 0x83638191). The card now boots 0.2.105 (was 0.2.102). Known open on
   this image: CH1 A's trained stage 4 garbles (fw-capstage), the rate grid locked in STOP (fw-stoprate).
