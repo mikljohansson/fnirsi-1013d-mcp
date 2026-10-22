@@ -334,9 +334,13 @@ def test_counter_on_the_simulator(sim_factory):
     s, srv = _scope(sim_factory, signal="square:freq=10kHz,amp=1,duty=0.2")
     try:
         s.set_channel(0, range_index=1)
+        r = s.read_counter()  # fw-hyst: about 35 codes pk-pk at level 128 never goes below 128 - 16: not counted
+        assert r.new and r.hysteresis == 16 and r.e == 0 and not r.valid and r.frequency_hz is None
+        assert r.min >= 128 - 16
+        s.set_channel(0, range_index=2)  # about 70 codes pk-pk: counted
         r = s.read_counter()
-        assert r.valid and r.new and r.frequency_hz == pytest.approx(10e3, rel=1e-6) and r.duty == pytest.approx(0.2)
-        assert r.gate == 2 and r.effective_source == "CH1" and r.e == 1000 and 100 < r.min < 128 < r.max < 160
+        assert r.valid and r.frequency_hz == pytest.approx(10e3, rel=1e-6) and r.duty == pytest.approx(0.2)
+        assert r.gate == 2 and r.effective_source == "CH1" and r.e == 1000 and 80 < r.min < 112 < 144 < r.max < 176
         assert r.freq_mhz == 10_000_000
         r2 = s.read_counter()
         assert r2.seq == r.seq and not r2.new  # no new gate yet
@@ -364,7 +368,7 @@ def test_counter_level_follows_the_trigger_level(sim_factory):
     source changes instead of pinning the level it read back."""
     s, srv = _scope(sim_factory, signal="square:freq=10kHz,amp=1,duty=0.2")
     try:
-        s.set_channel(0, range_index=1)
+        s.set_channel(0, range_index=2)
         s.set_trigger(source=0, level=128)
         r = s.read_counter()
         assert r.level == 128 and r.hysteresis == P.COUNTER_DEFAULT_HYST and r.valid and srv.device.counter_level == 0
@@ -542,7 +546,7 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             prof = await c.call("scope_profile")
             assert prof["live"]["trigger_types"] and prof["live"]["counter"] and prof["live"]["peak_detect"]
             assert "counter" in prof["static"] and "peak_detect" in prof["static"]
-            await c.call("scope_set_channel", channel="CH1", volts_per_div=2.5)
+            await c.call("scope_set_channel", channel="CH1", volts_per_div=1.0)
             await c.call("scope_set_timebase", sample_rate="10MS/s")
             r = await c.call("scope_set_trigger", source="CH1", level=0.0, mode="normal", pretrigger_fraction=0.25,
                              total_samples=4000)
@@ -589,6 +593,12 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             assert rep["kind"] == "counter" and rep["table"][0]["frequency"].startswith("10 kHz")
             r = await c.call("scope_counter", level="trigger")
             assert r["level_follows_trigger"] and r["level_code"] == srv.device.settings.trigger.level
+            # fw-hyst: 2 Vpp at 2.5 V/div is under 2 x 16 codes: no count, and the caveat says why
+            await c.call("scope_set_channel", channel="CH1", volts_per_div=2.5)
+            r = await c.call("scope_counter")
+            assert not r["valid"] and r["hysteresis_codes"] == 16
+            assert any("does not reach both thresholds" in x for x in r["caveats"])
+            await c.call("scope_set_channel", channel="CH1", volts_per_div=1.0)
             # peak detect through scope_capture: one shot, the Filter restored
             await c.call("scope_set_timebase", sample_rate="1MS/s")
             await c.call("scope_set_trigger", source="CH1", mode="auto", total_samples=3000)

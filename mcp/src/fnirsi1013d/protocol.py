@@ -2424,8 +2424,8 @@ COUNTER_F_VALID = 0x02  # E >= 1: at least two edges in the gate
 COUNTER_F_EXT = 0x04  # the effective source is EXT
 COUNTER_F_CH2 = 0x08  # the effective source is CH2 (neither: CH1)
 #: the firmware's boot thresholds (0x62): level 128 until the first main-loop pass, then the UI trigger level
-#: followed (fw-c7: configured level 0), hysteresis 6 codes (about 3 x the 2 LSB noise)
-COUNTER_DEFAULT_LEVEL, COUNTER_DEFAULT_HYST = 128, 6
+#: followed (fw-c7: configured level 0), hysteresis 16 codes (fw-hyst: 6 counted the noise on slow edges)
+COUNTER_DEFAULT_LEVEL, COUNTER_DEFAULT_HYST = 128, 16
 #: GET_COUNTER level 0: follow the trigger level (clamped to 0..255) instead of pinning a code
 COUNTER_LEVEL_FOLLOW = 0
 

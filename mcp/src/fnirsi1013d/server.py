@@ -2957,7 +2957,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                          "CH2; converted to a raw code and pinned), or 'trigger' to follow the trigger level (the "
                          "boot setting); default: as set")] = None,
         hysteresis: Annotated[int | None, Field(ge=0, le=255, description="codes below the level that read low "
-                                                                            "(boot: 6, about 3 x the noise)")] = None,
+                              "(boot: 16; the signal must reach the level and fall below level - hysteresis to "
+                              "be counted)")] = None,
         readings: Annotated[int, Field(ge=1, le=50, description="snapshots to take, one per new gate (the tool waits "
                                                                  "for each gate to end)")] = 1,
     ) -> dict[str, Any]:
@@ -3057,6 +3058,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if not last.valid:
                 notes.append("no valid count in the gate: raise the gate time, check the level against the signal "
                              "(scope_capture shows it) or the source")
+                lo_thr = max(0, last.level - last.hysteresis)
+                if src_name != "EXT" and last.gate and last.min <= last.max and (last.max < last.level
+                                                                                 or last.min >= lo_thr):
+                    notes.append(f"the signal (raw codes {last.min}..{last.max}) does not reach both thresholds "
+                                 f"(high at >= {last.level}, low below {lo_thr}): use a more sensitive range or "
+                                 "a smaller hysteresis (below about 16 codes the noise on slow edges is counted); "
+                                 "the scope's cards then show the record's measurement")
             if sc is not None:
                 notes.append("vmin / vmax are the raw extremes over the whole gate through the 8-bit model (mean of "
                              "both cores), noise peaks included: a few codes wider than a capture's min / max")

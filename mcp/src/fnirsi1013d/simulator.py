@@ -1014,7 +1014,7 @@ class Device:
         self.cap_counts_next: list[tuple[int, int, int, int]] = []
         #: protocol 1.26: the trigger hold-off (0x1B) still to run at the next arm, from the latest capture's trigger
         #: (across MCU re-arms, as the FPGA's counter; cleared by 0x66 + ARM) and the counter's configuration (the
-        #: firmware's boot values: gate 100 ms, the trigger source, level 0 = follow the trigger level, hysteresis 6)
+        #: firmware's boot values: gate 100 ms, the trigger source, level 0 = follow the trigger level, hysteresis 16)
         #: and last read sequence
         self.holdoff_left_s = 0.0
         #: 0x66 = 1 written (boot, SET_TRIGGER hold-off, SET_TRIGGER2): the next 0x01 = 1 clears a running hold-off
@@ -3064,7 +3064,8 @@ class Device:
             high = self._code_to_volts(ch, level, self.settings)
             low = self._code_to_volts(ch, level - self.counter_hyst, self.settings)
             dc = sig.dc if cs.coupling == 1 else 0.0
-            edges = signal_edges(sig, gen, high + dc, low + dc)
+            # the FPGA's low threshold saturates at code 0 (level <= hysteresis: never low, so no edges)
+            edges = signal_edges(sig, gen, high + dc, low + dc) if level > self.counter_hyst else None
             # min / max of the raw codes over the gate: the noise-free extremes of one period (or the level) plus the
             # expected extreme of the noise over the gate's samples
             period = edges[0] if edges is not None else 1e-3
