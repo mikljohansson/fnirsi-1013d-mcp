@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-guardfix (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: the capture-stage guard, the repeat watch and REPEAT act only on captures taken at the 0x63 value the firmware wrote (0x36's first word; a DEBUG_FPGA sweep no longer gets a core moved and stored); section 90.**
 **Branch fw-relay (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: host acquisition requests and SET_ACQ_STATE RUN close the Frequency response view first (no Bode sweep from RUN; the soak's relay clicks), the relay registers written only on a change; section 89.**
 **Branch fw-fullrate (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): one calibration clock class for FPGA 0x153D, whose ADC encodes run at 200 MSa/s at every rate (the gated class, its wizard steps, the class probe gone; old cards load), the host-test model of the full-rate encodes, the encode check over every capture; section 83 has the owner's bench list.**
 **Branch fw-105 (2026-10-21): fw 0.2.105, protocol 1.27 (row 67): the merged fw-d4 / fw-d5 / fw-nopat / fw-roll / fw-small / fw-cruft numbered and built for FPGA 0x153D (`PC_FW_FPGA_VERSION`), the dead checks for a bitstream without the 0x153D features removed (LOG_START E_FPGA detail 1, `fpga_log_start` -2, roll's "needs 0x153D" stop, the wizard's CW_GAIN_NA, the Frequency response's caps test); section 80 has the owner's bench list.**
@@ -6800,3 +6801,37 @@ the host sweep.
    host `scope_status` keeps the view; a host `scope_capture` closes it.
 Regression signs: a click per cycle in step 1 (the view still open: check GET_STATUS display_mode), no click on a range
 change in step 2 (the shadow out of step with the hardware: a relay write outside `fpga_relay_write`).
+
+## 90. fw-guardfix: the capture-stage guard acts only on the firmware's own 0x63 (fw 0.2.105, protocol 1.27 unchanged)
+
+Branch `fw-guardfix` from main 4d0dc75, commit bfbb7ed (`PC_FW_VERSION` and `PC_FW_FPGA_VERSION` 0x153D unchanged).
+
+**Bug** (bench 2026-10-22, fw 0.2.105 PC_DEBUG image on 0x153D): the runtime guard (section 87) moved a core while the
+FPGA's 0x63 had been set from outside the firmware. `fpga/al3/tools/capwin_sweep.py` (fpga/al3/README.md section 18)
+writes 0x63 through DEBUG_FPGA to put one core on stages 2..5 in turn; with CH1 A at stage 4 (it garbles on this unit) the
+self-check flagged CH1 A three times in a minute and the guard applied `cs_guard` to `cap_st.value` (what the firmware
+last wrote, not what the FPGA held), wrote 0x63 = 0x08A2 over the sweep's 0x08A4 and stored it in sector 708. A manual
+sweep earlier stored 0x08A3 the same way (CH2 A moved 3 -> 2, worse on this unit). Cause: `cap_read` discarded 0x36's
+first word, so the guard, the repeat watch (`cs_watch`) and REPEAT all assumed the FPGA held `cap_st.value`.
+
+**Rule** (`cap_hw.c`): `cap_read` returns the 0x63 value from 0x36's first two bytes. `fpga_capture_check` still stores
+the counts, `reads`, `flagged`, `flagged_n` and FLAGGED (GET_HEALTH shows what the FPGA counted), but when the value
+differs from `cap_st.value` it stops there: no `cs_watch_add`, no guard, no REPEAT, no event 23. The flags of such
+captures never enter the watch, so after the sweep restores the firmware's value three new flags are needed. `cap_guard`
+also requires the FPGA's value to equal `cap_st.stored` (with TRAINED: the stored value of this bitstream) before it
+writes 0x63 and sector 708. Every firmware write of 0x63 goes through `fpga_capture_write` (boot, calibration load, the
+wizard's training and restores, the guard), so "the value the firmware wrote" is exact; the wizard's training captures
+are excluded as before (`cap_training`).
+
+**Host test** `test_cap_hw` (new; includes `cap_hw.c` with a mock bus for 0x63 / 0x64 / 0x36, `pc_hal_ms`, the event
+log and sector 708): the trained value in effect garbles -> moved once and stored (control); stored 0x08E3 and a raw
+0x63 = 0x08E4 with CH1 A garbling over six captures -> no 0x63 write, no move, no store, no event, no REPEAT, counts
+read; back at 0x08E3 two flags do nothing and the third moves; untrained power-on value with a raw write -> no REPEAT,
+at the firmware's value REPEAT once; a raw write of the stored value while the firmware wrote another one -> nothing.
+The old code fails 15 of its 55 checks. `make -s test`, the vector check and the GCC 10 build (no new warnings) green.
+
+**Bench (owner, FEL load of this PC_DEBUG build; back up SD 700-710 first)**: run `capwin_sweep.py` over CH1 A as on
+2026-10-22. Expected: no event 23 with a bit 5 during the sweep, GET_HEALTH 106 bits 5 and 6 stay 0, GET_CAL 358 and
+sector 708 bytes 488..511 unchanged, and the script's "0x63 changed under the sweep" check never fires. Restore sector
+708 from the backup if a value the guard stored during the earlier sweeps (0x08A2 / 0x08A3) is still on the card, or
+Calibrate again.
