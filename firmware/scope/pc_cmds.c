@@ -1387,10 +1387,11 @@ static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //C7 counter (fw-c7, FPGA 0x153C, protocol 1.26 row 66, cap COUNTER). GET_COUNTER 0x0213: request u8 what (0 read, 1
-//configure then read), u8 gate, u8 source, u8 level (0 = follow the UI trigger level), u8 hysteresis, 3 x 0. The answer
+//configure then read), u8 gate, u8 source, u8 level (0 = auto: the band centred on the signal's midpoint), u8
+//hysteresis (0 = auto: round(span / 6), at least 6; fpga_counter.h), 3 x 0. The answer
 //is the result the main loop's pass holds (no FPGA access here, so it is answered inside menus too: F_MODAL); a
 //configuration is noted and written by the next main-loop pass. Response 24 bytes: 0 flags (bit 0 NEW: the sequence
-//number differs from the previous GET_COUNTER's, bit 1 VALID: E >= 1 and the result current, bit 2 EXT, bit 3 CH2: the
+//number differs from the previous GET_COUNTER's, bit 1 VALID: E >= 1, the result current and its thresholds fitting it (not misfit), bit 2 EXT, bit 3 CH2: the
 //result's source), 1 seq, 2 gate and 3 source as configured, 4 u32 E, 8 u32 T, 12 u32 W, 16 min, 17 max, 18 level and
 //19 hysteresis in effect, 20 u32 freq_mHz = round(E x 2e11 / T) saturating, 0 when not VALID.
 
@@ -1429,7 +1430,7 @@ static int h_get_counter(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   }
 
   pc_hal_counter_read(&c);
-  valid = (uint8_t)(c.held && c.current && c.has_period && (c.t != 0));
+  valid = (uint8_t)(c.held && c.current && c.has_period && !c.misfit && (c.t != 0));
 
   if(c.held && (!s->cnt_seen || (s->cnt_seen_seq != c.seq)))
     flags |= 0x01;

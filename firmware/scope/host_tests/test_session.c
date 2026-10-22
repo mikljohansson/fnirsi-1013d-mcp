@@ -4222,6 +4222,11 @@ static void test_counter(void)
   mock.cnt.current = 1; mock.cnt.has_period = 0; mock.cnt.e = 0; mock.cnt.t = 0; mock.cnt.w = 0;
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 20), 0);
+  //fw-ctrauto: a misfit result (auto thresholds being retuned, or no signal) is not VALID either
+  mock.cnt.has_period = 1; mock.cnt.e = 1000; mock.cnt.t = 20000000; mock.cnt.w = 4000000; mock.cnt.misfit = 1;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
+  mock.cnt.misfit = 0;
   //freq_mHz: round half up, saturating above 4294967.295 Hz (1 MHz, 30 MHz, 100 MHz)
   mock.cnt.has_period = 1; mock.cnt.e = 100000; mock.cnt.t = 20000000; mock.cnt.w = 10000000; mock.cnt.seq = 20;
   r = get_counter(0, 0, 0, 0, 0);
@@ -4248,11 +4253,13 @@ static void test_counter(void)
   T_EQ(r.h.status, 0); T_EQ(r.len, PC_COUNTER_LEN);
   T_EQ(mock.cnt_configs, 1); T_EQ(mock.cnt_cfg[0], 3); T_EQ(mock.cnt_cfg[1], 2); T_EQ(mock.cnt_cfg[2], 140); T_EQ(mock.cnt_cfg[3], 6);
   T_EQ(r.p[2], 3); T_EQ(r.p[3], 2); T_EQ(r.p[18], 140); T_EQ(r.p[19], 6);
-  //Level 0 = follow the trigger level again, any hysteresis: accepted
+  //Level 0 = auto again, any hysteresis: accepted; the level in effect stays until a gate retunes it
   r = get_counter(1, 2, 0, 0, 6);
   T_EQ(r.h.status, 0); T_EQ(mock.cnt_configs, 2); T_EQ(mock.cnt_cfg[2], 0); T_EQ(r.p[2], 2); T_EQ(r.p[3], 0);
-  r = get_counter(1, 0, 3, 0, 0);                                              //gate off on EXT
-  T_EQ(r.h.status, 0); T_EQ(mock.cnt_configs, 3); T_EQ(r.p[2], 0); T_EQ(r.p[3], 3);
+  T_EQ(r.p[18], 140);
+  r = get_counter(1, 0, 3, 0, 0);                                              //gate off on EXT, both auto
+  T_EQ(r.h.status, 0); T_EQ(mock.cnt_configs, 3); T_EQ(r.p[2], 0); T_EQ(r.p[3], 3); T_EQ(mock.cnt_cfg[3], 0);
+  T_EQ(r.p[19], 6);
   r = status();
   T_EQ(pc_get_u32(r.p + 32), sseq);
 

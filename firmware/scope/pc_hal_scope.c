@@ -530,6 +530,7 @@ void pc_hal_counter_read(pc_hw_counter *c)
   c->held       = fpga_cnt.held;
   c->current    = (uint8_t)fpga_counter_current(timer0ticks);
   c->has_period = fpga_cnt.has_period;
+  c->misfit     = fpga_cnt.misfit;
   c->seq        = fpga_cnt.seq;
   c->res_src    = fpga_cnt.res_src;
   c->res_gate   = fpga_cnt.res_gate;
@@ -546,21 +547,18 @@ void pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t 
 }
 
 //Main loop, after the capture readout (fnirsi_1013d_scope.c PC_COUNTER_PASS): the 0x35 read, the rate-change rule, the
-//trigger level followed, a pending host configuration; then the measurement cards' copy (ui_meas.c). Built-for
-//bitstream only: on a mismatch the counter was never configured and nothing is read
+//auto thresholds, a pending host configuration; then the measurement cards' copy (ui_meas.c). Built-for bitstream
+//only: on a mismatch the counter was never configured and nothing is read
 void pc_glue_counter_pass(void)
 {
   ui_ms_counter u;
-  int32 lvl;
 
   if(pc_fpga_word != PC_FW_FPGA_VERSION)
     return;
 
-  lvl = (int16)scopesettings.triggerlevel;                 //the UI stores the unclamped level
-  lvl = (lvl < 0) ? 0 : ((lvl > 255) ? 255 : lvl);
-  fpga_counter_pass(timer0ticks, (uint8)lvl);
+  fpga_counter_pass(timer0ticks);
 
-  u.valid     = (uint8)(fpga_counter_current(timer0ticks) && fpga_cnt.has_period && (fpga_cnt.res_src != FPGA_CNT_RES_EXT));
+  u.valid     = (uint8)(fpga_counter_usable(timer0ticks) && (fpga_cnt.res_src != FPGA_CNT_RES_EXT));
   u.ch        = fpga_cnt.res_src;
   u.freq_mhz  = (fpga_cnt.freq_uhz + 500) / 1000;
   u.period_ps = fpga_cnt.period_ps;

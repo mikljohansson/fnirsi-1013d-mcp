@@ -78,8 +78,8 @@ void fpga_counter_boot(void)
 
   c->cfg_gate   = FPGA_CNT_GATE_100MS;
   c->cfg_source = FPGA_CNT_SRC_TRIG;
-  c->cfg_level  = 0;                                 //follow the UI trigger level from the first pass on
-  c->cfg_hyst   = FPGA_CNT_HYST_BOOT;
+  c->cfg_level  = 0;                                 //auto: the first gate's min / max set the thresholds
+  c->cfg_hyst   = 0;
 
   //Thresholds first, then the gate starts (a FEL load leaves the FPGA as the previous firmware left it: always written)
   cnt_write_62(FPGA_CNT_LEVEL_BOOT, FPGA_CNT_HYST_BOOT);
@@ -124,11 +124,94 @@ static void cnt_take(fpga_counter_state *c, uint32_t now_ms)
   c->results++;
 }
 
-void fpga_counter_pass(uint32_t now_ms, uint8_t trig_level)
+//The thresholds the held result's min / max ask for (fpga_counter.h "The thresholds follow the signal"); a pinned level
+//or hysteresis is kept. 0: no signal (EXT, or a span below FPGA_CNT_AUTO_MIN_SPAN)
+static int cnt_auto_target(const fpga_counter_state *c, uint8_t *level, uint8_t *hyst)
+{
+  uint32_t span, h, u;
+
+  if((c->res_src == FPGA_CNT_RES_EXT) || (c->max < c->min))
+    return 0;
+
+  span = (uint32_t)(c->max - c->min);
+
+  if(span < FPGA_CNT_AUTO_MIN_SPAN)
+    return 0;
+
+  if(c->cfg_hyst)
+    h = c->cfg_hyst;
+  else
+  {
+    h = (span + 3) / 6;
+
+    if(h < FPGA_CNT_HYST_MIN)
+      h = FPGA_CNT_HYST_MIN;
+
+    if(h > span / 2)
+      h = span / 2;
+  }
+
+  if(c->cfg_level)
+  {
+    u = c->cfg_level;
+
+    if(h > u)                                        //GET_COUNTER's rule: the low threshold stays at or above 0
+      h = u;
+  }
+  else
+  {
+    u = ((uint32_t)c->min + c->max + h + 1) / 2;
+
+    if(u > 255)
+      u = 255;
+  }
+
+  *level = (uint8_t)u;
+  *hyst  = (uint8_t)h;
+  return 1;
+}
+
+static uint32_t cnt_absdiff(uint32_t a, uint32_t b)
+{
+  return (a > b) ? a - b : b - a;
+}
+
+//A result just taken in auto mode: does it fit the thresholds it was counted at? If not, *level / *hyst are the next ones
+static void cnt_auto_check(fpga_counter_state *c, uint8_t *level, uint8_t *hyst)
+{
+  uint8_t  lvl, hys;
+  uint32_t band;
+
+  c->misfit = 0;
+
+  if(c->cfg_level && c->cfg_hyst)
+    return;
+
+  if(!cnt_auto_target(c, &lvl, &hys))
+  {
+    //No signal: keep the thresholds; with an auto level the count is noise (EXT has no thresholds)
+    c->misfit = (uint8_t)(!c->cfg_level && (c->res_src != FPGA_CNT_RES_EXT));
+    return;
+  }
+
+  band = hys / 4;
+
+  if(band < 2)
+    band = 2;
+
+  if((cnt_absdiff(lvl, c->level) > band) || (cnt_absdiff(hys, c->hyst) > band))
+  {
+    c->misfit = 1;
+    *level    = lvl;
+    *hyst     = hys;
+  }
+}
+
+void fpga_counter_pass(uint32_t now_ms)
 {
   fpga_counter_state *c = &fpga_cnt;
   uint32_t i;
-  uint8_t  level = c->cfg_level ? c->cfg_level : trig_level;
+  uint8_t  level = c->level, hyst = c->hyst;
   int      drop = 0, zero_written = 0, restart;
 
   //A write clock change since the previous pass: abort the running gate before anything can be published from it
@@ -158,17 +241,31 @@ void fpga_counter_pass(uint32_t now_ms, uint8_t trig_level)
     if(drop)
       c->dropped++;
     else
+    {
       cnt_take(c, now_ms);
+      cnt_auto_check(c, &level, &hyst);
+
+      if(c->misfit && ((level != c->level) || (hyst != c->hyst)))
+        c->retunes++;
+    }
   }
 
-  //Thresholds: the trigger level followed, or the host's; a change restarts the gate too
+  //Thresholds: the host's pinned values, else the auto ones; a change restarts the gate too
+  if(c->cfg_level)
+    level = c->cfg_level;
+
+  if(c->cfg_hyst)
+    hyst = c->cfg_hyst;
+  else if(hyst > level)                              //an auto hysteresis under a newly pinned level
+    hyst = level;
+
   restart = drop || c->pending;
 
-  if((level != c->level) || (c->cfg_hyst != c->hyst))
+  if((level != c->level) || (hyst != c->hyst))
   {
-    cnt_write_62(level, c->cfg_hyst);
+    cnt_write_62(level, hyst);
     c->level = level;
-    c->hyst  = c->cfg_hyst;
+    c->hyst  = hyst;
     restart  = 1;
   }
 
@@ -194,4 +291,9 @@ int fpga_counter_current(uint32_t now_ms)
     return 0;
 
   return (now_ms - c->res_ms) <= 3 * fpga_counter_gate_ms(c->gate) + 100;
+}
+
+int fpga_counter_usable(uint32_t now_ms)
+{
+  return fpga_counter_current(now_ms) && fpga_cnt.has_period && !fpga_cnt.misfit;
 }
