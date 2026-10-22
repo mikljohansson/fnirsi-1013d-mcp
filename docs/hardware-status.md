@@ -1568,3 +1568,15 @@ Newest entries at the bottom. Format: date, who, what, result.
   FEL load then --persist: the card's sectors 750..2314 backed up first to backups/sdcard/sd_750-2314_20261022-090828.bin, written in 64 KiB pieces, all 1564 sectors compare
   identical, sector 750 verified (eGON.EXE, checksum 0x83638191). The card now boots 0.2.105 (was 0.2.102). Known open on
   this image: CH1 A's trained stage 4 garbles (fw-capstage), the rate grid locked in STOP (fw-stoprate).
+- 2026-10-22 09:16-09:49: fw-capstage + fw-stoprate image (backups/fw-0.2.105_cc3aecdc.bin) by FEL; SD sectors 700-710 backed
+  up first (backups/sd_700-710_20261022-pre-capstage.bin, two identical reads). **Wizard with the inputs open (owner): CH1 A3
+  B4, CH2 A3 B4 (0x08E3)**, as predicted; 0x36 counts 0 on every core, nothing flagged. Probes: CH1 on the RC ladder's input
+  (fed from the post), CH2 on its second node. The counter at the old fixed 146 / 6 read 2.6..4.3 kHz on the slow-settling
+  ladder input (hysteresis 16: 999.998 Hz, 32: 999.996 Hz); fw-ctrauto (thresholds follow each gate's min / max, h =
+  max(6, span / 6)) merged, image backups/fw-0.2.105_d386301a.bin (805,376 B, sha256 d386301a8b32dc55..): **auto level 145,
+  hysteresis 16, 999.993..1000.004 Hz over eight gates**. CH2 noise (owner: "noise at a specific part of the pulse"): both
+  cores 0.8..1.8 codes rms at every level, max 8 codes off the running median, no core-specific errors; mild code bands at
+  98..105 and 154..161 (about 1.7..1.8 rms vs 0.8..1.0), consistent with ADC DNL; asked the owner where on the pulse and with
+  which Filter. **Device Bode sweep 100 Hz .. 1 MHz, 30 points: done, low-pass, -3 dB 3.73 kHz (an ideal two-stage 1.6 kOhm /
+  10 nF ladder: 3.72 kHz)**, -45 deg 3.44 kHz, -90 deg 13.8 kHz (ideal 3.0 / 9.95 kHz; probe loading on the second node, an
+  inference), 23 valid, 7 flagged at the top end below -30 dB. 30-minute soak started 09:49.
