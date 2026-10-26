@@ -18,19 +18,23 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - **A host capture leaves the Bode view** (owner decision 2026-10-22 09:59, "first"): a host ARM / capture or SET_ACQ_STATE
   RUN while the frequency response view is open leaves the view (back to the scope view) and never starts a Bode sweep;
   sweeps come only from the view's own RUN and BODE_CTRL. Implemented in fw-relay.
-- [ ] **Relays click on every host capture** (bench 2026-10-22 09:5x, owner): the soak's host capture + RUN restore every
+- [x] **Relays click on every host capture** (fw-relay merged 6943125 10-22 10:12; 5-minute soak 0 errors, 8b5cbe1) (bench 2026-10-22 09:5x, owner): the soak's host capture + RUN restore every
   10 s switched the relays each time with no range / coupling change. Write the relay / range / coupling outputs only when
   their value changes (UI and host paths alike); a soak must be silent. fw-relay.
-- [ ] **Counter hysteresis default** (bench 2026-10-22 09:02): 6 codes miscounts slow noisy edges (RC node: 9.5..13.7 kHz on 1 kHz);
+- [x] **Counter hysteresis default** (superseded by fw-ctrauto, merged f465f8f 10-22 09:44: level and hysteresis follow the
+  signal, h = max(6, span / 6); benched 999.993..1000.004 Hz on the RC edge, hardware-status 09:16-09:49; branch fw-hyst
+  deleted unmerged 10-26) (bench 2026-10-22 09:02): 6 codes miscounts slow noisy edges (RC node: 9.5..13.7 kHz on 1 kHz);
   16 and 32 read 1000.00 Hz. Raise the boot default (fw-c7's 128 / 6) and the MCP default; fw-hyst.
 - [x] **ACQ rate changes in STOP** (fw-stoprate c4025cf, bench pending: firmware/AGENTS.md section 86) (owner 2026-10-22 08:56: the rate grid ignores taps in STOP, "rather unintuitive"): Atlan's
   rule (statemachine.c, rate changes only in RUN or single mode) exists because the handler writes the FPGA at once and the
   stopped record would be drawn with the new rate's geometry. New behaviour as on bench scopes: in STOP the rate (and the
   time/div grid's viable set) take taps, the pending setting shows as selected, the frozen record keeps its own capture
   geometry on screen, RUN arms at the new rate. fw-stoprate.
-- [ ] **USB drive screen: Back in the header** (owner 2026-10-22 08:31): a Back button in the top-right header like the other
+- [x] **USB drive screen: Back in the header** (fw-usbback merged dcd56bc 10-22 08:48; owner: looks good, hardware-status
+  08:56-09:0x) (owner 2026-10-22 08:31): a Back button in the top-right header like the other
   screens, the Exit button at the lower right removed. Small; no mockup round.
-- [ ] **UI tweaks from the 0x153C bench** (owner 2026-10-21 18:38): the trigger menu's - and + buttons with twice the font
+- [x] **UI tweaks from the 0x153C bench** (fw-acqui merged 06e7c4e 10-21 18:59; owner: looks good, hardware-status
+  10-22 08:56-09:0x) (owner 2026-10-21 18:38): the trigger menu's - and + buttons with twice the font
   size; the ACQ menu's Sample Rate and Time per Division grids with five columns instead of four (the four boxes of the middle
   row looked odd against them). Bundled with the Filter row item below into fw-acqui (no mockup round).
 - **ADCs always at full rate** (owner decision 2026-10-21 17:59: "we have no deadline ... Let's do the proper thing"):
@@ -39,7 +43,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   K = 0 path stores every (D + 1)-th sample pair; the counter is always valid, the ADCs stay inside the AD9288's 1 MSPS
   minimum, the GATED calibration class and its class probe go (firmware), the FPGA drops the gated-encode logic (fpga-d3
   measures it). 0x153D's current runs are superseded; 0.3.0 waits for it (no deadline, owner).
-- [ ] **ACQ Filter row: three modes** (owner decisions 2026-10-21 16:29-16:38): the UI's Filter choice becomes Off, Hi-Res
+- [x] **ACQ Filter row: three modes** (fw-acqui merged 06e7c4e 10-21 18:59, firmware/AGENTS.md section 84; owner: looks
+  good, hardware-status 10-22 08:56-09:0x; screenshots docs/screenshots/acq-menu.png, acq-menu-roll.png) (owner decisions 2026-10-21 16:29-16:38): the UI's Filter choice becomes Off, Hi-Res
   (= boxcar) and Anti-alias (= CIC3 + FIR); "Average" stays the ACQ record mean only. Names mimic other scopes (owner 16:31):
   Tektronix Hi Res, Keysight High Resolution, Rigol High Res. Every mode stays available over MCP (SET_DECIM unchanged, no
   FPGA change: boxcar / CIC2 / CIC3 share one CIC chain, the FIR stays). When the host has set another mode (CIC2, CIC3
@@ -47,7 +52,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   Hi-Res stays in the Filter row, not as a third Sample choice: it excludes Anti-alias (same FPGA stage). No mockup round
   (owner 16:38: "it's a simple change, just have the agent do it when it comes time"): one firmware item (settings word
   migration for saved CIC2 / CIC3 values, the warnings that name the Filter, the user guide, the Peak greying unchanged),
-  screenshots in the handoff. Not dispatched.
+  screenshots in the handoff.
 - **No 0x153E for 0.3.0** (owner decision 2026-10-21 16:15, after the walk-through of the 0x153E features): 0.3.0 ships on
   0x153D. Runt, window and the pulse-width range are dropped from the roadmap (owner: runt "rather special", window = check
   the dip or the spike separately, range "marginal"); both-core triggering stays the only later 0x153E candidate ("if we do
@@ -187,15 +192,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **Calibration v3: per-core, per-class gain** (fw-cal2, fw 0.2.45 merged c20957a; bench pending)
 - [x] **Bench: -1 V point on CH1 range 2** (done 10-18 evening, docs/hardware-status.md)
 - [x] **Generator menu: tapping the frequency row toggles the waveform** (fw-gen6 e0ee6f3 in 0.2.44: the removed Wave/Analog features read as present on 0x1533+; bench pending)
-- [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
-  warm-up and re-measure range 6 immediately and 10 minutes later. If it drifts, document a warm-up recommendation (Atlan: 5 min).
-- [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
-  correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
-  0.010 V match the host model within 1 %; owner reruns base calibration.
-  (check: CHANGELOG 0.2.45 says calibration v2 is superseded by v3; hardware-status 10-19 10:26 shows v3 zeros exact at 0 V, but the PWM sweep and the 1.000 V / 0.010 V volts points are not recorded.)
 - [x] **Reproducible firmware builds** (fw-gen7, fw 0.2.47: identity as data from the commit; .bin and .elf identical across directories)
-- [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
-  agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
 - [~] **Morning bench with the owner** (done: SD backup and base calibration with the gain step 08:15; 0x1535 flashed 10:40 and benched 11:05; DEFAULT = CIC2+FIR verified 11:00; owner: MMU image screen, spectrum and phosphor 'seems to work') (10-19 morning: calibration v3 run 08:15, 0x1535 flashed 10:40 and benched; the +-1 V and phosphor checks still open; load the latest pinned image, not 0.2.46): (1) back up SD 700-710; base calibration
   with probes + USB unplugged, then the new gain step with both x1 probes on the post ("Gain calibration successful"); GET_CAL version 3,
   gains about full A 0.995 / B 1.028, gated 0.998 / 1.002; (2) +-1.0045 V on CH1 range 2: |A-B| <= 0.15 at 200 MSa/s, codes/V equal
@@ -205,19 +202,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   (GET_DECIM bytes 26-27 = 0xE2 0x01 at 10 MSa/s); (6) persist a release candidate to the SD card after a soak.
   Remains: the +-1.0045 V check, phosphor visual steps with pass_ms in and out of the view, spectrum strip repaint and generator rows, persisting a release candidate to the SD card after a soak.
 - [x] **16-bit trigger level ignores corr16 and the class gain** (fw-gen7, fw 0.2.47, 04619ca; bench pending)
-- [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
-  a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
-  Remains: the capture loop itself; the design note docs/plans/phosphor-fast-capture.md landed with fw 0.2.58 and the scope-view pass is 15 ms median with the MMU (hardware-status 10-19 08:10).
-- [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
-  CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
 - [x] **Bode analyser, host steps H1-H3** (docs/plans/bode-design.md fe5780b; done by mcp-gen4: 1d46cf8, f0940ee, 363f676, d3a16bb, simulator-tested, bench pending in "MCP / host")
 - [x] **Bode analyser, device steps D1-D5** (fw-bode 0.2.66 merged 18:20; owner 18:45: Bode plot is a main-menu mode row after Spectrum analyser at a 52 px pitch, eight rows, removed from the generator pop-over -> fw-polish2 item 6; the earlier "entry from the generator menu" note is superseded)
 - [x] **docs/protocol.md tidy** (docs-gen3, merged 6f1ea23 on 10-19)
 - [x] **FPGA 0x1536 firmware + MCP support** (fw 0.2.58 / protocol 1.17 and mcp-gen5 4699593; bench pending, see the '1.17 on the unit' item; 0x1536 itself was superseded by 0x1537 flashed 10-19 16:31)
-- [ ] **Overnight zero step at 03:48** (docs/hardware-status.md 04:00): after 4.4 h flat, CH2 core A moved -1.7 codes (B unchanged) and CH1
-  both cores +0.5 within one 10-minute interval, persisting. Morning: battery/charger state, recalibrate on 0.2.48, re-check the CH2 A/B
-  split; if per-core zeros move with temperature or supply, consider a periodic zero re-check (needs an input-independent method) or a
-  warm-up note in the calibration procedure.
 - [x] **Calibration v4: background interleave-mismatch tracking** (fw-cal3, fw 0.2.50 / protocol 1.14: A - B tracker, full-class class probe, GET_CAL 288 bytes, diagnostics lines; built and host-tested, bench list firmware/README.md 6.5; the one-time gain step stays, design section 6)
 - [x] **Calibration wizard (owner approved 10-19)** (fw-cal3, fw 0.2.50: built and host-tested, bench list firmware/README.md 6.4)
 - [~] **USB: device lost after a long idle on 0.2.48** (0.2.49 merged; reopen soak 3 x 30 min idle 10-19 11:34-13:04 clean, counters 36/37 stayed 1/0) (fw-usb2 10-19: 0.2.49 merged with the suspend watch, inferred resume that acts,
@@ -293,6 +281,31 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [ ] 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)
+
+## After 0.3.0
+
+Moved out of the 0.3.0 scope on 2026-10-26 (owner): the calibration checks below date from 10-18 / 10-19, before the
+calibration rework (v3 gains, the wizard, the gated / full-rate classes back in fw-gated, the noise-aware capture
+training); the latest calibration and noise data (hardware-status 10-22 18:27-18:33) supersede them unless a
+symptom reappears. The phosphor capture loop is a design study, not a fix.
+
+- [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
+  warm-up and re-measure range 6 immediately and 10 minutes later. If it drifts, document a warm-up recommendation (Atlan: 5 min).
+- [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
+  correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
+  0.010 V match the host model within 1 %; owner reruns base calibration.
+  (check: CHANGELOG 0.2.45 says calibration v2 is superseded by v3; hardware-status 10-19 10:26 shows v3 zeros exact at 0 V, but the PWM sweep and the 1.000 V / 0.010 V volts points are not recorded.)
+- [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
+  agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
+- [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
+  a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
+  Remains: the capture loop itself; the design note docs/plans/phosphor-fast-capture.md landed with fw 0.2.58 and the scope-view pass is 15 ms median with the MMU (hardware-status 10-19 08:10).
+- [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
+  CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
+- [ ] **Overnight zero step at 03:48** (docs/hardware-status.md 04:00): after 4.4 h flat, CH2 core A moved -1.7 codes (B unchanged) and CH1
+  both cores +0.5 within one 10-minute interval, persisting. Morning: battery/charger state, recalibrate on 0.2.48, re-check the CH2 A/B
+  split; if per-core zeros move with temperature or supply, consider a periodic zero re-check (needs an input-independent method) or a
+  warm-up note in the calibration procedure.
 
 ## Roadmap to 0.3.0 (reconciled 2026-10-20)
 
