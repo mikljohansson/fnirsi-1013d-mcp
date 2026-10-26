@@ -2,8 +2,11 @@
 
 Epic-level view of what is left before the first public release, v0.3.0. The task queue (`docs/plans/task-queue.md`)
 holds the individual items with their bench facts; this file groups them into epics, orders them and says what has to
-be true before the tag. Dates are 2026. State as of 2026-10-20 (sections 1-3 reconciled against the changelog and the bench log): firmware 0.2.80,
-protocol 1.24, FPGA bitstreams up to 0x153A built, the maintainer's unit runs 0x153A (flashed 2026-10-20 10:03).
+be true before the tag. Dates are 2026. **State as of 2026-10-22 19:52** (the pause before the release work): firmware
+0.2.105, protocol 1.28; FPGA 0x153D (the gated build fd0be7a2 of fpga-d3gate) flashed on the maintainer's unit
+2026-10-22 17:01, benched, accepted by the owner at 18:56 and `recommended` in `fpga/al3/dist`; the card boots fw 0.2.105
+c681efa4. Next: the release steps of section 5. Sections 1-4 below were reconciled on 2026-10-20 morning (firmware
+0.2.80, FPGA 0x153A then) and stand as written; the status paragraphs that follow say what changed since.
 
 **Maintainer decision 2026-10-19: everything on this list ships before the announcement. One big splash, no follow-up
 posts.** The announcement draft is `docs/plans/announcement.md`; the tag-day checks are
@@ -31,6 +34,20 @@ install step, so the supported configuration is one firmware with one bitstream.
 chose the epics advanced triggers, peak detect, the streaming logger, the pulse pattern generator, hardware
 measurements and the software features on the new data (section 8, items 2 to 7); no deeper memory; testers with other
 variants later. The design of the next bitstream is in `docs/plans/fpga-0x153c.md` (being written).
+
+**Status 2026-10-22** (docs-rel153d, from `docs/hardware-status.md` and `docs/plans/task-queue.md`): the 0x153C and
+0x153D generations replaced section 3 item 1 and the owner's post-tag epics that fit the FPGA. 0x153C (trigger types
+with hold-off, peak detect, the hardware counter, the stock design's unused registers removed) was flashed 2026-10-21
+and benched on fw 0.2.104; 0x153D adds the streaming logger, roll mode on it and the fractional square generator (the
+pulse pattern generator was cut on 2026-10-21: it did not fit). A first 0x153D build with full-rate encodes brought CH2
+code errors to every time base and was replaced by the gated build (owner 2026-10-22 11:45), which at 200 MSa/s reads
+CH2 core A 3.32 % against about 1 % on 0x153C in a similar run; the owner accepted it for 0.3.0 at 18:56 (a known
+issue in the release notes; finer capture timing is the 0x153E candidate of section 6). Firmware 0.2.103-0.2.105 bring
+one firmware per bitstream with the mismatch notice, one Average behaviour, the Type and Sample rows, the counter with
+automatic thresholds, a stronger capture-stage training, quiet relays and the ACQ / USB drive UI changes. Still open
+for the tag: the version bump, the CHANGELOG section (draft ready), the release candidate persisted with a 30-minute
+soak and the long-idle check, the logger / roll / device Bode checks repeated on the gated 0x153D (they ran on the first
+build), and the rest of section 5.
 
 Status words: **done** (merged and benched), **built** (merged, host-tested, bench pending), **in flight** (an agent
 is working on it), **next** (designed or specified, not started), **maintainer** (needs the maintainer at the bench).
@@ -113,13 +130,17 @@ The announcement point. Gate, in order (details and the tick list in `docs/plans
 
 1. Every epic in sections 1-3 is merged and its bench list is ticked in `docs/hardware-status.md`, or the maintainer has
    explicitly removed the item.
-2. The FPGA bitstreams the release depends on are flashed on the maintainer's unit and benched: 0x1534 and 0x1535 are
-   (0x1535 since 2026-10-19), 0x1536 is not yet. Decide how users get them (open point in the readiness list: bitstream files are not in git and not
-   attached to releases today).
+2. The FPGA bitstream the release depends on, 0x153D (the gated build fd0be7a2), is flashed on the maintainer's unit
+   and benched: flashed 2026-10-22 17:01, benched 17:03-19:02 on fw 0.2.105, accepted by the owner at 18:56, and
+   `recommended` in `fpga/al3/dist` with its bench record (`tools/bitstreams.py check --release` passes). Users get it
+   from `fpga/al3/dist`, attached to the release with `BITSTREAMS.md` (`docs/releasing.md` section 5; the maintainer's
+   confirmation of that is a box in `release-checklist.md`).
 3. Version bump to 0.3.0 in `firmware/scope/pc_cmds.h` and `mcp/pyproject.toml`, a curated `## [0.3.0]` section in
    `CHANGELOG.md` (the release notes), `release: v0.3.0` commit, CI green.
 4. A release candidate persisted to the SD card and a 30-minute soak with the MCP server polling
-   (`fnirsi1013d-soak`), plus the long idle check.
+   (`fnirsi1013d-soak`), plus the long idle check. Done so far on 0x153D: fw 0.2.105 c681efa4 persisted 2026-10-22 19:52
+   and a 301 s soak with 0 errors; the 30-minute soak ran on 0.2.102 / 0x153B (2026-10-20) and is repeated on the 0.3.0
+   image.
 5. Demo material for the announcement: screenshots of the main views (`scope_screenshot`), a shared-control session
    with the MCP chip visible, a short clip.
 6. Tag `v0.3.0`, wait for `release.yml`, then check the attached hashes against a FEL load (`docs/releasing.md`

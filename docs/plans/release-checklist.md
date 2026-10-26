@@ -11,7 +11,7 @@ branch's commit; the maintainer's items and the hardware items are left open.
 ## Content
 
 - [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer.
-      (The roadmap's state line still reads fw 0.2.80 / 0x153A; it needs reconciling first.)
+      (The roadmap's state line names fw 0.2.105 / 0x153D since 2026-10-26; sections 1-4 are still the 2026-10-20 text.)
 - [ ] Maintainer verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows,
       USB long idle, UI steps), or the item named under "Known issues" in the release notes.
 
