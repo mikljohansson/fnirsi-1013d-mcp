@@ -1,7 +1,9 @@
 # CHANGELOG 0.3.0 section, draft
 
 Draft of the `## [0.3.0]` section of `CHANGELOG.md`, prepared by rel-gen2 on 2026-10-20 from the 0.1.0-0.2.102
-development entries. The coordinator applies it in the release commit and then deletes this file. How to apply:
+development entries and refreshed by docs-rel153d on 2026-10-26 for everything merged up to fa8377b (0.2.103-0.2.105,
+FPGA 0x153C and 0x153D, the mcp host changes, the docs). The coordinator applies it in the release commit and then
+deletes this file. How to apply:
 
 1. Keep `## [Unreleased]` at the top, empty (no text under it). Remove the "Nothing has been tagged yet" paragraph
    and the "Plan for the first tag (v0.3.0)" block.
@@ -13,7 +15,8 @@ development entries. The coordinator applies it in the release commit and then d
 4. Run `python .github/scripts/release_meta.py --check-changelog` and the `--tag v0.3.0` check
    (`docs/releasing.md` section 2 step 5).
 
-Commit hashes are the ones the development entries cite; every one resolves in the repository (checked 2026-10-20).
+Commit hashes are the ones the development entries cite, or the merge commit where an entry cites none; every one
+resolves in the repository (checked 2026-10-20 and again 2026-10-26).
 
 ---
 
@@ -25,7 +28,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
 
 ### Firmware (`firmware/scope`, from Atlan4 v1.00o5)
 
-- USB control protocol 1.24 over USB CDC: framed, CRC-checked requests with shared test vectors (0.1.0, 9ffd7ba);
+- USB control protocol 1.28 over USB CDC: framed, CRC-checked requests with shared test vectors (0.1.0, 9ffd7ba);
   shared control with the touch screen, no remote lock-out, the MCP chip in the top bar (0.2.0, d77298f). Link fixes:
   the FIFO layout (0.1.1, 5a8432b; 0.1.6, 697e1f6), the first request after opening the port (0.2.11, 1594918), the USB
   PHY tuning that never reached the PHY on the F1C100s (0.2.25, 85a113d), recovery after a long idle with an inferred
@@ -41,11 +44,36 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   kept per mode with CIC2 in the Scope and CIC2+FIR in the Spectrum (0.2.64, 5818b5b).
 - External trigger on the calibration pin (0.2.9, bebf901) and its pipeline offsets per bitstream (0.2.72, 7833312;
   0.2.79, 381dd8a).
+- One firmware, one bitstream (owner 2026-10-20): the firmware runs only on the bitstream it is built for (0x153B in
+  0.2.103, 0x153C in 0.2.104, 0x153D in 0.2.105) and shows a full-screen notice with Diagnostics, Settings and USB drive
+  on any other; the stock, Atlan4, EF2 and EP4 paths and the per-bitstream workarounds are gone (0.2.103, 1f13767;
+  5c0ea67, fb3a28a); the notice answers its buttons after Diagnostics (f08b5b1). The firmware stops writing the
+  registers 0x153C removed (43e2b0a, b10bc96, 19618eb).
+- Trigger types on 0x153C and later: pulse width, Nth edge after an idle time and timeout on CH1, CH2 or EXT, and the
+  trigger hold-off; SET_TRIGGER2, protocol 1.26 (0.2.104, c432354); the trigger menu's Type row (ae449b8) with larger
+  - / + keys (06a7d24).
+- Peak detect (0.2.104, ba6ce49): the ACQ Sample row and the peak bars (7098449, 4a93304, acc1884, 09dac96); Vmax,
+  Vmin and Vpp read the peaks (0.2.105, 7c3ced0).
+- Hardware counter (0.2.104, 4639122) feeding the Freq, Period, Width and Duty cards; level and hysteresis follow the
+  signal (0.2.105, 241e4d1, 540e75b); with Filter Off at the divided rates its gates are marked GATED and the cards
+  keep the record's measurement (0.2.105, ed6c283).
+- Streaming logger over USB at 500 / 250 / 125 kS/s, protocol 1.27 (0.2.105, 2101a2c, ff3a1cb), and roll mode drawn
+  from it, both channels (8e1458d, 827506f, 532f8af).
+- The generator as a fractional square on the 200 MHz clock, glitch-free changes, the Frequency response on its
+  period grid (0.2.105, 30fe638, 4743591, 4f12433, 5e5545f; c7a05e3, 78fc734, 990922e).
+- ACQ menu: five-column grids (43e513a), Filter Off / Hi-Res / Anti-alias with Hi-Res and Anti-alias as the defaults
+  (e5ad32d, 178af30), a sample rate tapped in STOP applies at the next RUN (c4025cf); USB drive screen with Back in
+  the header (c2694f3) (all 0.2.105).
+- Front-end relays written only on a change; a host setting, capture or RUN closes the Frequency response view first
+  (0.2.105, 4ca4ea0, 7b797bd). The forced stop ends a capture at the auto-mode deadline (53551d4).
 - Calibration: per-core zeros in two clock classes (v2, 0.2.43), per-core gains (v3, 0.2.45, c8f17bf), background
   tracking of the full-rate mismatch and common mode (v4, 0.2.50, 7cfc7f7, 93087b2), the four-screen wizard and the
   first-run screen (0.2.59, 95f440e, 5e8a5db), capture-stage training over a band of codes on 0x153A and later (0.2.79,
   381dd8a; 0.2.81, 3e5a2a1), noise limits of the open-input condition shared by the wizard and Diagnostics (0.2.100,
-  5879193).
+  5879193). In 0.2.105: no power-on tie-break, the trained clean set stored and a runtime guard for a repeatedly
+  flagged core (76fbaa2, bfbb7ed); the training scores the captured data, not only the outlier counters (protocol
+  1.28, b9eae5a, 8921016, 2f11674) and reads its own record (4ba6cf5, a0e0156); the two clock classes kept after a
+  single-class trial (9c7f59d).
 - Full-rate capture checks against garbled ADC cores: every 200 MSa/s capture checked and re-taken when garbled (0.2.62,
   9e7e53d), the 0x153A capture self-check and a repeated-flag warning (0.2.79, 0.2.81).
 - Diagnostics (Menu > Diagnostics): identity, FPGA line, verdict tiles, calibration provenance, event log, a report on
@@ -66,6 +94,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   record start, arm order; 0.2.72, 5f38d23); clipping judged per record (0.2.83, 51ab2a4); decimated records no longer
   saturated after a configuration change (0.2.88, 61af5dd, 1299f7a); auto-mode records no longer spliced on 0x1532-0x153A
   and a "may be spliced" flag (0.2.97, 49d99bf, dc35b9f; 0.2.98, d1f4e6b).
+- ACQ Average is one behaviour, a true mean of N records within a 40 ms budget per pass (0.2.103, 1f13767).
 - Reproducible images: the same commit gives the same sha256 in any checkout and in CI; the `PC_PROTOCOL=0` build and
   the byte-identical check against v1.00o5 removed (0.2.47, 473bd0b, 57d0d26, 8770209, 0f84761).
 
@@ -79,18 +108,30 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
 - 0x153A (f735fae): ADC data captured in IOB registers at a trainable stage per core, with a capture self-check;
   supported.
 - 0x153B (c173ed5): records that end on the auto time-out are the newest words, the time-out no longer cuts a triggered
-  record; recommended (benched 2026-10-20 20:40-20:49).
+  record; benched 2026-10-20 20:40-20:49, recommended until 2026-10-22, now supported.
+- 0x153C (bd24bdf; merges da4dc6e, f629cec, 50cbc71, 6229ac3): trigger types with hold-off, peak detect, the hardware
+  counter with min / max, the stock design's unused registers removed; benched 2026-10-21 on fw 0.2.104; supported.
+- 0x153D (e3a23c2; merges 63872af, f83f80f): the streaming logger and the fractional square generator in place of the
+  DDS, the ADC encodes as on 0x153C; the pulse pattern generator was cut (it did not fit), and a first build with
+  full-rate encodes was replaced after the 2026-10-22 A/B; flashed 2026-10-22 17:01, accepted by the owner 18:56,
+  recommended.
 - Released images committed under `fpga/al3/dist` with `manifest.json`, `BITSTREAMS.md` and the CI check
   `tools/bitstreams.py` (375adb7); releases attach every image that is not withdrawn.
 
 ### MCP server and host tools (`mcp/`)
 
-- Protocol client, serial and TCP transport, a device simulator and a FastMCP server (0d8b40f, 8c80c1e, a60d35a): 32
-  tools with safety tiers (30 by default; raw FPGA and FEL only when enabled), confirmation tokens for the generator
+- Protocol client, serial and TCP transport, a device simulator and a FastMCP server (0d8b40f, 8c80c1e, a60d35a): 41
+  tools with safety tiers (39 by default; raw FPGA and FEL only when enabled), confirmation tokens for the generator
   and the calibration pin, an audit log.
 - Measurement tools: averaged capture, FFT, decay fit, measurements, segmented capture and hardware averaging (4699593),
   the scope's spectrum (7f364a8), host and device Bode sweeps (f0940ee, 363f676, d3a16bb, 0a8e94d), reports as PNG and
   HTML (1a3c0aa), the volts model with the scope's per-core calibration (62da1e0, 5f6bc0d).
+- Host data tools: `scope_decode` (UART, SPI, I2C), `scope_mask_test`, `scope_export_csv`, `scope_dvm` (64f23f4,
+  19d6eea, 14503d6).
+- The 0x153C and 0x153D generations on the host: trigger types, peak detect and `scope_counter` (merge bcb269b;
+  7360b62, 717ca16, 6fbd0ff), the counter's auto thresholds (f7fa203); the square generator, Bode on the 5 ns period
+  grid, `scope_log` / `scope_log_status` / `scope_log_stop` and `scope_sweep` (3fea867, 1c5715f, 2f940e9); the
+  retired registers and READ_LIVE gone (1777a67, eea44e1); two calibration classes and `capture_training` (a8cf41c).
 - Diagnostics readers (`scope_health`, `scope_sd_info`, `scope_save_report`, b830434, 8614032) and `scope_cal_probe`
   (516b76a, b3b9c51).
 - `fnirsi1013d-flash` (FEL load, persist after a backup, restore; 136eb1b, 9e79583) and its refusal texts for the card
@@ -107,6 +148,9 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
 - CI and release workflows (573f9b6), release notes from `docs/release-notes/`, bitstream assets and `-rcN` dry runs
   (bd16d02); SD packages built on the user's machine from Atlan4's download (7659ed6); `make_sd_image.py` enforces the
   partition start (1563daf).
+- README for the hobbyist visitor, the agent install runbook and the Claude Code skill `fnirsi-install`, a Prepare and
+  back up page (50827b1, 3b15377, 2063e88; merges 28fde67, ac4c6a5, 42bf65b, a075dbf); the docs for one firmware
+  with one bitstream and 0x153D as the release's (003924d, 991b2da).
 - SPI flash tools for the FT2232D (71774ff, 108df11, fee75d9); protocol specification, hardware preparation guide and
   roadmap (9d32933, 1bd4179, a947e78).
 
