@@ -479,7 +479,7 @@ uint16_t pc_hal_acq_finish(void)
 
 uint8_t pc_hal_ext_status(void)
 {
-  //Read only on 0x1533+ (pc_cmds checks EXT_TRIGGER): older bitstreams return the stale bus byte
+  //Not on a mismatch (pc_poll): a bitstream the firmware does not know may return the stale bus byte
   fpga_write_cmd(0x28);
   return fpga_read_byte();
 }

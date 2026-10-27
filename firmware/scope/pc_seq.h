@@ -63,7 +63,8 @@
 #define PC_SEQ_FIT_TOTAL      5         //segments: total > 2^m - 2; averaging: total > 2046
 #define PC_SEQ_FIT_PRE        6         //pre >= total
 #define PC_SEQ_FIT_N          7         //averaging: N 0 or > 65536, or > 257 with legacy (8-bit) records
-#define PC_SEQ_FIT_PROG       8         //bitstream without programmable geometry / sequencer
+#define PC_SEQ_FIT_PROG       8         //bitstream without programmable geometry / sequencer (reserved:
+                                        //the built-for bitstream has both)
 #define PC_SEQ_FIT_PEAK       9         //C6: averaging of peak records (the sums would mix max and min bytes); SET_SEQ
                                         //answers E_STATE detail 7 (docs/plans/fpga-0x153c.md section 4), GET_SEQ 16 = 9
 

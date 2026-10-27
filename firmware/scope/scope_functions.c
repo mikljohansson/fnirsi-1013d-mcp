@@ -651,8 +651,8 @@ void scope_acquire_trace_data(void)
     }
     
     //Record start = (0x14 - the pretrigger words written to 0x0B) mod the ring (fw 0.2.72, pc_glue_ui_read_start). 1.00o5
-    //wrapped with fixed constants (stock + 3345, AL3 + 7441, EF2 + 5393 = ring - 751): one word off on stock and
-    //(751 - pretrigger) words off on AL3 / EF2 whenever the trigger address lay within the pretrigger of the ring start
+    //wrapped with a fixed ring - 751, (751 - pretrigger) words off whenever the trigger address lay within the
+    //pretrigger of the ring start
     data = pc_glue_ui_read_start(data);
     
     //display_decimal(550, 20, data);
