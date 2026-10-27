@@ -562,8 +562,7 @@ two compare point by point. Presets only, `ch2_range` auto / fixed, DC; `thru_ca
 thru, a stored name is applied on the host; `close_view` closes the scope's Bode view afterwards (it restores the
 scope's settings). Since fw 0.2.105 the next host setting, capture or RUN closes the view first and gives those
 settings back (no RUN starts a Bode sweep); the capture tools say so in a caveat. A device sweep ended
-with READ_BODE reason 8 (ADC readout fault: the capture self-check flagged a core on 0x153A+, fw 0.2.83; the pre-scan
-clipped at 5 V/div on older bitstreams) returns no table and a caveat pointing at `scope_health` and the calibration
+with READ_BODE reason 8 (ADC readout fault: the capture self-check flagged a core, fw 0.2.83) returns no table and a caveat pointing at `scope_health` and the calibration
 wizard. Host sweeps retake a flat or toneless record once (the 0x153A first record after a configuration change);
 a point still flat is flagged `ch1_low` + `incoherent` with no H, and a caveat names its frequencies. fw 0.2.99:
 `ch2_small` is one of the flags that leave a point out of the markers (BAD_FLAGS, grey on the scope and in

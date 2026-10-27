@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-legacy2 (2026-10-27): fw 0.2.105, protocol 1.28 unchanged: the last multi-bitstream code (capture-stage version argument, the pre-0x153A Bode reason 8 rule, the per-variant geometry fields and ring arguments, stale comments); behaviour on 0x153D unchanged; section 93.**
 **Branch fw-capmetric (2026-10-22): fw 0.2.105, protocol 1.28 (row 68): the capture-stage training parks at the carries 63.5..191.5 and keeps only the quiet stages (0 outliers and the 3-sample-median residual within 25 % + 4 of the core's best); GET_CAL 432 bytes with the last training; section 92.**
 **Branch fw-guardfix (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: the capture-stage guard, the repeat watch and REPEAT act only on captures taken at the 0x63 value the firmware wrote (0x36's first word; a DEBUG_FPGA sweep no longer gets a core moved and stored); section 90.**
 **Branch fw-relay (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: host acquisition requests and SET_ACQ_STATE RUN close the Frequency response view first (no Bode sweep from RUN; the soak's relay clicks), the relay registers written only on a change; section 89.**
@@ -7051,3 +7052,64 @@ CH2 B 8082..8263, flat to 0.05 %, and the training stored 0x06E3 (CH1 A3 B4, CH2
   no longer flat (class (a) stages, if the quiet input shows them, 25 % or more above the best). The outlier sums now
   cover 8000 words per capture, so a marginal stage may count where it read 0 before. A "data too noisy" note means the
   read still is not the capture's (report the q numbers) or the input is not quiet.
+
+## 93. fw-legacy2: the last multi-bitstream code (fw 0.2.105 unchanged, protocol 1.28 unchanged)
+
+Branch `fw-legacy2` from main 90c6ce5. Brief: the owner's 2026-10-20 decision ("One supported FPGA configuration",
+docs/plans/task-queue.md): remove what fw-one / fw-left left, behaviour on 0x153D unchanged. Commits 9982f41 (capture
+stages), 4f32ab2 (Bode reason 8), 01330ce (comments), 2b4aa12 (geometry constants), 20f4c62 (mcp texts), then the docs
+commit with this section. `PC_FW_VERSION` / `PC_FW_FPGA_VERSION` / the mcp version untouched. **Nothing benched.**
+
+**Removed**
+- cap_hw.c: `cap_fpga` and `fpga_capture_init`'s version argument (the trailer is applied / stored against
+  `PC_FW_FPGA_VERSION`); `fpga_capture_has()` (the wizard trains every channel). `PC_CAPF_HAS` stays on the wire and
+  means "set up": clear on a mismatch, where `pc_glue_init` never calls `fpga_capture_init` (Settings' Restore then
+  touches no 0x63).
+- bode_sweep.c/h: `BODE_CHK_NONE`, `readout_fault()` (the 0.2.71 rule: 5 V/div, a rail, a fundamental under 20 codes)
+  and `last_check`; reason 8 comes from the self-check alone. `BODE_CHK_CLEAN` / `FAULT` are 0 / 1 (engine-internal).
+  Tests: test_readout_fault and the no-self-check case of test_readout_check deleted.
+- pc_variant: `variant`, `ring_words`, `max_total` gone; `PC_FPGA_VARIANT` / `PC_FPGA_RING_WORDS` (now pc_hal.h) /
+  `PC_FPGA_MAX_TOTAL` at every use (GET_INFO 10 / 12 / 28, SET_TRIGGER's total check, READ_RAW, the report, Diagnostics).
+  `pc_variant_init(version, v)` remains as the one mismatch decision (version, mismatch, caps). `pc_hal_read_core`
+  lost its `ring_words` argument; `CAL_RING_WORDS`, `EH_RING`, `pc_glue_ring_words` gone, `UI_RING` / `PC_DEC_RING` alias
+  the constant. Host model: `fm.ring` 8192 always (stock 4096 / EF2 6144 arms), test_ring_start on 8192 only.
+- Comments: fpga_control.h's orphaned 0x1532..0x153A stop-geometry note, the stock / EF2 wrap constants
+  (scope_functions.c, fpga_bus.h / .c), the host capture's encode check, `pc_hal_ext_status`, `PC_SEQ_FIT_PROG`,
+  `BODE_ERR_NO_HW` (reserved / never produced).
+- mcp: READ_BODE reason 8 text and the Bode caveat without the "older bitstreams" clause (protocol.py, bode.py,
+  simulator.py comment, test_bode_device).
+
+**Kept on purpose**
+- `pc_decim_config`'s `has` levels (`PC_DECIM_HAS_*`, `c->cap`, `PC_DECIM_WHY_NOCAP`): docs/protocol-vectors.json's
+  "decim" cases are computed at HAS_FIR without the capture stages (their ext_shift has no + 40 ns) and decim_check feeds
+  them through that input; dropping it changes the vectors, which the brief forbids. The firmware passes
+  `pc_decim_has()` = FIR | CAPSTAGES everywhere.
+- fpga_model.c's older versions (0x1535..0x153C) and test_fpga_bus's loops over them: they model the FPGA, not a
+  firmware path, and show the faults the arm order, the dummy strobe and 0x153B's stop fixed (the reasons the code is
+  as it is). test_log's 0x153C case likewise.
+- The mismatch gates in pc_hal_scope.c (`pc_fpga_word == PC_FW_FPGA_VERSION`: init, the trigger restore, the counter
+  pass), `pc_cmds.c` GET_HEALTH 126, the notice, Diagnostics' line; `pc_hal_fpga_version()` in the Bode CSV header and the
+  calibration provenance (they report the word, they do not branch on it).
+- Wire values: GET_INFO variant 2, `PC_CAPF_HAS`, READ_BODE reasons 7 / 8, GET_SEQ fit 8, GET_DECIM why 6, the mcp's
+  `FpgaVariant` names (decoding).
+- enc_heal.c (the full-rate capture check), the calibration format, the capture-stage trailer's version word.
+
+**Checks**: `make gcc10`, GCC 13, PC_DEBUG: 0 warnings (as main); `make -C host_tests test` green (test_bode_sweep 2213,
+test_fpga_bus 10613, test_cap_hw 70, test_session 73220 / 73222), check_vectors OK; mcp ruff clean, pytest 543 passed, the mcp vector check ok.
+gcc10 image 817,664 -> 816,640 bytes (GCC 13 840,192 -> 839,680, PC_DEBUG 840,704 -> 840,192).
+
+**Bench (owner; FEL load of this branch's `make gcc10`; the unit on 0x153D; back up SD 700-710 first: step 2 saves)**
+1. `#VER` / GET_INFO as on 0.2.105: 8 = 0x153D, 10 = 2, 12 = 8192, 28 = 16382, 76 = 0x153D, 78 = 0. Diagnostics FPGA
+   line and the report's "FPGA: version word 0x153d, variant 2, ring 8192 words" unchanged.
+2. Calibration wizard with open inputs: "CH1: training capture stages..." runs for both channels as before (notes
+   "Capture stages: CH1 A3 B4" or the unit's values), Save; GET_HEALTH 104..106 = the trained value with HAS | TRAINED;
+   after a power cycle the stored value is applied (TRAINED again, not OTHER).
+3. Frequency response on the RC with the post: a sweep completes as before (the removed rule never ran on 0x153D:
+   `bh_check` always gave a verdict). "ADC readout fault: see Diagnostics" only with GET_HEALTH 106 FLAGGED / REPEAT.
+4. Ring / pretrigger geometry: a UI capture and a host ARM at 200 MSa/s and 1 MSa/s with pretrigger 0 / 50 / 100 %
+   (edge where the trigger marker is), READ_RAW of 16382 samples, a Bode sweep's records (the CSV's "FPGA 0x153D" header),
+   an Average-on trace at 1 MSa/s.
+5. Mismatch notice (optional, another bitstream such as 0x153B): the notice, Diagnostics (no capture-stage line, HAS
+   clear), Settings > Restore default settings returns to the notice without a hang; GET_INFO 78 = 1.
+Regression signs: a READ_RAW or Bode record shifted or garbled at the ring end (the read path's ring), the wizard
+skipping the training, TRAINED lost after a reboot (the trailer's version compare).
