@@ -556,8 +556,8 @@ class SimConfig:
     #: level beyond it pins the stage, and the noise (which the model puts in front of it) goes with the signal (bench
     #: 2026-10-19: -1.2 V DC saturates 0.1 and 0.2 V/div, the ADC then reads a noise-free constant); None: no limit
     frontend_window_v: tuple[float, float, float, float, float, float] | None = None
-    #: protocol 1.20 READ_BODE reason 8 (fw 0.2.71 / 0.2.83): the device sweep ends in an ADC readout fault after its
-    #: pre-scan (the self-check flagged a core on 0x153A+, or the pre-scan clipped at 5 V/div on older bitstreams)
+    #: protocol 1.20 READ_BODE reason 8 (fw 0.2.83): the device sweep ends in an ADC readout fault after its pre-scan
+    #: (the capture self-check flagged a core)
     bode_readout_fault: bool = False
     #: protocol 1.27 logger: the DDR ring's size (the firmware's is about 8 MB) and a stall of the host's reads
     #: (LOG_READ answers nothing for this many seconds from 0.1 s after LOG_START while the log keeps producing: with
