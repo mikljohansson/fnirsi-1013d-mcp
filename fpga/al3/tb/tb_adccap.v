@@ -23,6 +23,14 @@
 //   and the typical values (4.5, 3.0), stages 3 and 4: clean exactly inside the predicted range, the counters flag
 //   every dirty capture (a wrong stage fails loudly), B-first wherever clean.
 `timescale 1ns / 1ps
+// ENC_A_NS / ENC_B_NS: the simulated A / B encode pins' delay after their write clock edge (1.25 ns: the encode flops
+// on the falling clk_ADC edge; an fpga-encphase --iob image gets its own from run.sh, README section 19).
+`ifndef ENC_A_NS
+`define ENC_A_NS 1.25
+`endif
+`ifndef ENC_B_NS
+`define ENC_B_NS 1.25
+`endif
 
 module ad9288_core (input enc, input enc_out, output reg [7:0] d);
   // enc: the encode that samples (this core's pin); enc_out: the edge the outputs follow (the same pin, or the A pin
@@ -283,7 +291,7 @@ module tb;
 
   integer di, st, rf, al, ci, words_exp;
   integer divs [0:6];
-  real    T, mA1, mB1, mA2, mB2, tpd_r, tv_r, ep, e1, e2;
+  real    T, mA1, mB1, mA2, mB2, tpd_r, tv_r, ep, eA1, eA2, eB1, eB2;
   real    tpds [0:1], tvs [0:1];
   reg [15:0] cs;
   wire [15:0] po = dut.CAP_SEL_PO;
@@ -292,11 +300,12 @@ module tb;
 
   task evaluate(input real T, input integer al, input integer rf, input integer stA, input integer stB);
     begin
-      e1 = 1.25 + epad1; e2 = 1.25 + epad2;
-      mA1 = margin(e1, tpd_r, tv_r, T, stA);
-      mA2 = margin(e2, tpd_r, tv_r, T, stA);
-      mB1 = margin(e_eff(e1, T, al, rf), tpd_r, tv_r, T, stB);
-      mB2 = margin(e_eff(e2, T, al, rf), tpd_r, tv_r, T, stB);
+      eA1 = `ENC_A_NS + epad1; eA2 = `ENC_A_NS + epad2;
+      eB1 = `ENC_B_NS + epad1; eB2 = `ENC_B_NS + epad2;
+      mA1 = margin(eA1, tpd_r, tv_r, T, stA);
+      mA2 = margin(eA2, tpd_r, tv_r, T, stA);
+      mB1 = margin(e_eff(al ? eA1 : eB1, T, al, rf), tpd_r, tv_r, T, stB);
+      mB2 = margin(e_eff(al ? eA2 : eB2, T, al, rf), tpd_r, tv_r, T, stB);
       cleanA1 = (mA1 > 0.2); cleanA2 = (mA2 > 0.2); cleanB1 = (mB1 > 0.2); cleanB2 = (mB2 > 0.2);
       $sformat(tag, "T %0.0f align %0d ref %0d stA %0d stB %0d tpd %0.1f tv %0.1f epad %0.2f: words %0d garbage %0d/%0d/%0d/%0d oc %0d/%0d/%0d/%0d exp %0d/%0d/%0d/%0d dt1 %0.2f..%0.2f dt2 %0.2f..%0.2f cont %0d/%0d margins %0.2f/%0.2f/%0.2f/%0.2f",
                T, al, rf, stA, stB, tpd_r, tv_r, epad1, nw, g1A, g1B, g2A, g2B, oc1A, oc1B, oc2A, oc2B, x1A, x1B, x2A, x2B,
