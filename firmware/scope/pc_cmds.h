@@ -158,19 +158,15 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 //----------------------------------------------------------------------------------------------------------------------------------
 
 //The bitstream's geometry and capabilities (P-5.1). Fixed per firmware since fw-one: AL3A10 PC_FW_FPGA_VERSION, variant 2
-//on the wire, ring 8192 words, 16382 samples per channel; caps from the constant, never from the version word. The version
-//word read at boot is kept for GET_INFO 8 and the mismatch flag only.
-#define PC_FPGA_RING_WORDS  8192
+//on the wire (GET_INFO 10, a constant), ring PC_FPGA_RING_WORDS (pc_hal.h), 16382 samples per channel; caps from the
+//constant, never from the version word. The version word read at boot is kept for GET_INFO 8 and the mismatch flag only.
 #define PC_FPGA_MAX_TOTAL   16382
 #define PC_FPGA_VARIANT     2
 
 typedef struct
 {
   uint16_t version;             //raw word from FPGA command 0x06 (what the scope runs)
-  uint8_t  variant;             //PC_FPGA_VARIANT (wire encoding of P-5.1 kept)
   uint8_t  mismatch;            //version != PC_FW_FPGA_VERSION: acquisition refused, notice screen
-  uint16_t ring_words;
-  uint16_t max_total;
   uint32_t caps;
 } pc_variant;
 
@@ -437,7 +433,7 @@ void     pc_cal_body(int ch, uint8_t *resp);
 int      pc_sd_info_body(pc_session *s, int verify, int ident, uint8_t *resp, uint8_t *scratch, uint32_t scratch_bytes);
 
 //Exposed for tests
-void     pc_variant_init(uint16_t version, pc_variant *v);    //the fixed geometry and caps; mismatch from the word read
+void     pc_variant_init(uint16_t version, pc_variant *v);    //the word read, the fixed caps, the mismatch flag
 void     pc_variant_core_order(pc_variant *v);               //clears INTERLEAVE_UNVERIFIED when 0x33 confirmed the order at boot
 int      pc_decim_has(void);                                 //PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES: what pc_decim_config gets
 uint32_t pc_ring_mod(int64_t addr, uint32_t ring_words);

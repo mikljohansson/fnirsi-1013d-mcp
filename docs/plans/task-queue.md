@@ -89,6 +89,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   consequence: the FPGA flash (soldering + programmer) is step 1 of the install, the "SD card alone" path and the
   per-bitstream feature table go. Diagnostics keeps one check: the version word must be the one this firmware was built
   for, with a plain message otherwise.
+  **Status 2026-10-27 (firmware done, bench pending):** fw-one (fw 0.2.103, merge 1f13767) removed the stock / Atlan /
+  EF2 / EP4 arms, the encode-heal and core-order workarounds, the 0x1532..0x153A stop geometry and the version-word caps;
+  fw-left (0c0bf4c, 19618eb, 4b0475d) the constant capability tests; fw-legacy2 (branch `fw-legacy2`, firmware/AGENTS.md
+  section 93, not merged) the rest: the capture stages' version argument and `fpga_capture_has` (9982f41), the pre-0x153A
+  Bode reason 8 rule `BODE_CHK_NONE` (4f32ab2), stale comments (01330ce), the per-variant geometry fields and ring
+  arguments (2b4aa12), the mcp's reason 8 text (20f4c62). Left by design: the one mismatch check (boot word, notice,
+  Diagnostics), `pc_decim_config`'s capability levels (protocol-vectors.json's decim cases depend on them) and the host
+  FPGA model's older versions (they document the faults the bus order fixes).
 - [~] **The firmware image no longer fits the SD write window** (fw-sd dispatched 18:53) (bench 10-20 18:51: `--persist-only`
   of fw 0.2.100 (773,120 B = 1510 sectors at 750, end 2260) FAILED "does not fit below sector 2048"; the card's partition
   starts at 8192 but the firmware caps writes at PC_SD_LIMIT = 2048 (pc_cmds.c `pc_sd_write_end`, protocol row 40

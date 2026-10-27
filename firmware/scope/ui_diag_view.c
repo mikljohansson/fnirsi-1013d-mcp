@@ -140,7 +140,7 @@ static void ud_gather(ud_input *in, int card)
   in->card          = card ? pc_glue_card_ident() : 0;
   in->sd_sectors    = pc_hal_sd_sectors();
   in->fpga          = s->var.version;
-  in->variant       = s->var.variant;
+  in->variant       = PC_FPGA_VARIANT;
   in->mismatch      = s->var.mismatch;
   in->caps          = s->var.caps;
   in->volts_default = (const int32_t *)signal_adjusters;          //int32 is int, int32_t long on the target: same size

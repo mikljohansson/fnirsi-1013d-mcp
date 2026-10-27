@@ -238,8 +238,6 @@ static int cal_range(uint32 r, acal_range_meas *m, acal_point pt[ACAL_POINTS], i
 //17:20: q flat over the stages, A about 160x B) and the 0x36 counts covered 1000 words, not 8000. The time-out is
 //CS_TRAIN_WORDS for the capture (fpga_do_conversion writes samplecount when the UI time base is a short one, 0x0E here
 //for the others; host_tests/test_fpga_bus test_train_record), the wizard's after it
-#define CAL_RING_WORDS      8192    //AL3 sample memory words
-
 static uint8 cal_resid_buf[CS_RESID_WORDS];
 
 static void cal_auto_timeout(uint32 words)
@@ -269,7 +267,7 @@ static int cal_cap_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[4]
     for(k=0;k<4;k++)
       if(resid & (1u << k))
       {
-        pc_hal_read_core((uint8_t)k, start, CS_RESID_WORDS, cal_resid_buf, 1, CAL_RING_WORDS);
+        pc_hal_read_core((uint8_t)k, start, CS_RESID_WORDS, cal_resid_buf, 1);
         e[k] = cs_resid(cal_resid_buf, CS_RESID_WORDS);
       }
   }
@@ -398,8 +396,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   cal_cap_st[ch]  = CW_C_NONE;
   cal_cap_bad[ch] = 0;
 
-  //fw 0.2.79: on FPGA 0x153A the capture stages of this channel's cores first (cal_train), the zeros after them
-  if(fpga_capture_has())
+  //fw 0.2.79: the capture stages of this channel's cores first (cal_train), the zeros after them
   {
     cs_train t;
     int      cs_rc;

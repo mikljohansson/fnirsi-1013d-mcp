@@ -15,8 +15,6 @@
 #include "enc_heal.h"
 #include "fpga_bus.h"
 
-#define EH_RING  8192                   //AL3 ring words
-
 uint8_t          fpga_enc_garbled;
 static pc_hw_enc eh_st;                 //mode, 0x33 bytes, flags, counters (GET_HEALTH, GET_LINK_STATS)
 static eh_cap    eh_ui;                 //re-arms of the UI / calibration / probe conversion in progress
@@ -114,7 +112,7 @@ static uint8_t eh_hw_status(void *ctx)
 static void eh_hw_read(void *ctx, uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride)
 {
   (void)ctx;
-  pc_hal_read_core(core, start, count, dst, stride, EH_RING);
+  pc_hal_read_core(core, start, count, dst, stride);
 }
 
 void fpga_encode_new_conversion(void)

@@ -88,7 +88,8 @@ void pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// The bitstream this firmware is built for (P-5.1, PC_FW_FPGA_VERSION). One geometry, one capability word, derived from
+// The bitstream this firmware is built for (P-5.1, PC_FW_FPGA_VERSION). One geometry (constants: PC_FPGA_RING_WORDS,
+// PC_FPGA_MAX_TOTAL, PC_FPGA_VARIANT), one capability word, derived from
 // the constant: AL3A10 0x153D has the programmable geometry and the generator (0x1532), the EXT trigger (0x1533), the
 // decimation filter with 16-bit samples (0x1534, cmds 0x53-0x55, read 0x29), the CIC compensation FIR (0x1535, 0x56),
 // the sequencer (0x1536, cmds 0x57-0x5D, reads 0x2A-0x32), the encode self-check with the guaranteed core order (0x1538,
@@ -102,9 +103,6 @@ void pc_variant_init(uint16_t version, pc_variant *v)
 {
   v->version    = version;
   v->mismatch   = (uint8_t)(version != PC_FW_FPGA_VERSION);
-  v->variant    = PC_FPGA_VARIANT;
-  v->ring_words = PC_FPGA_RING_WORDS;
-  v->max_total  = PC_FPGA_MAX_TOTAL;
   v->caps       = PC_CAP_READ_LAG_UNVERIFIED | PC_CAP_INTERLEAVE_UNVERIFIED |          //BENCH: T3, T4
                   PC_CAP_PROG_TRIGGER_POS | PC_CAP_GENERATOR | PC_CAP_EXT_TRIGGER | PC_CAP_DECIM | PC_CAP_FIR |
                   PC_CAP_SEQ | PC_CAP_ENC_CHECK | PC_CAP_CAPTURE_STAGES |
@@ -323,7 +321,7 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   }
 
   c->trigger_addr  = trigger_addr;
-  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - pc_cap_words(c, c->ext_shift)), s->var.ring_words);
+  c->capture_start = (uint16_t)pc_ring_mod((int64_t)trigger_addr - ((int64_t)pc_cap_words(c, c->pretrigger) - pc_cap_words(c, c->ext_shift)), PC_FPGA_RING_WORDS);
   c->capture_id    = ++s->capture_id;
 
   s->trigger_addr  = c->trigger_addr;
@@ -734,15 +732,15 @@ static int h_get_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   pc_put_u16(resp + 2,  PC_MAX_REQUEST_FRAME);
   pc_put_u32(resp + 4,  PC_MAX_RESPONSE_PAYLOAD);
   pc_put_u16(resp + 8,  s->var.version);
-  resp[10] = s->var.variant;
+  resp[10] = PC_FPGA_VARIANT;
   resp[11] = 8;
-  pc_put_u16(resp + 12, s->var.ring_words);
+  pc_put_u16(resp + 12, PC_FPGA_RING_WORDS);
   resp[14] = 2;
   resp[15] = 2;
   pc_put_u32(resp + 16, 200000000u);
   pc_put_u32(resp + 20, s->var.caps);
   pc_put_u32(resp + 24, GP_CLK_HZ);                                                  //1.27: the generator clock (was the DDS's 50 MHz)
-  pc_put_u16(resp + 28, s->var.max_total);
+  pc_put_u16(resp + 28, PC_FPGA_MAX_TOTAL);
   pc_put_u16(resp + 30, 80);
   resp[32] = 0;                                                                      //read_lag, BENCH: T3
   resp[33] = 7;
@@ -1271,7 +1269,7 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
   if(mask & 0x30)
   {
     if(t.total & 1)                                    return pc_error(s, PC_E_BAD_ARG, 5, "total odd");
-    if((t.total < 80) || (t.total > s->var.max_total)) return pc_error(s, PC_E_BAD_ARG, 5, "total out of range");
+    if((t.total < 80) || (t.total > PC_FPGA_MAX_TOTAL)) return pc_error(s, PC_E_BAD_ARG, 5, "total out of range");
     if(t.pretrigger & 1)                               return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger odd");
     if(t.pretrigger + 2 > t.total)                     return pc_error(s, PC_E_BAD_ARG, 4, "pretrigger > total - 2");
 
@@ -1764,14 +1762,14 @@ static int h_wait(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp
 }
 
 //One core of READ_RAW: the ring (slot_len 0), or a segment slot of slot_len words at slot_base, wrapping at its end
-static void pc_raw_core(pc_session *s, uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
+static void pc_raw_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
                         uint32_t slot_base, uint32_t slot_len)
 {
   uint32_t n;
 
   if(!slot_len)
   {
-    pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words);
+    pc_hal_read_core(core, start, count, dst, stride);
     return;
   }
 
@@ -1779,10 +1777,10 @@ static void pc_raw_core(pc_session *s, uint8_t core, uint32_t start, uint32_t co
   if(n > count)
     n = count;
 
-  pc_hal_read_core(core, slot_base + start, n, dst, stride, s->var.ring_words);
+  pc_hal_read_core(core, slot_base + start, n, dst, stride);
 
   if(count > n)
-    pc_hal_read_core(core, slot_base, count - n, dst + n * stride, stride, s->var.ring_words);
+    pc_hal_read_core(core, slot_base, count - n, dst + n * stride, stride);
 }
 
 //Segment table entry (accumulator word idx) of the latest segment run
@@ -1827,7 +1825,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   uint8_t  flags  = req[3];
   int32_t  addr   = (int32_t)pc_get_u32(req + 4);
   uint32_t count  = pc_get_u32(req + 8);
-  uint32_t ring   = s->var.ring_words;
+  uint32_t ring   = PC_FPGA_RING_WORDS;
   uint32_t ncores = 0, i, start = 0, total;
   uint32_t slot_base = 0, slot_len = 0;
   int64_t  base;
@@ -1952,7 +1950,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (1 << i))
       {
-        pc_raw_core(s, (uint8_t)i, start, count, d, 1, slot_base, slot_len);
+        pc_raw_core((uint8_t)i, start, count, d, 1, slot_base, slot_len);
         d += count;
       }
     }
@@ -1965,8 +1963,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (3 << (2 * i)))
       {
-        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d,     2, slot_base, slot_len);
-        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + 1, 2, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i),     start, count, d,     2, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i + 1), start, count, d + 1, 2, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -1979,8 +1977,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (3 << (2 * i)))
       {
-        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d,         1, slot_base, slot_len);
-        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d + count, 1, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i),     start, count, d,         1, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i + 1), start, count, d + count, 1, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -1992,8 +1990,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
       if(mask & (3 << (2 * i)))
       {
         //core A = 2i (0x20/0x22), core B = 2i + 1 (0x21/0x23); B first (PC_INTERLEAVE_ORDER 0)
-        pc_raw_core(s, (uint8_t)(2 * i + 1), start, count, d,     2, slot_base, slot_len);
-        pc_raw_core(s, (uint8_t)(2 * i),     start, count, d + 1, 2, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i + 1), start, count, d,     2, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i),     start, count, d + 1, 2, slot_base, slot_len);
         d += 2 * count;
       }
     }
@@ -3929,8 +3927,8 @@ static int pc_dispatch(pc_session *s, int ctx)
 //----------------------------------------------------------------------------------------------------------------------------------
 // Host single capture polling (MAIN context)
 
-//fw 0.2.62: every full-rate host capture is checked before READ_RAW can read it (enc_heal.h): 0x1538+ by FPGA read 0x33,
-//0x1532..0x1537 by the B-against-A residual of the record's first words. A bad one is discarded and re-armed with the same
+//fw 0.2.62: every full-rate host capture is checked before READ_RAW can read it (enc_heal.h): by FPGA read 0x33, or by
+//the B-against-A residual of the record's first words after an asynchronous rate write (eh_capture_mode). A bad one is discarded and re-armed with the same
 //setting, at most EH_MAX_TRIES times; then it is accepted (event 21 with bit 7, GET_HEALTH 90 bit 2). Since
 //fw 0.2.105 the 0x33 check covers every capture (its prediction includes the divider's enable, so the gated encodes of
 //Filter Off at a divided rate are checked too), the residual divider-0 legacy records only (its core A neighbours are
@@ -3943,9 +3941,8 @@ static uint8_t pc_enc_status(void *ctx)
 
 static void pc_enc_read(void *ctx, uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride)
 {
-  pc_session *s = (pc_session *)ctx;
-
-  pc_hal_read_core(core, start, count, dst, stride, s->var.ring_words);
+  (void)ctx;
+  pc_hal_read_core(core, start, count, dst, stride);
 }
 
 //1: the capture was discarded (re-armed, or ABORTED when the re-arm failed)
@@ -4063,7 +4060,7 @@ static void pc_acq_service(pc_session *s)
   {
     pc_hw_channel c1, c2;
     uint16_t addr  = pc_hal_acq_finish();                                            //BENCH: T5 (trigger_addr alignment)
-    uint32_t start = pc_ring_mod((int64_t)addr - s->cap_pre_words, s->var.ring_words);
+    uint32_t start = pc_ring_mod((int64_t)addr - s->cap_pre_words, PC_FPGA_RING_WORDS);
     uint32_t samples = (uint32_t)s->cap_total_words * (s->cap_wide ? 1 : 2);
     uint32_t pre_samples = (s->cap_wide ? (uint32_t)s->cap_pre_words : (uint32_t)s->cap_pre_words * 2) + s->cap_ext_shift;
     uint8_t  mask;

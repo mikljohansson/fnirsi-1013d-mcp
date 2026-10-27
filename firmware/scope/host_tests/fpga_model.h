@@ -83,7 +83,7 @@ typedef struct
 typedef struct
 {
   uint16_t version;
-  uint32_t ring;                    //read pointer wrap (4096 stock, 8192 AL3, 6144 EF2)
+  uint32_t ring;                    //read pointer wrap (8192 words, every modelled AL3 version)
   uint8_t  mem[FM_RING_MAX][4];     //lanes 0x20..0x23 of each word
 
   //bus

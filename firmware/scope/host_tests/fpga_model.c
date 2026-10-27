@@ -582,7 +582,7 @@ void fm_reset(uint16_t version, uint32_t divider, uint32_t seed)
   fm.version = version;
   fm.divider = divider;
   fm.seed    = seed;
-  fm.ring    = (version == 0x1432) ? 4096 : ((version == 0x1632) ? 6144 : 8192);
+  fm.ring    = FM_RING_MAX;
   fm.next_edge_ps = fm_rnd() % fm_period_ps();
 }
 

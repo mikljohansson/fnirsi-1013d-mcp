@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// cap_hw.h - FPGA 0x153A capture stages on the target (cap_hw.c; the pure part is cap_stage.h)
+// cap_hw.h - the FPGA capture stages (0x153A+) on the target (cap_hw.c; the pure part is cap_stage.h)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef CAP_HW_H
@@ -8,12 +8,12 @@
 #include <stdint.h>
 #include "cap_stage.h"
 
-void     fpga_capture_init(uint16_t fpga_version);   //pc_glue_init: 0x64 = 8, 0x63 = the stored value or 0x08E4
+void     fpga_capture_init(void);                    //pc_glue_init on the built-for bitstream: 0x64 = 8, 0x63 = the stored
+                                                     //value or 0x08E4; until then (a mismatch) nothing touches 0x63
 void     fpga_capture_loaded(const uint8_t *sector); //calibration load: the trailer at sector 708 byte 488 (applied)
 void     fpga_capture_save(uint8_t *sector);         //calibration save: the trailer back (a valid one only)
-void     fpga_capture_write(uint16_t v);             //0x63 = v (0x153A+ only)
+void     fpga_capture_write(uint16_t v);             //0x63 = v (after fpga_capture_init only)
 uint16_t fpga_capture_value(void);                   //0x63 in effect
-int      fpga_capture_has(void);                     //the running bitstream has the stages (0x153A+)
 void     fpga_capture_commit(void);                  //the wizard's Save: the value in effect becomes the stored one
 void     fpga_capture_check(void);                   //after an accepted full-rate capture: read 0x36, flag; a core
                                                      //flagged 3 times in a minute: moved once inside its trained set

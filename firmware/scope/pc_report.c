@@ -304,9 +304,9 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
   pc_text_str(t, "FPGA: version word ");
   pc_text_hex(t, s->var.version, 4);
   pc_text_str(t, ", variant ");
-  pc_text_udec(t, s->var.variant);
+  pc_text_udec(t, PC_FPGA_VARIANT);
   pc_text_str(t, ", ring ");
-  pc_text_udec(t, s->var.ring_words);
+  pc_text_udec(t, PC_FPGA_RING_WORDS);
   pc_text_str(t, " words, caps ");
   pc_text_hex(t, s->var.caps, 8);
   pc_text_str(t, "; firmware built for ");
@@ -317,7 +317,7 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
 
   pc_text_nl(t);
 
-  //1.24: FPGA 0x153A capture stages (GET_HEALTH 104..123, cap_stage.h)
+  //1.24: FPGA 0x153A+ capture stages (GET_HEALTH 104..123, cap_stage.h; HAS clear on a mismatch)
   if(h[106] & PC_CAPF_HAS)
   {
     char     c[48];

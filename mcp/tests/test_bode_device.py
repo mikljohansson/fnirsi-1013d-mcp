@@ -30,12 +30,12 @@ def frame_payload(name: str) -> bytes:
 
 
 def test_reason_readout_fault():
-    # fw 0.2.71: reason 8 ends a sweep whose pre-scan clipped at 5 V/div with a small fundamental (a readout fault);
-    # fw 0.2.83 on 0x153A+: the capture self-check flagged a core during the sweep
+    # fw 0.2.83: reason 8 ends a sweep when the capture self-check flagged a core (the 0.2.71 rule for bitstreams
+    # without the self-check, a pre-scan clipped at 5 V/div, is gone with them)
     h = P.BodeHeader(state=4, reason=8)
     assert h.state_name == "error"
     assert h.reason_text.startswith("ADC readout fault") and "self-check" in h.reason_text
-    assert "older bitstreams" in h.reason_text
+    assert "older bitstreams" not in h.reason_text
 
 
 def _sim(sim_factory, ch1=FAST_IN, ch2=FAST_OUT, **kw):

@@ -58,7 +58,7 @@
 #define CW_G_FAIL          3      //measurement failed (gain_rc)
 
 //Capture stage training (fw 0.2.79, FPGA 0x153A, cap_stage.h): the first thing of each channel's zero step
-#define CW_C_NONE          0      //not run (no capture stages in this bitstream, or not reached)
+#define CW_C_NONE          0      //not run (not reached)
 #define CW_C_DONE          1      //trained: cap_v holds the stages
 #define CW_C_FAIL          2      //a core has no clean stage (cap_bad): the channel fails with ACAL_E_READOUT
 #define CW_C_NOISY         3      //fw-capmetric2: a core's best stage over the noise bound (cap_bad, CS_E_RESID): the

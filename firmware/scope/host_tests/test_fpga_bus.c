@@ -280,24 +280,23 @@ static void test_ready_bound(void)
 //The UI record start (pc_glue_ui_read_start): exact at every trigger address, where 1.00o5's constants were not
 static void test_ring_start(void)
 {
-  static const uint32_t rings[] = { 8192 };
-  uint32_t r, a, pre, bad = 0, old_bad = 0;
+  const uint32_t ring = 8192;
+  uint32_t a, pre, bad = 0, old_bad = 0;
 
-  for(r=0;r<1;r++)
-    for(pre=0;pre<2000;pre+=37)
-      for(a=0;a<rings[r];a+=13)
-      {
-        uint32_t s = fpga_ring_start(a, pre, rings[r]);
-        //1.00o5: the stock / AL3 / EF2 branches wrapped with ring - 751
-        uint32_t old = (a < pre) ? a + rings[r] - 751 : a - pre;
+  for(pre=0;pre<2000;pre+=37)
+    for(a=0;a<ring;a+=13)
+    {
+      uint32_t s = fpga_ring_start(a, pre, ring);
+      //1.00o5 wrapped with ring - 751
+      uint32_t old = (a < pre) ? a + ring - 751 : a - pre;
 
-        bad     += ((s + pre) % rings[r] != a) || (s >= rings[r]);
-        old_bad += (old != s);
-      }
+      bad     += ((s + pre) % ring != a) || (s >= ring);
+      old_bad += (old != s);
+    }
 
   T_EQ(bad, 0);
   T_TRUE(old_bad > 0);
-  T_EQ(fpga_ring_start(10, 750, 4096), 3356);
+  T_EQ(fpga_ring_start(10, 750, 8192), 7452);
   T_EQ(fpga_ring_start(8191, 8192, 8192), 8191);
 }
 

@@ -479,7 +479,7 @@ uint16_t pc_hal_acq_finish(void)
 
 uint8_t pc_hal_ext_status(void)
 {
-  //Read only on 0x1533+ (pc_cmds checks EXT_TRIGGER): older bitstreams return the stale bus byte
+  //Not on a mismatch (pc_poll): a bitstream the firmware does not know may return the stale bus byte
   fpga_write_cmd(0x28);
   return fpga_read_byte();
 }
@@ -601,10 +601,10 @@ void pc_hal_force(void)
   fpga_force_stop();
 }
 
-void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
+void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride)
 {
   //BENCH: T3 - the dummy strobe of the bus contract (fpga_bus.h), ring end restart
-  fpga_read_lane((uint8_t)(0x20 + core), start % ring_words, count, dst, stride, ring_words);
+  fpga_read_lane((uint8_t)(0x20 + core), start % PC_FPGA_RING_WORDS, count, dst, stride, PC_FPGA_RING_WORDS);
 }
 
 void pc_hal_fpga_write_cmd(uint8_t cmd)   { fpga_write_cmd(cmd); }
@@ -687,7 +687,7 @@ uint32_t pc_hal_trace_capacity(void)
 // (code = out * 2^S / N^K + (comp A + comp B) / 2); fpga_read_adc_data then runs its normal per-sample work on those
 // values instead of bus reads, so the trace, the measurements and the software trigger work unchanged.
 
-#define PC_DEC_RING       8192
+#define PC_DEC_RING       PC_FPGA_RING_WORDS
 
 //fw 0.2.64: the Filter per mode, [0] Scope, [1] Spectrum (owner): bits 1:0 requested K (UI Filter), PC_DECIM_SET_FIR;
 //saved in the settings sector (words 207 and 212). pc_dec_setting is the current mode's, so the Filter box, the arm,
@@ -1772,7 +1772,7 @@ int pc_glue_ui_has(int feature)
     default:
       //With the Filter on or Sample Peak, the 16-bit layout holds one sample per word: at most PC_DECIM_MAX_TOTAL
       if((feature >= PC_FEAT_MEM_BASE) && (feature < PC_FEAT_MEM_BASE + ACQ_MEM_CHIPS))
-        return (acq_view_mem_chips(pc_sess.var.max_total, pc_dec_ui_wide(), PC_DECIM_MAX_TOTAL) >>
+        return (acq_view_mem_chips(PC_FPGA_MAX_TOTAL, pc_dec_ui_wide(), PC_DECIM_MAX_TOTAL) >>
                 (feature - PC_FEAT_MEM_BASE)) & 1;
 
       return 1;
@@ -1931,9 +1931,7 @@ uint16 pc_glue_bode_setting_word(int i)
 }
 void pc_glue_view_opening(void)    { if(bode_view_active()) bode_view_close(); }
 
-//fw 0.2.66 (pc_bode.c): the running bitstream's capabilities, the ring size, a host capture in flight, and the ring
-//taken by a Bode capture (the PC's last capture is gone)
-uint32 pc_glue_ring_words(void)    { return (pc_ready && pc_sess.var.ring_words) ? pc_sess.var.ring_words : 8192; }
+//fw 0.2.66 (pc_bode.c): a host capture in flight, and the ring taken by a Bode capture (the PC's last capture is gone)
 
 int pc_glue_host_capture(void)
 {
@@ -2267,7 +2265,7 @@ static void pc_restart_clear(void)
 
 static void pc_ui_fix_settings(void)
 {
-  uint32 max = pc_sess.var.max_total, total;
+  uint32 max = PC_FPGA_MAX_TOTAL, total;
 
   pc_rtc_present = pc_probe_ds3231();
 
@@ -2375,7 +2373,7 @@ void pc_glue_init(void)
     //core-order cap (fw 0.2.72, pc_variant_core_order), so first
     fpga_encode_init();
     //fw 0.2.79: the capture stages, the stored value when it was trained on this bitstream (cap_hw.c)
-    fpga_capture_init(pc_fpga_word);
+    fpga_capture_init();
     //fw-c5 (0x153C): the trigger extension at its power-on state (edge, no hold-off) and the hold-off clear request for
     //the first arm: a FEL load leaves the FPGA as the previous firmware left it (fpga_bus.h)
     fpga_trig_write(&fpga_trig, 1);

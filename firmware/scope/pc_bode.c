@@ -27,7 +27,6 @@
 #include "fpga_bus.h"
 
 //pc_hal_scope.c (fw 0.2.66)
-uint32 pc_glue_ring_words(void);
 int    pc_glue_host_capture(void);
 void   pc_glue_ring_taken(void);
 
@@ -258,7 +257,7 @@ static uint8 bh_check(void)
 
 static int bh_read(void *ctx, const bode_plan *pp, uint32 total, bode_cap *cap)
 {
-  uint32 ring = pc_glue_ring_words(), addr, start, i;
+  uint32 ring = PC_FPGA_RING_WORDS, addr, start, i;
   pc_decim_cfg dc;
   int written, c;
 

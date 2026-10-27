@@ -28,7 +28,7 @@ typedef struct
   int    thru;                //CH2 on the DUT input too
   int    rail[2];             //fw 0.2.71: a readout fault: every rail-th sample of the channel reads 255 (0: none)
   int    rail_reads;          //fw 0.2.83: the rails only in the first rail_reads captures (0: every capture)
-  int    check;               //fw 0.2.83: bode_cap.check of every capture (BODE_CHK_*)
+  int    check;               //fw 0.2.83: bode_cap.check of every capture (BODE_CHK_*; 0 = CLEAN)
   uint32 fault_at;            //fw 0.2.83: this capture (1 = the first) has BODE_CHK_FAULT (0: none)
   uint32 flat_from, flat_n;   //fw 0.2.87: captures flat_from .. flat_from + flat_n - 1 are one saturated value on both
                               //channels (the 0x153A first-record artefact)
@@ -528,38 +528,8 @@ static void test_stop_and_steps(void)
   D.fail_arm = 0;
 }
 
-//fw 0.2.71 (owner's fail-fast rule): a readout that returns rail values at 5 V/div ends the sweep with
-//BODE_ERR_READOUT instead of a table of clipped points; a healthy readout never trips it
-static void test_readout_fault(void)
-{
-  bode_cfg c = cfg(1000, 100e3, 10, BODE_SETTLE_FAST, BODE_CH2_AUTO);
-  int ch;
-
-  for(ch = 0; ch < 2; ch++)
-  {
-    dut_rc(&D);
-    D.rail[ch] = 97;
-    bode_init(&eng, &HW);
-    T_EQ(bode_start(&eng, &c, 0, 3), 0);
-    run(&eng, 600000);
-    printf("  readout fault on CH%d: state %d, reason %d, ranges %d / %d, %d points measured\n", ch + 1,
-           bode_state(&eng), bode_error(&eng), D.range[0], D.range[1], bode_done_count(&eng));
-    T_EQ(bode_state(&eng), BODE_ST_ERROR);
-    T_EQ(bode_error(&eng), BODE_ERR_READOUT);
-    T_EQ(D.range[ch], 0);
-    T_EQ(bode_done_count(&eng), 0);
-    T_EQ(D.gen, 0);
-  }
-
-  dut_rc(&D);
-  bode_init(&eng, &HW);
-  T_EQ(bode_start(&eng, &c, 0, 3), 0);
-  run(&eng, 600000);
-  T_EQ(bode_state(&eng), BODE_ST_DONE);
-}
-
-//fw 0.2.83 (bench 2026-10-20 10:52): with the capture self-check (FPGA 0x153A+) its verdict decides reason 8, never the
-//clip. A clean check with rail samples at 5 V/div is a flagged table, not a fault; a flagged capture ends the sweep at
+//fw 0.2.83 (bench 2026-10-20 10:52): the capture self-check's verdict decides reason 8, never the clip (the 0.2.71 rule
+//for bitstreams without the self-check, rails at 5 V/div, is gone). A clean check with rail samples at 5 V/div is a flagged table, not a fault; a flagged capture ends the sweep at
 //any phase; one railed capture (a real clip, a saturated record) leaves no trace in the later points.
 static void test_readout_check(void)
 {
@@ -651,15 +621,6 @@ static void test_readout_check(void)
            D.range[0], D.range[1], flagged, n);
     T_EQ(flagged, 0);
   }
-
-  //Without the self-check the same single railed capture is harmless too (the record decides, the next one is clean)
-  dut_rc(&D);
-  D.rail[0] = 97;
-  D.rail_reads = 1;
-  bode_init(&eng, &HW);
-  T_EQ(bode_start(&eng, &c, 0, 3), 0);
-  run(&eng, 600000);
-  T_EQ(bode_state(&eng), BODE_ST_DONE);
 
   //A flagged capture ends the sweep with reason 8: in the pre-scan (the first capture) and in the middle of the points
   for(i = 0; i < 2; i++)
@@ -1835,7 +1796,6 @@ int main(void)
   test_hold();
   test_wiring_b();
   test_stop_and_steps();
-  test_readout_fault();
   test_readout_check();
   test_flat_retake();
   test_range_plan();

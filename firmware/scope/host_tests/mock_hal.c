@@ -395,14 +395,14 @@ void pc_hal_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t 
 }
 void     pc_hal_force(void)      { mock.fpga_ops++; mock.forces++; mock_polls = 1000000; mock.polls_to_trigger = -1; mock.polls_to_done = 0; }
 
-void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words)
+void pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride)
 {
-  uint32_t i;
+  uint32_t i, ring_words = mock.ring_words;
 
   assert(core < 4);
   assert(start < ring_words);
   assert(count <= ring_words);
-  assert(ring_words == mock.ring_words);
+  assert(ring_words == PC_FPGA_RING_WORDS);
 
   mock.read_calls++;
   mock.fpga_ops++;

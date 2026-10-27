@@ -180,9 +180,12 @@ uint16_t pc_hal_acq_finish(void);                                               
 void     pc_hal_force(void);                                                           //0x0E = 0, 0x1A = 0
 uint8_t  pc_hal_ext_status(void);                                                      //0x28: bit0 level, bit1 gen on, bit2 edge seen
 
-//Read count bytes of one core (0..3 = FPGA 0x20..0x23) from ring word start, splitting at the ring end, one dummy read
-//after every 0x1F write. dst advances by stride per byte.
-void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words);
+//The built-for bitstream's sample memory (AL3A10 0x153D): 8192 words of four lanes, 13-bit addresses
+#define PC_FPGA_RING_WORDS  8192
+
+//Read count bytes of one core (0..3 = FPGA 0x20..0x23) from ring word start (mod PC_FPGA_RING_WORDS), splitting at the
+//ring end, one dummy read after every 0x1F write. dst advances by stride per byte.
+void     pc_hal_read_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride);
 
 //Decimation filter (bitstream 0x1534+, pc_decim.h). The setting is the UI's acquisition "Filter" selector (saved with
 //the settings): bits 1:0 requested K (0 off, 1 boxcar, 2 CIC2, 3 CIC3), PC_DECIM_SET_FIR (0x1535+), PC_DECIM_SET_PEAK
@@ -422,7 +425,7 @@ typedef struct
   uint16_t stored_fpga;     //the FPGA version word it was trained on
 } pc_hw_cap;
 
-#define PC_CAPF_HAS          0x01  //the bitstream has the capture stages (0x153A+)
+#define PC_CAPF_HAS          0x01  //the capture stages are set up (the built-for bitstream runs; clear on a mismatch)
 #define PC_CAPF_TRAINED      0x02  //the value in effect is a trained one for this bitstream (else the power-on 0x08E4)
 #define PC_CAPF_READ         0x04  //counts were read after a full-rate capture since boot
 #define PC_CAPF_FLAGGED      0x08  //the last read flagged a core
