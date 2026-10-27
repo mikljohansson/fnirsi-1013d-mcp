@@ -43,17 +43,15 @@
 #define BODE_ERR_PLAN         4     //no point in the requested range
 #define BODE_ERR_HOST         5     //the PC armed its own capture during the sweep
 #define BODE_ERR_STOP         6     //stopped (STOP, leaving the view, BODE_CTRL stop)
-#define BODE_ERR_NO_HW        7     //no decimation filter or no DDS generator on this bitstream
-#define BODE_ERR_READOUT      8     //the ADC readout returns garbage, not the signal. fw 0.2.83: the capture self-check
-                                    //flagged a capture of the sweep (BODE_CHK_FAULT); without a self-check (before FPGA
-                                    //0x153A) the 0.2.71 rule: the pre-scan at 5 V/div, the record at a rail, the
-                                    //fundamental under 20 codes. A clean self-check never gives it (a small signal is
-                                    //ch1_low / clipped on the points)
+#define BODE_ERR_NO_HW        7     //no decimation filter or no generator on this bitstream (wire value; never produced
+                                    //since fw 0.2.105: the built-for bitstream has both)
+#define BODE_ERR_READOUT      8     //the ADC readout returns garbage, not the signal: the capture self-check flagged a
+                                    //capture of the sweep (BODE_CHK_FAULT, fw 0.2.83). A clean self-check never gives it
+                                    //(a small signal is ch1_low / clipped on the points)
 
 //The capture self-check of one capture (bode_cap.check, fw 0.2.83)
-#define BODE_CHK_NONE         0     //the bitstream has none (before 0x153A): the record's own rails decide reason 8
-#define BODE_CHK_CLEAN        1     //checked: nothing flagged
-#define BODE_CHK_FAULT        2     //0x36 outliers flagged on this capture, or the repeat watch (PC_CAPF_REPEAT) is set
+#define BODE_CHK_CLEAN        0     //checked: nothing flagged
+#define BODE_CHK_FAULT        1     //0x36 outliers flagged on this capture, or the repeat watch (PC_CAPF_REPEAT) is set
 
 //Thru calibration state
 #define BODE_THRU_NONE        0
@@ -322,7 +320,7 @@ struct bode_eng
   uint8     range[2];
   int32     dcoffset[2];
   uint8     exhausted, bad_down, disturbed, gen_on, stop_req, hold_r2;
-  uint8     relay_pending, ms_coll, last_fir, last_check;
+  uint8     relay_pending, ms_coll, last_fir;
   uint32    relay_until;
   uint16    switches;                         //unplanned CH2 range steps (the header's count, MAX_SWITCHES)
   uint16    planned;                          //fw 0.2.93: planned CH2 range transitions (plan_apply between points)

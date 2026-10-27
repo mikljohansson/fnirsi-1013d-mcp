@@ -10,7 +10,7 @@
 
 //Quality gates (bode.py; mdB of code levels and of ratios). The measurement's own flags and their thresholds are in
 //bode_dsp.c (bode_meas_flags, fw 0.2.87)
-#define CH1_LOW_MDB         26021       //CH1_LOW_CODES 20 (the 0.2.71 readout rule)
+#define CH1_LOW_MDB         26021       //CH1_LOW_CODES 20
 #define NEAR_FLOOR_MDB      20000       //NEAR_FLOOR_DB 20
 #define COLLAPSE_MDB        20000       //COLLAPSE_RATIO 0.1: a tone below 1/10 of the reference
 #define CENTRE_TOL_C100     1200        //re-centre beyond 12 codes from 128
@@ -556,24 +556,6 @@ static void on_prescan(bode_eng *e, const bode_meas *m)
   measure(e, PH_VERIFY, pp, settle_periods[e->cfg.settle] * 10);
 }
 
-//Without a capture self-check (BODE_CHK_NONE): range 0 (5 V/div) and the record still at a rail, the fundamental under
-//CH1_LOW (20 codes); CH2 only when it is not a flat record (a DC overload has its own rule). With a self-check its
-//verdict decides (bode_step), never the clip: a clean check with a small signal is ch1_low, not a fault (bench
-//2026-10-20 10:52)
-static int readout_fault(bode_eng *e, const bode_meas *m)
-{
-  int c;
-
-  if(e->last_check != BODE_CHK_NONE)
-    return 0;
-
-  for(c = 0; c < 2; c++)
-    if((e->range[c] == 0) && m->c[c].clipped && (m->c[c].code_mdb < CH1_LOW_MDB) && !((c == 1) && flat2(m, 0)))
-      return 1;
-
-  return 0;
-}
-
 //fw 0.2.90: the most sensitive range from r on where the record's peak (ac, measured on r) stays inside 85 % of full
 //scale, stopping before a range that clipped in this check
 static int finer_range(const bode_meas *m, int c, int r, uint8 bad)
@@ -605,15 +587,6 @@ static void on_verify(bode_eng *e, const bode_meas *m)
   if(over && (e->cfg.ch2_mode == BODE_CH2_HOLD))
   {
     finish(e, BODE_ST_ERROR, BODE_ERR_OVERLOAD);
-    return;
-  }
-
-  //fw 0.2.71 (owner's fail-fast rule), bitstreams without the self-check: 5 V/div (the last range down) still clipping
-  //with a fundamental under 20 codes cannot be the post's 3.1 Vpp (about 10 codes there): the readout returns rail
-  //values. The sweep ends rather than producing a flagged table (bench 2026-10-19 20:51, FPGA 0x1539's A-core fault).
-  if(readout_fault(e, m))
-  {
-    finish(e, BODE_ST_ERROR, BODE_ERR_READOUT);
     return;
   }
 
@@ -1086,8 +1059,7 @@ int bode_step(bode_eng *e)
       return 1;
     }
 
-    e->last_fir   = cap.fir;
-    e->last_check = cap.check;
+    e->last_fir = cap.fir;
 
     //Statistics of the generator-on captures (a background capture has no signal to trigger on)
     if(!e->mbg && (e->n_caps < 0xFFFF))
@@ -1096,7 +1068,8 @@ int bode_step(bode_eng *e)
       e->n_timeout++;
 
     //fw 0.2.83: the capture self-check flagged this capture (or a core keeps failing): the data is not the signal,
-    //whatever the phase (fail fast, as the 0.2.71 rule)
+    //whatever the phase (fail fast; the self-check's verdict alone gives reason 8, never a clip: a clean check with a
+    //small signal is ch1_low, bench 2026-10-20 10:52)
     if(cap.check == BODE_CHK_FAULT)
     {
       finish(e, BODE_ST_ERROR, BODE_ERR_READOUT);
