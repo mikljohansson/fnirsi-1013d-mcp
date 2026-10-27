@@ -105,11 +105,10 @@ Rewritten 2026-10-26 (docs-rel153d) for the release bitstream 0x153D (the gated 
       `spectrum.png` (eb645ec), `diagnostics.png` (Status page all OK on fw 0.2.102 from the card, 49c295f, 19:29), and in place of a
       host `bode.png` the on-device `frequency-response-sweep.png` (edd6f85). The same images in the release notes
       (rel-gen2, c0ea0c1).
-- [ ] README screenshot block un-commented (it still points at `docs/img/`; moved to the README rewrite, maintainer
-      2026-10-20: use `docs/screenshots/*.png`).
-- [ ] README links checked (every relative link resolves on GitHub). Checked 2026-10-20 on 876700a: 39 relative links,
-      all resolve to tracked files except the four `docs/img/*.png` inside the commented-out screenshot block; re-check
-      after the README rewrite.
+- [x] README screenshot block un-commented and on `docs/screenshots/*.png` (done in the README rewrite; docs-rel153d
+      2026-10-27 added acq-menu.png and acq-menu-roll.png and replaced the stale "What's next" list).
+- [x] README links checked (every relative link resolves on GitHub): 2026-10-27 on docs-rel153d, 24 relative links, all
+      tracked files or directories. Re-check if the README changes before the tag.
 - [ ] Credits and AI attribution wording confirmed by the maintainer (README "Credits", F12).
 - [ ] GitHub repository description, topics, Discussions on if the announcement uses them, issue templates (F11).
 - [ ] Vendored `research/tools/vendor/capstone/lib/capstone.dll` licence notice checked (F11).
