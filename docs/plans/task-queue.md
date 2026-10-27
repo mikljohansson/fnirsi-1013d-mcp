@@ -274,6 +274,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
+- [ ] **Bench the encode-phase experiment** (fpga-encphase, 2026-10-27, branch `fpga-encphase`, roadmap section 6 item 4
+  knob 2): IOB-encode images of 0x153D (-250 / 0 / +250 ps, version word 0x153D, no firmware change); -250 and +250
+  pinned in `backups/al3_encphase_*`. **First an FPGA agent finishes the prep:** a closing roll for 0 ps, two-seed run.sh
+  on all three, hash rebuilds (fpga/al3/AGENTS.md "To do before the bench"). Then the A/B script `fpga/al3/tools/enc_ab.py`, and a one-sitting session of about 2 hours (backups,
+  release run, 0x153C reference, three images, back to the release, decision table): `fpga/al3/AGENTS.md` "Encode phase
+  experiment, fpga-encphase", numbers in README section 19. Needs the owner at the bench with the FT2232D.
 - [ ] **Flash and bench 0x153C** (fpga-c4, built 10-21: `dist/al3-0x153C.bin` `2580b090...c7f2`, flash image `07393bf5...1f77`,
   unbenched; fw 0.2.104+ is built for it). Checklist: fpga/al3/AGENTS.md "0x153C built, fpga-c4"; bench checks: contract
   9.2 items 1-7 (README section 15). Then dist `recommended`, 0x153B `supported`.

@@ -12,7 +12,7 @@ has been flashed from this folder.
 |---|---|
 | `src/` | Atlan4's AL3 TD project, sources only: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc`, `zaklad.sdc`, `FPGA.al`, `al_ip/` (PLL and sample-memory IP: `.v`, `.ipc`, sim models), plus `FPGA commands.txt` (Atlan4's command table, updated). Copied from `D:\path\to\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\FPGA AL3\FPGA AL3S10\` (unmodified at commit a947e78, version 0x1532). `zaklad.v` and `zaklad.adc` now carry the changes listed in "Changes" (version 0x1533). Build outputs (`*.db`, `*.area`, `*.timing`, `*.bit`, `*.bin`) were left out. |
 | `tb/` | iverilog testbenches and reference models: `run.sh` (nine steps, `ONLY=ext/decim/fir/long/seg/trigpos/contract/encphase`), `tb_ext_trigger.v`, `tb_decim.v`, `tb_fir.v`, `tb_long.v`, `tb_seg.v`, `tb_trigpos.v`, `tb_seqcontract.v` (+ its transcript `contract_0x1538.txt`), `tb_encphase.v` + `encphase.sh`, `edge_phase.py`, `cic_model.py`, `seg_model.py`, `mutate_seg.py`, `sim_models.v` (behavioural PLL, sample memory, `AL_LOGIC_BRAM`). See "Changes". |
-| `tools/` | Bench scripts for the coordinator: `capwin_sweep.py` (per-core, per-band noise of every capture stage, section 18). |
+| `tools/` | Bench scripts for the coordinator: `capwin_sweep.py` (per-core, per-band noise of every capture stage, section 18); `enc_ab.py` (the CH2 code-error A/B between images, section 19). Build helpers: `encphase_variant.py` / `encphase_build.sh` (the encode-phase experiment images, section 19). |
 | `out/` | Named bitstreams for the bench, gitignored (`*.bin`). Hashes are recorded in "Changes". |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the **stock** FNIRSI design (version 0x1432), TD 5.0.28716 project. Sources only (`source/`, `al_ip/`, `Original_1013D.al`); his prebuilt `.bit` was left out. Licence GPL-3.0 (`LICENSE-GPL3`, repo `pecostm32/Anlogic_AL3-10_Analyzing`). |
 | `dist/` | The released bitstreams 0x1533 onwards, committed: `al3-0x15xx.bin` (raw bitgen output), `manifest.json` (sha256, padded-image sha256, source commit, minimum firmware, status), `BITSTREAMS.md` (the page attached to each release: which to use, how to flash, rollback). `tools/bitstreams.py check` runs in CI; `release.yml` packs them. Add a version there once it is pinned and benched. |
@@ -3039,6 +3039,114 @@ reached every timebase, and the full-rate build's placement (A encodes level wit
 worse at 200 MSa/s too (inference). The rebuilt 0x153D (`fd0be7a2`) gates the encodes again and puts the encode pads on
 0x153C's; the despike and the hardware options above are not needed for the slow timebases. What remains at 200 MSa/s is
 0x153C's level, which the bench of the new build checks (owner's rule: no worse than 0x153C).
+
+### 19. Encode phase experiment: IOB encodes and static clock phases (fpga-encphase, 2026-10-27)
+
+Roadmap section 6, "A future FPGA 0x153E", item 4, knob 2. **Experiment images only: `src/` stays the release 0x153D
+(`fd0be7a2`), no dist entry, no firmware change.** Every image is `tools/encphase_variant.py` applied to `src/`, built by
+`tools/encphase_build.sh`; the bench session and its decision table are in AGENTS.md "Encode phase experiment,
+fpga-encphase".
+
+**Why the encode pad delay moves with every roll.** The four encode flops are not in the pins' IOBs: `FPGA_phy.area` of
+the release lists the encode pins with register `NONE` (`#oreg 11`: the relays, AC/DC, offsets and the display PWM). TD
+also merges the two B flops and the two A flops (equal D, equal clock): one register, `adc1_encA_reg`, drives
+`o_adc1_encA`, `o_adc2_encA` and the self-check (net fanout 3), so it cannot sit in either IOB, and its clock-to-pad path
+is 0.146 ns flop + 1.2 .. 1.4 ns fabric route + 3.42 ns pad, the route set by placement. That route is the 6.9 .. 7.9 ns
+spread of README sections 10, 17 and 18. Tried in TD 4.6.8, each a build with `#oreg` and the pin's register column read
+back:
+
+| Variant | Encode pins packed? |
+|---|---|
+| four flops with `/* synthesis keep */` (no merge, fanout 1 each) + `PACKREG = ON` in zaklad.adc | no (`#oreg 11`, register `NONE`) |
+| the same on `posedge clk_ADC` | no |
+| without keep, `PACKREG = ON` | no (merged again) |
+| `AL_LOGIC_ODDR` per pin (d1 = d2 = the flop's D) | **yes** (`#oreg 15`, register `ODDR`) |
+
+The ODDR samples d1 / d2 on its clock's rising edge, so an ODDR copy of the negedge flop needs a clock whose rising edge
+comes where clk_ADC falls. TD's PLL macro (`arch/al3_macro.v`) allows `CLKCn_CPHASE` 1 .. DIV only (5 here; C0 = 0
+degrees is CPHASE 4), so the 270-degree C1 the first try used (CPHASE 7) was outside the macro's range although TD timed it
+without a message; the design below keeps every CPHASE in 1 .. 5.
+
+**The IOB variant (`--iob`).** B encodes from ODDRs on a new PLL output C2 (`clk_ADCB`), A encodes from ODDRs on C3
+(`clk_ADCA`); C1 (`clk_ADC`) stays in pll.v unused, so the testbenches' references keep their clock. The ODDRs and four
+fabric copies (`adc*_enc*`, for the 0x33 self-check and the testbenches) load `enc_cur` / `enc_cur_n`: enc_nxt taken on the
+falling clk_200MHz edge, i.e. the write clock after that edge, stable for the whole period up to the next falling edge.
+The encode sequence is the source's at every rate and after any write; only the instant moves. The IOB path (0.94 ns clock
+insertion + 3.5 ns IOB clock-to-pad) is about 1.25 ns shorter than the release's fabric route, so C2 at 0 degrees (2.5 ns
+after the write clock edge) lands the B pads at 6.97 ns, where 0x153C and the release have them, and C3 375 ps later puts
+the A pads 0.37 ns after B, the release's A - B offset (0x153C 0.36 / 0.39, release 0.36 / 0.36; the full-rate build that
+was worse had 0.01 / -0.07). `--phase-ps` moves C2 and C3 together in 125 ps steps (A and B stay 180 degrees + 375 ps
+apart), `--skew-ps` sets the A - B offset.
+
+Cost: +2 PLL outputs on global clocks (the AL3 has 16), about -10 LUT, 0 extra LEs; the 0x33 self-check now checks the
+fabric copies (same D, same clock edge as the ODDRs), not the flops that drive the pins.
+
+**Roll independence (task 1, measured).** 31 placed builds of the variant (7 at -250, 8 at +250 and 16 at 0 ps: the
+unmoved source and single-section moves; two more failed to route) all report the same encode pads for their phase: **B 6.97, A 7.34 ns at 0 ps
+(A - B 0.37 on both chips), 6.72 / 7.09 at -250, 7.22 / 7.59 at +250**, identical to 0.01 ns in every roll, against
+6.90 .. 7.93 ns over the release's rolls. The data pins stay at -0.11 / +0.12 ns (`#ireg 33`). The pads now depend only on
+the PLL setting: an image at phase p has B 6.97 + p, A 7.34 + p (TD, TT corner).
+
+**Images (task 2).** Pinned in `backups/` (gitignored); raw = bitgen output (282,898 bytes), padded = 0xFF to 1 MiB, the
+file to flash. Source = this branch's `src/` + `tools/encphase_variant.py` with the options shown.
+
+| Image | Options | Raw sha256 | Padded sha256 (flash) | Pads B / A | clk_200MHz | C2 / C3 |
+|---|---|---|---|---|---|---|
+| enc-250 | `--iob --phase-ps -250 --move "//Display brightness" "//External trigger"` | `3fc75a76a21f89c90a30307153a46da419e3f528b2db00eb2f30fc2032e8b59d` | `d397e0c26ec26ec2db517b5de9b9e33b299df778825b64de71576e3bc245dd46` | 6.72 / 7.09 | 0 errors, 4.840 ns | 0 / 0 errors |
+| enc+250 | `--iob --phase-ps 250 --move "//Trigger hold-off" "//Decimation filter control"` | `eaac246e11027c91aa8a8faf23970a33b490cc6bbc82645fc6ecee6ebeb79f05` | `46a38f24e3a56aff45d0113247ac5a82cfbc059b66689659e4a2049d6e440b6f` | 7.22 / 7.59 | 0 errors, 4.941 ns | 0 / 0 errors |
+| enc0 | `--iob` + a roll still to find | not closed | | 6.97 / 7.34 | best roll 1 error (5.081 ns, `q_pass` as in every 0x153D roll table) | 0 / 0 |
+
+Files: `backups/al3_encphase_m250_3fc75a76.bin` / `..._padded.bin`, `backups/al3_encphase_p250_eaac246e.bin` /
+`..._padded.bin`. sample_write_clock and i_mcu_clk 0 errors in both (9.047 / 22.510 and 9.178 / 25.372 ns); 7448 / 7436 LE.
+
+**Not finished (the session's background jobs were stopped by the host for low memory, 2026-10-27 about 12:30):** the
+phase-0 image (9 two-move rolls `t1_0`..`t9_0` were building), `tb/run.sh` on both seeds for every image (started for
+enc-250 / enc+250, stopped), and a rebuild of each pinned image in a fresh work dir (the hash check). What did run: the
+quick steps encphase, mcuread, adccap (2241 checks) and trigpos (882) on seed 12345 for the phase-0 source (identical RTL
+to all three images apart from the PLL), and encphase + adccap on the release source (unchanged, 2274 checks). **The images
+must not be flashed before the two-seed run.sh passes on each.**
+
+Other phases (what -375 / -125 / +125 / +375 need): `tools/encphase_build.sh ~/encph NAME --iob --phase-ps N` plus the roll
+moves above in parallel until one closes every clock (at -250 one of 7 closed, at +250 one of 8, at 0 none of 16); then
+run.sh on two seeds and pinning. PLL settings (C2 B / C3 A, CPHASE / FPHASE): -375 3/5, 4/0; -125 3/7, 4/2; +125 4/1, 4/4;
++375 4/3, 4/6. The simulation clocks stay in (2.5, 5) ns for all of them (`encphase_defs.py` refuses otherwise). Expect the
+self-check path (fabric copy on C3 to `enc_ok` on the next falling clk_200MHz edge, 1.875 ns at +250) to fail timing at
++375 and above (+0.066 ns slack at +250): move `enc_ok` to the rising edge first (inference).
+
+**Timing.** The paths the phase touches (TD, capture re-timing, worst setup / hold slack): `enc_cur` -> ODDR
+D (launch on the falling clk_200MHz edge, window 2.25 .. 2.875 ns) +0.90 / +2.71 ns at -250, +1.05 / +2.49 at +250;
+`enc_cur` -> fabric copies +1.11 / +2.99 (-250), +1.56 / +2.77 (+250); fabric copies -> `enc_ok` +0.43 (-250),
+**+0.066 (+250)**. The release's 3.75 ns `enc_nxt` -> encode flop path is gone (its slack was +2.80). A miss of the
+`enc_ok` path would flag the 0x33 self-check (GET_HEALTH encode bad) without touching the data.
+
+**Predictions (task 3).** `capture_report.sh --bits` margins at the datasheet corner (tV 2, tPD 6, board 0.3 ns; start / end of the
+valid window, ns, worst bit, every data pin -0.11 / +0.12):
+
+| Image | 1A k3 | 1A k4 | 1B k3 | 1B k4 | 2A k3 | 2A k4 | 2B k3 | 2B k4 | predicted pick |
+|---|---|---|---|---|---|---|---|---|---|
+| release fd0be7a2 | 3.81/1.96 | 1.31/4.46 | 4.17/1.61 | 1.67/4.11 | 3.63/2.14 | 1.13/4.64 | 3.99/1.78 | 1.49/4.28 | A3 B4 / A3 B3 (bench 0x06E3) |
+| enc-250 | 4.00/1.77 | 1.50/4.27 | 4.38/1.40 | 1.88/3.90 | 4.00/1.77 | 1.50/4.27 | 4.38/1.40 | 1.88/3.90 | A3 B4 / A3 B4 |
+| enc0 | 3.75/2.02 | 1.25/4.52 | 4.12/1.65 | 1.62/4.15 | 3.75/2.02 | 1.25/4.52 | 4.12/1.65 | 1.62/4.15 | A3 B3 or B4 (tie) |
+| enc+250 | 3.50/2.27 | 1.00/4.77 | 3.87/1.90 | 1.37/4.40 | 3.50/2.27 | 1.00/4.77 | 3.87/1.90 | 1.37/4.40 | A3 B3 / A3 B3 |
+
+The wizard's metric (README section 18) should keep **A3 on both channels in every image** (this unit's A cores have one
+clean stage, and every image moves the window by at most 0.37 ns against the release); a pick of A2 or A4 is the surprise
+to log. The B cores have three clean stages (3..5) on this unit, so B3 / B4 can flip between images without meaning
+anything. Chip 2 now has the same pads as chip 1 (the release had CH2 A 0.18 ns later than CH1 A).
+
+**Simulation.** `tb/encphase_defs.py` reads an image's `al_ip/pll.v` and gives iverilog `PLL_C2_NS` / `PLL_C3_NS` (the
+encode clocks, placed 1.25 ns earlier than in hardware: the simulation has no pad delays and the testbenches' ADC models
+are calibrated to the release's pins switching 1.25 ns after the write clock edge; `enc_cur` is stable over the whole
+window, so the earlier edge loads the same value) and `ENC_A_NS` / `ENC_B_NS` (tb_adccap.v's per-core pin delay). For the
+release source it gives nothing, and the release simulation is unchanged (seed 12345: encphase, adccap 2274 checks PASS).
+`sim_models.v` has an `AL_LOGIC_ODDR` model (a register, so a pin never glitches in zero time); encphase.sh annotates the
+image's ODDR inputs and fabric copies against their own window (the late-CH2-A case must still fail through 0x33).
+`capture_margins.py` counts an encode clock edge TD reports in [0, 2.5) ns as the edge of the next period.
+
+**Firmware.** None needed: the images keep the version word 0x153D and every register of the release, so fw 0.2.105
+(c681efa4, on the card) runs them unchanged. The firmware cannot tell an experiment image from the release; `enc_ab.py`
+records the image sha256 the operator passes (the flash step's verified hash), and the session ends with the release
+flashed back (AGENTS.md).
 
 ## Device facts from the datasheet
 
