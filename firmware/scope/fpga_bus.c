@@ -49,7 +49,7 @@ void fpga_read_decim_data(uint8_t cmdlo, uint8_t cmdhi, uint32_t start, uint32_t
 {
   uint32_t i;
 
-  //16-bit samples exist on AL3 only, whose 13-bit read pointer wraps at the 8192-word ring end by itself
+  //The 13-bit read pointer wraps at the 8192-word ring end by itself
   fpga_read_start(cmdlo, (uint16_t)start);
 
   for(i=0;i<count;i++)

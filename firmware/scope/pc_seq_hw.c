@@ -37,7 +37,7 @@
 static uint8  seq_57 = 0xFF;            //0x57 as last written; 0xFF unknown (an MCU restart leaves the FPGA running)
 
 //UI averaging
-#define UI_RING   8192                  //sample memory words (AL3)
+#define UI_RING   PC_FPGA_RING_WORDS    //sample memory words
 
 static uint8  ui_run;                   //the UI conversion in flight is a hardware averaging run
 static uint8  ui_mcu;                   //...or record 1 of an MCU-summed mean (pc_seq_ui_done takes the rest)
@@ -274,12 +274,12 @@ static void ui_mcu_add(uint32 start)
       uint8 *b = (uint8 *)ui_tmp;
 
       //Core A (0x20 / 0x22) to the odd positions, core B (0x21 / 0x23) to the even ones, as fpga_read_sample_data stores them
-      pc_hal_read_core((uint8_t)(2 * ch), start, words, b, 1, UI_RING);
+      pc_hal_read_core((uint8_t)(2 * ch), start, words, b, 1);
 
       for(w=0;w<words;w++)
         sum[2 * w + 1] += b[w];
 
-      pc_hal_read_core((uint8_t)(2 * ch + 1), start, words, b, 1, UI_RING);
+      pc_hal_read_core((uint8_t)(2 * ch + 1), start, words, b, 1);
 
       for(w=0;w<words;w++)
         sum[2 * w] += b[w];

@@ -32,8 +32,8 @@
 //left in data-read direction: the next strobe returns the byte of start_word, each further one the next word's.
 void fpga_read_start(uint8_t cmd, uint16_t start_word);
 
-//count bytes of one lane from ring word start, dst advancing by stride; restarts at the ring end instead of relying on
-//the FPGA pointer wrap (EF2 wraps at 6144)
+//count bytes of one lane from ring word start, dst advancing by stride; restarts at ring_words (the sample memory's
+//8192, or the logger's ring) with a new 0x1F instead of relying on the FPGA's pointer wrap
 void fpga_read_lane(uint8_t cmd, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride, uint32_t ring_words);
 
 //First word of a record: (trigger address 0x14 - the pretrigger words written to 0x0B) mod ring (the UI readout and the
