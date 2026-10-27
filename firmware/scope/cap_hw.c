@@ -9,6 +9,7 @@
 #include "types.h"
 #include "fpga_control.h"
 #include "pc_hal.h"
+#include "pc_cmds.h"
 #include "pc_transport.h"
 #include "cap_stage.h"
 #include "cap_hw.h"
@@ -16,7 +17,6 @@
 
 #include <string.h>
 
-static uint16    cap_fpga;                  //running bitstream (fpga_capture_init)
 static pc_hw_cap cap_st;                    //GET_HEALTH / GET_CAL
 static uint8     cap_training;              //the self-check is off while the wizard trains
 static cs_watch  cap_watch;                 //fw 0.2.81: cores flagged 3 times in a minute (PC_CAPF_REPEAT)
@@ -34,11 +34,6 @@ void pc_hal_cap_state(pc_hw_cap *c)
   *c = cap_st;
 }
 
-int fpga_capture_has(void)
-{
-  return (cap_st.flags & PC_CAPF_HAS) != 0;
-}
-
 uint16_t fpga_capture_value(void)
 {
   return cap_st.value;
@@ -54,7 +49,7 @@ void fpga_capture_write(uint16_t v)
   cap_st.value = (uint16)(v & CS_MASK);
 
   //Trained = the stored value of this bitstream is in effect (a wizard's new value counts once it is saved)
-  if((cap_st.trailer == CS_T_VALID) && (cap_st.stored_fpga == cap_fpga) && (cap_st.stored == cap_st.value))
+  if((cap_st.trailer == CS_T_VALID) && (cap_st.stored_fpga == PC_FW_FPGA_VERSION) && (cap_st.stored == cap_st.value))
     cap_st.flags |= PC_CAPF_TRAINED;
   else
     cap_st.flags &= (uint8)~PC_CAPF_TRAINED;
@@ -75,7 +70,8 @@ static uint16 cap_read(uint16_t cnt[CS_CORES])
   return (uint16)(v & CS_MASK);
 }
 
-//Boot (pc_glue_init) and after a calibration load: the stored value when it belongs to this bitstream, else 0x08E4.
+//Boot (pc_glue_init) and after a calibration load: the stored value when it was trained on the built-for bitstream
+//(PC_FW_FPGA_VERSION), else 0x08E4.
 //Always written: a FEL load leaves the FPGA with whatever the previous firmware wrote
 static void cap_apply(void)
 {
@@ -85,7 +81,7 @@ static void cap_apply(void)
 
   if(cap_st.trailer == CS_T_VALID)
   {
-    if(cap_st.stored_fpga == cap_fpga)
+    if(cap_st.stored_fpga == PC_FW_FPGA_VERSION)
       v = cap_st.stored;
     else
       cap_st.flags |= PC_CAPF_OTHER;
@@ -96,9 +92,8 @@ static void cap_apply(void)
   fpga_capture_write(v);
 }
 
-void fpga_capture_init(uint16_t fpga_version)
+void fpga_capture_init(void)
 {
-  cap_fpga = fpga_version;
   cap_st.flags |= PC_CAPF_HAS;
   cap_apply();
 }
@@ -135,7 +130,7 @@ void fpga_capture_commit(void)
 
   cap_st.trailer     = CS_T_VALID;
   cap_st.stored      = cap_st.value;
-  cap_st.stored_fpga = cap_fpga;
+  cap_st.stored_fpga = PC_FW_FPGA_VERSION;
   cap_stored_sets    = (cap_sets_v == cap_st.value) ? cap_sets : 0;
   cap_st.flags       = (uint8)((cap_st.flags & ~(PC_CAPF_OTHER | PC_CAPF_REPEAT | PC_CAPF_MOVED)) | PC_CAPF_TRAINED);
 

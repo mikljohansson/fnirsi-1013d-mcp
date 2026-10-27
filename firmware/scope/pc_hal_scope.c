@@ -2375,7 +2375,7 @@ void pc_glue_init(void)
     //core-order cap (fw 0.2.72, pc_variant_core_order), so first
     fpga_encode_init();
     //fw 0.2.79: the capture stages, the stored value when it was trained on this bitstream (cap_hw.c)
-    fpga_capture_init(pc_fpga_word);
+    fpga_capture_init();
     //fw-c5 (0x153C): the trigger extension at its power-on state (edge, no hold-off) and the hold-off clear request for
     //the first arm: a FEL load leaves the FPGA as the previous firmware left it (fpga_bus.h)
     fpga_trig_write(&fpga_trig, 1);

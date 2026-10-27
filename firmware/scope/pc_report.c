@@ -317,7 +317,7 @@ static void sec_identity(pc_text *t, pc_session *s, const uint8_t *sd, int sd_ok
 
   pc_text_nl(t);
 
-  //1.24: FPGA 0x153A capture stages (GET_HEALTH 104..123, cap_stage.h)
+  //1.24: FPGA 0x153A+ capture stages (GET_HEALTH 104..123, cap_stage.h; HAS clear on a mismatch)
   if(h[106] & PC_CAPF_HAS)
   {
     char     c[48];

@@ -422,7 +422,7 @@ typedef struct
   uint16_t stored_fpga;     //the FPGA version word it was trained on
 } pc_hw_cap;
 
-#define PC_CAPF_HAS          0x01  //the bitstream has the capture stages (0x153A+)
+#define PC_CAPF_HAS          0x01  //the capture stages are set up (the built-for bitstream runs; clear on a mismatch)
 #define PC_CAPF_TRAINED      0x02  //the value in effect is a trained one for this bitstream (else the power-on 0x08E4)
 #define PC_CAPF_READ         0x04  //counts were read after a full-rate capture since boot
 #define PC_CAPF_FLAGGED      0x08  //the last read flagged a core

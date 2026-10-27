@@ -80,7 +80,7 @@ static void boot(uint16_t stored, uint16_t sets)
 
   memset(&cap_st, 0, sizeof(cap_st));
   memset(&cap_watch, 0, sizeof(cap_watch));
-  cap_fpga = 0; cap_training = 0; cap_stored_sets = 0; cap_sets = 0; cap_sets_v = 0; cap_moved = 0; cap_store = 0;
+  cap_training = 0; cap_stored_sets = 0; cap_sets = 0; cap_sets_v = 0; cap_moved = 0; cap_store = 0;
   memset(cap_train, 0, sizeof(cap_train));
 
   if(stored)
@@ -89,7 +89,7 @@ static void boot(uint16_t stored, uint16_t sets)
     cs_ext_pack(sd708, sets);
   }
 
-  fpga_capture_init(0x153D);
+  fpga_capture_init();
   fpga_capture_loaded(sd708);
 }
 

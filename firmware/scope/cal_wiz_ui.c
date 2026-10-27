@@ -398,8 +398,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   cal_cap_st[ch]  = CW_C_NONE;
   cal_cap_bad[ch] = 0;
 
-  //fw 0.2.79: on FPGA 0x153A the capture stages of this channel's cores first (cal_train), the zeros after them
-  if(fpga_capture_has())
+  //fw 0.2.79: the capture stages of this channel's cores first (cal_train), the zeros after them
   {
     cs_train t;
     int      cs_rc;

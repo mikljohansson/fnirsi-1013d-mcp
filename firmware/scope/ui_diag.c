@@ -1278,7 +1278,7 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
 
 //fw 0.2.79: FPGA 0x153A capture stages (GET_HEALTH 104..123, GET_CAL 356..363): the stages in effect, where they come
 //from, and the self-check of the last 200 MSa/s capture as a residual against its limit (a core's outliers beyond its
-//chip partner's, cap_stage.h). 0 when the bitstream has no stages (nothing shown)
+//chip partner's, cap_stage.h). 0 when the stages are not set up (a bitstream mismatch: nothing shown)
 static int ud_cap_line(const ud_input *in, char *p)
 {
   const uint8_t *h = in->health + H_CAP;
