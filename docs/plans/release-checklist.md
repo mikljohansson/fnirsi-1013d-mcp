@@ -115,7 +115,8 @@ Rewritten 2026-10-26 (docs-rel153d) for the release bitstream 0x153D (the gated 
 - [ ] Vendored `research/tools/vendor/capstone/lib/capstone.dll` licence notice checked (F11).
 - [x] `docs/plans/announcement.md` final draft (2026-10-20, rel-gen2, 203933c): `{{VERSION}}` and `{{RELEASE_URL}}` kept
       for the tag, screenshots, the bitstream note (attached with `BITSTREAMS.md`) and the tested-on line filled; the clip
-      and the other maintainer decisions are the checklist at the top of that file.
+      and the other maintainer decisions are the checklist at the top of that file. Refreshed for 0x153D, fw 0.2.105 and
+      41 / 39 tools by docs-rel153d (2026-10-27); screenshots pinned to 68b733b.
 
 ## Tag and after
 
