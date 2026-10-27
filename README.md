@@ -73,15 +73,16 @@ Code skills: `fnirsi-scope` (how to measure) and `fnirsi-install` (the install r
 | A 16,384-sample capture with the trigger near the start | Spectrum analyser, waterfall view |
 | ![Frequency response of a two-pole RC ladder, magnitude and phase](docs/screenshots/frequency-response-sweep.png) | ![Diagnostics, all checks OK](docs/screenshots/diagnostics.png) |
 | Frequency response of an RC ladder, measured by the scope alone | Diagnostics, all checks OK |
+| ![ACQ menu with Filter Off, Hi-Res and Anti-alias and the Sample row](docs/screenshots/acq-menu.png) | ![Roll mode: a 1 Hz square scrolling, the ACQ chip on Long](docs/screenshots/acq-menu-roll.png) |
+| ACQ menu: Filter and Sample (Normal / Peak) | Roll mode, drawn from the streaming logger |
 
 ## What's next
 
-Ideas, not promises ([`docs/plans/roadmap.md`](docs/plans/roadmap.md), sections 6 and 8): more trigger types (pulse
-width, Nth edge, timeout) behind a Type row in the trigger menu; peak-detect acquisition; a streaming
-data logger (continuous filtered samples at up to about 1 MS/s into the 32 MB RAM and on to the host); a hardware
-frequency and period counter feeding the measurement cards; deeper plain
-memory (about 24,576 samples per channel from the spare block RAM); a DVM readout, serial decode, mask testing and
-CSV export; and testers with EF2L45 and EP4CE6 units.
+Ideas, not promises ([`docs/plans/roadmap.md`](docs/plans/roadmap.md), sections 6 and 8): finer ADC capture timing
+from the FPGA's spare PLL outputs, to bring the CH2 code errors at 200 MSa/s down (a future bitstream 0x153E); a trigger
+on both ADC cores, so the edge is found to 5 ns at 200 MSa/s; deeper plain memory (about 24,576 samples per channel
+from the spare block RAM, which competes with segments and averaging); a noise output; and testers with EF2L45 and
+EP4CE6 units.
 
 ## What you need
 

@@ -45,7 +45,7 @@ the 8 MiB start. Copy your files back after the card is written.
 ## Steps
 
 1. Download from the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases):
-   `fnirsi_1013d-fpga-al3-0x153b-flash1m.bin` (the FPGA bitstream), `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware),
+   `fnirsi_1013d-fpga-al3-0x153d-flash1m.bin` (the FPGA bitstream), `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware),
    `fnirsi_1013d-sdtools-X.Y.Z.zip` (the SD tools) and `SHA256SUMS`. Add the MCP wheel if you want it. Check the files:
 
     ```

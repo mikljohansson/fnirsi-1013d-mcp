@@ -1,6 +1,7 @@
 # Announcement draft (release 0.3.0)
 
-Final draft for the maintainer, rewritten 2026-10-20 (rel-gen2) from the README, `docs/release-notes/0.3.0.md`,
+Final draft for the maintainer, rewritten 2026-10-20 (rel-gen2) and refreshed 2026-10-27 (docs-rel153d) for bitstream
+0x153D and firmware 0.2.105, from the README, `docs/release-notes/0.3.0.md`,
 `CHANGELOG.md`, `docs/hardware-status.md` and `fpga/al3/dist/BITSTREAMS.md`. Every number names its bench source. Two
 placeholders stay until the tag exists: `{{VERSION}}` (0.3.0; firmware and MCP package share it) and `{{RELEASE_URL}}`
 (https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v{{VERSION}}, the tag URL, not `/latest`: v0 releases are
@@ -52,8 +53,8 @@ I wrote it for one job: transmit and receive waveforms of a VLF / pulse-inductio
 frequency, so the scope's real limits (200 MS/s, 8 bit, about 30 MHz) were never the problem. The firmware additions
 work without any agent.
 
-![Scope view with the MCP chip](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/876700a97e5f211a61281d65d77d551f90d7d604/docs/screenshots/scope.png)
-![Frequency response on the scope](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/876700a97e5f211a61281d65d77d551f90d7d604/docs/screenshots/frequency-response-sweep.png)
+![Scope view with the MCP chip](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/68b733b6fb0c4aedaa343130f314017ea1022187/docs/screenshots/scope.png)
+![Frequency response on the scope](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/68b733b6fb0c4aedaa343130f314017ea1022187/docs/screenshots/frequency-response-sweep.png)
 
 ### What it adds over Atlan4's firmware
 
@@ -63,7 +64,8 @@ The numbers are from my unit (AL3A10), not claims about every unit. Sources are 
   its output. The screen plots magnitude and phase, with -3 dB, peak, Q and phase markers, cursors and cards. AUTO SET
   finds the span and stops. RUN repeats sweeps for tuning and reuses the previous ranges, so the relays stay quiet. On
   bitstream 0x153B, ten sweeps of an RC network (100 Hz to 1 MHz, 25 points) needed 25 captures each, no retakes, and
-  flagged no point (bench 2026-10-20 20:40).
+  flagged no point (bench 2026-10-20 20:40); on a pre-release 0x153D build a sweep of a two-stage RC ladder put -3 dB at
+  3.73 kHz, against 3.72 kHz for the ideal ladder (bench 2026-10-22).
 - **Calibration per ADC core, with a wizard.** Each channel is two interleaved ADC cores with their own zero and gain,
   and the difference changes with the clock mode. The wizard measures both per core and per clock class. It also
   trains the instant at which the FPGA captures each core's data. A self-check after every 200 MSa/s capture counts
@@ -72,8 +74,9 @@ The numbers are from my unit (AL3A10), not claims about every unit. Sources are 
 - **USB protocol and MCP server.** Binary, CRC-checked, over USB CDC; no driver on Windows or Linux. PING median 0.89 ms
   over 500 PINGs with no failures (firmware 0.2.48). A full 16,382-sample dual-channel capture including readout in
   110 ms (firmware 0.1.2). A 30-minute capture soak with 17,908 content-checked requests, no failures and no restarts
-  (firmware 0.2.49). The server has 32 tools in safety tiers; 30 are on by default, raw FPGA access and the reboot into
-  FEL only when enabled. Anything that drives the calibration pin needs a confirmation. A device simulator lets you try
+  (firmware 0.2.49). The server has 41 tools in safety tiers; 39 are on by default, raw FPGA access and the reboot into
+  FEL only when enabled. Besides capture, averaging, FFT and Bode sweeps it decodes UART, SPI and I2C, runs mask tests,
+  reads like a DVM and exports CSV. Anything that drives the calibration pin needs a confirmation. A device simulator lets you try
   the tools without hardware.
 - **Shared control.** No remote lock-out. You and the agent change the same live settings. The screen follows the
   agent and the agent sees your touch changes. A chip in the top bar shows that a host is connected.
@@ -89,13 +92,23 @@ The numbers are from my unit (AL3A10), not claims about every unit. Sources are 
 - **Digital phosphor view**, persistence 0.2 s to infinite, mono or heat palette.
 - **External trigger on the calibration pin.** In a loopback through the scope's own generator 10 of 10 captures
   triggered.
-- **Generator** (a 32-bit DDS square wave on the calibration pin) and a **Bode sweep** tool on the host that uses it.
+- **Trigger types, peak detect and a hardware counter** (bitstream 0x153C and later). Pulse width, Nth edge and
+  timeout triggers with hold-off: on 0x153C, a 20 us pulse triggered "longer than 15 us" and not "longer than 25 us",
+  and hold-off 2.5 ms on a 1 kHz square spaced the triggers 3.000 ms. Peak detect caught 1 us spikes in all 600
+  expected screen columns. The counter read 1 kHz to 1 MHz to the generator's own frequency (bench 2026-10-21, firmware
+  0.2.104); on 0x153D it reads 999.996 Hz on the 1 kHz square at 200 MSa/s (bench 2026-10-22).
+- **Streaming logger and roll mode** (0x153D). One or both channels stream to the PC: 500 kS/s 8-bit on one channel,
+  250 kS/s 16-bit, 125 kS/s 16-bit on two; 10,000,000 words in 20 s at the top rate with none lost (pre-release 0x153D
+  build, bench 2026-10-22). Roll mode draws real samples of both channels from the same stream.
+- **Square-wave generator** on the calibration pin (no DAC on this board): every edge within 5 ns of ideal, the mean
+  frequency exact, glitch-free changes; the Frequency response and the host's Bode sweep and chirp use it.
 - **Hands-free development loop.** `fnirsi1013d-flash` reboots the scope into FEL, loads a build into RAM and can write
   it to the SD card over USB, with a backup first. The same commit gives the same image sha256 in any checkout and in CI.
 - Menus no longer offer what the hardware cannot do (there is no DAC, so no generator waveform shapes).
 
-![Spectrum analyser](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/876700a97e5f211a61281d65d77d551f90d7d604/docs/screenshots/spectrum.png)
-![Diagnostics, Status page](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/876700a97e5f211a61281d65d77d551f90d7d604/docs/screenshots/diagnostics.png)
+![Spectrum analyser](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/68b733b6fb0c4aedaa343130f314017ea1022187/docs/screenshots/spectrum.png)
+![Diagnostics, Status page](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/68b733b6fb0c4aedaa343130f314017ea1022187/docs/screenshots/diagnostics.png)
+![ACQ menu: Filter Off / Hi-Res / Anti-alias and the Sample row, the Freq card from the hardware counter](https://raw.githubusercontent.com/mikljohansson/fnirsi-1013d-mcp/68b733b6fb0c4aedaa343130f314017ea1022187/docs/screenshots/acq-menu.png)
 
 ### What an agent can do with it
 
@@ -114,8 +127,12 @@ measurements while you hold the probes.
 - **The FPGA bitstream needs an SPI programmer.** The config flash is wired only to the FPGA, so the scope cannot flash
   it. You solder pins to the 2x3 header and use a 3.3 V programmer (I use an FT2232D board with a script in the
   repository). Back up the flash twice and compare first. The bitstream is required: the firmware runs only with the
-  release's bitstream, 0x153B, and shows a banner on any other. It is attached to the release with `BITSTREAMS.md`
-  (hashes, wiring, rollback); the older images stay attached for the record, but no firmware supports them.
+  release's bitstream, 0x153D, and shows a banner on any other. It is attached to the release with `BITSTREAMS.md`
+  (hashes, wiring, rollback); the older images stay attached for the record, but this firmware does not run with them.
+- **A known issue on my unit**: at 200 MSa/s with the filter off, 3.32 % of CH2 core A's samples read 4 or more codes
+  high, almost all just below ADC code 96; core B reads 0.37 %, and at 2 MSa/s both read 0 % (bench 2026-10-22). The
+  previous bitstream read about 1 % in a similar run. I accepted it for this release; finer capture timing is on the
+  list for a later bitstream.
 - **The SD card's FAT32 partition must start at 8 MiB (sector 16384) or later.** The firmware sits in the raw sectors
   before it. Most cards start lower, so you recreate the partition. The card tool refuses a card that does not fit and
   says what it needs.
@@ -124,8 +141,8 @@ measurements while you hold the probes.
 - **Atlan4's bootloader and updater are not redistributed.** They exist only as binaries. A script in the release
   downloads them from Atlan4's repository on your machine and checks their sha256.
 - Real limits are unchanged: 200 MS/s per channel, 8 bit, about 30 MHz bandwidth, no DAC.
-- Tested on: one unit, my FNIRSI 1013D with the AL3A10 FPGA (JTAG IDCODE 0x18006C31), bootloader v0.8, bitstream 0x153B,
-  development firmware up to 0.2.102 written to the card and cold-booted from it. Host: Windows 11, with WSL Ubuntu for
+- Tested on: one unit, my FNIRSI 1013D with the AL3A10 FPGA (JTAG IDCODE 0x18006C31), bootloader v0.8, bitstream 0x153D,
+  development firmware up to 0.2.105 written to the card and booted from it. Host: Windows 11, with WSL Ubuntu for
   the FEL loader and the card tools; the host tests also run on Linux and Windows in CI.
 - **Use at your own risk.** Flashing the FPGA flash or the SD sectors can leave the scope unbootable until you restore
   a backup. Keep yours.
@@ -141,7 +158,7 @@ Short version; the full steps are on the documentation site (Install).
 1. Download from the release page ({{RELEASE_URL}}): `fnirsi_1013d-fw-{{VERSION}}.bin`,
    `fnirsi_1013d-sdtools-{{VERSION}}.zip`, the `fnirsi1013d` wheel and `SHA256SUMS`. Check the hashes.
 2. Back up your SD card and the FPGA's config flash, twice.
-3. Flash bitstream 0x153B with your SPI programmer. It is required; with any other bitstream the firmware only shows a
+3. Flash bitstream 0x153D with your SPI programmer. It is required; with any other bitstream the firmware only shows a
    banner, so the FPGA comes before the card.
 4. Prepare a spare micro SD card with its FAT32 partition at 8 MiB. Build the SD parts with the tools zip
    (`make_release_sd_package.py build ... --parts parts`) and write only those parts with `make_sd_image.py write`.
@@ -178,13 +195,14 @@ Short version; the full steps are on the documentation site (Install).
 I have released {{VERSION}} of an open firmware for the FNIRSI 1013D (Anlogic AL3A10 variant). It boots from the SD
 card, so the stock firmware stays untouched. Over Atlan4's firmware it adds a frequency response mode that measures a
 filter with the scope alone, a spectrum analyser (4096-point FFT in 2.7 ms), FPGA decimation filters against aliasing
-at slow time bases, per-core ADC calibration with a wizard, a phosphor view, an external trigger and a USB protocol. A
+at slow time bases, pulse width / Nth edge / timeout triggers, peak detect, a hardware frequency counter, a streaming
+logger to the PC, per-core ADC calibration with a wizard, a phosphor view, an external trigger and a USB protocol. A
 Python MCP server lets an AI agent (Claude Code, Codex) drive the scope while you keep using the touch screen.
 
 Verified on one unit only; the install needs an SPI programmer for the FPGA bitstream. GPL-3.0. Release notes, install
 steps and the bench log: {{RELEASE_URL}}. Credit to Atlan4, pecostm32 and Donwulff, whose work this builds on.
 
-For r/ClaudeAI, replace the second sentence of the first paragraph onwards with: the MCP server has 32 tools in safety
+For r/ClaudeAI, replace the second sentence of the first paragraph onwards with: the MCP server has 41 tools in safety
 tiers with confirmation tokens, a simulator you can try without the scope (`fnirsi1013d-mcp --sim`), a Claude Code skill
 with measurement rules, and shared control, so you can touch the scope while the agent works. The use case is
 pulse-induction metal detector design. Most of the code was written by Claude agents that I coordinated.
