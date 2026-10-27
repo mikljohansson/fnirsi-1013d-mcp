@@ -57,7 +57,7 @@ Sources, which you should open when you need the detail: [Install](install.md) (
 ### 1. Download and verify
 
 From the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) (v0 releases are marked
-pre-release): the bitstream `fnirsi_1013d-fpga-al3-0x153b-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`,
+pre-release): the bitstream `fnirsi_1013d-fpga-al3-0x153d-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`,
 `fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the MCP wheel if wanted. In the download directory, on Linux or WSL:
 
 ```
@@ -95,8 +95,8 @@ python firmware/tools/spiflash_d2xx.py wiring
 4. **Write and verify**:
 
     ```
-    python firmware/tools/spiflash_d2xx.py write -i fnirsi_1013d-fpga-al3-0x153b-flash1m.bin --yes
-    python firmware/tools/spiflash_d2xx.py verify -i fnirsi_1013d-fpga-al3-0x153b-flash1m.bin
+    python firmware/tools/spiflash_d2xx.py write -i fnirsi_1013d-fpga-al3-0x153d-flash1m.bin --yes
+    python firmware/tools/spiflash_d2xx.py verify -i fnirsi_1013d-fpga-al3-0x153d-flash1m.bin
     ```
 
     The tool asks for the JEDEC ID to be typed and takes another double-read backup before it erases. Good: verify
