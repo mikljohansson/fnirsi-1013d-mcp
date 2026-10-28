@@ -3081,8 +3081,8 @@ apart), `--skew-ps` sets the A - B offset.
 Cost: +2 PLL outputs on global clocks (the AL3 has 16), about -10 LUT, 0 extra LEs; the 0x33 self-check now checks the
 fabric copies (same D, same clock edge as the ODDRs), not the flops that drive the pins.
 
-**Roll independence (task 1, measured).** 31 placed builds of the variant (7 at -250, 8 at +250 and 16 at 0 ps: the
-unmoved source and single-section moves; two more failed to route) all report the same encode pads for their phase: **B 6.97, A 7.34 ns at 0 ps
+**Roll independence (task 1, measured).** 44 placed builds of the variant (7 at -250, 8 at +250 and 29 at 0 ps: the
+unmoved source, single- and two-section moves; three more failed to route) all report the same encode pads for their phase: **B 6.97, A 7.34 ns at 0 ps
 (A - B 0.37 on both chips), 6.72 / 7.09 at -250, 7.22 / 7.59 at +250**, identical to 0.01 ns in every roll, against
 6.90 .. 7.93 ns over the release's rolls. The data pins stay at -0.11 / +0.12 ns (`#ireg 33`). The pads now depend only on
 the PLL setting: an image at phase p has B 6.97 + p, A 7.34 + p (TD, TT corner).
@@ -3094,20 +3094,22 @@ file to flash. Source = this branch's `src/` + `tools/encphase_variant.py` with 
 |---|---|---|---|---|---|---|
 | enc-250 | `--iob --phase-ps -250 --move "//Display brightness" "//External trigger"` | `3fc75a76a21f89c90a30307153a46da419e3f528b2db00eb2f30fc2032e8b59d` | `d397e0c26ec26ec2db517b5de9b9e33b299df778825b64de71576e3bc245dd46` | 6.72 / 7.09 | 0 errors, 4.840 ns | 0 / 0 errors |
 | enc+250 | `--iob --phase-ps 250 --move "//Trigger hold-off" "//Decimation filter control"` | `eaac246e11027c91aa8a8faf23970a33b490cc6bbc82645fc6ecee6ebeb79f05` | `46a38f24e3a56aff45d0113247ac5a82cfbc059b66689659e4a2049d6e440b6f` | 7.22 / 7.59 | 0 errors, 4.941 ns | 0 / 0 errors |
-| enc0 | `--iob` + a roll still to find | not closed | | 6.97 / 7.34 | best roll 1 error (5.081 ns, `q_pass` as in every 0x153D roll table) | 0 / 0 |
+| enc0 | `--iob --move "//Trigger hold-off" "//External trigger input"` | `a71430a85e5b7676e2744e4d4ef8a8cdef38504ca9e46658697056d510111e06` | `c9d3210d90f9ad0a98d68011ce070940ead3c673cdcc2eb664f6bbc7b65b9fb2` | 6.97 / 7.34 | 0 errors, 4.892 ns | 0 / 0 errors |
 
-Files: `backups/al3_encphase_m250_3fc75a76.bin` / `..._padded.bin`, `backups/al3_encphase_p250_eaac246e.bin` /
-`..._padded.bin`. sample_write_clock and i_mcu_clk 0 errors in both (9.047 / 22.510 and 9.178 / 25.372 ns); 7448 / 7436 LE.
+Files: `backups/al3_encphase_m250_3fc75a76.bin`, `backups/al3_encphase_0_a71430a8.bin`,
+`backups/al3_encphase_p250_eaac246e.bin`, each with `..._padded.bin`. sample_write_clock and i_mcu_clk 0 errors in all three (9.047 / 22.510, 9.885 / 23.708, 9.178 / 25.372 ns); 7448 / 7449 / 7436 LE. The enc0 roll closed with 3 of 29 tried (also `t7_0` = "Sample write clock" before "Channel 1 DC offset" and `t8_0`); the one with the most clk_200MHz slack was kept.
 
-**Not finished (the session's background jobs were stopped by the host for low memory, 2026-10-27 about 12:30):** the
-phase-0 image (9 two-move rolls `t1_0`..`t9_0` were building), `tb/run.sh` on both seeds for every image (started for
-enc-250 / enc+250, stopped), and a rebuild of each pinned image in a fresh work dir (the hash check). What did run: the
+**Not finished: the host stopped the background jobs for low memory twice (2026-10-27 about 12:30, 2026-10-28 about
+12:30; WSL itself had 6+ GB free, the Windows side was short).** `tb/run.sh` on both seeds: the second attempt (enc0
+and enc-250, seeds 12345 and 4242, 4 jobs) passed steps 1-4 on all four runs (ext 39, decim 110 / 108 + cic_model, fir
+165 / 168 + cic_model, and on seed 12345 tb_long 8 checks) before it was stopped; enc+250 not started. The rebuild of
+each pinned image in a fresh work dir (the hash check) is not done either. What did run: the
 quick steps encphase, mcuread, adccap (2241 checks) and trigpos (882) on seed 12345 for the phase-0 source (identical RTL
 to all three images apart from the PLL), and encphase + adccap on the release source (unchanged, 2274 checks). **The images
-must not be flashed before the two-seed run.sh passes on each.**
+must not be flashed before the two-seed run.sh passes on each.** To finish: `full.sh`-style snapshots (the image's src + `tb/`), `REF_SRC_DIR=~/g11/refs`, two images (4 runs) at a time, about 3 h per batch; then rebuild each image with its options from the table into a fresh work dir and compare the raw sha256.
 
 Other phases (what -375 / -125 / +125 / +375 need): `tools/encphase_build.sh ~/encph NAME --iob --phase-ps N` plus the roll
-moves above in parallel until one closes every clock (at -250 one of 7 closed, at +250 one of 8, at 0 none of 16); then
+moves above in parallel until one closes every clock (at -250 one of 7 closed, at +250 one of 8, at 0 three of 29); then
 run.sh on two seeds and pinning. PLL settings (C2 B / C3 A, CPHASE / FPHASE): -375 3/5, 4/0; -125 3/7, 4/2; +125 4/1, 4/4;
 +375 4/3, 4/6. The simulation clocks stay in (2.5, 5) ns for all of them (`encphase_defs.py` refuses otherwise). Expect the
 self-check path (fabric copy on C3 to `enc_ok` on the next falling clk_200MHz edge, 1.875 ns at +250) to fail timing at
@@ -3115,8 +3117,7 @@ self-check path (fabric copy on C3 to `enc_ok` on the next falling clk_200MHz ed
 
 **Timing.** The paths the phase touches (TD, capture re-timing, worst setup / hold slack): `enc_cur` -> ODDR
 D (launch on the falling clk_200MHz edge, window 2.25 .. 2.875 ns) +0.90 / +2.71 ns at -250, +1.05 / +2.49 at +250;
-`enc_cur` -> fabric copies +1.11 / +2.99 (-250), +1.56 / +2.77 (+250); fabric copies -> `enc_ok` +0.43 (-250),
-**+0.066 (+250)**. The release's 3.75 ns `enc_nxt` -> encode flop path is gone (its slack was +2.80). A miss of the
+`enc_cur` -> fabric copies +1.11 / +2.99 (-250), +1.56 / +2.84 (0), +1.56 / +2.77 (+250); ODDR D at 0 ps +0.56 / +2.65; fabric copies -> `enc_ok` +0.43 (-250), +0.45 (0), **+0.066 (+250)**. The +250 image's self-check path is a risk: at 66 ps (TT corner) a slow unit or a warm FPGA can miss it, and the firmware would then see 0x33 / GET_HEALTH encode errors that are not data errors. If enc+250 shows encode errors on the bench, that is the likely cause; a rebuilt image would take `enc_ok` on the rising edge (inference). The release's 3.75 ns `enc_nxt` -> encode flop path is gone (its slack was +2.80). A miss of the
 `enc_ok` path would flag the 0x33 self-check (GET_HEALTH encode bad) without touching the data.
 
 **Predictions (task 3).** `capture_report.sh --bits` margins at the datasheet corner (tV 2, tPD 6, board 0.3 ns; start / end of the

@@ -219,9 +219,9 @@ like `docs/plans/fpga-0x153c.md` section 13 on the 0x153D source.
    "Encode phase experiment").** The pad delay moved with every roll because the encode flops were fabric flops: TD 4.6.8
    merges the A and the B flops and never packs a plain flop into these pads. An `AL_LOGIC_ODDR` per pin on two new PLL
    outputs (B on C2, A on C3, A - B 375 ps as the release) packs into the IOBs. Its pads are the same in every roll
-   (B 6.97, A 7.34 ns at the release-equivalent phase, against the release's 6.92 / 7.10 and 7.28 / 7.46). The -250 and
+   (B 6.97, A 7.34 ns at the release-equivalent phase, against the release's 6.92 / 7.10 and 7.28 / 7.46). The -250, 0 and
    +250 ps images are pinned in `backups/` with every clock closed and the release's version word, so they need no
-   firmware change. Still open before the bench: a closing roll for the 0 ps image, run.sh on two seeds for all three,
+   firmware change. Still open before the bench: run.sh on two seeds for all three (steps 1-4 passed for 0 and -250)
    and the hash rebuilds. `fpga/al3/tools/enc_ab.py` is the A/B (e_ab.py / e_ab2.py recovered). The
    decision table adds a fourth case: if the IOB image at phase 0 matches the release, the next build adopts it to end
    the roll lottery. Experiment (a), the IDELAY, is not prepared.

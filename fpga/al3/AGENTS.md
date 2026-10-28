@@ -7,8 +7,8 @@ State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
 - fpga-encphase (2026-10-27, branch `fpga-encphase`, not merged): **the encode-phase experiment, prepared, not finished**.
   The release's encode flops are fabric flops (TD merges them; plain flops never pack into those pads), which is why the
   pads move with every roll; an `AL_LOGIC_ODDR` per pin on new PLL outputs C2 / C3 packs into the IOB and fixes the pads
-  (B 6.97 / A 7.34 ns in all 16 rolls). enc-250 and enc+250 pinned (timing closed), enc0 not closed, two-seed run.sh not
-  run (jobs stopped for low memory). `src/` is still the release. Section "Encode phase experiment, fpga-encphase" below
+  (B 6.97 / A 7.34 ns in all 29 rolls). All three images pinned with every clock closed (enc0 `a71430a8` closed
+  2026-10-28); two-seed run.sh and the hash rebuilds still open (jobs stopped twice for low memory on the Windows side). `src/` is still the release. Section "Encode phase experiment, fpga-encphase" below
   (with the bench session), README section 19.
 - fpga-d3gate (2026-10-22): **0x153D with 0x153C's gated encodes** (the owner's 11:45 decision after the 11:36 A/B: the
   full-rate encodes gave CH2 1-3 % code errors at every timebase). ebf3645 reverts 646c453 and its testbench / contract
@@ -443,14 +443,14 @@ dist entry, no firmware change.** Write-up: README section 19.
   two B and the two A flops into one register driving two pads plus the self-check: the pad delay is a fabric route, hence
   6.9 .. 7.9 ns by roll. Plain flops never pack into these pads in TD 4.6.8 (keep + `PACKREG = ON`, posedge, no keep: all
   `#oreg 11`); `AL_LOGIC_ODDR` does (`#oreg 15`). The `--iob` variant (ODDRs on new PLL outputs C2 = B, C3 = A, fed from
-  `enc_cur`) puts the pads at B 6.97 / A 7.34 ns (release 6.92 / 7.10 and 7.28 / 7.46) in all 16 rolls at that phase, and
+  `enc_cur`) puts the pads at B 6.97 / A 7.34 ns (release 6.92 / 7.10 and 7.28 / 7.46) in all 29 rolls at that phase, and
   at exactly +-0.25 ns in the 15 rolls at +-250 ps: the pads no longer depend on placement (README section 19).
-- **Images (task 2), state at hand-over: NOT READY TO FLASH.** enc-250 (`3fc75a76`, padded `d397e0c2`) and enc+250
-  (`eaac246e`, padded `46a38f24`) close every clock and are pinned in `backups/al3_encphase_*`; enc0 has no closing roll
-  yet (16 tried, best 1 error on `q_pass`). The host stopped this session's background jobs for low memory (about 12:30)
-  while 9 two-move rolls for enc0 (`~/encph/t1_0..t9_0`, list in README section 19's commands) and the two-seed `run.sh`
-  of enc-+250 were running. **To do before the bench:** (1) roll enc0 (two-move combinations; `tools/encphase_build.sh`
-  with two `--move`), pin it; (2) `run.sh` on seeds 12345 and 4242 for each of the three images (a snapshot of the image's
+- **Images (task 2), state at hand-over: NOT READY TO FLASH.** enc-250 (`3fc75a76`, padded `d397e0c2`), enc0
+  (`a71430a8`, padded `c9d3210d`) and enc+250 (`eaac246e`, padded `46a38f24`) close every clock and are pinned in
+  `backups/al3_encphase_*`. The +250 image's self-check path has only +0.066 ns: a risk of false 0x33 encode errors
+  (README section 19). The host stopped the background jobs for low memory twice (2026-10-27 and 10-28, both about
+  12:30), the second time during the two-seed `run.sh` of enc0 and enc-250, after steps 1-4 passed on all four runs.
+  **To do before the bench:** (1) done; `run.sh` on seeds 12345 and 4242 for each of the three images (a snapshot of the image's
   src + `tb/`, `REF_SRC_DIR=~/g11/refs`, about 3 h each, run at most 4 at a time: 6 runs plus TD rolls exhausted the 15 GB
   WSL); (3) rebuild each pinned image in a fresh work dir and compare the hash. Quick steps already passed on the phase-0
   source: encphase, mcuread, adccap, trigpos (seed 12345).
