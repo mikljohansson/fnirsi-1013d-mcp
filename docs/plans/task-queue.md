@@ -276,10 +276,19 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [ ] **Bench the encode-phase experiment** (fpga-encphase, 2026-10-27, branch `fpga-encphase`, roadmap section 6 item 4
   knob 2): IOB-encode images of 0x153D (-250 / 0 / +250 ps, version word 0x153D, no firmware change); all three pinned
-  in `backups/al3_encphase_*`. **First an FPGA agent finishes the prep:** two-seed run.sh on all three (at most two
-  images at a time; the host has stopped these jobs twice for low memory), hash rebuilds (fpga/al3/AGENTS.md "To do before the bench"). Then the A/B script `fpga/al3/tools/enc_ab.py`, and a one-sitting session of about 2 hours (backups,
+  in `backups/al3_encphase_*`. Prep done 2026-11-02 (coordinator): two-seed run.sh and hash rebuilds on all three;
+  enc+250 passes only at its trained stages, so the wizard retrain before each A/B is mandatory (README section 19).
+  The A/B script is `fpga/al3/tools/enc_ab.py`; a one-sitting session of about 2 hours (backups,
   release run, 0x153C reference, three images, back to the release, decision table): `fpga/al3/AGENTS.md` "Encode phase
   experiment, fpga-encphase", numbers in README section 19. Needs the owner at the bench with the FT2232D.
+- [ ] **Simulation race on the derived write clock** (coordinator 2026-11-02, from the fpga-encphase run.sh): tb_peak seed
+  12345 on the enc0 source found the boxcar latency 11 instead of 12 in run.sh's compile and 12 in 8 of 8 other compiles
+  of the same files. `sample_write_clock` is a register toggled on clk_200MHz (zaklad.v ~1420), so logic on it can see a
+  clk_200MHz-domain value of the same instant before or after its update, depending on iverilog's ordering; any source
+  edit can flip a check (tb_fir's div20 failure in October was the same kind). Find the clk_200MHz -> write-clock
+  crossings in the decimator / peak path and make the simulation deterministic (e.g. the write clock as a delayed copy in
+  SIM, or sample those values one edge earlier) without changing the synthesized logic; confirm the hardware path is a
+  constrained, timed one in TD. Low priority; no hardware symptom known.
 - [ ] **Flash and bench 0x153C** (fpga-c4, built 10-21: `dist/al3-0x153C.bin` `2580b090...c7f2`, flash image `07393bf5...1f77`,
   unbenched; fw 0.2.104+ is built for it). Checklist: fpga/al3/AGENTS.md "0x153C built, fpga-c4"; bench checks: contract
   9.2 items 1-7 (README section 15). Then dist `recommended`, 0x153B `supported`.

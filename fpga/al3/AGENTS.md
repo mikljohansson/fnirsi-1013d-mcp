@@ -7,8 +7,9 @@ State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
 - fpga-encphase (2026-10-27, branch `fpga-encphase`, not merged): **the encode-phase experiment, prepared, not finished**.
   The release's encode flops are fabric flops (TD merges them; plain flops never pack into those pads), which is why the
   pads move with every roll; an `AL_LOGIC_ODDR` per pin on new PLL outputs C2 / C3 packs into the IOB and fixes the pads
-  (B 6.97 / A 7.34 ns in all 29 rolls). All three images pinned with every clock closed (enc0 `a71430a8` closed
-  2026-10-28); two-seed run.sh and the hash rebuilds still open (jobs stopped twice for low memory on the Windows side). `src/` is still the release. Section "Encode phase experiment, fpga-encphase" below
+  (B 6.97 / A 7.34 ns in all 29 rolls). All three images pinned with every clock closed, rebuilt to the same hashes and
+  through the two-seed run.sh (2026-11-02; enc+250 passes at its trained stages only, so the wizard retrain on the bench is
+  mandatory). Ready for the bench session; nothing flashed. `src/` is still the release. Section "Encode phase experiment, fpga-encphase" below
   (with the bench session), README section 19.
 - fpga-d3gate (2026-10-22): **0x153D with 0x153C's gated encodes** (the owner's 11:45 decision after the 11:36 A/B: the
   full-rate encodes gave CH2 1-3 % code errors at every timebase). ebf3645 reverts 646c453 and its testbench / contract
@@ -445,15 +446,15 @@ dist entry, no firmware change.** Write-up: README section 19.
   `#oreg 11`); `AL_LOGIC_ODDR` does (`#oreg 15`). The `--iob` variant (ODDRs on new PLL outputs C2 = B, C3 = A, fed from
   `enc_cur`) puts the pads at B 6.97 / A 7.34 ns (release 6.92 / 7.10 and 7.28 / 7.46) in all 29 rolls at that phase, and
   at exactly +-0.25 ns in the 15 rolls at +-250 ps: the pads no longer depend on placement (README section 19).
-- **Images (task 2), state at hand-over: NOT READY TO FLASH.** enc-250 (`3fc75a76`, padded `d397e0c2`), enc0
-  (`a71430a8`, padded `c9d3210d`) and enc+250 (`eaac246e`, padded `46a38f24`) close every clock and are pinned in
-  `backups/al3_encphase_*`. The +250 image's self-check path has only +0.066 ns: a risk of false 0x33 encode errors
-  (README section 19). The host stopped the background jobs for low memory twice (2026-10-27 and 10-28, both about
-  12:30), the second time during the two-seed `run.sh` of enc0 and enc-250, after steps 1-4 passed on all four runs.
-  **To do before the bench:** (1) done; `run.sh` on seeds 12345 and 4242 for each of the three images (a snapshot of the image's
-  src + `tb/`, `REF_SRC_DIR=~/g11/refs`, about 3 h each, run at most 4 at a time: 6 runs plus TD rolls exhausted the 15 GB
-  WSL); (3) rebuild each pinned image in a fresh work dir and compare the hash. Quick steps already passed on the phase-0
-  source: encphase, mcuread, adccap, trigpos (seed 12345).
+- **Images (task 2): ready for the bench (coordinator, 2026-11-02).** enc-250 (`3fc75a76`, padded `d397e0c2`), enc0
+  (`a71430a8`, padded `c9d3210d`) and enc+250 (`eaac246e`, padded `46a38f24`) close every clock, are pinned in
+  `backups/al3_encphase_*` and rebuild to the same hash. Two-seed run.sh: enc-250 ALL PASS; enc0 ALL PASS except one
+  tb_peak check on seed 12345, a simulation race on the derived write clock (passes in 8 of 8 other compiles); enc+250
+  fails tb_trigpos and tb_counter at the power-on capture stages (CH1 A4) and passes both on both seeds at the predicted
+  trained stages A3 B3 (0x63 = 0x06DB). Details README section 19. So: on enc+250 the wizard retrain of step 4 is
+  mandatory before any capture is judged, and its self-check path has only +0.066 ns (a risk of false 0x33 encode errors).
+  Background jobs in WSL must run from an attached `wsl.exe` (the VM shuts down otherwise; that, not memory alone, killed
+  the earlier runs).
 - **Firmware (task 4).** None: the images keep 0x153D and every register; fw 0.2.105 c681efa4 (on the card) runs them. They
   are identified by sha256 only (`enc_ab.py --image-sha256`), so the session must end with the release flashed back.
 - **Scripts (task 5).** `e_ab.py` / `e_ab2.py` recovered from the 2026-10-22 lead scratchpad
@@ -476,7 +477,8 @@ differs. Name every run `ab_<image>_<time>.npz` in `backups/encphase/`.
    both sha256 equal. Then battery, USB unplugged, FT2232D on J2: `spiflash_d2xx.py probe` = `ef 40 14`,
    `spiflash_d2xx.py read -o backups/encphase/fpga-flash_pre-encphase.bin --twice`: both must hash to the release flash
    image `aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc`; anything else: stop. Log in
-   docs/hardware-status.md (check the clock first). The experiment images must have passed run.sh on two seeds first.
+   docs/hardware-status.md (check the clock first). The experiment images passed run.sh on two seeds (2026-11-02, with the
+   two exceptions explained in README section 19).
 2. **Release run "rel-1"** (no flash): USB back, wizard with the inputs open (Calibrate, save), probes back to the fixed
    positions, then
    `mcp\.venv\Scripts\python -I fpga/al3/tools/enc_ab.py --port COM10 --image rel-1 --image-sha256 aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc --out backups/encphase/ab_rel-1.npz`
@@ -491,6 +493,8 @@ differs. Name every run `ab_<image>_<time>.npz` in `backups/encphase/`.
    power-cycle (the card boots 0.2.105); `#VER` = `fpga=0x153d`; GET_HEALTH encode self-check 0 bad; wizard with the inputs
    open; probes back; `enc_ab.py --image <name> --image-sha256 <padded sha256>`). About 12 minutes each. Note the trained
    stages the wizard prints and compare with the predictions of README section 19: a different A stage is a surprise to log.
+   Never skip the wizard: on enc+250 the stages stored from the previous image can take CH1 A one stage late (the
+   simulation fails at A4 and passes at A3).
 5. **Return to the release**: write `backups/al3_d3gate_0x153D_fd0be7a2_padded.bin` (`aa252fb7...63cc`), verified;
    power-cycle; wizard with the inputs open (the stored stages were trained on the last experiment image); probes back;
    run "rel-2" as in step 2. rel-1 against rel-2 is the session's run-to-run spread. Fallback for the calibration: the

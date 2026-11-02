@@ -3099,14 +3099,32 @@ file to flash. Source = this branch's `src/` + `tools/encphase_variant.py` with 
 Files: `backups/al3_encphase_m250_3fc75a76.bin`, `backups/al3_encphase_0_a71430a8.bin`,
 `backups/al3_encphase_p250_eaac246e.bin`, each with `..._padded.bin`. sample_write_clock and i_mcu_clk 0 errors in all three (9.047 / 22.510, 9.885 / 23.708, 9.178 / 25.372 ns); 7448 / 7449 / 7436 LE. The enc0 roll closed with 3 of 29 tried (also `t7_0` = "Sample write clock" before "Channel 1 DC offset" and `t8_0`); the one with the most clk_200MHz slack was kept.
 
-**Not finished: the host stopped the background jobs for low memory twice (2026-10-27 about 12:30, 2026-10-28 about
-12:30; WSL itself had 6+ GB free, the Windows side was short).** `tb/run.sh` on both seeds: the second attempt (enc0
-and enc-250, seeds 12345 and 4242, 4 jobs) passed steps 1-4 on all four runs (ext 39, decim 110 / 108 + cic_model, fir
-165 / 168 + cic_model, and on seed 12345 tb_long 8 checks) before it was stopped; enc+250 not started. The rebuild of
-each pinned image in a fresh work dir (the hash check) is not done either. What did run: the
-quick steps encphase, mcuread, adccap (2241 checks) and trigpos (882) on seed 12345 for the phase-0 source (identical RTL
-to all three images apart from the PLL), and encphase + adccap on the release source (unchanged, 2274 checks). **The images
-must not be flashed before the two-seed run.sh passes on each.** To finish: `full.sh`-style snapshots (the image's src + `tb/`), `REF_SRC_DIR=~/g11/refs`, two images (4 runs) at a time, about 3 h per batch; then rebuild each image with its options from the table into a fresh work dir and compare the raw sha256.
+**Two-seed run.sh and the hash rebuilds (coordinator, 2026-10-28 14:33 .. 2026-11-02 19:58).** Earlier attempts were
+stopped by the host: the WSL VM shuts down when no Windows-side `wsl.exe` stays attached, so detached background jobs died
+with it (2026-10-27 and 10-28 about 12:30, 10-28 11:39 and 11:41, and a machine restart). The rest ran as attached tasks
+from the coordinating session, at most 2 jobs at a time, each started only with 3 GB free on Windows (`~/encph/orch.log`).
+- **Rebuilds:** each pinned image rebuilt from its options into a fresh work dir gives the same raw sha256 (`a71430a8`,
+  `3fc75a76`, `eaac246e`, full hashes in the table above).
+- **enc-250:** ALL PASS on seeds 12345 and 4242.
+- **enc0:** ALL PASS on seed 4242; seed 12345 failed one check, tb_peak "N = 200, K = 1, FIR on" found the boxcar
+  latency 11 instead of 12. It is a simulation race, not the image: the same source and testbench compiled outside
+  run.sh pass 8 of 8 times, run.sh's compile fails every time it runs, and the two compiles differ only in iverilog's
+  internal ordering (the vvp files differ in pointer labels only). `sample_write_clock` is a register toggled on
+  clk_200MHz, so logic on it can see a clk_200MHz value from the same instant before or after its update, depending on that
+  ordering; the encode change only reshuffled the compile (the release source passes 6 of 6 compiles). The October tb_fir
+  failure (div20 alias wire, bd24bdf) was the same kind. Queued: `docs/plans/task-queue.md` "Simulation race on the
+  derived write clock".
+- **enc+250:** failed on both seeds in tb_trigpos ("legacy A/B order: core B half a word from core A", 30 / 12 of 882)
+  and tb_counter ("frequency within tolerance", 3 of 115). Cause: the power-on capture stages. The testbenches run at the
+  power-on 0x63 = 0x08E4 (CH1 A4 B4, CH2 A3 B4); at +250 the simulated A data (pin 1.875 ns after its edge, tPD 3.3 ns)
+  changes 0.175 ns after a capture instant at CH1 A4, so A is taken one stage late in some runs. With 0x63 = 0x06DB (A3 B3
+  on both channels, this section's predicted pick) written after the version read, tb_trigpos passes 882 of 882 and
+  tb_counter 115 of 115 on both seeds; with 0x08E4 written explicitly they fail as in run.sh (12 of 882, 3 of 115).
+  **On the bench the wizard must train the stages on enc+250 before any capture is judged** (the stored stages from the
+  previous image load at boot and may be wrong for it); a pick of CH1 A4 on enc+250 is the failure the simulation shows.
+
+**Flash status: enc-250 and enc0 may be flashed; enc+250 may be flashed for the experiment with the wizard retrain first
+(step 4 of the bench session), keeping the +0.066 ns self-check risk above in mind.**
 
 Other phases (what -375 / -125 / +125 / +375 need): `tools/encphase_build.sh ~/encph NAME --iob --phase-ps N` plus the roll
 moves above in parallel until one closes every clock (at -250 one of 7 closed, at +250 one of 8, at 0 three of 29); then
