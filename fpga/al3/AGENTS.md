@@ -4,6 +4,15 @@ Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
+- fpga-simrace (2026-11-03, branch `fpga-simrace`): **simulation only, no bitstream change** (release source rebuilds to
+  `fd0be7a2...e96a`). Under `ifdef SIM` the write clock toggles 1 ps after its clk_200MHz edge (`zaklad.v`, plus a SIM
+  `timescale`), and `run.sh`'s `mkref` gives the references the same delay: write clock processes and testbench monitors
+  no longer see an MCU write of the same instant half applied through combinational wires (the October tb_fir div20
+  failure, still reproduced by `bd24bdf^` and gone with the delay). tb_stream compiles with `-DSIM`. tb_peak's
+  `check_words` passes when the boxcar latency fits (at N = 200 a neighbour latency can fit too: the fpga-encphase enc0
+  "latency 11" was that, not a race). Rule for new RTL: a falling-clk_200MHz register read by write clock logic would be
+  simulated after its update, against timing analysis; there is none now. README section 20 has the crossing list, the
+  six-compile determinism runs and the TD slack.
 - fpga-d3gate (2026-10-22): **0x153D with 0x153C's gated encodes** (the owner's 11:45 decision after the 11:36 A/B: the
   full-rate encodes gave CH2 1-3 % code errors at every timebase). ebf3645 reverts 646c453 and its testbench / contract
   parts (tb_skip.v gone), keeps the logger, the square, version 0x3D and the W fix; e3a23c2 = roll h1 (4.983 ns, every
