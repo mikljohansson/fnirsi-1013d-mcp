@@ -96,6 +96,12 @@
 //    (power-on) the pin, when driven, holds the idle level and the capture is unchanged.
 //-------------------------------------------------------------------------------------
 
+//Simulation only: the time unit of the 1 ps write clock delay (see "sample_write_clock <= #0.001" below), whatever the
+//testbench compiles before this file
+`ifdef SIM
+`timescale 1ns / 1ps
+`endif
+
 //A simple clock divider module for which the width and the last count can be set
 
 module clockdivider
@@ -1414,10 +1420,20 @@ module fnirsi_1013D
       adc2_encA <= enc_nxt_n;
     end
 
+  //Simulation only (`ifdef SIM, fpga/al3/README.md "Changes" section 20): the write clock changes 1 ps after the falling
+  //clk_200MHz edge that toggles it, so every process on it (the write clock domain here and the testbench monitors on
+  //dut.sample_write_clock) runs after all the other updates of that instant, the MCU registers written on the same
+  //instant included. Without the delay iverilog woke those processes in the middle of the instant's nonblocking
+  //updates, so they saw some of the instant's MCU writes before and some after, in an order that changed with the
+  //compile (tb_peak seed 12345 on the fpga-encphase 0 ps source, tb_fir div20 in October). The flop itself is the same.
   always @(negedge clk_200MHz)//clk_200MHz  clk_RAM
     begin
       if(sample_clock_enable == 1)
+`ifdef SIM
+        sample_write_clock <= #0.001 ~sample_write_clock;
+`else
         sample_write_clock <= ~sample_write_clock;
+`endif
 
       swc_sh <= sample_write_clock ^ sample_clock_enable;
     end
