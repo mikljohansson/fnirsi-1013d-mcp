@@ -93,8 +93,12 @@ mkref() {
     | sed -E 's/\b(clockdivider|pwmcounter|freq_generator_dds_pwm|decim_chan|fir_chan|fnirsi_1013D)\b/\1_ref/g' \
     | if [ "${REF_READ_EDGE:-neg}" = neg ]; then
         sed -E '/requested byte is loaded/,/always @\(posedge i_mcu_clk\)/ s/always @\(posedge i_mcu_clk\)/always @(negedge i_mcu_clk)/'
-      else cat; fi > "$2"
+      else cat; fi \
+    | sed -E 's/^( *)sample_write_clock <= ~sample_write_clock;/\1sample_write_clock <= #0.001 ~sample_write_clock;/' > "$2"
   grep -q 'negedge i_mcu_clk' "$2" || [ "${REF_READ_EDGE:-neg}" != neg ] || { echo "mkref: read edge not changed in $1"; exit 1; }
+  # README "Changes" section 20: the references' write clock gets the dut's 1 ps simulation delay, so an MCU write on the
+  # instant of a write clock edge is seen the same way (after the write) by both sides of the equivalence steps
+  [ "$(grep -c 'sample_write_clock <= #0.001 ~sample_write_clock;' "$2")" = 1 ] || { echo "mkref: write clock delay not applied in $1"; exit 1; }
 }
 compile() {  # <out.vvp> <ref.v> <tb.v>
   iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -o "$1" "$HERE/sim_models.v" "$DUT" "$2" "$3" \
@@ -189,7 +193,7 @@ if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = stream ]; then
-  iverilog -g2012 $IVDEFS -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_stream.vvp" +seed=$SEED +chunks=${STREAM_CHUNKS:-2} | tee "$WORK/sim_stream.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_stream.log" || RC=1
 fi

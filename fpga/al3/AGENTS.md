@@ -11,6 +11,15 @@ State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
   through the two-seed run.sh (2026-11-02; enc+250 passes at its trained stages only, so the wizard retrain on the bench is
   mandatory). Ready for the bench session; nothing flashed. `src/` is still the release. Section "Encode phase experiment, fpga-encphase" below
   (with the bench session), README section 19.
+- fpga-simrace (2026-11-03, branch `fpga-simrace`): **simulation only, no bitstream change** (release source rebuilds to
+  `fd0be7a2...e96a`). Under `ifdef SIM` the write clock toggles 1 ps after its clk_200MHz edge (`zaklad.v`, plus a SIM
+  `timescale`), and `run.sh`'s `mkref` gives the references the same delay: write clock processes and testbench monitors
+  no longer see an MCU write of the same instant half applied through combinational wires (the October tb_fir div20
+  failure, still reproduced by `bd24bdf^` and gone with the delay). tb_stream compiles with `-DSIM`. tb_peak's
+  `check_words` passes when the boxcar latency fits (at N = 200 a neighbour latency can fit too: the fpga-encphase enc0
+  "latency 11" was that, not a race). Rule for new RTL: a falling-clk_200MHz register read by write clock logic would be
+  simulated after its update, against timing analysis; there is none now. README section 20 has the crossing list, the
+  six-compile determinism runs and the TD slack.
 - fpga-d3gate (2026-10-22): **0x153D with 0x153C's gated encodes** (the owner's 11:45 decision after the 11:36 A/B: the
   full-rate encodes gave CH2 1-3 % code errors at every timebase). ebf3645 reverts 646c453 and its testbench / contract
   parts (tb_skip.v gone), keeps the logger, the square, version 0x3D and the W fix; e3a23c2 = roll h1 (4.983 ns, every
@@ -449,7 +458,7 @@ dist entry, no firmware change.** Write-up: README section 19.
 - **Images (task 2): ready for the bench (coordinator, 2026-11-02).** enc-250 (`3fc75a76`, padded `d397e0c2`), enc0
   (`a71430a8`, padded `c9d3210d`) and enc+250 (`eaac246e`, padded `46a38f24`) close every clock, are pinned in
   `backups/al3_encphase_*` and rebuild to the same hash. Two-seed run.sh: enc-250 ALL PASS; enc0 ALL PASS except one
-  tb_peak check on seed 12345, a simulation race on the derived write clock (passes in 8 of 8 other compiles); enc+250
+  tb_peak check on seed 12345, an ambiguous latency check (11 and 12 both fit; fixed by fpga-simrace, merged here); enc+250
   fails tb_trigpos and tb_counter at the power-on capture stages (CH1 A4) and passes both on both seeds at the predicted
   trained stages A3 B3 (0x63 = 0x06DB). Details README section 19. So: on enc+250 the wizard retrain of step 4 is
   mandatory before any capture is judged, and its self-check path has only +0.066 ns (a risk of false 0x33 encode errors).

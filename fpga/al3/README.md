@@ -3107,13 +3107,12 @@ from the coordinating session, at most 2 jobs at a time, each started only with 
   `3fc75a76`, `eaac246e`, full hashes in the table above).
 - **enc-250:** ALL PASS on seeds 12345 and 4242.
 - **enc0:** ALL PASS on seed 4242; seed 12345 failed one check, tb_peak "N = 200, K = 1, FIR on" found the boxcar
-  latency 11 instead of 12. It is a simulation race, not the image: the same source and testbench compiled outside
-  run.sh pass 8 of 8 times, run.sh's compile fails every time it runs, and the two compiles differ only in iverilog's
-  internal ordering (the vvp files differ in pointer labels only). `sample_write_clock` is a register toggled on
-  clk_200MHz, so logic on it can see a clk_200MHz value from the same instant before or after its update, depending on that
-  ordering; the encode change only reshuffled the compile (the release source passes 6 of 6 compiles). The October tb_fir
-  failure (div20 alias wire, bd24bdf) was the same kind. Queued: `docs/plans/task-queue.md` "Simulation race on the
-  derived write clock".
+  latency 11 instead of 12. That was an ambiguous check, not a race and not the image (corrected 2026-11-03; an earlier
+  version of this bullet called it a compile-order race): with the image's encode clock defines, latencies 11 and 12
+  both explain all 71 words at N = 200 (200-sample windows of random input seldom have their max or min in a window's
+  end pair), and the check reported the first fit. The "passing" compiles outside run.sh lacked those defines and so
+  simulated the release's encode phases. Fixed in fpga-simrace (section 20: tb_peak passes when the boxcar latency fits;
+  the separate write clock simulation delay covers the real race class of the October tb_fir div20 failure).
 - **enc+250:** failed on both seeds in tb_trigpos ("legacy A/B order: core B half a word from core A", 30 / 12 of 882)
   and tb_counter ("frequency within tolerance", 3 of 115). Cause: the power-on capture stages. The testbenches run at the
   power-on 0x63 = 0x08E4 (CH1 A4 B4, CH2 A3 B4); at +250 the simulated A data (pin 1.875 ns after its edge, tPD 3.3 ns)
@@ -3166,6 +3165,58 @@ image's ODDR inputs and fabric copies against their own window (the late-CH2-A c
 (c681efa4, on the card) runs them unchanged. The firmware cannot tell an experiment image from the release; `enc_ab.py`
 records the image sha256 the operator passes (the flash step's verified hash), and the session ends with the release
 flashed back (AGENTS.md).
+### 20. Write clock simulation order and the tb_peak latency check (fpga-simrace, 2026-11-03)
+
+No bitstream change: the release source with this section's lines builds to the same raw image (`fd0be7a2...e96a`).
+
+**The race.** `sample_write_clock` is a register toggled with a nonblocking assignment on the falling edge of
+clk_200MHz. In iverilog its update wakes the processes on it in the middle of that instant's nonblocking updates. They
+see the registers written on the same instant updated, but a combinational wire of those registers can still hold its
+old value. A 20-line testbench (an MCU write on the write clock instant, a reader of the register and four wires shaped
+like `sample_rate_divider_eff`, `dec_ph`, `fir_ok` and `fir_hp`) got a mixed view in 8 of 8 reads, the mix depending on
+process order. In the design the instants that collide are MCU writes (`i_mcu_clk`, asynchronous to the write clock)
+landing on a write clock edge; the reads at risk are the wires made from them (`cap_rst`, `dec_on`, `dec_ph`, `fir_ok`,
+`peak_act`, `swc_adv`, `trigger_level_eff`, ...). The October tb_fir failure (div20, bd24bdf) was one: its source
+`bd24bdf^` still fails tb_fir seed 12345 at t = 9305.61 us (`+p1=10`, 157 checks, 1 failed, 30 MISMATCH lines).
+
+**Crossings into write clock logic** (a script over `zaklad.v`, the always blocks and instance ports clocked by the
+write clock, wires expanded): 27 MCU registers (the hazard above), 9 rising clk_200MHz registers (`adc_d*`, `adc_dd*`,
+`sampling_triggered`, `seq_req`, `seq_wrap`, `str_q`, `pp_ma`: launched 2.5 ns before the write clock edge in
+simulation, no collision), no falling clk_200MHz register (`sample_rate_counter`, `sce_q`, `swc_sh`, `enc_*` are not
+read there). The reverse: the only falling clk_200MHz block that reads the write clock is the one that toggles it.
+
+**The fix** (`ifdef SIM` only): `sample_write_clock <= #0.001 ~sample_write_clock`, with a `timescale 1ns / 1ps` under
+`ifdef SIM` at the top of `zaklad.v` so the delay is 1 ps whatever file is compiled first. Every process on the write
+clock, and every testbench monitor on `dut.sample_write_clock`, now runs after all updates of the instant, so an MCU write
+on that instant is always seen as written before the edge. In hardware the write is asynchronous and either order is a
+real outcome; the simulation now always takes the same one. The same micro testbench with the delay: 0 of 8 mixed.
+`run.sh`'s `mkref` gives the references the same delay (and stops if it does not apply), so the equivalence steps see
+the same order on both sides; `tb_stream` now compiles with `-DSIM` like the other steps. Caveat (inference from the
+timing model): a register on the falling clk_200MHz edge read by write clock logic would, with the delay, be seen
+after its update, where timing analysis (same edge, hold check) gives the value before it. There is none today; a new
+one needs this in mind.
+
+**Evidence.** October source `bd24bdf^` with the delay (reference too): tb_fir seed 12345 `+p1=10` 157 checks, 0
+failed, 0 MISMATCH. Six compiles per testbench (three path lengths x two file orders), seed 12345, the whole log
+compared: release source tb_peak, tb_trigpos (`+runs=2`), tb_fir (`+p1=10`) 1 distinct log of 6 each, tb_decim 1 of 4;
+the fpga-encphase 0 ps source (u3_0, with its encode clock defines) tb_peak, tb_trigpos, tb_fir 1 of 6 each. The vvp
+processes peak at 10..13 MB. (tb_fir at `+p1=3` fails "after FIR use, FIR off again identical to 0x1534" with or without
+the delay: a short-run artefact, not checked further.) Full `tb/run.sh` on the release source with these commits
+(`REF_SRC_DIR=~/g11/refs`, both seeds in parallel, 2.4 h each, 46 MB peak): **ALL PASS on seeds 12345 and 4242**.
+
+**Timing (TD 4.6.8, the build above, every endpoint re-timed).** The crossings are timed paths: `sample_write_clock` is
+the generated clock of `zaklad.sdc` (edges 2 4 6 of clk_200MHz), and TD propagates its latency through the toggle
+flop (clock arrival 2.6..2.97 ns at the write clock sinks against 0.94..1.09 ns at clk_200MHz's). clk_200MHz rising ->
+write clock rising: 121 endpoints, worst setup +0.558 ns (from `sampling_triggered`, against the PLL clock clkc[0];
++0.629 against clk_200MHz), hold +1.410 ns; -> write clock falling: 192 endpoints, setup +1.974 ns, hold +1.445 ns. Write
+clock -> clk_200MHz (multicycle 2): 185 endpoints, setup +1.196 ns, hold +3.950 ns. No falling clk_200MHz -> write clock
+path exists. The 40 setup errors under `main_clock/pll_inst.clkc[0]` are in the release build's own report too.
+
+**tb_peak.** The fpga-encphase 0 ps image failed seed 12345 "N = 200, K = 1, FIR on" (latency 11, the boxcar's 12).
+Not a race: with the image's encode clock defines (`run.sh` passes them) every compile fails, without them (the "8 of 8
+passing" compiles) every compile passes. Latencies 11 and 12 both explain all 71 words there: a 200-sample window of
+random input rarely has its max or min in its end pairs, and the check took the first fit. `check_words` now tries
+every latency, passes when the boxcar's latency fits and prints the others ("also fit"). Expected latencies are unchanged.
 
 ## Device facts from the datasheet
 
