@@ -274,6 +274,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
+- [x] **Simulation race on the derived write clock** (fpga-simrace, branch `fpga-simrace`, fpga/al3/README.md section 20:
+  461a70c the 1 ps SIM write clock delay with the references', 639a7de + e2f1bdd tb_peak's latency check). The enc0 tb_peak
+  failure that queued it was a checker ambiguity (11 and 12 both fit at N = 200), not a race; the race class is the
+  October div20 one, deterministic now (six compiles per testbench, one log). fpga-encphase needs the same commits.
 - [ ] **Flash and bench 0x153C** (fpga-c4, built 10-21: `dist/al3-0x153C.bin` `2580b090...c7f2`, flash image `07393bf5...1f77`,
   unbenched; fw 0.2.104+ is built for it). Checklist: fpga/al3/AGENTS.md "0x153C built, fpga-c4"; bench checks: contract
   9.2 items 1-7 (README section 15). Then dist `recommended`, 0x153B `supported`.
