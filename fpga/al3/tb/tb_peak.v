@@ -232,11 +232,16 @@ module tb;
   endtask
 
   // every written word against the windows: find the latency that explains all, require the boxcar's
-  integer valid, nchk;
+  // (README "Changes" section 20) Every latency 0..39 is tried and the check passes when lat_box is one that explains
+  // all words: with 2P = 200 samples per window of random input the max / min rarely sit in a window's end pairs, so a
+  // neighbour latency can explain all words too (the enc0 image's encode phases, seed 12345, N = 200: 11 and 12 both fit
+  // all 71 words), and the first fit was then reported as a wrong latency. The other fitting latencies are printed.
+  integer valid, nchk, nfit, lat_ok;
+  reg [8*80-1:0] also;
   task check_words(input integer pp, input [8*60-1:0] what);
     begin
-      best = -1; nchk = 0;
-      for (lat = 0; lat < 40 && best < 0; lat = lat + 1) begin
+      best = -1; nchk = 0; nfit = 0; lat_ok = 0; also = "";
+      for (lat = 0; lat < 40; lat = lat + 1) begin
         okc = 1; cnt = 0;
         for (i = 0; i < nwr && okc; i = i + 1) begin
           window(0, wedge[i], pp, lat, valid);
@@ -247,10 +252,16 @@ module tb;
             if (wword[i][31:16] !== {emx, emn}) okc = 0;
           end
         end
-        if (okc && cnt > 0) begin best = lat; nchk = cnt; end
+        if (okc && cnt > 0) begin
+          nfit = nfit + 1;
+          if (lat == lat_box) lat_ok = 1;
+          else also = (also == "") ? $sformatf("%0d", lat) : $sformatf("%0s, %0d", also, lat);
+          if (best < 0 || lat == lat_box) begin best = lat; nchk = cnt; end
+        end
       end
-      $display("  %0s: %0d words, latency %0d write clocks", what, nchk, best);
-      check(best >= 0 && best == lat_box, what);
+      if (nfit > 1) $display("  %0s: %0d words, latency %0d write clocks (also fit: %0s)", what, nchk, best, also);
+      else $display("  %0s: %0d words, latency %0d write clocks", what, nchk, best);
+      check(lat_ok == 1, what);
     end
   endtask
 
