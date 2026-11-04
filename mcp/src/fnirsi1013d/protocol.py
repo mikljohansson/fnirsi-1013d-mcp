@@ -174,7 +174,7 @@ BODE_LEAVE_CMDS = frozenset({Cmd.SET_CHANNEL, Cmd.SET_TIMEBASE, Cmd.SET_TRIGGER,
 #: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
 #: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
 #: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.
-FW_FPGA_VERSION = 0x153D
+FW_FPGA_VERSION = 0x153E  # since fw-153e (0.3.0); 0x153D in fw 0.2.105 (protocol 1.27 / 1.28)
 #: GET_INFO 78 / GET_HEALTH 126 bit 0: the version word the FPGA reported at boot differs from fw_fpga_version
 FPGA_F_MISMATCH = 0x01
 #: E_UNSUPPORTED detail of every non-basic command on such a scope, with this text
