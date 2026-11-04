@@ -1701,3 +1701,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   per median code 0x5D / 0x5E / 0x5F / 0x60: rel-1 32 / 23 / 0.7 / 0.1 %, c153c 33 / 22 / 0.8 / 0.0, enc0 66 / 25 / 6.9 / 1.4
   (enc0's level distribution sits a fraction of a code higher: fewer samples at 0x5D-0x5E); falling phase A 0.26 / 0.19 /
   0.20 %; core B rising 2.04 / 2.66 / 1.50, falling 1.02 / 0.78 / 0.53. Verdict waits for rel-2 (run-to-run spread).
+- 2026-11-04 10:39-10:52 (lead, owner present): **enc-250** (`al3_encphase_m250_3fc75a76_padded.bin`): written first try, verified
+  d397e0c2 (pre-write backup `backups/20261104-103940-pre-write.bin` = c9d3210d). Cold boot accepted as 0x153D, encode
+  self-check 0 bad (8589 by the end), 0 flagged. Wizard with the inputs open: **CH1 A3 B3, CH2 A3 B3** (predicted A3); its
+  CH2 centre moved offset_pwm 859 -> 856. CH1 confirmed DC before the run. `enc_ab.py` (first attempt ended after the
+  header without a save, transient, the rerun saved `ab_enc-250.npz`): divider 0 raw **CH2 A 0.213 %** (hot zone 0.36 %),
+  **CH2 B 2.570 %** (5.90 %); divider 99 0 / 0. The A drop is parking: core A's rising-phase level sits in 0x60..0x67
+  (17764 samples, 212 in 0x58..0x5F) while core B's sits half in 0x58..0x5F (8919) as before, so **this image reads
+  core A about 1.5 codes higher than core B** (equal on rel-1, c153c and 0x153C; a fraction on enc0): the encode phase
+  shifts core A's conversion as a DC offset (inference: the partner-switching coupling of README section 18 has a DC term).
+  **CH2 offset sweep** (new, scratch `enc_sweep.py`: offset_pwm base +-10 in steps of 1 = 0.25 codes, 6 rising-phase captures
+  per step, both cores' error share and raw level; the peak over the sweep is the parking-independent measure):
+  enc-250 **peak A 2.14 % at level 96, peak B 11.37 % at level 97**, means over the sweep A 0.62 %, B 3.86 %; both cores
+  near 0 at the sweep's ends (levels 100 and 94). `backups/encphase/sweep_enc-250.npz`. Every following image gets the sweep.
