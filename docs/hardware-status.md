@@ -1725,3 +1725,21 @@ Newest entries at the bottom. Format: date, who, what, result.
   build). Decision table: stop, return to the release. No A/B, no sweep; the calibration the wizard stored under it is
   discarded by the step-5 wizard. The silicon's usable encode phase is on the -250 side of TD's model (-250 and 0 run,
   +250 does not); inference: the enc_cur -> ODDR setup / hold at +250 (TD: +1.05 / +2.49 ns) is not what the silicon has.
+- 2026-11-04 11:00-11:14 (lead, owner present): **release 0x153D back ("rel-2")**: written first try, verified aa252fb7 (pre-write
+  backup `backups/20261104-110039-pre-write.bin` = 46a38f24, the enc+250 image). Cold boot: 0x153D, encode self-check 0 bad.
+  Wizard with the inputs open: CH1 A3 B3, CH2 A3 B4 (0x08DB), CH2 centre offset_pwm 856 -> 863. Two false starts: a first
+  rel-2 A/B and two sweeps with the CH2 probe on the wrong ladder node (low level 112..119, swing 55 codes; kept as
+  `*_wrongnode*`; the first sweep died and left offset_pwm at 857, restored to 863 before anything else). Probes re-placed
+  (CH2 low level 95 again), `ab_rel-2.npz`: divider 0 raw A 0.108 %, B 0.286 % (the low phase now sits in 0x60..0x67:
+  the +7 PWM units of the new centre moved the parking above the carry, the same bitstream and probes as rel-1's 6.38 /
+  1.66 %); divider 99 0 / 0. **Sweeps** (`enc_sweep.py`, base +-10 twice, then +6..+30 to follow the peak):
+  s1 peak A 5.47 % / B 0.12 % at level 97, s2 A 5.05 / B 0.16 (the repeat: run-to-run spread of the sweep about 0.4 points
+  at the peak), s3 (levels 98 -> 92): **peak A 6.94 % at level 97, B 0.66 % at level 95**, A 4.4 % at 96, 2.9 at 94, 1.4 at 92;
+  A - B DC level -0.44 codes. `backups/encphase/sweep_rel-2_{1,2,3}.npz`.
+  **Release against enc-250 at the same levels** (error % per core, sweeps averaged per level): level 97 A 2.1..4.2 / B 0.1
+  (release) vs A 0.6 / B 4.7 (enc-250); level 96 A 4.4 / B 0.2 vs A 1.7 / B 10.6; level 95 B 0.4 vs A 0.7 / B 5.0. **The
+  encode phase trades core A against core B**: -250 ps takes A out of the carry errors (peak 6.9 -> 2.1 %) and puts B in
+  (0.7 -> 11.4 %), and moves A's DC reading +1.2 codes against B. Opposite signs on the two cores point at the timing between
+  a core's conversion and its partner's output switching, which a common phase shift moves in opposite directions for A and
+  B; the A - B skew (`encphase_variant.py --skew-ps`) is then the knob to try, not the common phase (inference, for the FPGA
+  agent). enc0 has no sweep yet (measured before the sweep existed); its per-phase A/B is close to the release.
