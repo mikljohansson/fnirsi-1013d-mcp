@@ -1675,7 +1675,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   cores. Higher than the 10-22 18:31 run (A 3.32 %, B 0.37 %) because the restored defaults park the square's low level in
   0x58..0x5F, under the carry (the 10-22 offset is gone); comparable only within this session, where CH2 is not touched.
   `backups/encphase/ab_rel-1.npz`.
-- 2026-11-04 10:14-10:3x (lead, owner present): **0x153C reference "c153c"**. Flash written over J2 (`spiflash_d2xx.py write`,
+- 2026-11-04 10:14-10:19 (lead, owner present): **0x153C reference "c153c"**. Flash written over J2 (`spiflash_d2xx.py write`,
   pre-write backup `backups/20261104-101408-pre-write.bin` = aa252fb7, 69 sectors erased, read-back 07393bf5 verified),
   power-cycle, the card's 0.2.105 shows the mismatch notice, fw 0.2.104 7c640ab5 by FEL (ENTER_FEL works from the notice;
   12 s), wizard with the inputs open: **CH1 A4 B4, CH2 A3 B4** (0x153D trained CH1 A3). `enc_ab.py` (same probes, CH2
