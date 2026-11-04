@@ -77,8 +77,8 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 ## Instrument level
 
 - **Bitstream, version word**: the FPGA configuration, stored in the 1 MB flash beside the FPGA (25Q80); the firmware
-  reads a 16-bit version word to know the features: 0x1432 stock, 0x1532 Atlan4's, 0x1533..0x153D this project's
-  (0x153D recommended; each firmware runs on one of them).
+  reads a 16-bit version word to know the features: 0x1432 stock, 0x1532 Atlan4's, 0x1533..0x153E this project's
+  (0x153E recommended; each firmware runs on one of them).
 - **Firmware, FEL, SD card**: the scope program boots from the SD card. **FEL** is the SoC's USB boot mode that lets a
   firmware be loaded into RAM without touching the card; a power cycle returns to the card's version.
 - **Calibration post, generator, DDS**: the metal post outputs a logic-level square wave from the FPGA's DDS (a phase
