@@ -28,6 +28,7 @@
 #include "pc_hooks.h"
 #include "ui_diag_view.h"
 #include "roll_view.h"
+#include "acq_view.h"
 
 #include "arm32.h"
 
@@ -124,6 +125,13 @@ int main(void)
   scope_load_configuration_data();
   //PC control protocol session (selects CDC mode, caches the FPGA version)
   pc_glue_init();
+  //fw-settings0: everything the settings sector holds is applied now (pc_glue_init's pc_ui_fix_settings restores the marked
+  //words): from here on the power-off interrupt may save them
+  scope_settings_ready = 1;
+  //A record on the card that was not valid: the defaults run, and the Scope view says so once (the first-run screen too,
+  //when it shows; Diagnostics' Status: "Settings sector invalid")
+  if(restore == 2)
+    acq_view_notice_queue(1, "Saved settings not valid: ", "defaults loaded", "");
   //if (dev_mode)
   //Setup the USB interface
   usb_device_init();

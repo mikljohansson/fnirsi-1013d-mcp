@@ -9,6 +9,7 @@
 #include "mock_hal.h"
 #include "pc_cmds.h"
 #include "pc_life.h"
+#include "settings_check.h"
 #include "pc_ident.h"
 #include "pc_report.h"
 #include "adc_cal.h"
@@ -161,10 +162,10 @@ static void test_life(void)
   memset(s, 0, sizeof(s));
   s[2] = 0x0100; s[3] = 0x0015; s[100] = 0xFFFF; s[255] = 7;
   pc_life_settings_seal(s);
-  T_EQ(pc_life_settings_valid(s, 0x0100, 0x0015), 1);
-  T_EQ(pc_life_settings_valid(s, 0x0100, 0x0016), 0);
+  T_EQ(srec_check_header(s, 0x0100, 0x0015), SREC_OK);
+  T_EQ(srec_check_header(s, 0x0100, 0x0016), SREC_BAD_VERSION);
   s[230] ^= 1;
-  T_EQ(pc_life_settings_valid(s, 0x0100, 0x0015), 0);
+  T_EQ(srec_check_header(s, 0x0100, 0x0015), SREC_BAD_SUM);
 }
 
 static void test_prov(void)

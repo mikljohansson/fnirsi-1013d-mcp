@@ -106,8 +106,9 @@ void power_interrupt_handler(void)
   
   //Also need some scheme for wear leveling of the FLASH. It has enough room to do so
   
-  //Check if not in view mode
-  if(viewactive == VIEW_NOT_ACTIVE)
+  //Check if not in view mode. fw-settings0: and not while the boot is still applying the settings, nor over a rejected
+  //record that nothing has replaced yet (pc_glue_settings_save_ok)
+  if((viewactive == VIEW_NOT_ACTIVE) && PC_POWER_OFF_SAVE_OK())
   {
     //Get the settings in the working buffer and write them to the flash
     scope_save_configuration_data();

@@ -1696,8 +1696,12 @@ void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, 
   ud_txt(pg, 24, y, 752, UD_F_BODY, (colour == UD_C_WARN) ? UD_C_WARN : UD_C_TEXT, t);
   y += 36;
 
-  ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_TEXT, settings_defaults ? UD_ICON_OK "No saved settings on the card: defaults used." :
-         UD_ICON_OK "Settings loaded from the card.");
+  //fw-settings0: 2 = a record was on the card but not valid (checksum or a value out of range)
+  if(settings_defaults == 2)
+    ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_WARN, UD_ICON_WARN "Saved settings on the card were not valid: defaults used.");
+  else
+    ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_TEXT, settings_defaults ? UD_ICON_OK "No saved settings on the card: defaults used." :
+           UD_ICON_OK "Settings loaded from the card.");
   y += 36;
 
   if(((c0[C_FLAGS] & c1[C_FLAGS]) & F_LOADED) && !((c0[C_FLAGS] & c1[C_FLAGS]) & F_BOUND))

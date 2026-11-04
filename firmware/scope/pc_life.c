@@ -149,13 +149,3 @@ void pc_life_settings_seal(uint16_t *s)
   s[0] = (uint16_t)(sum >> 16);
   s[1] = (uint16_t)sum;
 }
-
-int pc_life_settings_valid(const uint16_t *s, uint16_t ver_hi, uint16_t ver_lo)
-{
-  uint32_t sum = 0, i;
-
-  for(i=2;i<256;i++)
-    sum += s[i];
-
-  return (s[0] == (uint16_t)(sum >> 16)) && (s[1] == (uint16_t)sum) && (s[2] == ver_hi) && (s[3] == ver_lo);
-}

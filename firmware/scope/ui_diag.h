@@ -151,6 +151,7 @@ typedef struct
 
 //Page builders. note may be 0. Each starts with the common header (title, four tabs, Back).
 void ud_build(ud_page *pg, int page, const ud_input *in, const ud_note *note);
+//settings_defaults: 0 settings loaded, 1 none on the card (defaults), 2 a record that was not valid (defaults; fw-settings0)
 void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, int volts_due);
 //The notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for (fw-one;
 //in->fpga the word read, PC_FW_FPGA_VERSION the needed one): what to do, and the three screens that still work

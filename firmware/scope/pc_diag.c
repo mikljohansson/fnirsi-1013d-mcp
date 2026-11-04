@@ -27,6 +27,7 @@
 #include "pc_ident.h"
 #include "pc_report.h"
 #include "adc_cal.h"
+#include "settings_check.h"
 
 //pc_hal_scope.c
 pc_session *pc_glue_session(void);
@@ -55,7 +56,9 @@ static uint32 pc_life_minutes(void)
 void pc_diag_boot(const uint32_t *restart_v)
 {
   uint16 *w = settingsworkbuffer;
-  int     valid = pc_life_settings_valid(w, SETTING_SECTOR_VERSION_HIGH, SETTING_SECTOR_VERSION_LOW);
+  //fw-settings0: valid = the record was applied (scope_settings_result). A rejected one is not rewritten here (the card
+  //keeps it until a setting changes); the buffer then holds the defaults, without a life record of the card's
+  int     valid = (scope_settings_result == SREC_OK);
   int     found = valid && pc_life_unpack(w + PC_LIFE_WORD0, &pc_life_rec);
 
   pc_life_end   = (uint8)pc_life_boot(&pc_life_rec, found, valid, restart_v);
@@ -78,6 +81,27 @@ void pc_glue_settings_store(uint16 *w)
 
   rec.minutes = pc_life_minutes();
   pc_life_pack(&rec, w + PC_LIFE_WORD0);
+}
+
+//fw-settings0, the power-off interrupt: 1 when its settings save may write sector 709. Not before the boot has applied
+//the settings (scope_settings_ready: a save from there wrote a record half loaded, half compile-time defaults, bench
+//2026-11-04); after a rejected record only when a setting changed since the defaults were loaded, so the rejected record
+//stays on the card for diagnosis until then
+static uint32 pc_set_crc(void);
+
+int pc_glue_settings_save_ok(void)
+{
+  if(!scope_settings_ready)
+    return 0;
+
+  if(scope_settings_result == SREC_OK)
+    return 1;
+
+  if(!pc_set_base_ok)
+    return 0;
+
+  scope_save_config_data();
+  return pc_set_crc() != pc_set_base_crc;
 }
 
 //PC_POWER_OFF: the power-off save that follows closes the session (no save in a viewer: the flag stays set)

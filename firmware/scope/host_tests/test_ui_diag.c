@@ -892,6 +892,13 @@ static void test_first_run(void)
   T_TRUE(has_text("Volts calibration missing too: it needs a DC supply up to 15 V."));
   T_TRUE(has_text("The gain step needs a probe on the calibration post, one channel at a time."));
   T_EQ(ud_hit(&pg, 700, 450), UD_ID_CAL_NOW);
+
+  //fw-settings0: a record on the card that was not valid (checksum or a value out of range)
+  ud_build_first_run(&pg, &in, 2, 0);
+  check_layout("first run rejected settings", 0);
+  T_TRUE(has_text(UD_ICON_WARN "Saved settings on the card were not valid: defaults used."));
+  T_TRUE(!has_text("Settings loaded from the card."));
+  T_TRUE(!has_text("No saved settings on the card"));
 }
 
 //fw-one: the notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for
