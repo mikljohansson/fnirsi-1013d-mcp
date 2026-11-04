@@ -1656,3 +1656,22 @@ Newest entries at the bottom. Format: date, who, what, result.
   817664 bytes, all 1597 sectors read back identical, eGON checksum 0x9D8EDB7F; sector backup `backups/sdcard/sd_750-2347_20261022-195232.bin`).
   State at the pause (owner travelling): FPGA flash = gated 0x153D fd0be7a2 (padded aa252fb7), card boots 0.2.105
   c681efa4 with the calibration saved between 18:27 and 18:29 by the debug build (stages 0x06E3, trained). Release bump to 0.3.0 waits.
+- 2026-11-04 09:4x-10:10 (lead, owner present): **encode-phase bench session started** (fpga/al3/AGENTS.md "Bench session",
+  images from branch fpga-encphase). Step 1 backups: FPGA flash read twice over the FT2232D on J2, identical, sha256
+  aa252fb7 = the release 0x153D flash image (`backups/encphase/fpga-flash_pre-encphase.bin`); SD sectors 700-710 read twice
+  over USB, identical, sha256 846c2b72 (`backups/encphase/sd_700-710_pre-encphase_{a,b}.bin`). Note: `spiflash_d2xx.py`
+  needs plain `python` (the FTDI module is in the user site-packages, which `-I` hides).
+  **First cold boot of the persisted 0.2.105 c681efa4 since 10-22: every setting read as zero.** The scope opened on the
+  first-run Calibrate screen, time/div could not be changed, nothing was recorded until the owner set the memory depth to
+  3000; GET_TRIGGER showed pretrigger 0, the trace jumped about a quarter period between captures; GET_CAL cal_version 1 on
+  both channels (no v3 applied), cap_stored 0x06DB / 0x153D, GET_HEALTH settings_flags 1, saves 0, enc_bad 0, cap_flagged 0.
+  Sector 709 of the backup has 73 non-zero bytes (128 in the 10-22 pre-gate backup), sector 708 401. Battery 65 % on
+  screen (GET_STATUS battery_level 13-14). Investigation + fix dispatched as fw-settings0 (defaults when no valid record).
+  Recovery for the session: Settings > Restore default settings (trigger stable again), then the wizard with the inputs open:
+  stages CH1 A3 B4, CH2 A3 B4 (0x08E3). The pre-restore sectors stay in the backup above for the agent.
+  **rel-1** (release 0x153D, `enc_ab.py`, CH1 on the ladder input, CH2 on its second node, CH2 range 2 DC dcoffset 0
+  offset_pwm 859, encode self-check 0 bad of 39912): divider 0 CH2 A 6.377 % (hot zone 8.10 %; band 0x58: 20.39 % of
+  14725 samples, 0x60: 0.05 %), CH2 B 1.656 % (2.03 %; band 0x58 4.36 %, 0xA8 7.75 % of 2193); divider 99: 0 / 0 on both
+  cores. Higher than the 10-22 18:31 run (A 3.32 %, B 0.37 %) because the restored defaults park the square's low level in
+  0x58..0x5F, under the carry (the 10-22 offset is gone); comparable only within this session, where CH2 is not touched.
+  `backups/encphase/ab_rel-1.npz`.
