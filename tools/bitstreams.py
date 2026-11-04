@@ -6,7 +6,8 @@ images are committed under fpga/al3/dist with their sha256 and source commit in 
 is the gate between that directory and a release:
 
   python3 -I tools/bitstreams.py check              # CI: files, hashes, headers, manifest <-> BITSTREAMS.md
-  python3 -I tools/bitstreams.py check --release    # release.yml: also one benched "recommended" image, no placeholders
+  python3 -I tools/bitstreams.py check --release    # release.yml: also one benched "recommended" image, the
+                                                    # firmware's PC_FW_FPGA_VERSION, no placeholders
   python3 -I tools/bitstreams.py pack --out dist    # release.yml: raw .bin + 1 MiB flash image per bitstream, BITSTREAMS.md
 
 pack writes, for every entry whose status is not "withdrawn":
@@ -98,9 +99,25 @@ def check(dist=DIST, release=False):
             errors.append("release: exactly one bitstream must have status 'recommended' (found %d)" % len(recommended))
         elif not recommended[0].get("bench"):
             errors.append("release: the recommended bitstream %s has no bench record" % recommended[0]["version"])
+        if len(recommended) == 1:
+            fw = firmware_fpga_version()
+            if fw is None or int(recommended[0]["version"], 16) != fw:
+                errors.append("release: the recommended bitstream %s is not the firmware's PC_FW_FPGA_VERSION %s "
+                              "(firmware/scope/pc_cmds.h)" % (recommended[0]["version"],
+                                                              "unreadable" if fw is None else "0x%04X" % fw))
         if "{{" in doc:
             errors.append("release: BITSTREAMS.md still has {{placeholders}}")
     return errors
+
+
+def firmware_fpga_version(root=ROOT):
+    """PC_FW_FPGA_VERSION of firmware/scope/pc_cmds.h (the one bitstream the firmware runs on), None if not found."""
+    try:
+        text = (root / "firmware/scope/pc_cmds.h").read_text()
+    except OSError:
+        return None
+    m = re.search(r"^#define PC_FW_FPGA_VERSION\s+(0x[0-9A-Fa-f]{4})\s", text, re.M)
+    return int(m.group(1), 16) if m else None
 
 
 def pack(out, dist=DIST):
