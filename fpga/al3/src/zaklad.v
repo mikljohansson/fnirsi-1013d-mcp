@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x153D, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153E, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -94,6 +94,14 @@
 //    marker, trigger source 0x15 = 3 and the pattern trigger engine (0x6E, 0x6F, 0x76-0x7D, read 0x42) of the D2 branch
 //    are not in this bitstream: writes to those codes are ignored, 0x15 = 3 acts as EXT as before. With 0x6D = 0
 //    (power-on) the pin, when driven, holds the idle level and the capture is unchanged.
+//  - 0x153E (fpga-153e, the owner's decision of 2026-11-04 after the encode-phase bench session, fpga/al3/README.md
+//    sections 19 and 21): the four ADC encode pins leave from IOB output registers (AL_LOGIC_ODDR, both data inputs
+//    equal) on two new PLL outputs, C2 = clk_ADCB for the B encodes and C3 = clk_ADCA, 375 ps later, for the A encodes.
+//    Until 0x153D they were fabric flops on the falling clk_ADC edge (C1), which TD merged per core and placed anywhere,
+//    so the pad delay moved 6.9 .. 7.9 ns from build to build; now it is the IOB's own, B 6.97 / A 7.34 ns in every
+//    placement (TD, typical corner). The encode sequence is 0x153D's at every rate and after any write; the 0x33
+//    self-check reads fabric copies of the encodes (same D, same clock edges as the ODDRs), not the pins. Version byte
+//    0x3E, every register and every other path as in 0x153D. C1 (clk_ADC) stays enabled in the PLL, unused.
 //-------------------------------------------------------------------------------------
 
 //Simulation only: the time unit of the 1 ps write clock delay (see "sample_write_clock <= #0.001" below), whatever the
@@ -842,8 +850,9 @@ module fnirsi_1013D
 //Wires to connect parts together
 
   wire clk_200MHz;
-  wire clk_ADC;//
-  //wire clk_ADC0;
+  wire clk_ADC;                            //PLL C1, 90 degrees: unused since 0x153E (the 0x153D encode clock)
+  wire clk_ADCB;                           //PLL C2, 0 degrees: the B encodes (0x153E)
+  wire clk_ADCA;                           //PLL C3, 27 degrees (375 ps after C2): the A encodes (0x153E)
   
   wire clk_50MHz;
   wire clk_out;
@@ -1029,7 +1038,8 @@ module fnirsi_1013D
   wire        swc_adv;                     //Capture logic advances on this write clock edge
   reg         swc_adv_q = 1;               //The last write clock edge advanced the capture logic (wrote a sample)
 
-  reg adc1_encA = 1;                       //Clock signals for the ADC's (0x1538: A starts as the complement of B)
+  reg adc1_encA = 1;                       //The ADC encodes (0x1538: A starts as the complement of B; 0x153E: fabric
+                                           //copies of the ODDRs that drive the pins, "ADC encode outputs")
   reg adc1_encB = 0;
   reg adc2_encA = 1;
   reg adc2_encB = 0;
@@ -1041,11 +1051,9 @@ module fnirsi_1013D
     .refclk   (i_xtal),
     .reset    (1'b0),
     .clk0_out (clk_200MHz),
-    .clk1_out (clk_ADC)
-
-    //.clk1_out (clk_ADC90),
-    //.clk2_out (clk_ADC0)
-
+    .clk1_out (clk_ADC),
+    .clk2_out (clk_ADCB),
+    .clk3_out (clk_ADCA)
   );
 
 //-------------------------------------------------------------------------------------
@@ -1392,9 +1400,10 @@ module fnirsi_1013D
   //clk_200MHz edge from the counter, it equals the enable of the cycle after that edge while the divider is stable.
   //swc_sh is a copy of the write clock (loaded from it, so a difference lasts one clock; it keeps the write clock's
   //fanout, and with it the half-cycle path into sampling_triggered, as in 0x1537). enc_nxt is the value the write
-  //clock will have after the next falling clk_200MHz edge, made on the rising edge before it (2.5 ns path), and the
-  //encode flops load it on the falling edge of clk_ADC 1.25 ns after that falling edge (3.75 ns path, no enable).
-  //So encB follows the write clock and encA its complement, 1.25 ns later, at every rate, and nothing in the
+  //clock will have after the next falling clk_200MHz edge, made on the rising edge before it (2.5 ns path). 0x153E:
+  //enc_cur takes enc_nxt on that falling edge (it is then the write clock as it is after that edge, stable until the
+  //next falling edge) and the encode registers load enc_cur on the rising edges of clk_ADCB (B) and clk_ADCA (A),
+  //2.5 and 2.875 ns after it. So encB follows the write clock and encA its complement at every rate, and nothing in the
   //encodes keeps state of its own: a cycle disturbed by an asynchronous 0x0D / 0x53 write (sce_q one cycle behind
   //the combinational enable) repairs itself on the next one. The write clock and the divider counter still use the
   //combinational enable, so they stay cycle-identical to 0x1537.
@@ -1410,14 +1419,33 @@ module fnirsi_1013D
       enc_nxt_n <= ~(swc_sh ^ sce_q);
     end
 
-  always @(negedge clk_ADC)	//clk_ADC   clk_RAM
-    begin
-      adc1_encB <= enc_nxt;
-      adc2_encB <= enc_nxt;
+  //0x153E: the encode pins are driven by the four ODDRs in "ADC encode outputs" at the end of the file (IOB registers:
+  //the pad delay is the same in every placement); adc*_enc* are fabric copies on the same clock edges with the same D,
+  //for the 0x33 self-check and the testbenches. In TD's model the IOB path (0.94 ns clock insertion + 3.5 ns
+  //clock-to-pad) is about 1.25 ns shorter than 0x153D's fabric route, so C2 at 0 degrees puts the B pads at 6.97 ns,
+  //where 0x153C's and 0x153D's were, and C3 375 ps later keeps their A - B offset (README section 19). The encode
+  //phase was benched on 2026-11-04: -250 ps trades core A's carry errors against core B's, +250 ps stops both A cores
+  //at 200 MSa/s.
+  reg enc_cur   = 0;                       //enc_nxt on the falling clk_200MHz edge = the write clock after that edge
+  reg enc_cur_n = 1;                       //its complement, a flop of its own
 
+  always @(negedge clk_200MHz)
+    begin
+      enc_cur   <= enc_nxt;
+      enc_cur_n <= enc_nxt_n;
+    end
+
+  always @(posedge clk_ADCB)
+    begin
+      adc1_encB <= enc_cur;
+      adc2_encB <= enc_cur;
+    end
+
+  always @(posedge clk_ADCA)
+    begin
       //The A and B clocks are inverted versions of each other
-      adc1_encA <= enc_nxt_n;
-      adc2_encA <= enc_nxt_n;
+      adc1_encA <= enc_cur_n;
+      adc2_encA <= enc_cur_n;
     end
 
   //Simulation only (`ifdef SIM, fpga/al3/README.md "Changes" section 20): the write clock changes 1 ps after the falling
@@ -1439,8 +1467,10 @@ module fnirsi_1013D
     end
 
   //Encode self-check (read 0x33). enc_ref is enc_nxt taken on the falling clk_200MHz edge, i.e. the write clock this
-  //edge was predicted to give. On the next falling edge the four encode flops (loaded 3.75 ns before from the same
-  //enc_nxt) must equal enc_ref (B) and its complement (A), and the write clock must equal enc_ref (the prediction).
+  //edge was predicted to give. On the next falling edge the four fabric encode copies (loaded 2.5 / 2.875 ns before
+  //from enc_cur, which equals enc_ref) must equal enc_ref (B) and its complement (A), and the write clock must equal
+  //enc_ref (the prediction). 0x153E: the copies stand for the ODDRs that drive the pins (same D, same clock edges);
+  //a fault after the ODDRs (pad, pin, the IOB's clock) is not seen.
   //enc_err: a mismatch since the last 0x01 = 1 (an asynchronous divider or 0x53 write can make the prediction miss
   //once; the firmware writes those before the reset). swc_sh stands in for the write clock (equal unless a
   //disturbed clock, which the next check then also flags).
@@ -3119,7 +3149,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h3D;
+                    o_mcu_data <= 8'h3E;
                 endcase
               end
 
@@ -3349,27 +3379,17 @@ assign sampling_enable = ~(
   assign o_relay2_3 = relay2_3;
   assign o_ac_dc_2  = ac_dc_2;
 
+//-------------------------------------------------------------------------------------
+//ADC encode outputs (0x153E)
 
-  assign o_adc1_encA = adc1_encA;
-  assign o_adc1_encB = adc1_encB;
-  assign o_adc2_encA = adc2_encA;
-  assign o_adc2_encB = adc2_encB;
-
-/*
-  assign o_adc1_encA = clk_ADC0;
-  assign o_adc1_encB = clk_ADC90;
-  assign o_adc2_encA = clk_ADC0;
-  assign o_adc2_encB = clk_ADC90;
-*/
-  /*
-  assign o_adc1_encA = clk_RAM;
-  assign o_adc1_encB = clk_200MHz;
-  assign o_adc2_encA = clk_RAM;
-  assign o_adc2_encB = clk_200MHz;
-*/
-  
-//assign adc1_encB = clk_200MHz; // 0°
-//assign adc1_encA = clk_RAM; // 90°
+  //Each encode pin from an IOB output register: AL_LOGIC_ODDR with both data inputs equal is a single-rate register
+  //on the rising clock edge. TD 4.6.8 does not pack plain flops into these pads (PACKREG = ON, synthesis keep and a
+  //posedge flop were all tried, README section 19: #oreg stays 11), but it packs an ODDR (#oreg 15), so the pad delay
+  //is the IOB's own: the same on all four pins and in every placement.
+  AL_LOGIC_ODDR enc_oddr_1A (.q(o_adc1_encA), .clk(clk_ADCA), .d1(enc_cur_n), .d2(enc_cur_n), .rst(1'b0));
+  AL_LOGIC_ODDR enc_oddr_1B (.q(o_adc1_encB), .clk(clk_ADCB), .d1(enc_cur),   .d2(enc_cur),   .rst(1'b0));
+  AL_LOGIC_ODDR enc_oddr_2A (.q(o_adc2_encA), .clk(clk_ADCA), .d1(enc_cur_n), .d2(enc_cur_n), .rst(1'b0));
+  AL_LOGIC_ODDR enc_oddr_2B (.q(o_adc2_encB), .clk(clk_ADCB), .d1(enc_cur),   .d2(enc_cur),   .rst(1'b0));
 
 //-------------------------------------------------------------------------------------
 endmodule

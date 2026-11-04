@@ -17,18 +17,28 @@
 //		Clock name	| Frequency 	| Phase shift
 //		C0        	| 200.000000MHZ	| 0.0000  DEG  
 //		C1        	| 200.000000MHZ	| 90.0000 DEG  
+//		C2        	| 200.000000MHZ	| 0.0000  DEG  (0x153E: the B encodes' ODDRs)
+//		C3        	| 200.000000MHZ	| 27.0000 DEG  (0x153E: the A encodes' ODDRs, 375 ps after C2)
+//	C1 is unused since 0x153E (the encode clock until 0x153D), kept so the PLL equals the benched enc0 image.
+//	C2 / C3 were added by hand (fpga-153e, as tools/encphase_variant.py wrote them for the fpga-encphase image enc0);
+//	pll.ipc still describes C0 / C1 only. TD's macro allows CLKCn_CPHASE 1 .. DIV (5): an output t ns after C0 is
+//	CPHASE 4 + floor(e / 8), FPHASE e mod 8, with e = 8 t taken in -24 .. 15 (fpga/al3/README.md section 19).
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1 ns / 100 fs
 
 module pll(refclk,
 		reset,
 		clk0_out,
-		clk1_out);
+		clk1_out,
+		clk2_out,
+		clk3_out);
 
 	input refclk;
 	input reset;
 	output clk0_out;
 	output clk1_out;
+	output clk2_out;
+	output clk3_out;
 
 	wire clk0_buf;
 
@@ -57,7 +67,15 @@ module pll(refclk,
 		.CLKC1_ENABLE("ENABLE"),
 		.CLKC1_DIV(5),
 		.CLKC1_CPHASE(5),
-		.CLKC1_FPHASE("2")	)
+		.CLKC1_FPHASE("2"),
+		.CLKC2_ENABLE("ENABLE"),
+		.CLKC2_DIV(5),
+		.CLKC2_CPHASE(4),
+		.CLKC2_FPHASE("0"),
+		.CLKC3_ENABLE("ENABLE"),
+		.CLKC3_DIV(5),
+		.CLKC3_CPHASE(4),
+		.CLKC3_FPHASE("3")	)
 	pll_inst (.refclk(refclk),
 		.pllreset(reset),
 		.stdby(1'b0),
@@ -69,6 +87,6 @@ module pll(refclk,
 		.phcntsel(3'b000),
 		.phasedone(open),
 		.fbclk(clk0_out),
-		.clkc({open, open, open, clk1_out, clk0_buf}));
+		.clkc({open, clk3_out, clk2_out, clk1_out, clk0_buf}));
 
 endmodule
