@@ -1701,7 +1701,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   per median code 0x5D / 0x5E / 0x5F / 0x60: rel-1 32 / 23 / 0.7 / 0.1 %, c153c 33 / 22 / 0.8 / 0.0, enc0 66 / 25 / 6.9 / 1.4
   (enc0's level distribution sits a fraction of a code higher: fewer samples at 0x5D-0x5E); falling phase A 0.26 / 0.19 /
   0.20 %; core B rising 2.04 / 2.66 / 1.50, falling 1.02 / 0.78 / 0.53. Verdict waits for rel-2 (run-to-run spread).
-- 2026-11-04 10:39-10:52 (lead, owner present): **enc-250** (`al3_encphase_m250_3fc75a76_padded.bin`): written first try, verified
+- 2026-11-04 10:39-10:46 (lead, owner present): **enc-250** (`al3_encphase_m250_3fc75a76_padded.bin`): written first try, verified
   d397e0c2 (pre-write backup `backups/20261104-103940-pre-write.bin` = c9d3210d). Cold boot accepted as 0x153D, encode
   self-check 0 bad (8589 by the end), 0 flagged. Wizard with the inputs open: **CH1 A3 B3, CH2 A3 B3** (predicted A3); its
   CH2 centre moved offset_pwm 859 -> 856. CH1 confirmed DC before the run. `enc_ab.py` (first attempt ended after the
