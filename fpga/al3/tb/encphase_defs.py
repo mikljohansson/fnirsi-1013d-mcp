@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""iverilog defines for a design under test (fpga/al3/README.md section 19; used by run.sh, encphase.sh, mcuread.sh).
+"""iverilog defines for a design under test (fpga/al3/README.md sections 19 and 21; used by run.sh, encphase.sh, mcuread.sh).
 
     python3 -I encphase_defs.py <zaklad.v>            -> "" or "-DPLL_C2_NS=.. -DPLL_C3_NS=.. -DENC_B_NS=.. -DENC_A_NS=.."
     python3 -I encphase_defs.py --windows <zaklad.v>  -> "<window A> <window B>" in ns (encphase.sh's annotations)
 
-The release source (and every design without the fpga-encphase --iob encode ODDRs) needs no define: sim_models.v's pll
-gives clk1 at 1.25 ns and the encode flops switch on its falling edge, 1.25 ns after the write clock edge; their D path
-(enc_nxt on the rising clk_200MHz edge) has a 3.75 ns window.
+A design without the encode ODDRs (0x153D and older, e.g. a SRC_REV / DUT of those; the references are never passed
+here) needs no define: sim_models.v's pll gives clk1 at 1.25 ns and the encode flops switch on its falling edge, 1.25 ns
+after the write clock edge; their D path (enc_nxt on the rising clk_200MHz edge) has a 3.75 ns window.
 
-An --iob image (tools/encphase_variant.py) encodes on the rising edges of PLL C2 (B) and C3 (A), read here from
+The committed source since 0x153E, and every image tools/encphase_variant.py makes from it (the fpga-encphase --iob
+images before), encodes on the rising edges of PLL C2 (B) and C3 (A), read here from
 <dir of zaklad.v>/al_ip/pll.v (t ns after C0 = CPHASE - 4 + FPHASE / 8, mod 5). In hardware the IOB output path is about
 1.25 ns shorter than the fabric route of the release's encode flops (TD: 6.97 ns pad at t = 0 against the release's
 6.92 .. 7.10 at 1.25), so the simulation places each clock 1.25 ns earlier than the hardware does: the encode pins then

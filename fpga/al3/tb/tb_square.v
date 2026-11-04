@@ -6,7 +6,7 @@
 // drives it.
 //   G. The generator on 0x50 alone (nothing else written): the pin is driven low (the idle level) with 0x50 = 1, hi-Z
 //      with 0x50 = 0; 0x51 / 0x52 (the DDS) and the cut pattern registers 0x6E / 0x6F / 0x76 .. 0x7D change nothing;
-//      idle level 1 through 0x6D bit 2; 0x28 bit 1; 0x39 reads 0 while off; 0x06 = 0x153D.
+//      idle level 1 through 0x6D bit 2; 0x28 bit 1; 0x39 reads 0 while off; 0x06 = 0x153E (0x153D before the IOB encodes).
 //   L. The start latency: step 0 begins 7 .. 8 clocks (35 .. 40 ns) after the rising edge of the 0x6D data strobe.
 //   S. The square wave, programmed with the firmware's SET_GEN sequence (P16 / H16 of section 7.4: entry 0 high, entry 1
 //      low, 0x6D = 0x33 to enable, 0x23 for a change) at 1 kHz, 999.5 Hz, 10 kHz 25 %, 1 MHz, 10 MHz, 7.3 MHz, the
@@ -293,7 +293,7 @@ module tb;
     check(rd_d[1] == 1'b0, "G: 0x28 bit 1 = 0 with the pin hi-Z");
     mon_pad = 0;
     rd2(8'h06);
-    check(rd16 == 16'h153D, "cmd 0x06 reads 0x153D");
+    check(rd16 == 16'h153E, "cmd 0x06 reads 0x153E");
 
     //-------------------------------------------------------------------------------
     // L. The start latency: the first edge 8 .. 9 clocks (40 .. 45 ns) after the rising edge of the 0x6D data strobe
