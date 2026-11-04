@@ -3042,10 +3042,13 @@ worse at 200 MSa/s too (inference). The rebuilt 0x153D (`fd0be7a2`) gates the en
 
 ### 19. Encode phase experiment: IOB encodes and static clock phases (fpga-encphase, 2026-10-27)
 
-Roadmap section 6, "A future FPGA 0x153E", item 4, knob 2. **Experiment images only: `src/` stays the release 0x153D
-(`fd0be7a2`), no dist entry, no firmware change.** Every image is `tools/encphase_variant.py` applied to `src/`, built by
-`tools/encphase_build.sh`; the bench session and its decision table are in AGENTS.md "Encode phase experiment,
-fpga-encphase".
+Roadmap section 6, "A future FPGA 0x153E", item 4, knob 2. The experiment images were `tools/encphase_variant.py --iob`
+applied to the release 0x153D source (`fd0be7a2`), built by `tools/encphase_build.sh`, with no dist entry and no firmware
+change; the bench session and its decision table are in AGENTS.md "Encode phase experiment, fpga-encphase", its results
+in "Bench session 2026-11-04" at the end of this section. **The owner adopted the enc0 recipe as 0x153E (section 21):
+since then `src/` is the IOB source and `encphase_variant.py` derives the phase and skew images from it** (`--phase-ps`,
+`--skew-ps`, `--move`; the `--iob` option of the commands below is gone, the images of the table are reproduced from the
+fpga-encphase merge 587bcd0 with that commit's tool).
 
 **Why the encode pad delay moves with every roll.** The four encode flops are not in the pins' IOBs: `FPGA_phy.area` of
 the release lists the encode pins with register `NONE` (`#oreg 11`: the relays, AC/DC, offsets and the display PWM). TD
@@ -3125,7 +3128,7 @@ from the coordinating session, at most 2 jobs at a time, each started only with 
 **Flash status: enc-250 and enc0 may be flashed; enc+250 may be flashed for the experiment with the wizard retrain first
 (step 4 of the bench session), keeping the +0.066 ns self-check risk above in mind.**
 
-Other phases (what -375 / -125 / +125 / +375 need): `tools/encphase_build.sh ~/encph NAME --iob --phase-ps N` plus the roll
+Other phases (what -375 / -125 / +125 / +375 need; since 0x153E without `--iob`): `tools/encphase_build.sh ~/encph NAME --iob --phase-ps N` plus the roll
 moves above in parallel until one closes every clock (at -250 one of 7 closed, at +250 one of 8, at 0 three of 29); then
 run.sh on two seeds and pinning. PLL settings (C2 B / C3 A, CPHASE / FPHASE): -375 3/5, 4/0; -125 3/7, 4/2; +125 4/1, 4/4;
 +375 4/3, 4/6. The simulation clocks stay in (2.5, 5) ns for all of them (`encphase_defs.py` refuses otherwise). Expect the
@@ -3165,6 +3168,92 @@ image's ODDR inputs and fabric copies against their own window (the late-CH2-A c
 (c681efa4, on the card) runs them unchanged. The firmware cannot tell an experiment image from the release; `enc_ab.py`
 records the image sha256 the operator passes (the flash step's verified hash), and the session ends with the release
 flashed back (AGENTS.md).
+
+#### Bench session 2026-11-04 (the owner with the lead; `docs/hardware-status.md` 09:4x-11:14)
+
+Every image on fw 0.2.105 c681efa4 from the card, except c153c (0x153C on fw 0.2.104 by FEL). Probes fixed for the
+session: CH1 on the RC ladder's input, CH2 on its second node, both DC, Filter Off, the post's 1 kHz square; the wizard
+with the inputs open after every flash. Runs in `backups/encphase/` (`ab_<image>.npz`, `sweep_<image>.npz`), numbers
+below from `tools/enc_ab.py --analyse` and `tools/enc_sweep.py --analyse` over those files. Error = a sample 4 or more
+codes above the median of itself and its two neighbours (README section 18's class (b), one-sided).
+
+**Two things about the measure itself.**
+- *Phases.* The trigger (CH1 rising, level 137) also fires on the falling slope of the slow ladder signal: CH1 moves
+  0.03 codes per sample there and the A / B cores' 1-2 code zigzag makes rising crossings. Every run is a mix of
+  rising-phase captures (CH2 low, 94 -> 98, at the 0x5F / 0x60 carry) and falling-phase ones (CH2 181 -> 177), 20 / 12 in
+  rel-1 and c153c, 15 / 17 in enc0, so the overall shares are not comparable between runs; per phase and per code they
+  are (`enc_ab.py --analyse` prints both).
+- *Parking.* The share depends on where the low level sits against the carry. rel-1 and rel-2 are the same image and the
+  same probes, but rel-2's wizard centred CH2 at offset_pwm 863 against rel-1's 859: core A 6.38 % -> 0.11 %, its low
+  level moved from 0x58..0x5F to 0x60..0x67. The level also moves with the bitstream: core A - core B over a sweep is
+  -0.44 codes on the release, +0.76 on enc-250. Hence the sweep: `enc_sweep.py` steps CH2's offset_pwm through the carry
+  (1 unit = about 0.25 codes, rising-phase captures only) and **the peak error share per core over the sweep is the
+  acceptance measure**: it does not depend on where the wizard's centre and the bitstream happen to park each core's
+  level against the 0x5F / 0x60 carry. The sweep exists since enc-250; rel-1, c153c and enc0 have A/B runs only.
+
+**A/B runs at 200 MSa/s** (divider 0, 32 captures; error % per phase; divider 99: 0 / 0 on both cores in every run):
+
+| Run | Image | Stages (wizard) | Captures rise / fall | A rise | A fall | B rise | B fall | Overall A / B |
+|---|---|---|---|---|---|---|---|---|
+| rel-1 | 0x153D `aa252fb7` | CH1 A3 B4, CH2 A3 B4 | 20 / 12 | 10.05 | 0.26 | 2.04 | 1.02 | 6.38 / 1.66 |
+| c153c | 0x153C `07393bf5`, fw 0.2.104 | CH1 A4 B4, CH2 A3 B4 | 20 / 12 | 9.48 | 0.20 | 2.66 | 0.78 | 6.00 / 1.96 |
+| enc0 | `c9d3210d` (IOB, 0 ps) | CH1 A3 B3, CH2 A3 B3 | 15 / 17 | 6.41 | 0.20 | 1.50 | 0.53 | 3.12 / 0.99 |
+| enc-250 | `d397e0c2` (IOB, -250 ps) | CH1 A3 B3, CH2 A3 B3 | 12 / 20 | 0.36 | 0.12 | 5.94 | 0.55 | 0.21 / 2.57 |
+| enc+250 | `46a38f24` (IOB, +250 ps) | wizard failed (CH2 gain split) | - | - | - | - | - | both A cores frozen |
+| rel-2 | 0x153D `aa252fb7` | CH1 A3 B3, CH2 A3 B4 | 14 / 18 | 0.02 | 0.17 | 0.01 | 0.50 | 0.11 / 0.29 |
+
+Rising phase, core A, per median code 0x5D / 0x5E / 0x5F / 0x60: rel-1 32.5 / 22.6 / 0.7 / 0.1 %, c153c 32.9 / 21.7 / 0.8 /
+0.0, enc0 66.0 / 25.0 / 6.9 / 1.4 (enc0's low level sat a fraction of a code higher: fewer samples at 0x5D..0x5E). c153c
+against rel-1: within 0.6 points in every cell, so the 2026-10-22 "0x153C 1.0 % against 0x153D 3.3 %" was parking, not
+the bitstream. enc0 boots clean on fw 0.2.105, encode self-check 0 bad (8943 checked), capture self-check 0 flagged, the
+wizard trains A3 on both channels as predicted (above), and its per-phase numbers are in the same range as the release
+runs. (A first enc0 run was invalid: CH1 had been switched to AC coupling between c153c and that boot, which moves the
+trigger and so CH2's window; kept as `ab_enc0_ch1ac.npz`.)
+
+**enc+250 fails.** Written and verified (`46a38f24`), boots as 0x153D, encode self-check 0 bad, 0 flagged, but the
+wizard's CH2 gain step stopped with "the two ADC cores differ too much" and host captures at divider 0 show **both A
+cores returning a constant** (CH2 A 181..182, 4 distinct codes in 1500 words while CH2 B reads 100 in the same record;
+CH1 A flat at 135..136 while CH1 B rises 128..134); at dividers 1, 3, 19, 99 A tracks B. So at full rate the A encodes
+stop or the A capture stops updating. The 0x33 self-check did not see it: it compares the fabric copies, not the pins
+(queue item "pin-level encode self-check" in AGENTS.md). The silicon's usable encode phase lies on the -250 side of
+TD's model (-250 and 0 run, +250 does not); inference: the `enc_cur` -> ODDR setup / hold that TD reports at +250
+(+1.05 / +2.49 ns) is not what the silicon has.
+
+**Sweeps** (`enc_sweep.py`, 6 rising-phase captures per step; peak per core over the sweep, with the level it sits at):
+
+| Sweep | Image | offset_pwm | Peak A | Peak B | Mean A / B | A - B level |
+|---|---|---|---|---|---|---|
+| enc-250 | enc-250 | 856 +- 10 | **2.14 %** at level 96 | **11.37 %** at level 97 | 0.62 / 3.86 % | +0.76 |
+| rel-2 s1 | release | 863 +- 10 | 5.47 % at 97 | 0.12 % at 97 | 0.31 / 0.01 % | -0.43 |
+| rel-2 s2 | release | 863 +- 10 (repeat) | 5.05 % at 97 | 0.16 % at 97 | 0.40 / 0.02 % | -0.48 |
+| rel-2 s3 | release | 863 +6 .. +30 (levels 98 -> 92) | **6.94 %** at 97 | **0.66 %** at 95 | 2.83 / 0.16 % | -0.44 |
+
+s1 against s2 is the sweep's run-to-run spread: about 0.4 points at the peak. Two more rel-2 sweeps and one A/B with the
+CH2 probe on the wrong ladder node are kept as `*_wrongnode*` and not used.
+
+**Per level** (`enc_sweep.py --analyse`, the steps of an image's sweeps pooled by level; error % core A / core B; '-' =
+fewer than 1000 samples):
+
+| Level | 94 | 95 | 96 | 97 | 98 |
+|---|---|---|---|---|---|
+| release (rel-2 s1..s3) | 2.88 / 0.10 | - / 0.43 | 4.42 / 0.24 | 3.37 / 0.10 | 0.01 / 0.01 |
+| enc-250 | - / 2.50 | 0.75 / 5.00 | 1.71 / 10.57 | 0.62 / 4.67 | 0.41 / 0.01 |
+
+**The encode phase trades core A against core B.** -250 ps takes core A out of the carry errors (peak 6.94 -> 2.14 %) and
+puts core B in (0.66 -> 11.37 %), and moves A's DC reading about 1.2 codes up against B (A - B -0.44 -> +0.76). Opposite
+signs on the two cores of one chip point at the timing between a core's conversion and its partner's output switching
+(README section 18's partner coupling), which a common phase shift moves in opposite directions for A and B (inference).
+The A - B skew (`encphase_variant.py --skew-ps`), not the common phase, is then the knob to try.
+
+**Decision (the owner, 2026-11-04 11:2x).** enc0 becomes 0x153E (section 21): the IOB encodes make the pad timing the
+same in every placement roll (B 6.97 / A 7.34 ns in all 29 rolls of the experiment, where the release's fabric flops moved
+6.9 .. 7.9 ns roll to roll), and on the bench enc0 boots clean, trains A3 on both channels and reads data in the release's
+range. The further experiments are **parked**: the skew images and a runtime (wizard-trained) encode phase. If they are
+ever resumed, the lead's first candidate is the skew image **A -250 / B 0** (`encphase_variant.py --skew-ps 125`: core A
+250 ps earlier, core B where 0x153E has it), judged by the sweep peak per core on both cores, then A 0 / B -250 (`--phase-ps
+-250 --skew-ps 625`) for the other side; any image must pass the wizard and a divider-0 capture with both A cores moving
+before its sweep, since the 0x33 self-check cannot see a frozen pin.
+
 ### 20. Write clock simulation order and the tb_peak latency check (fpga-simrace, 2026-11-03)
 
 No bitstream change: the release source with this section's lines builds to the same raw image (`fd0be7a2...e96a`).
