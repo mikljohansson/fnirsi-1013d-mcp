@@ -286,8 +286,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   **0x153E**; the common phase only trades CH2 core A against core B (-250 ps: A peak 6.9 -> 2.1 %, B 0.7 -> 11.4 %);
   +250 ps fails at 200 MSa/s (the A cores hold a constant). Roadmap section 6 item 4 has the outcome. The rest of the
   experiments are parked (items below).
-- [ ] **Flash and bench 0x153E** (owner at the bench with the FT2232D, after fpga-153e pins the image and fw-153e's
-  firmware expects it): flash over the release 0x153D (pre-write double read), cold boot, wizard with the inputs open
+- [ ] **Flash and bench 0x153E** (owner at the bench with the FT2232D; fpga-153e pinned the image 2026-11-04, merge
+  0cd4768: raw `831dc346...02e1`, flash image `2782e1b6...d9d8`, `tb/run.sh` ALL PASS on two seeds, manifest `unbenched`;
+  fw-153e's firmware expects it since e8112e3; the owner's checklist is `fpga/al3/AGENTS.md` "0x153E, the IOB encodes"):
+  flash over the release 0x153D (pre-write double read), cold boot, wizard with the inputs open
   (the stored calibration is bound to the bitstream), encode and capture self-checks, CH2 A/B with the offset sweep
   (`enc_sweep.py`; the peak over the sweep, not the parked level), counter, logger, soak; then fill the
   `{{0x153E bench}}` and `{{0x153E tested-on}}` placeholders of the release notes and the announcement
