@@ -545,7 +545,7 @@ static void test_stress(void)
   }
 
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA bitstream 0x1532: this firmware needs 0x153d"));
+  T_TRUE(has_text("FPGA bitstream 0x1532: this firmware needs 0x153e"));
   T_EQ(text_colour("FPGA bitstream 0x1532"), UD_C_WARN);
   T_TRUE(has_text("from RAM. No SD card:"));
   T_TRUE(has_text("No PC"));
@@ -899,6 +899,36 @@ static void test_first_run(void)
   T_TRUE(has_text(UD_ICON_WARN "Saved settings on the card were not valid: defaults used."));
   T_TRUE(!has_text("Settings loaded from the card."));
   T_TRUE(!has_text("No saved settings on the card"));
+
+  //fw-153e: when it shows. Not calibrated: yes. Calibrated on the running bitstream: no
+  T_EQ(ud_first_run_due(&in), 1);
+  healthy(&in);
+  T_EQ(ud_first_run_due(&in), 0);
+
+  //Calibrated on the bitstream before the one flashed now (the provenance's word): yes, and it says so
+  in.fpga = 0x153C;
+  T_EQ(ud_first_run_due(&in), 1);
+  ud_build_first_run(&pg, &in, 0, 0);
+  check_layout("first run foreign bitstream", 0);
+  T_TRUE(has_text(UD_ICON_WARN "Calibrated on FPGA bitstream 0x153b: calibrate again for 0x153c."));
+  T_EQ(text_colour(UD_ICON_WARN "Calibrated on FPGA bitstream"), UD_C_WARN);
+  T_TRUE(!has_text("Calibration missing"));
+  T_TRUE(!has_text("does not match the current offsets"));
+  T_EQ(ud_hit(&pg, 700, 450), UD_ID_CAL_NOW);
+  T_EQ(ud_hit(&pg, 30, 410), UD_ID_LATER);
+
+  //No provenance record (a pre-0.2.52 block), the capture stages stored for another bitstream (PC_CAPF_OTHER, GET_CAL
+  //360 the word): yes
+  healthy(&in);
+  cal[0][288] = cal[1][288] = 0;
+  T_EQ(ud_first_run_due(&in), 0);
+  health[106] = PC_CAPF_HAS | PC_CAPF_OTHER;
+  p16(cal[0] + 360, 0x153A);
+  T_EQ(ud_first_run_due(&in), 1);
+  ud_build_first_run(&pg, &in, 0, 0);
+  T_TRUE(has_text(UD_ICON_WARN "Calibrated on FPGA bitstream 0x153a: calibrate again for 0x153b."));
+  health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED;
+  T_EQ(ud_first_run_due(&in), 0);
 }
 
 //fw-one: the notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for
@@ -914,7 +944,7 @@ static void test_fpga_mismatch(void)
   ud_build_fpga_mismatch(&pg, &in);
   check_layout("fpga mismatch", 0);
   T_TRUE(has_text("FPGA bitstream"));
-  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153D."));
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153E."));
   T_TRUE(has_text("This scope has 0x1532."));
   T_EQ(text_colour("This firmware needs"), UD_C_WARN);
   T_EQ(text_colour("This scope has"), UD_C_WARN);
@@ -922,7 +952,7 @@ static void test_fpga_mismatch(void)
   T_TRUE(has_text("or remove the card to run the stock firmware."));
   T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. The scope, the spectrum analyser, the frequency response and the generator do not run"));
   T_TRUE(has_text("Diagnostics shows the version word and saves a report to the card."));
-  T_TRUE(strstr(need, "0x153D") != NULL);                      //the constant the texts quote
+  T_TRUE(strstr(need, "0x153E") != NULL);                      //the constant the texts quote
   T_EQ(pg.nbtn, 3);
   T_EQ(ud_hit(&pg, 30, 410), UD_ID_DIAG);
   T_EQ(ud_hit(&pg, 400, 450), UD_ID_SETTINGS);
@@ -930,10 +960,17 @@ static void test_fpga_mismatch(void)
   T_EQ(ud_hit(&pg, 260, 430), UD_ID_NONE);
 
   //A newer word is a mismatch too (the next bitstream ships with its own firmware)
-  in.fpga = 0x153E;
+  in.fpga = 0x153F;
   ud_build_fpga_mismatch(&pg, &in);
   check_layout("fpga mismatch newer", 0);
-  T_TRUE(has_text("This scope has 0x153E."));
+  T_TRUE(has_text("This scope has 0x153F."));
+
+  //fw-153e: the previous release's bitstream (0x153D) is a mismatch
+  in.fpga = 0x153D;
+  ud_build_fpga_mismatch(&pg, &in);
+  T_TRUE(has_text("This scope has 0x153D."));
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153E."));
+  in.fpga = 0x153F;
 
   //On the Diagnostics pages of a mismatched scope nothing measures: no Calibrate, DC shift trim or Volts calibration;
   //Save report, Clear calibration, the log and FEL stay
@@ -941,7 +978,7 @@ static void test_fpga_mismatch(void)
   check_layout("mismatch status", 0);
   T_EQ(ud_hit(&pg, 20, 430), UD_ID_NONE);
   T_EQ(ud_hit(&pg, 200, 430), UD_ID_REPORT);
-  T_TRUE(has_text("FPGA bitstream 0x153e: this firmware needs 0x153d"));
+  T_TRUE(has_text("FPGA bitstream 0x153f: this firmware needs 0x153e"));
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   check_layout("mismatch cal", 0);
   {

@@ -54,7 +54,7 @@ def test_set_trigger2_matches_the_firmware_vectors():
     assert (t2.type_name, t2.polarity_name, t2.longer, t2.holdoff_s) == ("pulse_width", "negative", False, 1e-3)
     assert t2.describe()["condition"] == "shorter" and t2.describe()["width_samples"] == 1500
     e = P.parse_error_payload(payload("resp_set_trigger2_e_bad_arg_runt"))
-    assert e[0] == P.TRIG2_D_TYPE and "0x153E" in e[1]
+    assert e[0] == P.TRIG2_D_TYPE and "not in this bitstream" in e[1]
     assert P.TRIG2_DETAIL_NAMES[8] == "H" and P.TRIG2_D_LEVEL2 == 14
     assert P.holdoff_units(2.5e-3) == 500000 and P.holdoff_units(1e-9) == 0 and P.holdoff_units(1e9) == 0xFFFFFFFF
 
@@ -631,7 +631,7 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             assert r["applied"]["type"]["type"] == "edge"
             st = await c.call("scope_status")
             assert "trig_types" in st["features"] and st["trigger_status"]["type"] == "pulse_width"  # the last arm's
-            assert "0x153E" in await c.fails("scope_set_trigger", type="runt")
+            assert "later FPGA bitstream" in await c.fails("scope_set_trigger", type="runt")
             assert "pulse_width" in await c.fails("scope_set_trigger", type="nth_edge", width="1us")
             r = await c.call("scope_set_trigger", type="pulse_width", width="1ns", hold_off="0s")
             assert r["applied"]["type"]["width_samples"] == 1 and any("clamped" in x for x in r["caveats"])

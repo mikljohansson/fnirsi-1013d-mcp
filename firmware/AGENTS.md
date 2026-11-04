@@ -7219,3 +7219,67 @@ field at its edge and one past; the roll mode rules; generator frequency; trigge
    first, asks for the typed confirmation), FEL-load: as step 1.
 6. Optional, the root cause: power on and press the power key again during the first second of the boot; at the next
    boot 709 equals the one before (no save happened).
+
+## 95. fw-153e: built for FPGA 0x153E (fw 0.2.105 unchanged until the 0.3.0 bump, protocol 1.28 unchanged)
+
+Branch `fw-153e` from main 039c7af. Brief: the owner's decision of 2026-11-04 11:2x (docs/hardware-status.md): enc0 is
+the next release bitstream as **0x153E**, 0x153D's RTL with the ADC encodes from PLL outputs through the pin registers,
+every register and behaviour unchanged; 0.3.0 ships on it and the firmware expects 0x153E only. Commits 1fb783b (the
+constant, host tests), 9bd7cce (the first-run prompt), 82c04f0 (mcp), ceda9a0 (runt / window texts), 3c55f0a (protocol
+5.1, three host vectors), 23266f0 (bitstreams.py release check), 28e3498 (CHANGELOG), then this section.
+`PC_FW_VERSION` not bumped. **Nothing benched, nothing flashed.**
+
+**Where the version lives** (the release checklist's list): `firmware/scope/pc_cmds.h` `PC_FW_FPGA_VERSION` and
+`PC_FW_FPGA_VERSION_TEXT` (everything in the firmware derives from them: GET_INFO 76, GET_HEALTH 124 / 126, `#VER
+fpga=`, the mismatch notice and E_UNSUPPORTED text, Diagnostics, the report, `cap_hw.c`'s trailer binding and commit,
+the calibration provenance stamps the word read); `mcp/src/fnirsi1013d/protocol.py` `FW_FPGA_VERSION` (the simulator's
+default word, `FPGA_MISMATCH_TEXT`); host tests: test_session (#VER, the mismatch words incl. 0x153D), test_diag,
+test_ui_diag (the notice on 0x153D / 0x153F), test_cap_hw, test_fpga_bus / test_log / test_roll (model resets on 0x153E;
+the model treats every word >= 0x153D alike); mcp tests test_one_bitstream (`== 0x153E`), test_d27 (`>= 0x153D`);
+docs/protocol.md 5.1; host vectors `host_resp_get_info_153e`, `_153e_on_153d`, `host_resp_e_unsupported_fpga_mismatch_153e`
+(the 1.25..1.27 vectors keep their historical words); `fpga/al3/dist/manifest.json` "recommended" (fpga-153e's; now
+checked against pc_cmds.h by `tools/bitstreams.py check --release`). `tools/make_release_sd_package.py` names no
+bitstream.
+
+**A card calibrated on 0x153D** (the owner's, after the 0x153E flash). Nothing refuses to boot: the 708 block (v3, bound
+by 709's centres, not by the FPGA word) applies as before, fw-settings0's 709 checks do not look at the FPGA word. The
+capture-stage trailer (stored 0x06DB on 0x153D) is not applied: 0x63 = the power-on 0x08E4, GET_HEALTH 106 / GET_CAL 357
+OTHER, GET_CAL 360 = 0x153D, the runtime guard idle, nothing written to the card (test_cap_hw
+`test_stored_for_previous_bitstream`). New (9bd7cce): `ud_first_run_due` = not calibrated, or `ud_cal_foreign` (the
+provenance's FPGA word differs from the running one, else OTHER), so the boot opens the first-run screen with "Calibrated
+on FPGA bitstream 0x153d: calibrate again for 0x153e." (amber), Later / Calibrate now; it comes back at every boot until
+the wizard's Save (new provenance word, trailer bound to 0x153E). Before this the bound block skipped the screen and
+only Diagnostics said "FPGA changed since calibration (0x153d to 0x153e): recalibrate.". **Inference**: the 0x153D-era
+zeros / gains are close on 0x153E (same converters, the encode phase moved by a fraction of a clock), so measuring with
+Later is fine; the stages at 0x08E4 are what 0x153D gave untrained.
+
+**Runt / window naming** (ceda9a0): the C5 contract called the runt / window / range / both-cores bitstream "0x153E";
+SET_TRIGGER2's E_BAD_ARG texts now say "not in this bitstream" (vector `resp_set_trigger2_e_bad_arg_runt` regenerated),
+caps bit 26 / 28 rows and the mcp tool text say "planned for a later bitstream". The caps / detail numbers are unchanged.
+
+**fpga-153e's note**: on 0x153E the 0x05 / 0x0A / 0x18 status reads carry the version's low byte in bits 7..1 (0x3F where
+0x153D read 0x3D); the firmware masks bit 0 at every such read (fpga_bus.c, fpga_control.c, pc_hal_scope.c) and the model
+returns bit 0 only, so nothing here changes. A host model replaying `tb/contract_0x153E.txt` byte for byte needs the new file.
+
+**Checks**: host tests green (test_session 73247 / 73249, test_ui_diag 13708, test_cap_hw 96, test_fpga_bus 11974),
+check_vectors OK (165), check_retired_regs OK; mcp ruff (CI selection) clean, pytest 544 passed (one timing flake of
+test_counter_on_the_simulator in one run, green alone and in the rerun); `fnirsi1013d.vectors --check` ok. Builds 0
+warnings: gcc10 818,176 -> 818,688 bytes (039c7af -> 28e3498, sha256 prefix f2fdf494 at 28e3498; later commits give other
+hashes), GCC 13 841,216 -> 841,728, PC_DEBUG 841,728 -> 842,240.
+
+**Bench (owner; back up SD 700-710 first)**
+1. 0x153D still flashed, FEL-load this branch's `make gcc10`: the notice "This firmware needs FPGA bitstream 0x153E." /
+   "This scope has 0x153D."; Diagnostics (Back returns), Settings, USB drive answer and return; `#VER` ends `fpga=0x153d`,
+   GET_INFO 76 = 0x153E, 78 = 1; `scope_capture` fails with E_UNSUPPORTED detail 1 "... needs 0x153E".
+2. Flash 0x153E per fpga/al3/AGENTS.md (backup first), cold boot, FEL-load: `#VER ...,proto=1.28,fpga=0x153e`, no notice,
+   GET_INFO 8 = 76 = 0x153E, 78 = 0; Diagnostics "FPGA AL3A10 bitstream 0x153e: encode check ..." with 0 bad after a few
+   200 MSa/s captures (GET_HEALTH 92 bad = 0).
+3. The first-run screen with "Calibrated on FPGA bitstream 0x153d: calibrate again for 0x153e."; GET_CAL 357 = HAS |
+   OTHER, 360 = 0x153D; Diagnostics' stages line "(trained on 0x153d: calibrate)". Later: the Scope view runs; power cycle:
+   the screen again.
+4. Calibrate now (5 min warm, inputs open, then the probes on the post): Save; GET_CAL 357 HAS | TRAINED, 358 the trained
+   value, 360 = 0x153E; the provenance "Calibrated on fw ..., FPGA 0x153e"; power cycle: no first-run screen, TRAINED.
+5. The normal release checks (section 80's list: logger, roll, generator / counter, Frequency response, Type / Sample rows,
+   the 30-minute soak).
+Regression signs: the notice on 0x153E (the constant), the first-run screen after step 4 (the provenance or the trailer
+not stamped with 0x153E), TRAINED on the first 0x153E boot (the trailer applied across bitstreams).

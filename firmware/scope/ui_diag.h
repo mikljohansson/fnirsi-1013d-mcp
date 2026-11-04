@@ -184,6 +184,10 @@ typedef struct
 void ud_cal_verdict(const ud_input *in, ud_verdict *v);
 void ud_cal_provenance(const ud_input *in, char *p);             //the provenance sentence
 int  ud_cal_calibrated(const uint8_t *cal0, const uint8_t *cal1); //both channels use a bound v3 block
+//fw-153e: the calibration in use was made on another FPGA bitstream than the running one (the provenance's word, else
+//the capture stages' stored word with PC_CAPF_OTHER); *word = that bitstream. A bitstream update asks for Calibrate
+int  ud_cal_foreign(const ud_input *in, uint16_t *word);
+int  ud_first_run_due(const ud_input *in);                        //the first-run screen: not calibrated, or foreign
 
 //The calibration limits (diagnostics-review.md finding 6). The noise rows measure the zero step's open-input condition,
 //so their limits are the zero step's own (adc_cal.h ACAL_MAX_NOISE16_*, owner 2026-10-20 18:13, fw 0.2.100), here in

@@ -8075,16 +8075,16 @@
   },
   {
    "name": "resp_set_trigger2_e_bad_arg_runt",
-   "description": "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, 14 level2)",
-   "hex": "a513010119024f0004001c000000ebed000072756e74202f2077696e646f773a2046504741203078313533451ef7e880",
+   "description": "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window: planned for a later bitstream): detail 0 = the byte offset of the field, then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, 14 level2)",
+   "hex": "a513010119024f00040026000000a9a9000072756e74202f2077696e646f773a206e6f7420696e20746869732062697473747265616de841bbf9",
    "frames": [
     {
      "cmd": 537,
      "seq": 79,
      "status": 4,
      "flags": 1,
-     "len": 28,
-     "payload": "000072756e74202f2077696e646f773a204650474120307831353345"
+     "len": 38,
+     "payload": "000072756e74202f2077696e646f773a206e6f7420696e20746869732062697473747265616d"
     }
    ],
    "device_events": []
@@ -9535,6 +9535,57 @@
      "flags": 1,
      "len": 52,
      "payload": "030000000200000001000100ffff010000000000000000000000000000000000c800000000e1f505d3fe6cee7cfc4ffb02030000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_153e",
+   "description": "GET_INFO response, protocol 1.28 (80 bytes): FPGA 0x153E = the built-for word at 76, flags 78 = 0; caps 0xFFEC4F as on 0x153D",
+   "hex": "a513010102000a00000050000000ffdd011c0002000401003e1502080020020200c2eb0b4fecff0000c2eb0bfe3f500000070600302e332e30000000000000000000000028018c0c31303133442d303030310000000000002003e0013e1500002fb372cd",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 10,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "011c0002000401003e1502080020020200c2eb0b4fecff0000c2eb0bfe3f500000070600302e332e30000000000000000000000028018c0c31303133442d303030310000000000002003e0013e150000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_get_info_153e_on_153d",
+   "description": "GET_INFO response, protocol 1.28: the FPGA still reports 0x153D (fw 0.2.105's bitstream), the firmware is built for 0x153E (76), flags 78 bit 0 FPGA_MISMATCH",
+   "hex": "a513010102000b000000500000002c9a011c0002000401003d1502080020020200c2eb0b4fecff0000c2eb0bfe3f500000070600302e332e30000000000000000000000028018c0c31303133442d303030310000000000002003e0013e150100937005fd",
+   "frames": [
+    {
+     "cmd": 2,
+     "seq": 11,
+     "status": 0,
+     "flags": 1,
+     "len": 80,
+     "payload": "011c0002000401003d1502080020020200c2eb0b4fecff0000c2eb0bfe3f500000070600302e332e30000000000000000000000028018c0c31303133442d303030310000000000002003e0013e150100"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_e_unsupported_fpga_mismatch_153e",
+   "description": "E_UNSUPPORTED detail 1 with the 0x153E mismatch text (the scope runs another word, e.g. 0x153D)",
+   "hex": "a513010100020c000500350000004fe30100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e656564732030783135334541e33156",
+   "frames": [
+    {
+     "cmd": 512,
+     "seq": 12,
+     "status": 5,
+     "flags": 1,
+     "len": 53,
+     "payload": "0100465047412062697473747265616d206d69736d617463683a2074686973206669726d77617265206e6565647320307831353345"
     }
    ],
    "device_events": [],

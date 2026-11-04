@@ -811,6 +811,32 @@ static const uint8_t *ud_prov(const ud_input *in)
   return (in->cal[0][C_PROV] == ACAL_PROV_VALID) ? in->cal[0] + 292 : 0;
 }
 
+int ud_cal_foreign(const ud_input *in, uint16_t *word)
+{
+  const uint8_t *pv = ud_prov(in);
+
+  if(pv && (g16(pv + 28) != in->fpga))
+  {
+    *word = (uint16_t)g16(pv + 28);
+    return 1;
+  }
+
+  if(in->health[H_CAP + 2] & PC_CAPF_OTHER)
+  {
+    *word = (uint16_t)g16(in->cal[0] + C_CAP + 4);
+    return 1;
+  }
+
+  return 0;
+}
+
+int ud_first_run_due(const ud_input *in)
+{
+  uint16_t w;
+
+  return !ud_cal_calibrated(in->cal[0], in->cal[1]) || ud_cal_foreign(in, &w);
+}
+
 //Class gain ratio full / gated, |ratio - 1| in tenths of a percent; -1 without measured gains
 static int32_t ud_class_tenths(const uint8_t *c)
 {
@@ -1669,6 +1695,7 @@ void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, 
   const uint8_t *c0 = in->cal[0], *c1 = in->cal[1];
   char t[UD_TEXT_LEN], f[UD_TEXT_LEN], *p;
   int y = 104, colour;
+  uint16_t was;
 
   ud_clear(pg);
   ud_boxa(pg, 0, 0, 800, UD_HDR_H, 1);
@@ -1704,7 +1731,17 @@ void ud_build_first_run(ud_page *pg, const ud_input *in, int settings_defaults, 
            UD_ICON_OK "Settings loaded from the card.");
   y += 36;
 
-  if(((c0[C_FLAGS] & c1[C_FLAGS]) & F_LOADED) && !((c0[C_FLAGS] & c1[C_FLAGS]) & F_BOUND))
+  //fw-153e: calibrated, but on the bitstream before the one flashed now (the encode timing changed with it)
+  if(ud_cal_calibrated(c0, c1) && ud_cal_foreign(in, &was))
+  {
+    p = s_str(t, UD_ICON_WARN "Calibrated on FPGA bitstream ");
+    p = s_hex(p, was, 4);
+    p = s_str(p, ": calibrate again for ");
+    p = s_hex(p, in->fpga, 4);
+    s_str(p, ".");
+    ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_WARN, t);
+  }
+  else if(((c0[C_FLAGS] & c1[C_FLAGS]) & F_LOADED) && !((c0[C_FLAGS] & c1[C_FLAGS]) & F_BOUND))
     ud_txt(pg, 24, y, 752, UD_F_BODY, UD_C_WARN,
            UD_ICON_WARN "Saved calibration does not match the current offsets: calibrate again.");
   else

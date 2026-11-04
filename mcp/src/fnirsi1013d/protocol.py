@@ -174,7 +174,7 @@ BODE_LEAVE_CMDS = frozenset({Cmd.SET_CHANNEL, Cmd.SET_TIMEBASE, Cmd.SET_TRIGGER,
 #: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
 #: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
 #: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.
-FW_FPGA_VERSION = 0x153D
+FW_FPGA_VERSION = 0x153E  # since fw-153e (0.3.0); 0x153D in fw 0.2.105 (protocol 1.27 / 1.28)
 #: GET_INFO 78 / GET_HEALTH 126 bit 0: the version word the FPGA reported at boot differs from fw_fpga_version
 FPGA_F_MISMATCH = 0x01
 #: E_UNSUPPORTED detail of every non-basic command on such a scope, with this text
@@ -265,7 +265,8 @@ class Caps(enum.IntFlag):
     #: protocol 1.27 (FPGA 0x153D): the streaming logger (0x69, 0x6A, read 0x38), LOG_START / LOG_READ / LOG_STOP
     LOGGER = 1 << 23
     #: bit 24 reserved (PATTERN_GEN of the 1.27 drafts, cut)
-    #: protocol 1.28 (FPGA 0x153E): runt and window types, the pulse-width range (SET_TRIGGER2 types 4 / 5, RANGE)
+    #: planned for a later bitstream (not 0x153E): runt and window types, the pulse-width range (SET_TRIGGER2 types
+    #: 4 / 5, RANGE)
     TRIG_RUNT_WINDOW = 1 << 26
     #: bit 27 reserved (PATTERN_TRIGGER of the 1.27 drafts, cut)
 
@@ -1861,8 +1862,8 @@ TRIG_POLARITY_NAMES = {
 }
 #: SET_TRIGGER2 flags (byte 2)
 TRIG2_F_LONGER = 0x01  # pulse width only: "longer than N" (0 = shorter than N); FPGA 0x5E bit 3
-TRIG2_F_RANGE = 0x02  # 0x153E: pulse width inside [N, N2] (outside with LONGER); 0x5E bit 4. E_BAD_ARG on 1.26
-TRIG2_F_BOTH_CORES = 0x04  # 0x153E: trigger on both ADC cores (legacy D = 0); 0x5E bit 5. E_BAD_ARG on 1.26
+TRIG2_F_RANGE = 0x02  # planned: pulse width inside [N, N2] (outside with LONGER); 0x5E bit 4. E_BAD_ARG on 1.26
+TRIG2_F_BOTH_CORES = 0x04  # planned: trigger on both ADC cores (legacy D = 0); 0x5E bit 5. E_BAD_ARG on 1.26
 #: limits: N and H are u24 in the FPGA (0x5F / 0x60), the Nth-edge count 16 bits, the hold-off a u32 of 5 ns units
 TRIG2_MAX_N = (1 << 24) - 1
 TRIG2_MAX_NTH = 65535
@@ -1886,7 +1887,7 @@ class Trigger2(Payload):
     GET_TRIGGER bytes 28..51 with the values in effect. Every field is written (no mask): a host reads GET_TRIGGER,
     changes fields and writes the block back; the geometry, mode and auto time-out stay SET_TRIGGER's.
 
-    0 u8 type (TRIG_*; 4 runt / 5 window are 0x153E: E_BAD_ARG detail 0), 1 u8 polarity per type
+    0 u8 type (TRIG_*; 4 runt / 5 window are planned: E_BAD_ARG detail 0), 1 u8 polarity per type
     (TRIG_POLARITY_NAMES; = GET_TRIGGER ``edge``, FPGA 0x16), 2 u8 flags (TRIG2_F_LONGER, pulse width only; RANGE /
     BOTH_CORES and other bits: detail 2), 3 u8 source (0 CH1, 1 CH2, 2 EXT), 4 u32 n (pulse width / timeout: samples
     of the trigger stream 1..16777215; Nth edge: the count 1..65535; edge: 0; detail 4. The firmware converts nothing:

@@ -1898,7 +1898,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             description="trigger type (protocol 1.26, caps TRIG_TYPES): edge; pulse_width = the trailing edge of a "
                         "pulse shorter (default) or longer than `width`; nth_edge = the n-th edge of `polarity` since "
                         "the arm, or of each burst when `idle` separates bursts; timeout = the level held for `width` "
-                        "with no edge. runt / window need FPGA 0x153E (caps TRIG_RUNT_WINDOW)")] = None,
+                        "with no edge. runt / window need a later FPGA bitstream (caps TRIG_RUNT_WINDOW)")] = None,
         polarity: Annotated[Literal["positive", "negative", "rising", "falling", "high", "low"] | None, Field(
             description="per type: pulse_width positive / negative pulse; nth_edge rising / falling counted edge; "
                         "timeout high / low held level; edge rising / falling (same as edge)")] = None,
@@ -1954,8 +1954,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 raise ValueError("source 'EXT' needs the external trigger input (caps EXT_TRIGGER); this firmware's "
                                  "caps lack it. Trigger on CH2 instead.")
             if type in ("runt", "window"):
-                raise ValueError(f"trigger type {type!r} needs FPGA bitstream 0x153E (caps TRIG_RUNT_WINDOW, protocol "
-                                 "1.28); this generation has edge, pulse_width, nth_edge and timeout")
+                raise ValueError(f"trigger type {type!r} needs a later FPGA bitstream (caps "
+                                 "TRIG_RUNT_WINDOW); this generation has edge, pulse_width, nth_edge and timeout")
             typed = any(v is not None for v in (type, polarity, width, longer, n, idle, hold_off))
             if typed and (cur.trigger2 is None or not prof.has(P.Caps.TRIG_TYPES)):
                 raise ValueError("trigger types and the hold-off need protocol 1.26 with caps TRIG_TYPES (FPGA 0x153C, "

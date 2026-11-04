@@ -682,7 +682,7 @@ class Scope:
         'edge' / 'pulse_width' / 'nth_edge' / 'timeout'), ``polarity`` (0 / 1 or the type's name,
         P.TRIG_POLARITY_NAMES), ``longer`` (pulse width: longer than ``n`` instead of shorter), ``n`` (pulse width /
         timeout: samples of the trigger stream; Nth edge: the count), ``h`` (Nth edge: idle samples, 0 = from the
-        arm), ``level`` (raw 8-bit code), ``holdoff`` (5 ns units) or ``holdoff_s`` (seconds, rounded), and the 0x153E
+        arm), ``level`` (raw 8-bit code), ``holdoff`` (5 ns units) or ``holdoff_s`` (seconds, rounded), and the planned
         fields ``level2`` / ``both_cores`` / ``range_`` (refused by 1.26 firmware). A type change zeroes the fields the
         new type does not use (the firmware refuses them otherwise) and gives N 1 where it must be at least 1. The
         firmware writes 0x66 with every SET_TRIGGER2: the next ARM clears a hold-off still running."""

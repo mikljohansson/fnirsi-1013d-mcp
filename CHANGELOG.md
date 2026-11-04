@@ -268,7 +268,19 @@ sections 74 to 79.
   defaults with the calibration's own PWM centres (so a stored calibration still applies), says so ("Saved settings not
   valid: defaults loaded" in the Scope view, the first-run screen, Diagnostics "Settings sector invalid"), and is left on
   the card until a setting changes. Wire unchanged (GET_HEALTH byte 32 bit 3 now also means "fields in range").
-  firmware/AGENTS.md section 93. (edeca27, b6c6b72)
+  firmware/AGENTS.md section 94. (edeca27, b6c6b72)
+
+**Built for FPGA 0x153E (fw-153e).**
+
+- **FPGA bitstream 0x153E: the ADC encodes come from the PLL through the pin registers, so every build has the same
+  encode timing; the firmware runs with 0x153E only and asks for a calibration after the flash.** `PC_FW_FPGA_VERSION`
+  0x153E (registers, commands and behaviour as 0x153D; protocol 1.28 unchanged); a scope still on 0x153D shows the
+  mismatch notice (1fb783b). A calibration saved on 0x153D loads, but the capture stages run at the power-on value until
+  the wizard trains them again; the first-run screen opens at boot with "Calibrated on FPGA bitstream 0x153d: calibrate
+  again for 0x153e." until the wizard's Save (9bd7cce). mcp: the simulator and the mismatch text on 0x153E (82c04f0).
+- SET_TRIGGER2's refusals of runt / window / range / both cores / level2 now say "not in this bitstream" instead of
+  naming 0x153E, the word the planning documents had given those features (ceda9a0). `tools/bitstreams.py check
+  --release` requires the recommended bitstream to be the firmware's `PC_FW_FPGA_VERSION` (23266f0).
 
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 

@@ -158,7 +158,7 @@ static void check_chunk(const fpga_log *l, log_check *c, const uint8_t *b, uint3
 //Configure the model for a format at a divider: K = 2 (CIC2) for 1 / 2, peak for 3, legacy for 0
 static void model_rate(uint8_t format, uint32_t divider, uint32_t seed)
 {
-  fm_reset(0x153D, divider, seed);
+  fm_reset(0x153E, divider, seed);
   fm.capture = 1;
 
   if((format == FPGA_LOG_F_HIGH) || (format == FPGA_LOG_F_16))

@@ -110,11 +110,11 @@ uint32_t pc_hal_auto_timeout_default(uint32_t total_samples);                   
 #define PC_TRG_T_PULSE    1       //a pulse shorter (longer with PC_TRG_F_LONGER) than N samples; fires on its trailing edge
 #define PC_TRG_T_NTH      2       //the Nth edge after the arm, or after an idle time of H samples (H = 0: from the arm)
 #define PC_TRG_T_TIMEOUT  3       //the level held for N samples after the edge (or the arm)
-#define PC_TRG_T_RUNT     4       //0x153E: refused by this firmware (E_BAD_ARG)
-#define PC_TRG_T_WINDOW   5       //0x153E: refused
+#define PC_TRG_T_RUNT     4       //a later bitstream: refused by this firmware (E_BAD_ARG)
+#define PC_TRG_T_WINDOW   5       //later: refused
 #define PC_TRG_F_LONGER   0x01    //pulse width: longer than N (0x5E bit 3)
-#define PC_TRG_F_RANGE    0x02    //0x153E: refused
-#define PC_TRG_F_BOTH     0x04    //0x153E: refused
+#define PC_TRG_F_RANGE    0x02    //later: refused
+#define PC_TRG_F_BOTH     0x04    //later: refused
 #define PC_TRG_N_MAX      0xFFFFFFu   //0x5F / 0x60 are 24 bits
 #define PC_TRG_NTH_MAX    0xFFFFu     //the Nth edge count
 

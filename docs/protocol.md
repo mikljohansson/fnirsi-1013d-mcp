@@ -160,7 +160,9 @@ Compatibility rules [D]:
 
 Version word from FPGA command 0x06 (two bytes, high first) [V `S100 fpga_control.c:196-209`, `zaklad.v` :847-855].
 **Since protocol 1.25 (fw-one, owner decision 2026-10-20) every firmware version supports exactly one bitstream, the
-project's latest** (`PC_FW_FPGA_VERSION` in `firmware/scope/pc_cmds.h`, 0x153D since protocol 1.27 (fw 0.2.105), 0x153C in 1.26, 0x153B in 1.25;
+project's latest** (`PC_FW_FPGA_VERSION` in `firmware/scope/pc_cmds.h`, 0x153E since fw-153e (the 0.3.0 release; protocol 1.28
+unchanged: 0x153D's registers and behaviour, the ADC encodes from PLL outputs through the pin registers), 0x153D since
+protocol 1.27 (fw 0.2.105), 0x153C in 1.26, 0x153B in 1.25;
 fpga/al3/dist/manifest.json "recommended"). The firmware reads the word once at boot and compares it with that constant;
 nothing else is derived from it. The capability word, the geometry and every feature decision are the firmware's own:
 
@@ -176,12 +178,18 @@ nothing else is derived from it. The capability word, the geometry and every fea
 On a mismatch the scope boots into a full-screen notice instead of the scope (the word needed, the word found, "flash it
 as the guide says, or remove the card to run the stock firmware"; Diagnostics, Settings and the USB drive stay reachable),
 the acquisition never starts, and every command that is not in the basic set answers **E_UNSUPPORTED detail 1** with the
-text "FPGA bitstream mismatch: this firmware needs 0x153D" (the built-for word, `PC_FW_FPGA_VERSION_TEXT`). The basic set
+text "FPGA bitstream mismatch: this firmware needs 0x153E" (the built-for word, `PC_FW_FPGA_VERSION_TEXT`). The basic set
 keeps the link, the diagnostics and the way out:
 PING, GET_INFO, GET_STATUS, GET_BATTERY, TEST_PATTERN, GET_LINK_STATS, GET_BAD_FRAME, GET_EVENT_LOG, GET_HEALTH,
 READ_SPECTRUM, SD_INFO / SD_READ_SECTORS / SD_STAGE / SD_WRITE_SECTORS, SAVE_REPORT, GET_CAL, READ_SCREEN, FFT_BENCH,
 ENTER_FEL. GET_HEALTH 124..127 repeats the two fields (row 65). A host shows the mismatch as a caveat and does not try to
 work around it: the next bitstream ships with its own firmware.
+
+**0x153E (fw-153e)**: no wire change, so the protocol stays 1.28; only GET_INFO 76 / GET_HEALTH 124, the mismatch text
+and `#VER`'s `fpga=` follow the constant. A scope still on 0x153D is a mismatch. A calibration saved on 0x153D loads,
+but GET_CAL 357 carries OTHER (360 = 0x153D) instead of TRAINED and the capture stages run at the power-on 0x08E4 until
+the wizard trains again; the first-run screen asks for it. Vectors: `host_resp_get_info_153e`,
+`host_resp_get_info_153e_on_153d`, `host_resp_e_unsupported_fpga_mismatch_153e`.
 
 Up to fw 0.2.102 the firmware ran on the stock 0x1432, Atlan4's 0x1532 / 0x1632 (EF2) / 0x1732 (EP4) and every AL3 minor
 0x1533..0x153B with capabilities per word (`pc_variant_from_version`), the encode-heal and core-order workarounds for
@@ -624,9 +632,9 @@ column below is the history of each bit):
 | 23 | LOGGER | the streaming logger (FPGA 0x69 / 0x6A, read 0x38): LOG_START / LOG_READ / LOG_STOP, GET_STATUS acq_state 5 (1.27, row 67, fw-d4; FPGA 0x153D) |
 | 24 | reserved | 0 (PATTERN_GEN of the 1.27 drafts: the 0x153D pattern generator, cut; row 67) |
 | 25 | reserved | 0 (was DDS_SWEEP in a draft: sweeps are host-stepped SET_GEN writes) |
-| 26 | (TRIG_RUNT_WINDOW) | 0x153E |
+| 26 | (TRIG_RUNT_WINDOW) | 0: planned for a later bitstream (not 0x153E, which is 0x153D's logic) |
 | 27 | reserved | 0 (PATTERN_TRIGGER of the 1.27 drafts: the pattern trigger engine, cut; row 67) |
-| 28-31 | reserved | 0 (bit 4 TRIG_BOTH_CORES is 0x153E) |
+| 28-31 | reserved | 0 (bit 4 TRIG_BOTH_CORES is planned for a later bitstream) |
 
 **GET_STATUS (0x0003).** Request: empty. Response (28 bytes in the 1.0 draft, 32 bytes in 1.1, 44 bytes since 1.3, 48 bytes since 1.17, 52 bytes since 1.26).
 Also the response body of SET_REMOTE, ARM, FORCE, STOP and WAIT. The table is the 1.0 layout; the appended fields
@@ -815,14 +823,14 @@ written (no mask; the geometry, the mode and the auto time-out stay SET_TRIGGER'
 
 | Off | Type | Field | Notes |
 |---|---|---|---|
-| 0 | u8 | type | 0 edge, 1 pulse width, 2 Nth edge, 3 timeout (FPGA 0x5E bits 2..0). 4 runt and 5 window are 0x153E: `E_BAD_ARG` detail 0 |
+| 0 | u8 | type | 0 edge, 1 pulse width, 2 Nth edge, 3 timeout (FPGA 0x5E bits 2..0). 4 runt and 5 window (planned for a later bitstream): `E_BAD_ARG` detail 0 |
 | 1 | u8 | polarity | 0 / 1, written to 0x16 (GET_TRIGGER `edge`). Edge: the edge; pulse width 0 = positive pulse, 1 = negative (the trigger is its trailing edge); Nth edge: the counted edge; timeout 0 = held high after a rising edge, 1 = held low |
-| 2 | u8 | flags | bit 0 LONGER: pulse width longer than N (0x5E bit 3; pulse width only). Bits 1 RANGE and 2 BOTH_CORES are 0x153E: `E_BAD_ARG` detail 2; other bits detail 2 |
+| 2 | u8 | flags | bit 0 LONGER: pulse width longer than N (0x5E bit 3; pulse width only). Bits 1 RANGE and 2 BOTH_CORES (planned for a later bitstream): `E_BAD_ARG` detail 2; other bits detail 2 |
 | 3 | u8 | source | 0 CH1, 1 CH2, 2 EXT (0x15; EXT switches the generator off as SET_TRIGGER does); 3 and above E_BAD_ARG detail 3 |
 | 4 | u32 | N | pulse width / timeout: 1..16777215 samples of the trigger stream (0x5F, u24); Nth edge: 1..65535 edges; edge: 0. **The firmware converts nothing**: a sample is one memory word on CH1 / CH2 (10 (D + 1) ns legacy, N x 5 ns with the filter), one 5 ns clock on EXT |
-| 8 | u32 | H | Nth edge: idle time 0..16777215 samples (0x60, u24): the count restarts when the level held for H samples without an edge, 0 = count from the arm; every other type: 0 (0x153E: the pulse-width range's N2) |
+| 8 | u32 | H | Nth edge: idle time 0..16777215 samples (0x60, u24): the count restarts when the level held for H samples without an edge, 0 = count from the arm; every other type: 0 (planned: the pulse-width range's N2) |
 | 12 | u16 | level | 0..255, the raw 8-bit code as SET_TRIGGER's level (through the UI's marker; mapped to 0x55 at a 16-bit arm) |
-| 14 | u16 | level2 | 0 (0x153E: the runt / window second level) |
+| 14 | u16 | level2 | 0 (planned: the runt / window second level) |
 | 16 | u32 | holdoff | trigger hold-off in 5 ns units, 0 = off (0x1B): from the trigger of a record no trigger is accepted until it elapsed, across sequencer restarts and re-arms; 0x1B = 0 releases a running one at once |
 | 20 | u32 | reserved | 0 |
 

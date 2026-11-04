@@ -609,7 +609,8 @@ int ui_diag_pass(void)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
-// First run (plan section 6): on a unit without a bound calibration, what was found and what to do
+// First run (plan section 6): on a unit without a bound calibration, or one calibrated on another FPGA bitstream than
+// the one flashed now (fw-153e: the next boot after a bitstream update), what was found and what to do
 
 void ui_first_run(int settings_defaults)
 {
@@ -619,7 +620,7 @@ void ui_first_run(int settings_defaults)
   ud_page_no = UD_PAGE_STATUS;
   ud_gather(&in, 0);
 
-  if(ud_cal_calibrated(in.cal[0], in.cal[1]))
+  if(!ud_first_run_due(&in))
     return;
 
   //The scope screen to return to

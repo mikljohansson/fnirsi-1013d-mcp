@@ -178,7 +178,7 @@ static void test_info(void)
   T_EQ(caps & fixed, fixed);
   T_EQ(caps & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);                //BENCH: T3 still open
   T_EQ(caps & PC_CAP_INTERLEAVE_UNVERIFIED, 0);                                       //the mock's boot 0x33: convention 1
-  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE), 0);                  //0x153E, never built
+  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE), 0);                  //planned, never built
   T_EQ(caps & (1u << 9), 0);                                                         //reserved (LIVE_READ, retired)
   T_EQ(pc_get_u32(r.p + 24), 200000000); T_EQ(pc_get_u16(r.p + 28), 16382); T_EQ(pc_get_u16(r.p + 30), 80);
   T_EQ(r.p[32], 0); T_EQ(r.p[35], 0);
@@ -196,7 +196,7 @@ static void test_info(void)
   //in GET_INFO and GET_HEALTH, every acquisition and configuration command refused with one clear status, and the link,
   //the diagnostics readers, the card, the screen and FEL still answering (the notice screen on the scope says what to do)
   {
-    static const uint16_t other[] = { 0x1432, 0x1532, 0x153A, 0x153B, 0x153C, 0x153E, 0x1632, 0x9999 };
+    static const uint16_t other[] = { 0x1432, 0x1532, 0x153A, 0x153B, 0x153C, 0x153D, 0x153F, 0x1632, 0x9999 };
     uint32_t i;
 
     for(i=0;i<sizeof(other) / sizeof(other[0]);i++)
@@ -300,7 +300,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.28,fpga=0x153d");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.28,fpga=0x153e");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
