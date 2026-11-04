@@ -1,6 +1,7 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x3D (0x153D = 0x153C with the streaming logger, the pattern generator in place of the DDS
+//  - 0x06 returns 0x15 0x3E (0x153E = 0x153D with the ADC encode pins driven by IOB output registers on PLL C2 / C3,
+//    no register change, fpga/al3/README.md section 21; 0x153D = 0x153C with the streaming logger, the pattern generator in place of the DDS
 //    and its trigger engine, see the 0x153D bullets below; 0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
 //    the cruft removal listed last below; 0x153B = 0x153A with records that end on the auto time-out or the forced stop
 //    reported at the write pointer; 0x153A = 0x1539 with the ADC data captured through IOB registers at a per-core stage
@@ -216,7 +217,7 @@
             8'h37: //Trigger extension status (0x153C), 1 byte
                     o_mcu_data <= { 3'b000, holdoff_running, trig_type[2], both_cores, trigger_core, 1'b0 };
                     //bit4 the trigger hold-off (0x1B) is running (no trigger is accepted); bit3 = 0x5E bit 2;
-                    //bits 2, 1 reserved for 0x153E (both cores on, trigger core), read 0 here
+                    //bits 2, 1 reserved for a later bitstream (both cores on, trigger core), read 0 here
 
             8'h35: //Counter (0x153C), 16 bytes from a snapshot taken when the command byte 0x35 is written (copied on the
                    //200 MHz side 15 .. 20 ns after the command strobe, so a gate ending during the read cannot tear it)
@@ -506,9 +507,9 @@
 
             8'h5E: //Trigger type, 1 byte
                     trig_type    <= io_mcu_data[2:0];  //0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and
-                                                       //5 window are 0x153E (here, like 6 and 7, they act as edge)
+                                                       //5 window are planned (here, like 6 and 7, they act as edge)
                     trig_pw_long <= io_mcu_data[3];    //pulse width: 1 = longer than N, 0 = shorter than N
-                                                       //bits 7..4 reserved (0x153E: bit 4 range, bit 5 both cores), write 0
+                                                       //bits 7..4 reserved (planned: bit 4 range, bit 5 both cores), write 0
                     //0x16 per type: edge = the edge; pulse width 0 = positive pulse (trigger on its falling edge),
                     //1 = negative pulse; Nth edge = the counted edge; timeout 0 = held high after a rising edge,
                     //1 = held low after a falling edge.

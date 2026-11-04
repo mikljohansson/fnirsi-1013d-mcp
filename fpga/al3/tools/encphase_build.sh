@@ -1,9 +1,10 @@
 #!/bin/bash
-# Build one encode-phase experiment image (README section 19) in WSL:
-#   tools/encphase_build.sh <root> <name> [encphase_variant.py options: --iob --phase-ps N --move S A ...]
-# Makes <root>/<name>/tree (build.sh, build.tcl, tb and the variant src of this checkout), builds it into <root>/<name>/w
-# and writes <root>/<name>/summary.txt: the image's sha256, timing per clock, area (#oreg: 15 with --iob), the encode pad
-# delays and the capture margins (tb/capture_report.sh --bits). Builds of different names may run in parallel.
+# Build one encode-phase image or placement roll of src/ (README sections 19 and 21) in WSL:
+#   tools/encphase_build.sh <root> <name> [encphase_variant.py options: --phase-ps N --skew-ps S --move S A ...]
+# Makes <root>/<name>/tree (build.sh, build.tcl, tb and the variant src of this checkout; no option = src/ itself),
+# builds it into <root>/<name>/w and writes <root>/<name>/summary.txt: the image's sha256, timing per clock, area (#oreg
+# 15: the four encode ODDRs packed), the encode pad delays and the capture margins (tb/capture_report.sh --bits).
+# Builds of different names may run in parallel (at most 4 TD jobs; check the Windows free memory first).
 set -e
 AL3=$(cd "$(dirname "$0")/.." && pwd)
 ROOT=$1; N=$2; shift 2

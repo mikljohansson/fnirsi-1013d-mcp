@@ -6,7 +6,8 @@
 // time step (zaklad.v uses `sample_read_offset = ... + 1`) cannot race the read, as in hardware.
 `timescale 1ns / 1ps
 
-// clk2 / clk3: the fpga-encphase --iob images' B and A encode clocks (fpga/al3/README.md section 19), unused otherwise.
+// clk2 / clk3: the B and A encode clocks of 0x153E (and of the encphase images, fpga/al3/README.md sections 19 and 21);
+// the references (0x1532 .. 0x1535) and 0x153D and older leave them unused.
 // run.sh sets PLL_C2_NS / PLL_C3_NS from the image's al_ip/pll.v (each output's rising edge after clk0's, ns, minus the
 // IOB's 1.25 ns advance over the fabric encode route; see run.sh); clk1 stays at 1.25 for the references.
 `ifndef PLL_C2_NS
@@ -90,7 +91,7 @@ module AL_LOGIC_BRAM #(
   assign doa = 0;
 endmodule
 
-// AL_LOGIC_ODDR (TD logic DDR output register; the fpga-encphase --iob images' encode pins), as TD's
+// AL_LOGIC_ODDR (TD logic DDR output register; the encode pins since 0x153E), as TD's
 // sim/al/al_logic_io.v without the global reset and the 0.1 ns clock-mux delay: d1 and d2 taken on the rising edge, the
 // pin shows d1 from the rising edge and d2 from the falling edge. A register, not TD's mux of two, so the pin never
 // glitches in zero time.

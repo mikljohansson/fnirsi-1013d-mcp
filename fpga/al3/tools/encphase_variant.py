@@ -1,114 +1,40 @@
 #!/usr/bin/env python3
-"""Make an encode-phase experiment source tree from fpga/al3/src (roadmap section 6 item 4, knob 2; README section 19).
+"""Make an encode-phase experiment source tree from fpga/al3/src (README sections 19 and 21).
 
-The release source (0x153D, the gated encodes) stays as it is; every experiment image is this script applied to it, so an
-image is reproducible from the commit that holds the script and the source (build it with tools/encphase_build.sh).
+Since 0x153E the committed source drives the four ADC encode pins from IOB output registers (AL_LOGIC_ODDR) on PLL C2
+(clk_ADCB, the B encodes, 0 degrees) and C3 (clk_ADCA, the A encodes, 375 ps after C2): the recipe of the fpga-encphase
+image enc0, adopted by the owner on 2026-11-04. An experiment image is this script applied to the source, so it is
+reproducible from the commit that holds both (build it with tools/encphase_build.sh). The images keep the version word
+0x153E; they are told apart by their sha256 only (tools/enc_ab.py --image-sha256).
 
-    python3 -I fpga/al3/tools/encphase_variant.py OUT_DIR [--iob [--skew-ps S]] [--phase-ps N] [--move SECTION ANCHOR]
+    python3 -I fpga/al3/tools/encphase_variant.py OUT_DIR [--phase-ps N] [--skew-ps S] [--move SECTION ANCHOR]...
 
---iob          each encode pin from an IOB output register (AL_LOGIC_ODDR, d1 = d2): B on the rising edge of a new
-               clk_ADCB (PLL C2), A on the rising edge of a new clk_ADCA (PLL C3); C1 (clk_ADC) is left unused, so the
-               testbenches' reference designs keep their clock. Both load enc_cur / enc_cur_n: enc_nxt on the falling
-               clk_200MHz edge, i.e. the write clock after that edge, stable for a whole period. The pad delay is then
-               the IOB's, independent of placement. At --phase-ps 0 C2 rises 2.5 ns after the write clock edge (the IOB
-               path is about 1.25 ns faster than the source's fabric route, so the B pads land where 0x153C's and the
-               release 0x153D's do, about 7.0 ns) and C3 --skew-ps (default 375) later: the release's A - B offset
-               (0.36 ns). The fabric flops adc*_enc* stay, on the same edges, for the 0x33 self-check and the
-               testbenches. The encode sequence is the source's (the same write clock value per edge).
---phase-ps N   the encode clock(s) moved by N ps (a multiple of 125, the VCO's 1/8 step): without --iob C1 from the
-               source's 90 degrees (1.25 ns after clk_200MHz), with --iob both C2 and C3 from the point above.
+--phase-ps N   C2 and C3 moved together by N ps (a multiple of 125, the VCO's 1/8 step) from the source's C2 at 0 ps.
+--skew-ps S    C3 (the A encodes) S ps after C2 (default 375, the source's; a multiple of 125). The parked "skew images"
+               of README section 19 move one core only: A -250 / B 0 is --skew-ps 125, A 0 / B -250 is --phase-ps -250
+               --skew-ps 625.
 --move S A     a placement roll: move the zaklad.v section whose header starts with S before the one starting with A
                (order only; the knob that re-rolls TD 4.6.8's placement, README section 17 "Rolls").
 
-TD's PLL macro (arch/al3_macro.v) allows CLKCn_CPHASE 1..DIV (5 here); C0 = 0 degrees is CPHASE 4, so an output t ns
-after C0 is CPHASE 4 + floor(e / 8), FPHASE e mod 8 with e = 8 t taken in -24..15 (mod 40). TD 4.6.8 accepts a CPHASE
-above DIV without a message and times it as asked; this script never writes one. `encphase.txt` in the tree records the
-options and the clock times; tb/run.sh reads the clocks from al_ip/pll.v.
+With no option the tree equals src/. TD's PLL macro (arch/al3_macro.v) allows CLKCn_CPHASE 1..DIV (5 here); C0 = 0
+degrees is CPHASE 4, so an output t ns after C0 is CPHASE 4 + floor(e / 8), FPHASE e mod 8 with e = 8 t taken in
+-24..15 (mod 40). TD 4.6.8 accepts a CPHASE above DIV without a message and times it as asked; this script never writes
+one. `encphase.txt` in the tree records the options and the clock times; tb/run.sh reads the clocks from al_ip/pll.v
+(tb/encphase_defs.py), which refuses a phase whose simulated encode edges leave (2.5, 5) ns.
 """
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
 
 SEP = '//-------------------------------------------------------------------------------------'
 
-ENC_FLOP_OLD = """  always @(negedge clk_ADC)\t//clk_ADC   clk_RAM
-    begin
-      adc1_encB <= enc_nxt;
-      adc2_encB <= enc_nxt;
-
-      //The A and B clocks are inverted versions of each other
-      adc1_encA <= enc_nxt_n;
-      adc2_encA <= enc_nxt_n;
-    end
-"""
-ENC_FLOP_NEW = """  //fpga-encphase (--iob): the encodes leave from IOB output registers (the ODDRs at the end of the file) on the
-  //rising edges of clk_ADCB (B, PLL C2) and clk_ADCA (A, PLL C3). Their D is enc_cur / enc_cur_n, enc_nxt taken on
-  //the falling clk_200MHz edge, i.e. the write clock as it is after that edge: stable from that edge to the next
-  //falling edge, so any encode clock edge in between loads the same value (README section 19). adc*_enc* are fabric
-  //copies on the same edges for the 0x33 self-check and the testbenches.
-  reg enc_cur   = 0;
-  reg enc_cur_n = 1;
-
-  always @(negedge clk_200MHz)
-    begin
-      enc_cur   <= enc_nxt;
-      enc_cur_n <= enc_nxt_n;
-    end
-
-  always @(posedge clk_ADCB)
-    begin
-      adc1_encB <= enc_cur;
-      adc2_encB <= enc_cur;
-    end
-
-  always @(posedge clk_ADCA)
-    begin
-      //The A and B clocks are inverted versions of each other
-      adc1_encA <= enc_cur_n;
-      adc2_encA <= enc_cur_n;
-    end
-"""
-PIN_OLD = """  assign o_adc1_encA = adc1_encA;
-  assign o_adc1_encB = adc1_encB;
-  assign o_adc2_encA = adc2_encA;
-  assign o_adc2_encB = adc2_encB;
-"""
-PIN_NEW = """  //fpga-encphase (--iob): each encode pin from an IOB output register (AL_LOGIC_ODDR with both data inputs equal = a
-  //single-rate register on the rising clock edge). TD 4.6.8 does not pack plain flops into these pads (PACKREG = ON,
-  //synthesis keep and a posedge flop were all tried: #oreg stays 11), but it packs an ODDR, so the pad delay is the
-  //IOB's own: the same on all four pins and in every placement.
-  AL_LOGIC_ODDR enc_oddr_1A (.q(o_adc1_encA), .clk(clk_ADCA), .d1(enc_cur_n), .d2(enc_cur_n), .rst(1'b0));
-  AL_LOGIC_ODDR enc_oddr_1B (.q(o_adc1_encB), .clk(clk_ADCB), .d1(enc_cur),   .d2(enc_cur),   .rst(1'b0));
-  AL_LOGIC_ODDR enc_oddr_2A (.q(o_adc2_encA), .clk(clk_ADCA), .d1(enc_cur_n), .d2(enc_cur_n), .rst(1'b0));
-  AL_LOGIC_ODDR enc_oddr_2B (.q(o_adc2_encB), .clk(clk_ADCB), .d1(enc_cur),   .d2(enc_cur),   .rst(1'b0));
-"""
-WIRE_OLD = "  wire clk_ADC;//\n"
-WIRE_NEW = ("  wire clk_ADC;//\n"
-            "  wire clk_ADCB;                           //fpga-encphase: the B encodes' clock (PLL C2)\n"
-            "  wire clk_ADCA;                           //fpga-encphase: the A encodes' clock (PLL C3)\n")
-INST_OLD = "    .clk1_out (clk_ADC)\n"
-INST_NEW = "    .clk1_out (clk_ADC),\n    .clk2_out (clk_ADCB),\n    .clk3_out (clk_ADCA)\n"
-
 PLL_C0_CPHASE = 4          # pll.v: C0 (clk_200MHz) at 0 degrees; TD's macro: 1 <= CPHASE <= DIV (5)
-SRC_C1_NS = 1.25           # pll.v: C1 = 1 VCO cycle + 2/8 after C0 (VCO 1 GHz, 125 ps per FPHASE step)
-IOB_B_NS = 5.0             # --iob, --phase-ps 0: C2 rises 2.5 ns after the falling clk_200MHz (write clock) edge
-
-
-def replace_once(s: str, old: str, new: str, what: str) -> str:
-    n = s.count(old)
-    if n != 1:
-        sys.exit(f'{what}: expected the text once, found it {n} times (has src/ changed?)')
-    return s.replace(old, new)
-
-
-def apply_iob(zaklad: str) -> str:
-    zaklad = replace_once(zaklad, ENC_FLOP_OLD, ENC_FLOP_NEW, 'encode flops')
-    zaklad = replace_once(zaklad, WIRE_OLD, WIRE_NEW, 'clk_ADC wire')
-    zaklad = replace_once(zaklad, INST_OLD, INST_NEW, 'pll instance')
-    return replace_once(zaklad, PIN_OLD, PIN_NEW, 'encode pins')
+SRC_B_NS = 0.0             # src/al_ip/pll.v: C2 (the B encodes) rises with C0, 2.5 ns after the write clock edge
+SRC_SKEW_PS = 375          # src/al_ip/pll.v: C3 (the A encodes) 375 ps after C2
 
 
 def pll_setting(t_ns: float) -> tuple[int, int]:
@@ -119,38 +45,31 @@ def pll_setting(t_ns: float) -> tuple[int, int]:
     return PLL_C0_CPHASE + e // 8, e % 8
 
 
-def clock_times(phase_ps: int, iob: bool, skew_ps: int) -> tuple[float, float | None]:
-    """Rising edge after C0, ns mod 5: C1 (without --iob), or C2 and C3 (the B and A encodes, with --iob)."""
+def clock_times(phase_ps: int, skew_ps: int) -> tuple[float, float]:
+    """Rising edges of C2 (B) and C3 (A) after C0, ns mod 5."""
     for v in (phase_ps, skew_ps):
         if v % 125:
-            sys.exit("--phase-ps and --skew-ps must be multiples of 125 (the VCO's 1/8 step)")
-    if not iob:
-        return (SRC_C1_NS + phase_ps / 1000) % 5, None
-    b = (IOB_B_NS + phase_ps / 1000) % 5
+            sys.exit('--phase-ps and --skew-ps must be multiples of 125 (the VCO\'s 1/8 step)')
+    b = (SRC_B_NS + phase_ps / 1000) % 5
     return b, (b + skew_ps / 1000) % 5
 
 
-def apply_pll(pll: str, t1: float, t2: float | None, label: str) -> str:
-    """Without --iob: C1 (clk_ADC) to t1. With --iob: C1 unchanged (unused), C2 (clk_ADCB) to t1, C3 (clk_ADCA) to t2."""
-    if t2 is None:
-        c1, f1 = pll_setting(t1)
-        pll = replace_once(pll, '.CLKC1_CPHASE(5),', f'.CLKC1_CPHASE({c1}),', 'pll.v CLKC1_CPHASE')
-        pll = replace_once(pll, '.CLKC1_FPHASE("2")', f'.CLKC1_FPHASE("{f1}")', 'pll.v CLKC1_FPHASE')
-        return replace_once(pll, '| 90.0000 DEG  ', f'| {t1 / 5 * 360:.4f} DEG ({label})', 'pll.v header')
-    (c2, f2), (c3, f3) = pll_setting(t1), pll_setting(t2)
-    pll = replace_once(pll, '.CLKC1_FPHASE("2")',
-                       '.CLKC1_FPHASE("2"),\n'
-                       f'\t\t.CLKC2_ENABLE("ENABLE"),\n\t\t.CLKC2_DIV(5),\n\t\t.CLKC2_CPHASE({c2}),\n'
-                       f'\t\t.CLKC2_FPHASE("{f2}"),\n'
-                       f'\t\t.CLKC3_ENABLE("ENABLE"),\n\t\t.CLKC3_DIV(5),\n\t\t.CLKC3_CPHASE({c3}),\n'
-                       f'\t\t.CLKC3_FPHASE("{f3}")', 'pll.v C2 / C3')
-    pll = replace_once(pll, '\t\tclk1_out);', '\t\tclk1_out,\n\t\tclk2_out,\n\t\tclk3_out);', 'pll.v ports')
-    pll = replace_once(pll, '\toutput clk1_out;\n', '\toutput clk1_out;\n\toutput clk2_out;\n\toutput clk3_out;\n',
-                       'pll.v outputs')
-    pll = replace_once(pll, 'open, open, clk1_out, clk0_buf}', 'clk3_out, clk2_out, clk1_out, clk0_buf}', 'pll.v clkc')
-    head = (f'| 90.0000 DEG  \n//\t\tC2        \t| 200.000000MHZ\t| {t1 / 5 * 360:.4f} DEG ({label}: the B encodes)'
-            f'\n//\t\tC3        \t| 200.000000MHZ\t| {t2 / 5 * 360:.4f} DEG (the A encodes)')
-    return replace_once(pll, '| 90.0000 DEG  ', head, 'pll.v header')
+def sub_once(s: str, pattern: str, new: str, what: str) -> str:
+    out, n = re.subn(pattern, new, s)
+    if n != 1:
+        sys.exit(f'{what}: expected the pattern once, found it {n} times (has src/ changed?)')
+    return out
+
+
+def apply_pll(pll: str, tb: float, ta: float, label: str) -> str:
+    """C2 (clk_ADCB) to tb, C3 (clk_ADCA) to ta; the header lines say so."""
+    for n, t, core in ((2, tb, 'B'), (3, ta, 'A')):
+        c, f = pll_setting(t)
+        pll = sub_once(pll, rf'\.CLKC{n}_CPHASE\(\d+\)', f'.CLKC{n}_CPHASE({c})', f'pll.v CLKC{n}_CPHASE')
+        pll = sub_once(pll, rf'\.CLKC{n}_FPHASE\("\d"\)', f'.CLKC{n}_FPHASE("{f}")', f'pll.v CLKC{n}_FPHASE')
+        pll = sub_once(pll, rf'(//\t\tC{n} +\t\| 200\.000000MHZ\t\| )[^\n]*',
+                       r'\g<1>' + f'{t / 5 * 360:.4f} DEG  ({label}: the {core} encodes)', f'pll.v C{n} header')
+    return pll
 
 
 def move_section(text: str, sec: str, anc: str) -> str:
@@ -163,6 +82,8 @@ def move_section(text: str, sec: str, anc: str) -> str:
     h = hits(lines, starts, sec)
     if len(h) != 1:
         sys.exit(f'--move: section {sec!r} matches {len(h)}')
+    if h[0] + 1 >= len(starts):
+        sys.exit(f'--move: section {sec!r} is the last one')
     a, b = starts[h[0]], starts[h[0] + 1]
     block, rest = lines[a:b], lines[:a] + lines[b:]
     starts2 = [i for i, ln in enumerate(rest) if ln.rstrip('\r') == SEP]
@@ -186,32 +107,27 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('out', type=Path, help='output src directory (created; must not exist)')
     ap.add_argument('--src', type=Path, default=Path(__file__).resolve().parent.parent / 'src')
-    ap.add_argument('--iob', action='store_true')
     ap.add_argument('--phase-ps', type=int, default=0)
-    ap.add_argument('--skew-ps', type=int, default=375, help='--iob: A encodes this much after B + T/2 (default 375)')
+    ap.add_argument('--skew-ps', type=int, default=SRC_SKEW_PS, help='A encodes this much after B (default 375)')
     ap.add_argument('--move', nargs=2, action='append', default=[], metavar=('SECTION', 'ANCHOR'))
     a = ap.parse_args()
     if a.out.exists():
         sys.exit(f'{a.out} exists')
+    zsrc = rd(a.src / 'zaklad.v')
+    if 'AL_LOGIC_ODDR enc_oddr_' not in zsrc:
+        sys.exit(f'{a.src}/zaklad.v has no encode ODDRs: a source before 0x153E (use that commit\'s own tool)')
     shutil.copytree(a.src, a.out)
     zp, pllp = a.out / 'zaklad.v', a.out / 'al_ip' / 'pll.v'
-    z, pll = rd(zp), rd(pllp)
-    t1, t2 = clock_times(a.phase_ps, a.iob, a.skew_ps)
-    if a.iob:
-        z = apply_iob(z)
-    if a.iob or a.phase_ps:
-        pll = apply_pll(pll, t1, t2, f'fpga-encphase iob={int(a.iob)} {a.phase_ps:+d} ps')
+    z, pll = zsrc, rd(pllp)
+    tb, ta = clock_times(a.phase_ps, a.skew_ps)
+    if a.phase_ps or a.skew_ps != SRC_SKEW_PS:
+        pll = apply_pll(pll, tb, ta, f'encphase {a.phase_ps:+d} ps skew {a.skew_ps} ps')
     for sec, anc in a.move:
         z = move_section(z, sec, anc)
     wr(zp, z)
     wr(pllp, pll)
-    if t2 is None:
-        clocks = f'C1_NS={t1:.3f}'
-    else:
-        clocks = f'B_NS={t1:.3f} A_NS={t2:.3f}'
     moves = ';'.join(s + '>' + t for s, t in a.move) or '-'
-    desc = (f'iob={int(a.iob)} phase_ps={a.phase_ps} skew_ps={a.skew_ps if a.iob else 0} {clocks} '
-            f'moves={moves}\n')
+    desc = f'phase_ps={a.phase_ps} skew_ps={a.skew_ps} B_NS={tb:.3f} A_NS={ta:.3f} moves={moves}\n'
     (a.out / 'encphase.txt').write_text(desc, encoding='ascii')
     print(desc, end='')
 

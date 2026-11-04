@@ -3,8 +3,16 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
-State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
-- fpga-encphase (2026-10-27, branch `fpga-encphase`, not merged): **the encode-phase experiment, prepared, not finished**.
+State on 2026-11-04 (fpga-153e, branch `fpga-153e`):
+- fpga-153e (2026-11-04): **0x153E built and simulated, not flashed**: the release 0x153D with the four ADC encode
+  pins on IOB output registers (`AL_LOGIC_ODDR`) on PLL C2 (B) / C3 (A, +375 ps), the benched enc0 recipe made the
+  source, version byte 0x3E (the owner's decision of 2026-11-04 after the encode-phase session). Roll i2 (da645d0):
+  every clock 0 errors, clk_200MHz 4.802 ns, 7454 LE, encode pads B 6.97 / A 7.34 ns; `dist/al3-0x153E.bin`
+  `831dc346...02e1`, flash image `2782e1b6...d9d8`, status unbenched, min firmware 0.3.0; 0x153D supported.
+  `check --release` fails until the bench makes 0x153E recommended. Section "0x153E, the IOB encodes, fpga-153e"
+  below (the owner's flash checklist, the parked queue), README sections 19 (bench results) and 21.
+- fpga-encphase (2026-10-27, merged 587bcd0; benched 2026-11-04, results in README section 19): **the encode-phase
+  experiment**; the text below is as of its preparation.
   The release's encode flops are fabric flops (TD merges them; plain flops never pack into those pads), which is why the
   pads move with every roll; an `AL_LOGIC_ODDR` per pin on new PLL outputs C2 / C3 packs into the IOB and fixes the pads
   (B 6.97 / A 7.34 ns in all 29 rolls). All three images pinned with every clock closed, rebuilt to the same hashes and
@@ -158,7 +166,8 @@ State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, eighteen steps (18: `tb_square.v`, the fractional square generator, 0x153D; 17: `tb_stream.v`, the streaming logger, 0x153D; 16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153D.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, eighteen steps (18: `tb_square.v`, the fractional square generator, 0x153D; 17: `tb_stream.v`, the streaming logger, 0x153D; 16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153E.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tools/` | Bench and build helpers (README sections 18, 19, 21): `enc_ab.py` (CH2 code-error A/B per image, `--analyse` per phase and per code), `enc_sweep.py` (CH2 offset sweep, the per-core peak = the acceptance measure, `--analyse` per level), `encphase_variant.py` (phase / skew / roll trees from `src/`), `encphase_build.sh` (one roll or image + summary), `capwin_sweep.py`. Each Python tool has `--selftest`; run the bench ones with the mcp venv's Python. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -193,8 +202,9 @@ wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compar
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x153D with 0x153C's gated encodes, commit e3a23c2) gives `build/FPGA.bin` sha256
-  `fd0be7a2c715e3106b1501986640cdf64a1c8af64c534502701e5d836d32e96a` (= `dist/al3-0x153D.bin`; about 2 min). The
+- Current `src/` (0x153E, the IOB encodes, commit da645d0) gives `build/FPGA.bin` sha256
+  `831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1` (= `dist/al3-0x153E.bin`; about 2 min). 0x153D
+  (commit e3a23c2) gave `fd0be7a2c715e3106b1501986640cdf64a1c8af64c534502701e5d836d32e96a` (= `dist/al3-0x153D.bin`). The
   reverted full-rate 0x153D (50b4abe) gave `0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e`, the
   pre-full-rate 0x153D (ecdc6f0) gave `11b83ce70fddb657127b2e685e4d290281dc53fd6959f9459a071854b7dcba97`. 0x153C
   (commit bd24bdf) gave `2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2`. The testbench scripts compile
@@ -442,6 +452,77 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x153E, the IOB encodes, fpga-153e (2026-11-04)
+
+Brief (coordinator, after the owner's decision of 2026-11-04 11:2x at the encode-phase bench session): 0x153E = the release
+0x153D RTL with the four ADC encode pins on IOB output registers (`AL_LOGIC_ODDR`) on PLL C2 (B, 0 degrees) and C3 (A,
+375 ps later), the fpga-encphase enc0 recipe, version byte 0x3E, no other logic change; build with every clock closed;
+two-seed run.sh; dist (unbenched); tools and docs. Branch `fpga-153e`. **Nothing flashed.** README section 21.
+
+- **Source.** 754e39b: `src/zaklad.v` and `src/al_ip/pll.v` = `encphase_variant.py --iob` of 587bcd0 in clean form
+  (comments, the "ADC encode outputs" section at the end, header bullet), code equal to the enc0 tree except the version
+  byte (checked on comment-stripped text); `FPGA commands.txt` 0x06 = 0x15 0x3E, the planned trigger extensions no longer
+  called 0x153E. da645d0 = roll i2: the "Streaming logger" block before "Time base counter" (order only).
+- **tb.** 47ee0e1: version checks 0x153E, `tb/contract_0x153E.txt` (= 0x153D's but the version byte and the 0x05 / 0x0A /
+  0x18 poll reads, which update bit 0 only: `3f` for `3d`; fw-153e confirmed the firmware masks bit 0 and no host tool
+  replays the transcript). `encphase_defs.py` detects the committed source (ODDRs present): `-DPLL_C2_NS=3.750
+  -DPLL_C3_NS=4.125 -DENC_B_NS=1.250 -DENC_A_NS=1.625`; the references are old revisions and keep clk1.
+- **Build** (README section 21): da645d0 closes every clock (clk_200MHz 4.802 ns, sample_write_clock 9.375,
+  i_mcu_clk 27.608, clkc[2] 4.140, clkc[3] 3.887; clkc[0] the SDC artefact); 6439 LUT / 5912 reg / 7454 LE (86.3 %),
+  `#oreg 15`; encode pads 1A / 1B / 2A / 2B = 7.34 / 6.97 / 7.34 / 6.97 ns (enc0's); `enc_cur` -> ODDR D +0.860 /
+  +2.654 ns, -> fabric copies +0.988 (B) / +1.733 (A), self-check copies -> `enc_ok` +0.481 ns. 3 of 55 distinct
+  placements (64 builds, under `~/e153e`) closed; the kept one has the most clk_200MHz slack. Raw
+  `831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1`, padded **`2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8`**
+  (`backups/al3_0x153E_831dc346.bin`, `..._padded.bin`); a fresh rebuild of the committed source (`~/e153e/final`)
+  gives the same raw sha256.
+- **run.sh** (`REF_SRC_DIR=~/g11/refs`, snapshots `~/e153e/full_<seed>`): `tb/run.sh` (18 steps, `REF_SRC_DIR=~/g11/refs`) on a snapshot of da645d0's `src` + `tb`, both seeds in parallel (2026-11-04, 10488 / 10289 s): **ALL PASS on seeds 12345 and 4242**, every step, no exception. Per step (12345 / 4242): ext 39; decim 110 / 108 + cic_model 1876 / 1902 samples; fir 164 / 168 + cic_model 1582 / 1557; long 8; seg 59 / 57 + seg_model 22 runs 0 failures; trigpos 882; contract 42 and the transcript = `contract_0x153E.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 2241; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102. run.sh prints the encode clock defines `-DPLL_C2_NS=3.750 -DPLL_C3_NS=4.125 -DENC_B_NS=1.250 -DENC_A_NS=1.625` (`encphase_defs.py` detects the committed source); the references keep their clock.
+- **Tools** (8b5a4c7): `tools/enc_sweep.py` (the session's CH2 offset sweep: `--port COM10 --image <label> --image-sha256
+  <sha> [--range N | lo:hi] [--captures 6] --out sweep_<label>.npz`, `--analyse <npz>...` with the per-level table, sweeps
+  of one image pooled, `--selftest`), `tools/enc_ab.py --analyse` now prints per phase and per code too (the session's
+  `phase_ab.py`), `tools/encphase_variant.py` derives phase / skew images from the IOB source (`--phase-ps`, `--skew-ps`,
+  `--move`; `--iob` gone). All ruff clean with mcp's selection; both `--selftest` PASS and both `--analyse` reproduce the
+  session's numbers from `backups/encphase/*.npz`.
+- **dist.** `dist/al3-0x153E.bin`, manifest status `unbenched`, `min_firmware` 0.3.0 (the dev builds between are
+  unnumbered 0.2.105); 0x153D `supported`. `tools/bitstreams.py check` passes; **`check --release` fails on this branch
+  by design** (fw-153e's rule on main: the recommended entry must equal PC_FW_FPGA_VERSION = 0x153E, and 0x153E is not
+  benched yet). The owner's bench sets 0x153E to `recommended` with its bench record; then `--release` passes.
+
+**Owner's flash checklist for 0x153E** (the flash holds the release 0x153D, `aa252fb7`, since 2026-11-04 11:00):
+1. Firmware first: fw-153e's build that expects 0x153E (FEL or the card; on 0x153D it shows the mismatch banner, so do the
+   backups below on the current card's 0.2.105 first). `python -I tools/bitstreams.py pack --out backups/dist-0x153E`
+   gives `fnirsi_1013d-fpga-al3-0x153e.bin` (`831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1`) and `fnirsi_1013d-fpga-al3-0x153e-flash1m.bin`
+   (**`2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8`**); `sha256sum` both and log them in `docs/hardware-status.md` (check the clock first).
+2. Backups: SD sectors 700-710 twice over USB (`fnirsi1013d-sd --port COM10 read 700 11 -o backups/sd_700-710_pre-0x153E_a.bin`,
+   `..._b.bin`, equal sha256). Then battery, USB unplugged, FT2232D channel A on J2: `python firmware/tools/spiflash_d2xx.py
+   probe` = `ef 40 14`; `spiflash_d2xx.py read -o backups/<date>-pre-0x153E.bin --twice`: both reads must hash to
+   `aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc`; anything else: stop. (Plain `python`: the FTDI
+   module is in the user site-packages, which `-I` hides.)
+3. `spiflash_d2xx.py write -i backups/dist-0x153E/fnirsi_1013d-fpga-al3-0x153e-flash1m.bin --yes --confirm-id ef4014`;
+   the verified read-back must hash `2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8`. (On 2026-11-04 two writes were refused by the double pre-read, "bus
+   unstable"; a retry wrote.) Rollback: the release flash image `aa252fb7...63cc` written the same way, with fw 0.2.105.
+4. Power-cycle; `#VER` = `fpga=0x153e` with fw-153e's firmware (no banner); GET_HEALTH encode self-check 0 bad, capture
+   self-check 0 flagged.
+5. Wizard with the inputs open (Calibrate, save); expect A3 on both channels (enc0 trained CH1 A3 B3, CH2 A3 B3); a
+   different A stage is a surprise to log. Then a divider-0 capture with the probes on the ladder: **both A cores must
+   move with B** (the enc+250 failure mode, which 0x33 cannot see).
+6. The normal release bench: probes on the ladder as in the encode-phase session (CH1 input, CH2 second node, both DC,
+   Filter Off), `fpga/al3/tools/enc_ab.py --image 0x153E --image-sha256 2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8 --out backups/ab_0x153E.npz` and
+   `fpga/al3/tools/enc_sweep.py --image 0x153E --image-sha256 2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8 --out backups/sweep_0x153E_1.npz` (twice; the sweep
+   peak per core is the acceptance number: the release had A 6.94 % / B 0.66 %, enc-250 A 2.14 / B 11.37; divider 99 must
+   be 0 / 0), then the logger, square and counter checks of README sections 16 / 17 and the 0.3.0 release bench of
+   `docs/releasing.md`. Log each step; on a clean run set 0x153E `recommended` (bench record), 0x153D stays `supported`,
+   and run `tools/bitstreams.py check --release`.
+
+**Queue (fpga, parked unless the owner asks):**
+- **Pin-level encode self-check.** Read the four encode pads back through their input buffers (the pad's IBUF beside the
+  ODDR, or a spare pin) into the clk_200MHz domain and compare with the fabric copies, so read 0x33 / GET_HEALTH sees a
+  frozen or late pin. Today's 0x33 compares the fabric copies only and passed on enc+250 with both A cores frozen at
+  200 MSa/s (2026-11-04 10:48). Needs a check of whether TD 4.6.8 lets an output pad's input path be used (inference: the
+  AL3 IOB has one, the pin would become bidirectional); a version bump and firmware support.
+- **Skew images** (README section 19 "Bench session 2026-11-04"): A -250 / B 0 first (`encphase_variant.py --skew-ps
+  125`), then A 0 / B -250 (`--phase-ps -250 --skew-ps 625`); judge by the sweep peak per core on both cores, after a
+  divider-0 capture with both A cores moving. Runtime phase (the PLL's dynamic phase trained by the wizard) after those.
 
 ## Encode phase experiment, fpga-encphase (2026-10-27)
 

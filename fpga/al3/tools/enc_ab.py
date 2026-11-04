@@ -20,8 +20,19 @@ the probes, the CH2 range and the offset BEFORE the first run and leave them alo
 depends on where the signal's flat levels sit against the 0x5F / 0x60 carry (hardware-status 18:27-18:33), so the
 script records CH2's range, coupling and offset (dcoffset / offset_pwm), the trained capture stages in effect (GET_HEALTH
 cap_value), the encode self-check counters, firmware and FPGA version words and the image's sha256 / label you pass
-(the firmware cannot see which image is flashed: every experiment image reports 0x153D). --analyse warns when two runs
-differ in any of them.
+(the firmware cannot see which image is flashed: every experiment image reports its source's version word, 0x153D for
+the fpga-encphase images, 0x153E for images made from the 0x153E source). --analyse warns when two runs differ in any
+of them.
+
+Phases (--analyse, bench session 2026-11-04): the trigger (CH1 rising at the ladder input) also fires on the falling
+slope of the slow signal, because the A / B cores' 1-2 code zigzag makes rising crossings there. A run therefore mixes
+captures of the rising phase (CH2 low, about 94, at the 0x5F / 0x60 carry) and of the falling phase (CH2 high, about
+181), in a ratio that changes from run to run (20 / 12, 15 / 17, ...), so the overall shares of two runs are not
+comparable. --analyse splits the captures by core A's median (--phase-split, default 140) and prints per phase and
+core, per band, and per median code at the carry (0x5A..0x63, rising phase, divider 0), besides the overall numbers.
+Per phase and per code compare like for like; a level parked a fraction of a code higher still moves the per-code
+shares, so the parking-independent number is enc_sweep.py's peak. At divider 99 every capture spans both levels and
+counts as "fall".
 
 Run it with the mcp venv's Python (mcp/.venv: the fnirsi1013d package); --analyse and --selftest need only numpy.
 """
@@ -38,6 +49,8 @@ HOT = (0x5E, 0x6F)          # the hot zone of the 2026-10-22 A/B (medians at the
 BAND = 8
 MIN_BAND_N = 200
 THRESH = 4                  # codes above the 3-sample median
+PHASE_SPLIT = 140           # capture median below: rising phase (CH2 low ~94); at or above: falling phase (~181)
+CARRY_CODES = range(0x5A, 0x64)   # per-code table of the rising phase, around the 0x5F / 0x60 carry
 
 #: images the bench has flashed or will flash (sha256 of the raw .bin or of the 1 MiB padded flash image -> label);
 #: README section 19 lists the experiment images with their padded hashes
@@ -46,6 +59,14 @@ KNOWN_IMAGES = {
     "aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc": "0x153D release (gated encodes), flash image",
     "2580b090db3dd16f5609ddcb0d27576f9dfe6a4651dbafa85000d807a6bec7f2": "0x153C, raw",
     "07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77": "0x153C, flash image",
+    "a71430a85e5b7676e2744e4d4ef8a8cdef38504ca9e46658697056d510111e06": "fpga-encphase enc0 (0x153D word), raw",
+    "c9d3210d90f9ad0a98d68011ce070940ead3c673cdcc2eb664f6bbc7b65b9fb2": "fpga-encphase enc0 (0x153D word), flash",
+    "3fc75a76a21f89c90a30307153a46da419e3f528b2db00eb2f30fc2032e8b59d": "fpga-encphase enc-250 (0x153D word), raw",
+    "d397e0c26ec26ec2db517b5de9b9e33b299df778825b64de71576e3bc245dd46": "fpga-encphase enc-250 (0x153D word), flash",
+    "eaac246e11027c91aa8a8faf23970a33b490cc6bbc82645fc6ecee6ebeb79f05": "fpga-encphase enc+250 (0x153D word), raw",
+    "46a38f24e3a56aff45d0113247ac5a82cfbc059b66689659e4a2049d6e440b6f": "fpga-encphase enc+250 (0x153D word), flash",
+    "831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1": "0x153E (IOB encodes), raw",
+    "2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8": "0x153E (IOB encodes), flash image",
 }
 #: keys of the recorded settings that must match for two runs to be comparable
 COMPARE_KEYS = ("ch2", "cap_value", "fw", "gen", "trigger_mode")
@@ -55,10 +76,49 @@ COMPARE_KEYS = ("ch2", "cap_value", "fw", "gen", "trigger_mode")
 # Analysis (numpy only)
 
 def flags(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """(median of x[j-1], x[j], x[j+1], flagged = x[j] - median >= THRESH) for j = 1 .. n - 2."""
+    """(median of x[j-1], x[j], x[j+1], flagged = x[j] - median >= THRESH) for j = 1 .. n - 2 along the last axis (one
+    capture, or captures x words)."""
     x = x.astype(np.int16)
-    med = np.median(np.stack([x[:-2], x[1:-1], x[2:]]), axis=0)
-    return med, (x[1:-1] - med) >= THRESH
+    med = np.median(np.stack([x[..., :-2], x[..., 1:-1], x[..., 2:]]), axis=0)
+    return med, (x[..., 1:-1] - med) >= THRESH
+
+
+def rising(caps_a: np.ndarray, split: float = PHASE_SPLIT) -> np.ndarray:
+    """Per capture: True for the rising phase (core A's median below split), False for the falling phase."""
+    return np.median(caps_a, axis=1) < split
+
+
+def phase_stats(raw: dict, split: float = PHASE_SPLIT) -> dict:
+    """raw: {(divider, core): captures x words} -> {(divider, core, 'rise' | 'fall'): stats} (both cores split by
+    core A's medians, so a capture is in the same phase for A and B), plus the per-code shares of the rising phase."""
+    out = {}
+    for (div, core), caps in raw.items():
+        a = raw.get((div, "A"), caps)
+        rise = rising(a, split)
+        for ph, sel in (("rise", rise), ("fall", ~rise)):
+            if not sel.any():
+                continue
+            st = core_stats(caps[sel])
+            st["caps"] = int(sel.sum())
+            if ph == "rise":
+                med, e = flags(caps[sel])
+                mi = np.round(med).astype(int)
+                st["code"] = {c: (int((mi == c).sum()), int((e & (mi == c)).sum())) for c in CARRY_CODES}
+            out[(div, core, ph)] = st
+    return out
+
+
+def phase_report(ph: dict, split: float = PHASE_SPLIT) -> str:
+    lines = [f"  per phase (captures split by core A's median at {split:g}: rise = CH2 low, fall = CH2 high):"]
+    for (div, core, phase), r in sorted(ph.items()):
+        bands = [f"{BAND * k:02X}:{int(r['band_n'][k])}/{100 * r['band_b'][k] / r['band_n'][k]:.2f}"
+                 for k in range(len(r['band_n'])) if r['band_n'][k] > MIN_BAND_N]
+        lines.append(f"    divider {div:3d} {core} {phase}: {r['caps']:2d} captures, {r['bad']} of {r['n']} "
+                     f"({r['pct']:.3f} %); bands " + "  ".join(bands))
+        if "code" in r and div == 0:
+            cells = [f"{c:02X}:{n}/{100 * b / n:.1f}" if n else f"{c:02X}:0" for c, (n, b) in r["code"].items()]
+            lines.append("      per median code (samples/error %): " + " ".join(cells))
+    return "\n".join(lines)
 
 
 def core_stats(caps: np.ndarray) -> dict:
@@ -86,9 +146,9 @@ def analyse(raw: dict) -> dict:
 
 
 def report(res: dict, meta: dict) -> str:
-    lines = [f"image {meta.get('image')} ({meta.get('image_label')}) sha256 {str(meta.get('image_sha256'))[:16]}...; "
+    lines = [(f"image {meta.get('image')} ({meta.get('image_label')}) sha256 {str(meta.get('image_sha256'))[:16]}...; "
              f"fw {meta.get('fw')} FPGA 0x{meta.get('fpga_version', 0):04X}; stages {meta.get('cap_text')}; "
-             f"CH2 {meta.get('ch2')}; encode self-check {meta.get('enc')}"]
+             f"CH2 {meta.get('ch2')}; encode self-check {meta.get('enc')}")]
     for (div, core), r in sorted(res.items()):
         lines.append(f"  divider {div:3d} CH2 {core}: >= +{THRESH} codes {r['bad']} of {r['n']} ({r['pct']:.3f} %); "
                      f"at codes 0x{HOT[0]:02X}..0x{HOT[1]:02X} {r['hot_bad']} of {r['hot_n']} ({r['hot_pct']:.2f} %)")
@@ -98,8 +158,9 @@ def report(res: dict, meta: dict) -> str:
     return "\n".join(lines)
 
 
-def compare(runs: list[tuple[str, dict, dict]]) -> str:
-    """One line per (divider, core) with every run's overall and hot-zone share; warnings for unlike runs."""
+def compare(runs: list[tuple[str, dict, dict]], phases: list[dict] | None = None) -> str:
+    """One line per (divider, core) with every run's overall and hot-zone share; with phases (phase_stats per run) one
+    line per (divider, core, phase) and the rising phase's per-code shares; warnings for unlike runs."""
     lines = []
     ref = runs[0][2]
     for name, _, meta in runs[1:]:
@@ -115,6 +176,22 @@ def compare(runs: list[tuple[str, dict, dict]]) -> str:
             r = res.get(k)
             cells.append(f"{r['pct']:8.3f} /{r['hot_pct']:7.2f}" if r else f"{'-':>18s}")
         lines.append(f"{k[0]:7d} {k[1]:>6s}  " + "  ".join(cells))
+    if phases:
+        lines.append(f"{'per phase':14s}  {head}   (captures: error %)")
+        for k in sorted({k for ph in phases for k in ph}):
+            cells = []
+            for ph in phases:
+                r = ph.get(k)
+                cells.append(f"{r['caps']:3d}: {r['pct']:7.3f} %    " if r else f"{'-':>18s}")
+            lines.append(f"{k[0]:4d} {k[1]} {k[2]:4s}    " + "  ".join(cells))
+        lines.append("rising phase, divider 0, per median code (error %; samples < 50: '-'):")
+        for core in ("A", "B"):
+            for c in CARRY_CODES:
+                cells = []
+                for ph in phases:
+                    n, b = ph.get((0, core, "rise"), {}).get("code", {}).get(c, (0, 0))
+                    cells.append(f"{100 * b / n:18.1f}" if n >= 50 else f"{'-':>18s}")
+                lines.append(f"  {core} 0x{c:02X}         " + "  ".join(cells))
     return "\n".join(lines)
 
 
@@ -168,8 +245,9 @@ def run(args) -> int:
         }
         print(f"{args.image}: fw {meta['fw']} FPGA 0x{info.fpga_version:04X}, stages {meta['cap_text']}, "
               f"CH2 {meta['ch2']}, encode self-check {meta['enc']}", flush=True)
-        if info.fpga_version != 0x153D:
-            print("WARNING: the FPGA does not report 0x153D (the experiment images keep the release's version word)")
+        if info.fpga_version != 0x153E:
+            print(f"NOTE: the FPGA reports 0x{info.fpga_version:04X}, not 0x153E (expected for the fpga-encphase "
+                  "images, 0x153D and 0x153C; images made from the 0x153E source keep 0x153E)")
         try:
             s.set_decim(0)
             if args.gen_hz:
@@ -210,6 +288,7 @@ def run(args) -> int:
         s.close()
     res = analyse(raw)
     print(report(res, meta))
+    print(phase_report(phase_stats(raw)))
     if args.out:
         np.savez_compressed(args.out, meta=np.array(json.dumps(meta)),
                             **{f"d{div}_{core}": v for (div, core), v in raw.items()})
@@ -220,12 +299,12 @@ def run(args) -> int:
 # ----------------------------------------------------------------------------------------------------------------------
 # Self-test
 
-def synth(rng, n_caps: int, words: int, err: float, codes: tuple[int, int]) -> np.ndarray:
+def synth(rng, n_caps: int, words: int, err: float, codes: tuple[int, int], period: int = 700) -> np.ndarray:
     """A 1 kHz-like square between two codes with 1-code noise; err: share of samples at medians 0x5E..0x6F made 5
-    codes high (the class (b) signature)."""
+    codes high (the class (b) signature). A period longer than the capture gives one level per capture (a phase)."""
     out = []
     for _ in range(n_caps):
-        x = np.where((np.arange(words) // 700) % 2 == 0, codes[0], codes[1]).astype(float)
+        x = np.where((np.arange(words) // period) % 2 == 0, codes[0], codes[1]).astype(float)
         x += rng.normal(0, 0.6, words)
         x = np.clip(np.round(x), 0, 255).astype(np.int16)
         hot = (x >= HOT[0]) & (x <= HOT[1])
@@ -249,6 +328,20 @@ def selftest() -> int:
     txt = compare([("a", res, meta), ("b", res, other)])
     print(txt)
     ok &= "not like for like" in txt
+    # phases: 5 rising-phase captures (low level at the carry, errors on A) and 3 falling-phase ones (high, clean)
+    lo = synth(rng, 5, 3000, 0.08, (0x60, 0x60), period=10 ** 6)
+    hi = synth(rng, 3, 3000, 0.08, (0xB4, 0xB4), period=10 ** 6)
+    raw2 = {(0, "A"): np.concatenate([lo, hi]), (0, "B"): np.concatenate([hi[:1], lo, hi[1:]])}
+    ph = phase_stats(raw2)
+    print(phase_report(ph))
+    ok &= ph[(0, "A", "rise")]["caps"] == 5 and ph[(0, "A", "fall")]["caps"] == 3
+    ok &= ph[(0, "A", "rise")]["pct"] > 2.0 and ph[(0, "A", "fall")]["pct"] == 0.0
+    n60, b60 = ph[(0, "A", "rise")]["code"][0x60]
+    ok &= n60 > 1000 and 2.0 < 100 * b60 / n60 < 9.0
+    ok &= (0, "B", "rise") in ph and ph[(0, "B", "rise")]["caps"] == 5     # B split by A's phase, not its own
+    txt2 = compare([("a", analyse(raw2), meta), ("b", analyse(raw2), meta)], [ph, ph])
+    print(txt2)
+    ok &= "per phase" in txt2 and "A 0x60" in txt2
     print("selftest:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -265,20 +358,25 @@ def main() -> int:
     ap.add_argument("--note", default="", help="free text stored with the run (probe positions, room, ...)")
     ap.add_argument("--out", help="save the raw captures and the settings (.npz)")
     ap.add_argument("--analyse", nargs="+", metavar="NPZ", help="reprint saved runs; two or more: compare them")
+    ap.add_argument("--phase-split", type=float, default=PHASE_SPLIT,
+                    help="--analyse: capture median below this = rising phase (default 140)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if a.analyse:
-        runs = []
+        runs, phases = [], []
         for p in a.analyse:
             raw, meta = load(p)
             res = analyse(raw)
+            ph = phase_stats(raw, a.phase_split)
             print(f"== {p}")
             print(report(res, meta))
+            print(phase_report(ph, a.phase_split))
             runs.append((p, res, meta))
+            phases.append(ph)
         if len(runs) > 1:
-            print(compare(runs))
+            print(compare(runs, phases))
         return 0
     if not a.image or not a.image_sha256:
         ap.error("a bench run needs --image and --image-sha256")

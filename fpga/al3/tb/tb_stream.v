@@ -515,7 +515,7 @@ module tb;
     wr4(8'h0D, 0);
     rd2(8'h06);
     $display("0x06 = %04h", rd16);
-    check(rd16 == 16'h153B || rd16 == 16'h153C || rd16 == 16'h153D, "0x06 reads 0x153B .. 0x153D");
+    check(rd16 == 16'h153B || rd16 == 16'h153C || rd16 == 16'h153D || rd16 == 16'h153E, "0x06 reads 0x153B .. 0x153E");
 
     //------------------------------------------------------------------------------
     $display("---- 0: normal captures before any 0x69 write (0x153C behaviour): auto time-out, triggered, 1.3-ring time-out");
