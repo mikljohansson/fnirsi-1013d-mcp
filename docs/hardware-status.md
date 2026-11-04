@@ -1714,3 +1714,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   per step, both cores' error share and raw level; the peak over the sweep is the parking-independent measure):
   enc-250 **peak A 2.14 % at level 96, peak B 11.37 % at level 97**, means over the sweep A 0.62 %, B 3.86 %; both cores
   near 0 at the sweep's ends (levels 100 and 94). `backups/encphase/sweep_enc-250.npz`. Every following image gets the sweep.
+- 2026-11-04 10:48-10:55 (lead, owner present): **enc+250 fails at 200 MSa/s** (`al3_encphase_p250_eaac246e_padded.bin`, written
+  first try, verified 46a38f24; pre-write backup `backups/20261104-104759-pre-write.bin` = d397e0c2). Cold boot accepted
+  as 0x153D, encode self-check 0 bad (7082 by the end), 0 flagged. The wizard's CH2 gain step failed with "the two ADC
+  cores differ too much" (ACAL_E_GAIN_SPLIT). Host captures with the probes on the ladder: at divider 0 **both A cores return
+  a constant** (CH2 A 181..182, 4 distinct codes over 1500 words, while CH2 B reads 100 in the same record; CH1 A 135..136
+  flat while CH1 B shows the rising 128..134); at dividers 1, 3, 19 and 99 A tracks B (CH2 A/B 181/186, 93/95, 93..181/
+  95..185, 92..180/95..184). So at full rate the A encodes stop or the A capture stops updating and the AD9288 A cores hold
+  their last value; the 0x33 self-check cannot see it (it checks the fabric copies, not the ODDR pins: a gap for any future
+  build). Decision table: stop, return to the release. No A/B, no sweep; the calibration the wizard stored under it is
+  discarded by the step-5 wizard. The silicon's usable encode phase is on the -250 side of TD's model (-250 and 0 run,
+  +250 does not); inference: the enc_cur -> ODDR setup / hold at +250 (TD: +1.05 / +2.49 ns) is not what the silicon has.
