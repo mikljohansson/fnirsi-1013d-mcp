@@ -56,8 +56,7 @@ void pc_life_set_restart(pc_life *l, const uint32_t *v, uint32_t minutes);
 //restart, restart record stored, session open) and returns PC_LIFE_END_* for the previous power-on.
 int  pc_life_boot(pc_life *l, int found, int sector_valid, const uint32_t *restart_v);
 
-//1.00o5 settings checksum (sum of words 2..255) into words 0-1; 1 when words 2-3 hold the expected version and 0-1 match
+//1.00o5 settings checksum (sum of words 2..255) into words 0-1 (the check: settings_check.h srec_check_header)
 void     pc_life_settings_seal(uint16_t *s);
-int      pc_life_settings_valid(const uint16_t *s, uint16_t ver_hi, uint16_t ver_lo);
 
 #endif /* PC_LIFE_H */

@@ -83,6 +83,8 @@ firmware/scope/            Atlan4 v1.00o5 scope app + the USB control protocol (
                            host-buildable (section 75)
   adc_cal.c/.h             calibration data v3: per-core zero and gain model, sector 708 block, correction maths,
                            zero and gain step checks. Pure C, host-buildable (sections 21, 23)
+  settings_check.c/.h      the stored settings record (sector 709) checked whole before it is applied: version,
+                           checksum, every field's range. Pure C, host-buildable (host_tests/test_settings.c; section 94)
   cal_wiz.c/.h             calibration wizard steps: state machine, actions, summary texts. Pure C, host-buildable
                            (host_tests/test_cal_wizard.c; section 27)
   cal_wiz_ui.c             the wizard's step dialog, touch loop and the zero / gain measurements (sections 28, 34)
@@ -146,7 +148,8 @@ SOURCE_DATE_EPOCH=<any>` and comparing sha256 (section 25). Warning policy: no n
 
 The SD card boots our 0.2.11 from sector 750 (persisted with SD_STAGE + SD_WRITE_SECTORS, see section 13). One serial user at a time; ask the maintainer to keep hands off
 the screen during tests (menus are modal and defer commands). The power-off ISR still writes settings to sector 709
-(1.00o5 behaviour); with PC_FORCE_CDC=1 that save stores "USB CH340 mode" = on.
+(1.00o5 behaviour; since fw-settings0 not during the boot, nor over a rejected record before a setting changed,
+section 94); with PC_FORCE_CDC=1 that save stores "USB CH340 mode" = on.
 
 ## 4. USB facts learned the hard way
 
@@ -7113,3 +7116,106 @@ gcc10 image 817,664 -> 816,640 bytes (GCC 13 840,192 -> 839,680, PC_DEBUG 840,70
    clear), Settings > Restore default settings returns to the notice without a hang; GET_INFO 78 = 1.
 Regression signs: a READ_RAW or Bode record shifted or garbled at the ring end (the read path's ring), the wizard
 skipping the training, TRAINED lost after a reboot (the trailer's version compare).
+## 94. fw-settings0: a bad settings record loads the defaults; no settings save during the boot (fw 0.2.105, protocol unchanged)
+
+Branch `fw-settings0` from main fa8377b (`PC_FW_VERSION` not bumped). Commits: edeca27 (`settings_check.c/.h`,
+`acal_centres`, `host_tests/test_settings.c`), b6c6b72 (the boot, the power-off save, the notices), then the docs
+commit with this section. **Not benched.**
+
+**What the owner saw (2026-11-04 ~10:00, card boot of c681efa4 on 0x153D)**: the first-run screen, time/div would not
+change, nothing recorded until ACQ memory depth was set to 3000, every setting looking zeroed. GET_CAL cal_version 1,
+flags 0x0d (block loaded, not bound).
+
+**Sector 709 of `backups/encphase/sd_700-710_pre-encphase_a.bin`** (read before the owner changed anything): version
+0x0100 / 0x0015 and the 1.00o5 checksum (sum of words 2..255 = 0x0009F056) both **valid**, so 0.2.105 applied it.
+Against the 10-22 pre-gate record: words 8..61 (channels, time/div 20, rate 6, trigger), 80..107, 120..126, 136..161
+and 221..223 (the spectrum MEASURES) carry the user's values; **zero**: 168..179 (PWM centres), 184..187
+(compensations), 192..201 (generator on, frequency, duty, memory depth, trigger point), 62..63 (trigger position);
+202..220 hold the modules' compile-time defaults (208 0x5E53 / 209 0x1000 spectrum, 207 0xDE01 Filter, 211 0xC701, 219
+0xB34A, 202 0xAC38), not the user's 0x5E64 / 0x1014 / 0xDE03 / 0xC703 / 0xB349 / 0xAE71; life record 224..229 = marker,
+session open, power_on **2**, minutes **6** (10-22: power_on 0x53, minutes 0x254).
+- **Cause (evidence)**: the cut runs exactly along `scope_restore_config_data`'s order. Everything it restores before
+  `scope_load_ALLREF_file()` is the user's; what `scope_load_input_calibration_data()` (centres, compensations, then
+  52 ms of `timer0_delay(1)` in its checksum loop), the FPGA block after it and `pc_glue_init` (pc_ui_fix_settings'
+  words 202..220, `pc_diag_boot`'s life record) restore is BSS zero or the initialisers. The only writer that saves in
+  that state is the **power-off interrupt** (`power_interrupt_handler`, armed in `main` by `power_interrupt_init` long
+  before `scope_load_configuration_data`; it saved whenever no viewer was open): it rebuilt the buffer from a
+  half-restored `scopesettings` into the very `settingsworkbuffer` being restored, sealed it (valid checksum) and wrote
+  709. pc_life_rec was still zero, so the life record read power_on 0; the next power-on counted 1 and ran >= 6 minutes
+  (minutes 6 at its power-off save, which wrote the zeros back), the boot before the backup counted 2. **Inference**:
+  when. The bench log has the card off from 10-22 19:52 to today; power_on 0 -> 1 -> 2 needs the torn write in one boot
+  and two cold boots after it, so at least two boots are not in the log (probably today before 09:5x, around the 09:44
+  FPGA flash read; a power-key press or a battery dip during a boot). What raised PE11 during that boot is not known.
+- **Why it was then unusable**: memory depth 0 makes every time/div non-viable (`tbv_viable` with 0 samples) and no
+  record fits; `pc_ui_fix_settings` only clamps a depth over the bitstream's. No migration zero-fills anything.
+- Not the cause: the debug build (it saved 708 + 709 at 18:27-18:29 with centres 0x363.., the same layout),
+  `scope_reset_config_data` (sets depth 3000, generator 1 kHz, position 357: not in the record), the boot write (writes
+  the record as loaded).
+
+**Sector 708** of the same backup: Atlan checksum valid, v3 block (magic ACAL, version 3, CRC-32 ok) with centres CH1
+0x363 0x35E 0x366 0x361 0x366 0x360, CH2 0x35A 0x355 0x35D 0x359 0x35D 0x359, provenance 'APRV' build 0x07C2BBF7
+"0.2.105" FPGA 0x153D, stages 0x06DB for 0x153D. Nothing wrong with it. cal_version 1 is the **binding rule**
+(adc_cal.h: the block applies while 709's centres equal the ones it was measured at), here against the zeroed centres.
+The rule is right (an older firmware's base calibration or a RESET changes 709's centres, and the block's zeros then do
+not hold), but its other half was a bug: with no valid 709 the defaults took the centres from the rejected buffer (or
+860). Now, when 709 is not applied and the block unpacks, `acal_centres` takes the block's own centres and
+`acal_atlan_comps` (what the wizard's Save wrote to 709), so the calibration binds again; without a block 860 / 0 as
+before. The calibration is not bound to the writing build: the provenance is reporting only.
+
+**The fix** (`scope_functions.c`, `pc_diag.c`, `power_and_battery.c`, `fnirsi_1013d_scope.c`):
+- `scope_load_configuration_data`: `srec_check` (settings_check.h): read ok, version, checksum, then the fields
+  (enable / coupling / invert / V/A 0..1, probe and both V/div 0..6, time/div 0..34, rate 0..28, short mode needs
+  time/div 11..34 and rate < 18, trigger mode 0..2, edge 0..1, source 0..2, right menu 0..4, brightness 0..100, the
+  switches 0..1, centres 200..1800 (ACAL_PWM_MIN..MAX), compensations -127..127, generator on 0..1, duty 0..100,
+  frequency 0..10 MHz, depth >= 80 and even, pretrigger + 2 <= depth). Result in `scope_settings_result` (SREC_*),
+  the first failing word in `scope_settings_bad_word` (for a debugger or a later report line; not on the wire). Not
+  checked, as the load clamps or migrates them: positions, trigger level, Trace style 3, a depth over the bitstream's,
+  the marked words 202..223, the measurement ranks, the math sources, the retired slots.
+- **Whole record, not per field**: a checksum-valid record with an out-of-range field was written by a writer that did
+  not hold the settings; its in-range fields are not the user's either (11-04: the module words were compile-time
+  defaults). A bit flip fails the checksum. Rejecting it whole gives a known state; the 10-18..10-22 records pass.
+- Rejected: `scope_reset_config_data` (centres from the block, above), `scope_save_config_data` into the buffer only
+  (so pc_ui_fix_settings and pc_diag_boot read defaults, not the rejected words), **nothing written**: no 1.00o5
+  default save, no boot write (`pc_diag_boot` valid = applied; power_on 0 = unknown, as for an invalid sector).
+- Power-off save (`pc_glue_settings_save_ok`): nothing before `scope_settings_ready` (set in `main` after
+  `pc_glue_init`: the root cause); after a rejected record only when the rebuilt words 2..223 differ from the defaults'
+  baseline (the dirty CRC), so the rejected record stays on the card for diagnosis until the user changes a setting
+  (the wizard's Save writes 709 itself; Restore defaults counts as a change when it changes something). An unchanged
+  session after a rejection saves no life record (the count stays unknown until the first save, as before).
+- Visible: Scope view notice "Saved settings not valid: defaults loaded" (slot 1, 4 s, after the boot); first-run line
+  "Saved settings on the card were not valid: defaults used." (restore = 2; the screen shows only when uncalibrated, so
+  not when the block binds); Diagnostics Status "Settings sector invalid: defaults." and the report's "invalid at boot:
+  defaults loaded" (GET_HEALTH byte 32 bit 3 clear; protocol row 55 text updated, wire unchanged).
+- Removed: `pc_life_settings_valid` (replaced by `srec_check_header`).
+
+**Tests**: test_settings 213 checks (the 11-04 record rejected at word 168, then at 200 with the centres back,
+accepted with a depth too; the five 10-18..10-22 records accepted and unchanged; a zeroed body under a valid header
+rejected, an all-zero sector = other version; a truncated tail and bit flips = checksum; wrong version words; every
+field at its edge and one past; the roll mode rules; generator frequency; trigger point; clamped fields accepted; the
+11-04 708 block does not bind to the 11-04 centres and binds to `acal_centres`' ones, 0x363 / 0x35A), test_ui_diag
+(the first-run line), test_diag (srec_check_header). `make test` green incl. check_vectors; `fnirsi1013d.vectors
+--check` ok. GCC 10, GCC 13 and PC_DEBUG builds without warnings. GCC 10 image 819200 bytes (0.2.105 c681efa4:
+817664). mcp not touched (`mcp/.venv`'s console-script launchers still point at the old checkout path: run
+`mcp\.venv\Scripts\python.exe -m ...` with PYTHONPATH=mcp/src).
+
+**Bench (owner; FEL load only, `make gcc10` then `fnirsi1013d-flash`; the load does not write the card)**
+0. Back up SD 700-710 (`fnirsi1013d-sd --port COM10 read 700 11 -o backups/sd_700-710_<date>-pre-settings0.bin`,
+   twice, compare). The card's 709 holds whatever c681efa4 saved after the owner set the depth: most likely still the
+   zero centres (words 168..179, bytes 0x1350..0x1367 of the dump).
+1. FEL-load. Expected with the zero-centre record on the card: no first-run screen (the block binds: GET_CAL both
+   channels cal_version 3, flags bit 1 set, centres 0x363.. / 0x35A..), the Scope view at the defaults (200 us/div, AC,
+   depth 3000, generator 1 kHz) recording, the notice "Saved settings not valid: defaults loaded" for 4 s; GET_HEALTH
+   byte 32 bit 3 clear, bits 1-2 clear (no boot write), power_on 0; Diagnostics Status "Settings sector invalid:
+   defaults."; time/div taps work.
+2. Card untouched: `fnirsi1013d-sd --port COM10 read 709 1 -o ...` equals step 0's sector 709.
+3. Power off with the key without touching anything, on, FEL-load again: as step 1, 709 still unchanged (if it
+   changed, something adjusts a setting after the boot: report the words that differ).
+4. Change one setting (V/div), wait 2 s (GET_HEALTH 34 bit 0 = 1), power off with the key, on, FEL-load: settings as
+   left, no notice, byte 32 bit 3 and bit 1 set (boot write ok), power_on 1; 709 words 168..179 = the block's centres.
+   The card's own c681efa4 then binds the calibration too.
+5. Optional, the 11-04 record itself (**owner only, writes the card**): copy bytes 4608..5119 of
+   `backups/encphase/sd_700-710_pre-encphase_a.bin` (its sector 709) to `backups/sd709_20261104.bin`, then
+   `fnirsi1013d-sd --port COM10 write backups/sd709_20261104.bin --sector 709 --config --yes` (backs up the target
+   first, asks for the typed confirmation), FEL-load: as step 1.
+6. Optional, the root cause: power on and press the power key again during the first second of the boot; at the next
+   boot 709 equals the one before (no save happened).

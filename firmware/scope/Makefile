@@ -106,6 +106,8 @@ SRCS += peak_bars.c
 SRCS += ui_diag.c ui_dlg.c ui_diag_view.c
 # fw 0.2.52 diagnostics readers (protocol row 55)
 SRCS += pc_life.c pc_ident.c pc_report.c pc_diag.c
+# fw-settings0: the stored settings record checked whole before it is applied (pure C, host_tests/test_settings.c)
+SRCS += settings_check.c
 # 0x1536 sequencer (fw 0.2.58): segmented capture and hardware averaging (maths in pc_seq.c, host_tests/test_seq.c)
 SRCS += pc_seq.c pc_seq_hw.c
 # fw 0.2.66: the Bode plot: maths (bode_dsp.c) and sweep engine (bode_sweep.c) pure C, host-tested (test_bode.py,

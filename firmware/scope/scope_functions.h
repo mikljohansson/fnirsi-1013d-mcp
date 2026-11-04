@@ -152,6 +152,14 @@ void scope_reset_config_data(void);
 void scope_save_config_data(void);
 void scope_restore_config_data(void);
 
+//fw-settings0: how the stored settings record (sector 709) was taken at boot (settings_check.h SREC_*; SREC_OK = applied,
+//anything else = the defaults, and the card's record is left as it is until a setting changes), the word of the first
+//failing field check, and 1 once the boot has applied everything (main, after pc_glue_init): before that the power-off
+//interrupt saves nothing, since the settings in RAM are still partly unloaded
+extern uint8  scope_settings_result;
+extern uint16 scope_settings_bad_word;
+extern uint8  scope_settings_ready;
+
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef USE_TP_CONFIG

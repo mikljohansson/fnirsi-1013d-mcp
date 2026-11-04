@@ -258,6 +258,18 @@ sections 74 to 79.
   through it. A rewrite of the same value never switched a relay (the FPGA latches the byte); this removes the bus
   rounds and makes the relay writes countable (fpga_model, mock HAL). (4ca4ea0)
 
+**Bad stored settings no longer leave the scope unusable (fw-settings0).**
+
+- **A stored settings record is checked whole before it is applied** (bench 2026-11-04: the card's record had a valid
+  checksum but zero PWM centres, generator and memory depth, so nothing recorded, time/div did not change and the
+  calibration did not bind). The power-off interrupt had saved it during an earlier boot, before the settings were fully
+  loaded. Now nothing is saved before the boot has applied the settings, and a record is applied only when its version,
+  checksum and every field's range pass (the UI's and the SET_* commands' limits). A record that fails loads the
+  defaults with the calibration's own PWM centres (so a stored calibration still applies), says so ("Saved settings not
+  valid: defaults loaded" in the Scope view, the first-run screen, Diagnostics "Settings sector invalid"), and is left on
+  the card until a setting changes. Wire unchanged (GET_HEALTH byte 32 bit 3 now also means "fields in range").
+  firmware/AGENTS.md section 93. (edeca27, b6c6b72)
+
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, flash image `04e3328b...d0e7`, status

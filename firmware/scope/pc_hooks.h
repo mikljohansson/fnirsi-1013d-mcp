@@ -162,6 +162,10 @@ void   pc_seq_ui_pre_reset(void);
 //save that follows closes the session in the unit life record (pc_diag.c)
 void pc_glue_power_off(void);
 #define PC_POWER_OFF()          pc_glue_power_off()
+//fw-settings0: 1 when the power-off save may write sector 709 (not during the boot; after a rejected record only once a
+//setting changed: pc_diag.c)
+int  pc_glue_settings_save_ok(void);
+#define PC_POWER_OFF_SAVE_OK()  pc_glue_settings_save_ok()
 
 //fw 0.2.52 diagnostics readers (pc_diag.c, protocol row 55): the unit life record in settings words 224..255 is stored by
 //every settings save; in-session save results; the calibration provenance trailer in sector 708 bytes 432..487

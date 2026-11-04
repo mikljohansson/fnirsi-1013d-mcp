@@ -31,6 +31,9 @@
 #include "peak_bars.h"
 #include "ref_and_math.h"
 #include "roll_view.h"
+#include "settings_check.h"
+#include "generator.h"
+#include "adc_cal.h"
 /*
 //sinx
 #include <stdio.h>
@@ -5833,21 +5836,31 @@ void scope_display_file_status_message(int32 msgid, int32 alwayswait)
 // Configuration data functions
 //----------------------------------------------------------------------------------------------------------------------------------
 
+uint8  scope_settings_result = SREC_NO_READ;
+uint16 scope_settings_bad_word;
+uint8  scope_settings_ready;
+
+//settings_check.c has its own copy of the layout
+typedef char scope_srec_layout_check[((CHANNEL1_SETTING_OFFSET == 8) && (CHANNEL2_SETTING_OFFSET == 32) &&
+                                      (TRIGGER_SETTING_OFFSET == 56) && (OTHER_SETTING_OFFSET == 80) &&
+                                      (CURSOR_SETTING_OFFSET == 120) && (MEASUREMENT_SETTING_OFFSET == 136) &&
+                                      (CALIBRATION_SETTING_OFFSET == 168) && (CALIBRATION_SETTING_OFFSET_C == 184) &&
+                                      (FPGA_SETTING_OFFSET == 192) && (GEN_f_MAX == 10000000)) ? 1 : -1];
+
 void scope_load_configuration_data(void)
 {
-#if 0
-  //Get the settings data form the flash memory
-  //sys_spi_flash_read(0x001FD000, (uint8 *)settingsworkbuffer, sizeof(settingsworkbuffer));
-#else
-  //Load the settings data from its sector on the SD card
+  //Load the settings data from its sector on the SD card and check it whole (fw-settings0, settings_check.h): version,
+  //checksum and every field in its range
   if(sd_card_read(SETTINGS_SECTOR, 1, (uint8 *)settingsworkbuffer) != SD_OK)
   {
-    settingsworkbuffer[2] = 0;
-    settingsworkbuffer[3] = 0;
+    scope_settings_result   = SREC_NO_READ;
+    scope_settings_bad_word = 0;
   }
-#endif
+  else
+    scope_settings_result = (uint8)srec_check(settingsworkbuffer, SETTING_SECTOR_VERSION_HIGH, SETTING_SECTOR_VERSION_LOW,
+                                              &scope_settings_bad_word);
 
-  //Restore the settings from the loaded data
+  //Restore the settings from the loaded data, or the defaults
   scope_restore_config_data();
 
   //Set the FPGA commands for channel 1
@@ -5987,31 +6000,47 @@ void scope_load_input_calibration_data(void)
   
     //Check if the checksum is a match as well as the version number
     if(((buffer[0] == (checksum >> 16))&&(buffer[1] == (checksum & 0xFFFF))&&(buffer[0]<0xFFFF)&&(buffer[0]>0))||(reload_cal_data == 1))
-    {       
-        //Point to the calibration settings
-        ptr = &settingsworkbuffer[CALIBRATION_SETTING_OFFSET];
+    {
+        //Calibration data v3 (bytes 128.., outside the checksum): used per channel while bound to the 709 PWM centres
+        adc_cal_loaded = (acal_unpack((uint8 *)buffer + ACAL_SECTOR_OFFSET, adc_cal) == ACAL_OK);
 
-        //Restore the working set values from the saved values
-        for(index=0;index<6;index++,ptr++)
+        if(scope_settings_result == SREC_OK)
         {
-            //Copy the data for both channels
-            scopesettings.channel1.dc_calibration_offset[index] = ptr[0];
-            scopesettings.channel2.dc_calibration_offset[index] = ptr[6];
+          //Point to the calibration settings
+          ptr = &settingsworkbuffer[CALIBRATION_SETTING_OFFSET];
+
+          //Restore the working set values from the saved values
+          for(index=0;index<6;index++,ptr++)
+          {
+              //Copy the data for both channels
+              scopesettings.channel1.dc_calibration_offset[index] = ptr[0];
+              scopesettings.channel2.dc_calibration_offset[index] = ptr[6];
+          }
+
+          //The last entry is a copy of the fore last value
+          scopesettings.channel1.dc_calibration_offset[6] = scopesettings.channel1.dc_calibration_offset[5];
+          scopesettings.channel2.dc_calibration_offset[6] = scopesettings.channel2.dc_calibration_offset[5];
+
+          //Point to the calibration settings
+          ptr = &settingsworkbuffer[CALIBRATION_SETTING_OFFSET_C];
+
+          //Restore the ADC compensation values
+          scopesettings.channel1.adc1compensation = *ptr++;
+          scopesettings.channel1.adc2compensation = *ptr++;
+          scopesettings.channel2.adc1compensation = *ptr++;
+          scopesettings.channel2.adc2compensation = *ptr++;
+        }
+        else
+        {
+          //fw-settings0: no valid settings record, so its centres are not to be had (the buffer holds the rejected
+          //record): the ones the stored block was measured at, which the wizard's Save also wrote to 709, so the block
+          //binds again; without a block the 1.00o5 defaults
+          acal_centres(adc_cal_loaded ? &adc_cal[0] : 0, scopesettings.channel1.dc_calibration_offset,
+                       &scopesettings.channel1.adc1compensation, &scopesettings.channel1.adc2compensation);
+          acal_centres(adc_cal_loaded ? &adc_cal[1] : 0, scopesettings.channel2.dc_calibration_offset,
+                       &scopesettings.channel2.adc1compensation, &scopesettings.channel2.adc2compensation);
         }
 
-        //The last entry is a copy of the fore last value
-        scopesettings.channel1.dc_calibration_offset[6] = scopesettings.channel1.dc_calibration_offset[5];
-        scopesettings.channel2.dc_calibration_offset[6] = scopesettings.channel2.dc_calibration_offset[5];
-    
-        //Point to the calibration settings
-        ptr = &settingsworkbuffer[CALIBRATION_SETTING_OFFSET_C];
-
-        //Restore the ADC compensation values
-        scopesettings.channel1.adc1compensation = *ptr++;
-        scopesettings.channel1.adc2compensation = *ptr++;
-        scopesettings.channel2.adc1compensation = *ptr++;
-        scopesettings.channel2.adc2compensation = *ptr++; 
-         
         //Point to the input calibration settings
         ptr32 = (uint32*)&buffer[INPUT_CALIBRATION_SETTING_OFFSET];
     
@@ -6033,9 +6062,6 @@ void scope_load_input_calibration_data(void)
     scopesettings.channel2.dc_shift_center = ptr32[4];
     scopesettings.channel2.dc_shift_size   = ptr32[5];
     scopesettings.channel2.dc_shift_value  = ptr32[6];
-
-    //Calibration data v2 (bytes 128.., outside the checksum): used per channel while bound to the 709 PWM centres
-    adc_cal_loaded = (acal_unpack((uint8 *)buffer + ACAL_SECTOR_OFFSET, adc_cal) == ACAL_OK);
 
     //Calibration v4 tracking starts from the stored values
     acal_live_reset();
@@ -6501,18 +6527,11 @@ void scope_restore_config_data(void)
 {
   uint32  channel;
   uint32  index;
-  uint32  checksum = 0;
   uint32  tmp = 0;
   uint16 *ptr;
 
-  //Calculate a checksum over the loaded data
-  for(index=2;index<256;index++)
-  {
-    checksum += settingsworkbuffer[index];
-  }
-  
-  //Check if the checksum is a match as well as the version number
-  if((settingsworkbuffer[0] == (checksum >> 16)) && (settingsworkbuffer[1] == (checksum & 0xFFFF)) && (settingsworkbuffer[2] == SETTING_SECTOR_VERSION_HIGH) && (settingsworkbuffer[3] == SETTING_SECTOR_VERSION_LOW))
+  //fw-settings0: applied only when scope_load_configuration_data found it whole and every field in range
+  if(scope_settings_result == SREC_OK)
   {
     //Point to the channel 1 settings
     ptr = &settingsworkbuffer[CHANNEL1_SETTING_OFFSET];
@@ -6672,9 +6691,16 @@ void scope_restore_config_data(void)
   {
     //Load a default set on failure
     scope_reset_config_data();
-    
-    //Save it to the SD card
-    scope_save_configuration_data();
+
+    //fw-settings0: the defaults into the work buffer only, so what reads it next (pc_ui_fix_settings' marked words, the
+    //life record) sees the defaults and not the rejected record. Nothing is written: the card keeps the rejected record
+    //for diagnosis until a setting changes (the power-off save checks that, pc_glue_settings_save_ok). 1.00o5 wrote the
+    //defaults here, which is how a bad record used to turn into a stored set of defaults without a word.
+    scope_save_config_data();
+
+    //The first-run screen says which: none on the card, or one that was not valid
+    if((scope_settings_result == SREC_BAD_SUM) || (scope_settings_result == SREC_BAD_FIELD))
+      restore = 2;
   }
 }
 
