@@ -624,9 +624,9 @@ column below is the history of each bit):
 | 23 | LOGGER | the streaming logger (FPGA 0x69 / 0x6A, read 0x38): LOG_START / LOG_READ / LOG_STOP, GET_STATUS acq_state 5 (1.27, row 67, fw-d4; FPGA 0x153D) |
 | 24 | reserved | 0 (PATTERN_GEN of the 1.27 drafts: the 0x153D pattern generator, cut; row 67) |
 | 25 | reserved | 0 (was DDS_SWEEP in a draft: sweeps are host-stepped SET_GEN writes) |
-| 26 | (TRIG_RUNT_WINDOW) | 0x153E |
+| 26 | (TRIG_RUNT_WINDOW) | 0: planned for a later bitstream (not 0x153E, which is 0x153D's logic) |
 | 27 | reserved | 0 (PATTERN_TRIGGER of the 1.27 drafts: the pattern trigger engine, cut; row 67) |
-| 28-31 | reserved | 0 (bit 4 TRIG_BOTH_CORES is 0x153E) |
+| 28-31 | reserved | 0 (bit 4 TRIG_BOTH_CORES is planned for a later bitstream) |
 
 **GET_STATUS (0x0003).** Request: empty. Response (28 bytes in the 1.0 draft, 32 bytes in 1.1, 44 bytes since 1.3, 48 bytes since 1.17, 52 bytes since 1.26).
 Also the response body of SET_REMOTE, ARM, FORCE, STOP and WAIT. The table is the 1.0 layout; the appended fields
@@ -815,14 +815,14 @@ written (no mask; the geometry, the mode and the auto time-out stay SET_TRIGGER'
 
 | Off | Type | Field | Notes |
 |---|---|---|---|
-| 0 | u8 | type | 0 edge, 1 pulse width, 2 Nth edge, 3 timeout (FPGA 0x5E bits 2..0). 4 runt and 5 window are 0x153E: `E_BAD_ARG` detail 0 |
+| 0 | u8 | type | 0 edge, 1 pulse width, 2 Nth edge, 3 timeout (FPGA 0x5E bits 2..0). 4 runt and 5 window (planned for a later bitstream): `E_BAD_ARG` detail 0 |
 | 1 | u8 | polarity | 0 / 1, written to 0x16 (GET_TRIGGER `edge`). Edge: the edge; pulse width 0 = positive pulse, 1 = negative (the trigger is its trailing edge); Nth edge: the counted edge; timeout 0 = held high after a rising edge, 1 = held low |
-| 2 | u8 | flags | bit 0 LONGER: pulse width longer than N (0x5E bit 3; pulse width only). Bits 1 RANGE and 2 BOTH_CORES are 0x153E: `E_BAD_ARG` detail 2; other bits detail 2 |
+| 2 | u8 | flags | bit 0 LONGER: pulse width longer than N (0x5E bit 3; pulse width only). Bits 1 RANGE and 2 BOTH_CORES (planned for a later bitstream): `E_BAD_ARG` detail 2; other bits detail 2 |
 | 3 | u8 | source | 0 CH1, 1 CH2, 2 EXT (0x15; EXT switches the generator off as SET_TRIGGER does); 3 and above E_BAD_ARG detail 3 |
 | 4 | u32 | N | pulse width / timeout: 1..16777215 samples of the trigger stream (0x5F, u24); Nth edge: 1..65535 edges; edge: 0. **The firmware converts nothing**: a sample is one memory word on CH1 / CH2 (10 (D + 1) ns legacy, N x 5 ns with the filter), one 5 ns clock on EXT |
-| 8 | u32 | H | Nth edge: idle time 0..16777215 samples (0x60, u24): the count restarts when the level held for H samples without an edge, 0 = count from the arm; every other type: 0 (0x153E: the pulse-width range's N2) |
+| 8 | u32 | H | Nth edge: idle time 0..16777215 samples (0x60, u24): the count restarts when the level held for H samples without an edge, 0 = count from the arm; every other type: 0 (planned: the pulse-width range's N2) |
 | 12 | u16 | level | 0..255, the raw 8-bit code as SET_TRIGGER's level (through the UI's marker; mapped to 0x55 at a 16-bit arm) |
-| 14 | u16 | level2 | 0 (0x153E: the runt / window second level) |
+| 14 | u16 | level2 | 0 (planned: the runt / window second level) |
 | 16 | u32 | holdoff | trigger hold-off in 5 ns units, 0 = off (0x1B): from the trigger of a record no trigger is accepted until it elapsed, across sequencer restarts and re-arms; 0x1B = 0 releases a running one at once |
 | 20 | u32 | reserved | 0 |
 

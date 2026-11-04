@@ -67,7 +67,7 @@ void fpga_force_stop(void);
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26; docs/plans/fpga-0x153c.md sections 2.1, 3, 3.6; the RTL
 // semantics in fpga/al3/AGENTS.md "0x153C C1 triggers"). Registers: 0x5E type (bits 2..0: 0 edge, 1 pulse width, 2 Nth
-// edge, 3 timeout; 4 runt and 5 window are 0x153E and act as edge on 0x153C) with bit 3 "longer than N"; 0x5F u24 N;
+// edge, 3 timeout; 4 runt and 5 window are planned for a later bitstream and act as edge) with bit 3 "longer than N"; 0x5F u24 N;
 // 0x60 u24 H (Nth edge idle time, 0 = count from the arm); 0x1B u32 hold-off in 5 ns clocks (0 = off: from the trigger
 // of a record no trigger is accepted until it elapsed, across sequencer restarts and MCU re-arms; 0 written releases a
 // running one at once); 0x66 bit 0 = 1: the next 0x01 = 1 also clears the hold-off timer (one-shot, consumed). 0x16 is

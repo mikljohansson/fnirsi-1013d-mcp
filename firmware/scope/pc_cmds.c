@@ -96,8 +96,9 @@ void pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern)
 // read 0x33), the per-core capture stages (0x153A, 0x63 / 0x36), the trigger types with the hold-off (0x153C, cmds
 // 0x5E-0x60, 0x66, 0x1B, reads 0x34 / 0x37), peak detect and the counter (0x153C, 0x56 bit 1, 0x61 / 0x62, read 0x35),
 // the streaming logger and the generator as a fractional square (0x153D, 0x69 / 0x6A, read 0x38; 0x6C / 0x6D, read
-// 0x39), the ADC encodes from PLL outputs through the pin registers (0x153E, no register change). No feature is tested against the version word: the word read at boot decides only the mismatch flag; a
-// mismatched scope answers the F_BASIC commands and refuses the rest (pc_dispatch).
+// 0x39), the ADC encodes from PLL outputs through the pin registers (0x153E, no register change). No feature is
+// tested against the version word: the word read at boot decides only the mismatch flag; a mismatched scope answers
+// the F_BASIC commands and refuses the rest (pc_dispatch).
 
 void pc_variant_init(uint16_t version, pc_variant *v)
 {
@@ -1301,12 +1302,13 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 //----------------------------------------------------------------------------------------------------------------------------------
 // SET_TRIGGER2 (1.26, fw-c5, FPGA 0x153C; docs/protocol.md row 66, docs/plans/fpga-0x153c.md section 3): the trigger
 // definition in one 24-byte request, every field written (no mask): 0 u8 type, 1 u8 polarity, 2 u8 flags, 3 u8 source,
-// 4 u32 N, 8 u32 H (N2 on 0x153E), 12 u16 level (0..255: the 8-bit code, as SET_TRIGGER), 14 u16 level2 (0x153E, 0),
+// 4 u32 N, 8 u32 H (N2 later), 12 u16 level (0..255: the 8-bit code, as SET_TRIGGER), 14 u16 level2 (later, 0),
 // 16 u32 hold-off (5 ns units), 20 u32 0. Nothing is converted: N and H are samples of the trigger stream. The edge
 // trigger's registers take source, polarity (0x16) and level as SET_TRIGGER writes them; the extension registers are
 // written at once and the hold-off clear is requested for the next arm (pc_hal_trig_ext_write). Response: the
 // GET_TRIGGER body. SET_TRIGGER stays for the edge type's fields, the geometry and the mode. Runt / window / range /
-// both cores (0x153E) are refused: one bitstream per firmware, no reserved behaviour.
+// both cores (planned for a later bitstream, not 0x153E) are refused: one bitstream per firmware, no reserved
+// behaviour.
 
 static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
@@ -1320,7 +1322,7 @@ static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8
 
   //detail = the byte offset of the field (section 14 row 4)
   if((type == PC_TRG_T_RUNT) || (type == PC_TRG_T_WINDOW))
-    return pc_error(s, PC_E_BAD_ARG, 0, "runt / window: FPGA 0x153E");
+    return pc_error(s, PC_E_BAD_ARG, 0, "runt / window: not in this bitstream");
 
   if(type > PC_TRG_T_TIMEOUT)
     return pc_error(s, PC_E_BAD_ARG, 0, "type 0..3");
@@ -1329,7 +1331,7 @@ static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8
     return pc_error(s, PC_E_BAD_ARG, 1, "polarity 0..1");
 
   if(flags & (PC_TRG_F_RANGE | PC_TRG_F_BOTH))
-    return pc_error(s, PC_E_BAD_ARG, 2, "range / both cores: FPGA 0x153E");
+    return pc_error(s, PC_E_BAD_ARG, 2, "range / both cores: not in this bitstream");
 
   if(flags & ~PC_TRG_F_LONGER)
     return pc_error(s, PC_E_BAD_ARG, 2, "flags");
@@ -1363,7 +1365,7 @@ static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8
     return pc_error(s, PC_E_BAD_ARG, 12, "level 0..255");
 
   if(level2)
-    return pc_error(s, PC_E_BAD_ARG, 14, "level2: FPGA 0x153E");
+    return pc_error(s, PC_E_BAD_ARG, 14, "level2: not in this bitstream");
 
   //The edge trigger's registers as SET_TRIGGER writes them: 0x15, 0x16 (the polarity), 0x17 through the UI's marker
   pc_hal_trigger_read(&t);

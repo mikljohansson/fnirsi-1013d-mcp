@@ -386,7 +386,7 @@ the new word.
 
 Bitstream 0x153C (fpga-c1, `fpga/al3/AGENTS.md` "0x153C C1 triggers"; contract `docs/plans/fpga-0x153c.md` section 3) adds
 a trigger qualifier in front of the edge compare and gives Atlan4's dead 0x1B register its meaning. Registers: 0x5E type
-(bits 2..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and 5 window are 0x153E and act as edge) with bit 3
+(bits 2..0: 0 edge, 1 pulse width, 2 Nth edge, 3 timeout; 4 runt and 5 window are planned for a later bitstream and act as edge) with bit 3
 "longer than N"; 0x5F u24 N; 0x60 u24 H; 0x16 the polarity per type (the UI's trigger edge); 0x1B u32 hold-off in 5 ns
 clocks (0 = off: from the trigger of a record no trigger is accepted until it elapsed, across sequencer restarts and
 re-arms; 0 written releases a running one at once); 0x66 bit 0 = 1 makes the next 0x01 = 1 clear the hold-off (one-shot);
@@ -407,7 +407,7 @@ unchanged; power-on (every register 0) is 0x153B behaviour.
 - **Host** (`pc_cmds.c`, `docs/protocol.md` row 66): **SET_TRIGGER2 0x0219** (24 bytes: type, polarity, flags, source,
   N, H, level, level2, hold-off, 0; no mask, every field written; the firmware converts nothing) and **GET_TRIGGER**
   52 bytes (12 the hold-off, 28..51 the SET_TRIGGER2 body that reproduces the trigger). Runt / window / range / both
-  cores (0x153E) and out-of-range fields are E_BAD_ARG with the byte offset as detail; nothing is written then. The old
+  cores (planned for a later bitstream, not 0x153E) and out-of-range fields are E_BAD_ARG with the byte offset as detail; nothing is written then. The old
   SET_TRIGGER keeps the edge type's fields, the geometry and the mode, and now accepts its `holdoff` (5 ns units).
   GET_STATUS 48..51 carries 0x37 / 0x34 read at every MAIN poll while a host capture is in flight (6 strobes), GET_CAPTURE_INFO
   96..111 the extension the capture was armed with. Caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8.

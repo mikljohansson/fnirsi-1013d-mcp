@@ -8075,16 +8075,16 @@
   },
   {
    "name": "resp_set_trigger2_e_bad_arg_runt",
-   "description": "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, 14 level2)",
-   "hex": "a513010119024f0004001c000000ebed000072756e74202f2077696e646f773a2046504741203078313533451ef7e880",
+   "description": "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window: planned for a later bitstream): detail 0 = the byte offset of the field, then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, 14 level2)",
+   "hex": "a513010119024f00040026000000a9a9000072756e74202f2077696e646f773a206e6f7420696e20746869732062697473747265616de841bbf9",
    "frames": [
     {
      "cmd": 537,
      "seq": 79,
      "status": 4,
      "flags": 1,
-     "len": 28,
-     "payload": "000072756e74202f2077696e646f773a204650474120307831353345"
+     "len": 38,
+     "payload": "000072756e74202f2077696e646f773a206e6f7420696e20746869732062697473747265616d"
     }
    ],
    "device_events": []

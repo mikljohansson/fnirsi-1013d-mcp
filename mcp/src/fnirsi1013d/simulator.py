@@ -426,7 +426,7 @@ class TriggerState:
     #: FPGA 0x1B in 5 ns units: the trigger hold-off since 0x153C (caps HOLDOFF)
     holdoff: int = 0
     auto_timeout: int = 0  # 0 = firmware default
-    #: 1.26 (0x5E / 0x5F / 0x60): type P.TRIG_*, pulse width "longer", N, H (the 0x153E fields stay 0 on 1.26)
+    #: 1.26 (0x5E / 0x5F / 0x60): type P.TRIG_*, pulse width "longer", N, H (the planned fields stay 0)
     ttype: int = P.TRIG_EDGE
     longer: int = 0
     n: int = 0
@@ -3675,13 +3675,13 @@ class Device:
         """SET_TRIGGER2's checks in byte-offset order (E_BAD_ARG detail = the offset)."""
         E = P.Status.E_BAD_ARG
         if r.type in (P.TRIG_RUNT, P.TRIG_WINDOW):
-            raise _DevErr(E, P.TRIG2_D_TYPE, "runt / window: FPGA 0x153E")
+            raise _DevErr(E, P.TRIG2_D_TYPE, "runt / window: not in this bitstream")
         if r.type > P.TRIG_TIMEOUT:
             raise _DevErr(E, P.TRIG2_D_TYPE, "type 0..3")
         if r.polarity > 1:
             raise _DevErr(E, P.TRIG2_D_POLARITY, f"polarity {r.polarity}")
         if r.flags & (P.TRIG2_F_RANGE | P.TRIG2_F_BOTH_CORES):
-            raise _DevErr(E, P.TRIG2_D_FLAGS, "range / both cores: FPGA 0x153E")
+            raise _DevErr(E, P.TRIG2_D_FLAGS, "range / both cores: not in this bitstream")
         if r.flags & ~P.TRIG2_F_LONGER:
             raise _DevErr(E, P.TRIG2_D_FLAGS, "flags")
         if r.flags & P.TRIG2_F_LONGER and r.type != P.TRIG_PULSE_WIDTH:
@@ -3701,7 +3701,7 @@ class Device:
         if r.level > 255:
             raise _DevErr(E, P.TRIG2_D_LEVEL, f"level {r.level} > 255")
         if r.level2:
-            raise _DevErr(E, P.TRIG2_D_LEVEL2, "level2: FPGA 0x153E")
+            raise _DevErr(E, P.TRIG2_D_LEVEL2, "level2: not in this bitstream")
 
     def _cal_resp(self, ch: int) -> P.CalResp:
         """GET_CAL (1.12, 256 bytes). With cfg.cal_v3 the stored block is what a base calibration of this model

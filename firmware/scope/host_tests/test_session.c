@@ -178,7 +178,7 @@ static void test_info(void)
   T_EQ(caps & fixed, fixed);
   T_EQ(caps & PC_CAP_READ_LAG_UNVERIFIED, PC_CAP_READ_LAG_UNVERIFIED);                //BENCH: T3 still open
   T_EQ(caps & PC_CAP_INTERLEAVE_UNVERIFIED, 0);                                       //the mock's boot 0x33: convention 1
-  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE), 0);                  //0x153E, never built
+  T_EQ(caps & (PC_CAP_TRIG_BOTH_CORES | PC_CAP_DEVICE_AVERAGE), 0);                  //planned, never built
   T_EQ(caps & (1u << 9), 0);                                                         //reserved (LIVE_READ, retired)
   T_EQ(pc_get_u32(r.p + 24), 200000000); T_EQ(pc_get_u16(r.p + 28), 16382); T_EQ(pc_get_u16(r.p + 30), 80);
   T_EQ(r.p[32], 0); T_EQ(r.p[35], 0);

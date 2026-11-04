@@ -688,10 +688,10 @@ def build():
         "1.26 GET_CAPTURE_INFO tail (112 bytes; 0..95 as 1.17, zero here): 96 trigger type 2 (Nth edge), 97 flags 0, "
         "98 u16 0, 100 u32 N 3, 104 u32 H 100000, 108 u32 hold-off 0",
         [decoded(CMDS["GET_CAPTURE_INFO"], 78, ci, flags=FLAG_RESPONSE)])
-    ep = struct.pack("<H", 0) + b"runt / window: FPGA 0x153E"
+    ep = struct.pack("<H", 0) + b"runt / window: not in this bitstream"
     f = frame(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)
     add("resp_set_trigger2_e_bad_arg_runt", f, [],
-        "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window are 0x153E): detail 0 = the byte offset of the field, "
+        "1.26 SET_TRIGGER2 E_BAD_ARG for type 4 / 5 (runt / window: planned for a later bitstream): detail 0 = the byte offset of the field, "
         "then the text; every other refusal has the same shape (detail 1 polarity, 2 flags, 3 source, 4 N, 8 H, 12 level, "
         "14 level2)",
         [decoded(CMDS["SET_TRIGGER2"], 79, ep, status=4, flags=FLAG_RESPONSE)])
