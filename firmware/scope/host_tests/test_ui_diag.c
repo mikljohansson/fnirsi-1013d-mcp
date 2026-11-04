@@ -899,6 +899,36 @@ static void test_first_run(void)
   T_TRUE(has_text(UD_ICON_WARN "Saved settings on the card were not valid: defaults used."));
   T_TRUE(!has_text("Settings loaded from the card."));
   T_TRUE(!has_text("No saved settings on the card"));
+
+  //fw-153e: when it shows. Not calibrated: yes. Calibrated on the running bitstream: no
+  T_EQ(ud_first_run_due(&in), 1);
+  healthy(&in);
+  T_EQ(ud_first_run_due(&in), 0);
+
+  //Calibrated on the bitstream before the one flashed now (the provenance's word): yes, and it says so
+  in.fpga = 0x153C;
+  T_EQ(ud_first_run_due(&in), 1);
+  ud_build_first_run(&pg, &in, 0, 0);
+  check_layout("first run foreign bitstream", 0);
+  T_TRUE(has_text(UD_ICON_WARN "Calibrated on FPGA bitstream 0x153b: calibrate again for 0x153c."));
+  T_EQ(text_colour(UD_ICON_WARN "Calibrated on FPGA bitstream"), UD_C_WARN);
+  T_TRUE(!has_text("Calibration missing"));
+  T_TRUE(!has_text("does not match the current offsets"));
+  T_EQ(ud_hit(&pg, 700, 450), UD_ID_CAL_NOW);
+  T_EQ(ud_hit(&pg, 30, 410), UD_ID_LATER);
+
+  //No provenance record (a pre-0.2.52 block), the capture stages stored for another bitstream (PC_CAPF_OTHER, GET_CAL
+  //360 the word): yes
+  healthy(&in);
+  cal[0][288] = cal[1][288] = 0;
+  T_EQ(ud_first_run_due(&in), 0);
+  health[106] = PC_CAPF_HAS | PC_CAPF_OTHER;
+  p16(cal[0] + 360, 0x153A);
+  T_EQ(ud_first_run_due(&in), 1);
+  ud_build_first_run(&pg, &in, 0, 0);
+  T_TRUE(has_text(UD_ICON_WARN "Calibrated on FPGA bitstream 0x153a: calibrate again for 0x153b."));
+  health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED;
+  T_EQ(ud_first_run_due(&in), 0);
 }
 
 //fw-one: the notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for
