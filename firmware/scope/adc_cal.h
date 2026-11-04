@@ -167,6 +167,12 @@ void     acal_round_pair(int32_t da16, int32_t db16, int16_t *comp_a, int16_t *c
 //the ranges (the UI's time bases are gated except 200 MSa/s)
 void     acal_atlan_comps(const acal_channel *c, int16_t *comp_a, int16_t *comp_b);
 
+//fw-settings0: the PWM centres (cal_offset[0..6], 6 = a copy of 5) and the 1.00o5 compensations when sector 709 gave no
+//valid record: those the block c was measured at, as the wizard's Save wrote them to 709 (the block binds again), or
+//without a block (c = 0) the 1.00o5 defaults, centres ACAL_PWM_DEFAULT and no compensation
+#define ACAL_PWM_DEFAULT     860
+void     acal_centres(const acal_channel *c, uint16_t *cal_offset, int16_t *comp_a, int16_t *comp_b);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 //Measurement
 

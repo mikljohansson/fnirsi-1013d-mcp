@@ -351,6 +351,24 @@ void acal_atlan_comps(const acal_channel *c, int16_t *comp_a, int16_t *comp_b)
   acal_round_pair(2048 - rdiv(sa, ACAL_RANGES), 2048 - rdiv(sb, ACAL_RANGES), comp_a, comp_b);
 }
 
+void acal_centres(const acal_channel *c, uint16_t *cal_offset, int16_t *comp_a, int16_t *comp_b)
+{
+  uint32_t r;
+
+  for(r=0;r<ACAL_RANGES;r++)
+    cal_offset[r] = c ? c->pwm[r] : ACAL_PWM_DEFAULT;
+
+  cal_offset[ACAL_RANGES] = cal_offset[ACAL_RANGES - 1];
+
+  if(c)
+    acal_atlan_comps(c, comp_a, comp_b);
+  else
+  {
+    *comp_a = 0;
+    *comp_b = 0;
+  }
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 //Measurement
 

@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_sta
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h $(SRC)/gen_pat.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_cap_hw $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_cap_hw $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll $(OUT)/test_settings
 
 $(OUT):
 	mkdir -p $@
@@ -77,8 +77,8 @@ $(OUT)/test_ui_diag: test_ui_diag.c test_util.h $(UI_DIAG_SRCS) $(SRC)/ui_diag.h
 	$(CC) $(CFLAGS) -o $@ test_ui_diag.c $(UI_DIAG_SRCS)
 # fw 0.2.52 diagnostics: life record, provenance trailer, image identity (pure parts); --layouts prints the packed
 # layouts for check_vectors.py (diag_layouts)
-DIAG_SRCS := $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c $(SRC)/pc_logring.c
-$(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) | $(OUT)
+DIAG_SRCS := $(SRC)/settings_check.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_stage.c $(SRC)/pc_life.c $(SRC)/pc_ident.c $(SRC)/adc_cal.c mock_hal.c $(SRC)/pc_cmds.c $(SRC)/pc_decim.c $(SRC)/pc_seq.c $(SRC)/acal_track.c $(SRC)/pc_report.c $(SRC)/pc_protocol.c $(SRC)/pc_logring.c
+$(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) $(SRC)/settings_check.c $(SRC)/settings_check.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_diag.c $(DIAG_SRCS)
 
 # Plot touch geometry: pointer position, left handle column, channel pick, shared move (fw 0.2.54)
@@ -141,6 +141,10 @@ $(OUT)/test_log: test_log.c test_util.h $(LOG_SRCS) fpga_model.h $(SRC)/fpga_bus
 ROLL_SRCS := fpga_model.c $(SRC)/fpga_bus.c $(SRC)/fpga_counter.c $(SRC)/fpga_log.c $(SRC)/pc_logring.c $(SRC)/roll.c
 $(OUT)/test_roll: test_roll.c test_util.h $(ROLL_SRCS) fpga_model.h $(SRC)/fpga_bus.h $(SRC)/fpga_log.h $(SRC)/pc_logring.h $(SRC)/roll.h | $(OUT)
 	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_roll.c $(ROLL_SRCS)
+
+# fw-settings0: the stored settings record (sector 709) checked whole before it is applied, on the maintainer's records
+$(OUT)/test_settings: test_settings.c test_util.h $(SRC)/settings_check.c $(SRC)/settings_check.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_settings.c $(SRC)/settings_check.c $(SRC)/adc_cal.c
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c
@@ -206,6 +210,7 @@ test: all
 	$(OUT)/test_mmu
 	$(OUT)/test_usbw
 	$(OUT)/test_diag
+	$(OUT)/test_settings
 	$(OUT)/test_bode_sweep
 	$(PYTHON) -I check_vectors.py --checker $(OUT)/vector_check --decim-checker $(OUT)/decim_check --adc-cal-checker $(OUT)/test_adc_cal --diag-checker $(OUT)/test_diag --seq-checker $(OUT)/seq_check --vectors $(VECTORS)
 	$(PYTHON) -I check_retired_regs.py $(SRC)
