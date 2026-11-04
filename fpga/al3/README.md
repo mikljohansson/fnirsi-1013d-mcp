@@ -3307,6 +3307,66 @@ passing" compiles) every compile passes. Latencies 11 and 12 both explain all 71
 random input rarely has its max or min in its end pairs, and the check took the first fit. `check_words` now tries
 every latency, passes when the boxcar's latency fits and prints the others ("also fit"). Expected latencies are unchanged.
 
+### 21. 0x153E: the encodes from IOB registers on PLL C2 / C3 (fpga-153e, 2026-11-04)
+
+**What it is.** The release 0x153D with the fpga-encphase enc0 recipe made permanent (the owner's decision of 2026-11-04
+after the bench session of section 19): the four ADC encode pins are driven by `AL_LOGIC_ODDR` output registers (both
+data inputs equal: a single-rate register on the rising clock edge) that TD packs into the pins' IOBs, B on PLL C2
+(`clk_ADCB`, 0 degrees, the rising clk_200MHz edge 2.5 ns after the write clock edge) and A on C3 (`clk_ADCA`, 375 ps
+later). Both load `enc_cur` / `enc_cur_n` (enc_nxt taken on the falling clk_200MHz edge, i.e. the write clock after that
+edge, stable for the whole period). The fabric flops `adc*_enc*` stay as copies on the same clock edges for the 0x33
+self-check and the testbenches; C1 (`clk_ADC`, 0x153D's encode clock) stays enabled and unused. The encode sequence, every
+register and every other path are 0x153D's; version byte 0x3E (cmd 0x06 = 0x15 0x3E). The code is equal to
+`encphase_variant.py --iob` of the fpga-encphase merge (587bcd0) except the version byte (compared with the comments
+stripped). Firmware: fw-153e (0.3.0) expects 0x153E only; fw 0.2.105 shows the mismatch banner on it.
+
+Why: in 0x153D TD merged the encode flops per core and placed them in the fabric, so the clock-to-pad delay was a fabric
+route that moved 6.9 .. 7.9 ns from roll to roll and every build was a new encode timing; the IOB registers give the same
+pad delay in every placement (29 of 29 rolls at this phase in section 19, all 64 rolls here).
+
+**Build** (TD 4.6.8 SP1, `build.sh`; **the pinned source: commit da645d0** = 754e39b plus roll i2, the "Streaming logger"
+block moved before "Time base counter"): `dist/al3-0x153E.bin` sha256
+`831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1`, the 1 MiB flash image
+`2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8` (pinned as `backups/al3_0x153E_831dc346*.bin`); a
+rebuild of the committed source in a fresh work dir (`tools/encphase_build.sh ~/e153e final`, no option = `src/`) gives
+the same bytes. **6439 LUT (74.5 %) / 5912 reg (68.4 %) / 7454 LE (86.3 %)**, all block RAM, `#oreg 15` (the four
+encode ODDRs packed). Every clock 0 errors: `clk_200MHz` **4.802 ns** (+0.198), `sample_write_clock` 9.375, `i_mcu_clk`
+27.608, `clkc[2]` 4.140, `clkc[3]` 3.887 ns; `clkc[0]` the SDC artefact (40 setup errors, as in every build since
+0x1534); `clkc[1]` has no load.
+
+| Item | 0x153E (i2) | enc0 (section 19) | 0x153D release |
+|---|---|---|---|
+| Encode pads 1A / 1B / 2A / 2B (ns after the core's write clock edge) | 7.34 / 6.97 / 7.34 / 6.97 | 7.34 / 6.97 / 7.34 / 6.97 | 7.28 / 6.92 / 7.46 / 7.10 |
+| `enc_cur` -> ODDR D, worst setup / hold | +0.860 / +2.654 | +0.56 / +2.65 | (fabric flop path +2.80) |
+| `enc_cur` -> fabric copies, setup B / A, hold | +0.988 / +1.733, +2.748 | +1.56, +2.84 | - |
+| fabric copies -> `enc_ok` (0x33 self-check), setup | +0.481 | +0.45 | - |
+| Capture margins at k3 (start / end, 1A 1B 2A 2B) | 3.75/2.02 4.12/1.65 3.75/2.02 4.12/1.65 | the same | 3.81/1.96 4.17/1.61 3.63/2.14 3.99/1.78 |
+| LE / clk_200MHz | 7454 / 4.802 ns | 7449 / 4.892 ns | 7449 / 4.983 ns |
+
+(Slacks from `tb/capture_report.sh`'s re-timing of the placed design, TT corner; the data pins stay at -0.11 / +0.12 ns,
+skew 0.00, `#ireg 33`.) The pads equal enc0's to the 0.01 ns in this build as in all 64 below: the IOB registers make the
+encode timing a property of the PLL setting, not of the placement. The wizard should pick A3 on both channels (enc0 did).
+
+**Rolls.** The version byte changes the netlist, so enc0's placement did not carry over (its own move, the hold-off block
+before "External trigger input", gave 2 clk_200MHz errors here). 64 builds of section moves (55 distinct placements:
+moves of the trigger hold-off, streaming logger, hardware counter, outlier counter, sample write clock, sequencer and
+"ADC encode outputs" sections, one to three at a time; `tools/encphase_build.sh <root> <name> --move S A ...`, at most
+four in parallel, about 2 minutes each) closed every clock in 3: **i2, the logger before "Time base counter" (4.802 ns,
+kept)**, i6, the logger before "Capture of the trigger address" (4.807), and i3, the outlier counters before "Time base
+counter" (4.931). The near misses failed by 0.02 .. 0.10 ns on scattered clk_200MHz paths (the square generator, the EXT
+trigger qualifier, the hold-off, the encode look-ahead); one (the sample write clock before "Channel 1 DC offset" plus the
+logger before "Trigger types") closed clk_200MHz at 4.890 but missed `sample_write_clock` by 0.343 ns
+(`sampling_triggered` -> `sample_write_enable`). Expect 15 to 25 rolls for a closing one at this fill.
+
+**Tests.** `tb/run.sh` (18 steps, `REF_SRC_DIR=~/g11/refs`) on a snapshot of da645d0's `src` + `tb`, both seeds in parallel (2026-11-04, 10488 / 10289 s): **ALL PASS on seeds 12345 and 4242**, every step, no exception. Per step (12345 / 4242): ext 39; decim 110 / 108 + cic_model 1876 / 1902 samples; fir 164 / 168 + cic_model 1582 / 1557; long 8; seg 59 / 57 + seg_model 22 runs 0 failures; trigpos 882; contract 42 and the transcript = `contract_0x153E.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 2241; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102. run.sh prints the encode clock defines `-DPLL_C2_NS=3.750 -DPLL_C3_NS=4.125 -DENC_B_NS=1.250 -DENC_A_NS=1.625` (`encphase_defs.py` detects the committed source); the references keep their clock.
+
+**Bench.** Not flashed (status `unbenched`); the owner's checklist is in AGENTS.md "0x153E, the IOB encodes, fpga-153e".
+The enc0 image of section 19 is the same logic with the 0x153D word and another placement; what it showed on the bench
+(clean boot, encode self-check 0 bad, A3 on both channels, data in the release's range) is the expectation, not a
+measurement of this image. Acceptance: the sweep peak per core (`tools/enc_sweep.py`, section 19) against the release's
+A 6.94 % / B 0.66 %, and a divider-0 capture with both A cores moving (the 0x33 self-check reads the fabric copies, so a
+frozen pin, as on enc+250, is invisible to it).
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).
