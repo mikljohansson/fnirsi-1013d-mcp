@@ -65,6 +65,8 @@ KNOWN_IMAGES = {
     "d397e0c26ec26ec2db517b5de9b9e33b299df778825b64de71576e3bc245dd46": "fpga-encphase enc-250 (0x153D word), flash",
     "eaac246e11027c91aa8a8faf23970a33b490cc6bbc82645fc6ecee6ebeb79f05": "fpga-encphase enc+250 (0x153D word), raw",
     "46a38f24e3a56aff45d0113247ac5a82cfbc059b66689659e4a2049d6e440b6f": "fpga-encphase enc+250 (0x153D word), flash",
+    "831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1": "0x153E (IOB encodes), raw",
+    "2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8": "0x153E (IOB encodes), flash image",
 }
 #: keys of the recorded settings that must match for two runs to be comparable
 COMPARE_KEYS = ("ch2", "cap_value", "fw", "gen", "trigger_mode")
