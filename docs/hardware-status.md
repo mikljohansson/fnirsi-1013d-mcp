@@ -1743,3 +1743,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   a core's conversion and its partner's output switching, which a common phase shift moves in opposite directions for A and
   B; the A - B skew (`encphase_variant.py --skew-ps`) is then the knob to try, not the common phase (inference, for the FPGA
   agent). enc0 has no sweep yet (measured before the sweep existed); its per-phase A/B is close to the release.
+- 2026-11-04 11:1x-11:33 (lead, owner present): **session end and decisions.** The owner stops the hardware part here (the release
+  0x153D is flashed and calibrated, rel-2 done; the enc0 sweep is not taken: two more flashes for a number the next round
+  would re-measure anyway). **Owner decisions: (1) future encode experiments (skew images, runtime phase) are parked;
+  (2) enc0 is adopted as the next release bitstream, as 0x153E** (the 0x153D RTL with the IOB encodes on PLL C2 / C3 at
+  common phase 0, skew 375 ps, version word 0x153E, no other logic change) **and 0.3.0 ships on it**; the firmware then
+  expects 0x153E only. Dispatched: fpga-153e (bitstream, dist, tools: enc_sweep.py and the per-phase analysis into
+  fpga/al3/tools), fw-153e (firmware / mcp / protocol expect 0x153E), docs-153e (user docs, release notes, checklist,
+  roadmap, queue). Still to bench once 0x153E is built: flash it (one more J2 session), wizard, the normal release checks.
+  Merged into main today before the dispatch: fpga-encphase (587bcd0), fw-settings0 (896e21e; its handoff is firmware/AGENTS.md
+  section 94). Session artefacts: `backups/encphase/` (ab_*.npz, sweep_*.npz, the flash and SD backups, the two
+  `*_wrongnode*` and `ab_enc0_ch1ac` side runs), the tool's pre-write flash backups `backups/20261104-*-pre-write.bin`.
+  Lessons for the next bench plan: the sweep from the start, one flash per image; CH1 coupling and the CH2 node checked
+  by a capture before every run; the wizard moves the CH2 centre by up to 7 PWM units (1.75 codes) per run.
