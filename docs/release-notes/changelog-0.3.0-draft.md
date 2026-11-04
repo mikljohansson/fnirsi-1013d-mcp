@@ -45,7 +45,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
 - External trigger on the calibration pin (0.2.9, bebf901) and its pipeline offsets per bitstream (0.2.72, 7833312;
   0.2.79, 381dd8a).
 - One firmware, one bitstream (owner 2026-10-20): the firmware runs only on the bitstream it is built for (0x153B in
-  0.2.103, 0x153C in 0.2.104, 0x153D in 0.2.105, 0x153E in {{fw version}}) and shows a full-screen notice with Diagnostics, Settings and USB
+  0.2.103, 0x153C in 0.2.104, 0x153D in 0.2.105, 0x153E in 0.3.0) and shows a full-screen notice with Diagnostics, Settings and USB
   drive
   on any other; the stock, Atlan4, EF2 and EP4 paths and the per-bitstream workarounds are gone (0.2.103, 1f13767;
   5c0ea67, fb3a28a); the notice answers its buttons after Diagnostics (f08b5b1). The firmware stops writing the
@@ -116,7 +116,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   DDS, the ADC encodes as on 0x153C; the pulse pattern generator was cut (it did not fit), and a first build with
   full-rate encodes was replaced after the 2026-10-22 A/B; flashed 2026-10-22 17:01, accepted by the owner 18:56,
   benched good; supported (the firmware 0.3.0 refuses it).
-- 0x153E ({{0x153E commit}}): the 0x153D design with the ADC encodes driven from the PLL outputs through the pin (IOB)
+- 0x153E (source 754e39b, roll da645d0, merge 0cd4768): the 0x153D design with the ADC encodes driven from the PLL outputs through the pin (IOB)
   registers, so every build has the same encode timing; no other logic change; the release's bitstream, recommended.
   The encode-phase experiments around it (-250 / +250 ps images, bench 2026-11-04) are parked.
 - Released images committed under `fpga/al3/dist` with `manifest.json`, `BITSTREAMS.md` and the CI check
@@ -154,7 +154,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   partition start (1563daf).
 - README for the hobbyist visitor, the agent install runbook and the Claude Code skill `fnirsi-install`, a Prepare and
   back up page (50827b1, 3b15377, 2063e88; merges 28fde67, ac4c6a5, 42bf65b, a075dbf); the docs for one firmware
-  with one bitstream and 0x153E as the release's (003924d, 991b2da; {{0x153E docs commit}}).
+  with one bitstream and 0x153E as the release's (003924d, 991b2da; eda30b2).
 - SPI flash tools for the FT2232D (71774ff, 108df11, fee75d9); protocol specification, hardware preparation guide and
   roadmap (9d32933, 1bd4179, a947e78).
 

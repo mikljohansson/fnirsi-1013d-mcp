@@ -25,11 +25,13 @@ driven from PLL outputs through the pin registers (`docs/hardware-status.md` 202
 "session end and decisions"). The 0x153D boxes below stay as the record of what 0x153D proved; 0x153D remains attached
 as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). The 0x153E boxes come first.
 
-- [ ] 0x153E built by fpga-153e and pinned: committed `fpga/al3/src`, `tb/run.sh` ALL PASS, every clock closed, raw and
-      padded sha256 in `fpga/al3/dist/BITSTREAMS.md` and `manifest.json` ({{0x153E raw sha256}}, {{0x153E padded
-      sha256}}, {{0x153E merge commit}}). Proof: the fpga-153e handoff in `fpga/al3/AGENTS.md` and the dist rows.
+- [x] 0x153E built by fpga-153e and pinned (2026-11-04, merge 0cd4768): committed `fpga/al3/src` (roll da645d0),
+      `tb/run.sh` ALL PASS on seeds 12345 and 4242, every clock closed (clk_200MHz 4.802 ns), raw sha256
+      `831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1` and padded
+      `2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8` in `fpga/al3/dist/BITSTREAMS.md` and
+      `manifest.json`. Proof: the fpga-153e handoff in `fpga/al3/AGENTS.md` and the dist rows.
 - [ ] `fpga/al3/dist`: 0x153E `status: recommended`, `min_firmware` = the 0.3.0 firmware; 0x153D `supported`;
-      `python3 -I tools/bitstreams.py check --release` exits 0 ({{N}} bitstreams consistent).
+      `python3 -I tools/bitstreams.py check --release` exits 0 (12 bitstreams consistent; status `unbenched` until the bench).
 - [ ] 0x153E flashed on the maintainer's unit (owner at the bench): pre-write double read equal, written, verified,
       independently read back equal to the padded image's hash; `docs/hardware-status.md` entry with the date.
 - [ ] 0x153E benched on the firmware that expects it: cold boot with no mismatch notice, encode self-check 0 bad, capture
