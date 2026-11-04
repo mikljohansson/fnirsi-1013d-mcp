@@ -4,8 +4,11 @@ Epic-level view of what is left before the first public release, v0.3.0. The tas
 holds the individual items with their bench facts; this file groups them into epics, orders them and says what has to
 be true before the tag. Dates are 2026. **State as of 2026-10-22 19:52** (the pause before the release work): firmware
 0.2.105, protocol 1.28; FPGA 0x153D (the gated build fd0be7a2 of fpga-d3gate) flashed on the maintainer's unit
-2026-10-22 17:01, benched, accepted by the owner at 18:56 and `recommended` in `fpga/al3/dist`; the card boots fw 0.2.105
-c681efa4. Next: the release steps of section 5. Sections 1-4 below were reconciled on 2026-10-20 morning (firmware
+2026-10-22 17:01, benched, accepted by the owner at 18:56; the card boots fw 0.2.105 c681efa4. **Update 2026-11-04: the
+owner moved the release to FPGA 0x153E**, the 0x153D design with the ADC encodes driven from PLL outputs through the pin
+registers (section 6 item 4 has the experiment behind it); 0x153D stays attached as `supported`, the 0.3.0 firmware
+expects 0x153E only, and 0x153E still has to be built, pinned, flashed and benched (`docs/plans/release-checklist.md`).
+Next: the release steps of section 5. Sections 1-4 below were reconciled on 2026-10-20 morning (firmware
 0.2.80, FPGA 0x153A then) and stand as written; the status paragraphs that follow say what changed since.
 
 **Maintainer decision 2026-10-19: everything on this list ships before the announcement. One big splash, no follow-up
@@ -130,16 +133,17 @@ The announcement point. Gate, in order (details and the tick list in `docs/plans
 
 1. Every epic in sections 1-3 is merged and its bench list is ticked in `docs/hardware-status.md`, or the maintainer has
    explicitly removed the item.
-2. The FPGA bitstream the release depends on, 0x153D (the gated build fd0be7a2), is flashed on the maintainer's unit
-   and benched: flashed 2026-10-22 17:01, benched 17:03-19:02 on fw 0.2.105, accepted by the owner at 18:56, and
-   `recommended` in `fpga/al3/dist` with its bench record (`tools/bitstreams.py check --release` passes). Users get it
+2. The FPGA bitstream the release depends on, **0x153E** (since 2026-11-04; 0x153D, the gated build fd0be7a2, was
+   benched 2026-10-22 and is now `supported`), is built and pinned, flashed on the maintainer's unit and benched with
+   the firmware that expects it, and `recommended` in `fpga/al3/dist` with its bench record (`tools/bitstreams.py check
+   --release` passes; open, owner at the bench). Users get it
    from `fpga/al3/dist`, attached to the release with `BITSTREAMS.md` (`docs/releasing.md` section 5; the maintainer's
    confirmation of that is a box in `release-checklist.md`).
 3. Version bump to 0.3.0 in `firmware/scope/pc_cmds.h` and `mcp/pyproject.toml`, a curated `## [0.3.0]` section in
    `CHANGELOG.md` (the release notes), `release: v0.3.0` commit, CI green.
 4. A release candidate persisted to the SD card and a 30-minute soak with the MCP server polling
-   (`fnirsi1013d-soak`), plus the long idle check. Done so far on 0x153D: fw 0.2.105 c681efa4 persisted 2026-10-22 19:52
-   and a 301 s soak with 0 errors; the 30-minute soak ran on 0.2.102 / 0x153B (2026-10-20) and is repeated on the 0.3.0
+   (`fnirsi1013d-soak`), plus the long idle check. Done so far on 0x153D (not on 0x153E): fw 0.2.105 c681efa4 persisted
+   2026-10-22 19:52 and a 301 s soak with 0 errors; the 30-minute soak ran on 0.2.102 / 0x153B (2026-10-20) and is repeated on the 0.3.0
    image.
 5. Demo material for the announcement: screenshots of the main views (`scope_screenshot`), a shared-control session
    with the MCP chip visible, a short clip.
@@ -166,11 +170,12 @@ Ideas that stay in the repository for later and are not part of the one-splash p
 - CSV export of the on-screen trace, a dot display mode, triggered sweeps slower than 10 ms/div.
 - Invite testers with EF2L45 and EP4CE6 units; those paths are inherited from Atlan4 and untested here.
 
-### A future FPGA 0x153E (owner, 2026-10-21)
+### A future FPGA after 0x153E (owner, 2026-10-21)
 
-0.3.0 ships on 0x153D; 0x153E is not scheduled. The owner wants FPGA headroom kept ("not program the FPGA too full, who knows
-what we might want to do later"), so a 0x153E would combine one feature with the compaction below, measured block by block
-like `docs/plans/fpga-0x153c.md` section 13 on the 0x153D source.
+0.3.0 ships on 0x153E (the 0x153D design with IOB encodes; section 6 item 4); a bitstream after it is not scheduled. The owner
+wants FPGA headroom kept ("not program the FPGA too full, who knows what we might want to do later"), so a later bitstream
+would combine one feature with the compaction below, measured block by block like `docs/plans/fpga-0x153c.md` section 13
+on the 0x153D source (the 0x153E source adds no logic).
 
 1. **Trigger on both ADC cores** (the only feature candidate; contract section 3.4): the edge found to 5 ns instead of 10 ns at
    200 MS/s, so repeated captures line up twice as tightly (sharper averaged and phosphor traces at the fastest time bases).
@@ -225,6 +230,21 @@ like `docs/plans/fpga-0x153c.md` section 13 on the 0x153D source.
    and the hash rebuilds. `fpga/al3/tools/enc_ab.py` is the A/B (e_ab.py / e_ab2.py recovered). The
    decision table adds a fourth case: if the IOB image at phase 0 matches the release, the next build adopts it to end
    the roll lottery. Experiment (a), the IDELAY, is not prepared.
+
+   **Outcome (bench 2026-11-04, `docs/hardware-status.md` 09:4x-11:33; experiments parked by the owner the same day).**
+   The IOB encodes at common phase 0 ("enc0") behaved like the release: encode self-check 0 bad, CH2 core A on the rising
+   phase 6.4 % against the release's 10.1 %, B in the same range, so **the owner adopted enc0 as bitstream 0x153E** for 0.3.0,
+   which ends the placement lottery of the encode timing (the goal of the fourth case above); it does not remove the CH2
+   code errors. The common phase trades core A against core B: at -250 ps core A's peak error fell from 6.9 to 2.1 % and
+   core B's rose from 0.7 to 11.4 %, and A's DC reading moved +1.2 codes against B. At +250 ps the A cores stopped
+   updating at 200 MSa/s (they returned a constant; the wizard failed its gain step), so +250 ps is dead on the silicon
+   (inference: the setup / hold at the ODDR is not what TD's model says), and the 0x33 encode self-check cannot see such
+   a failure because it checks the fabric copies, not the pins. Opposite signs on the two cores suggest the A - B skew,
+   not the common phase, is the knob (inference): the first candidate if the work is resumed is the skew images, A -250 ps
+   and B 0, judged by the offset sweep (`enc_sweep.py`; its peak over the sweep is the measure that does not depend on
+   where the signal is parked, which the plain A/B does). Pin-level encode self-check and the skew images are parked.
+   The 2026-10-22 comparison "0x153C 1.0 % against 0x153D 3.3 %" turned out to be the signal's parking against the carry
+   band, not the bitstream: the two read within 0.4 points in the same 2026-11-04 session.
 
 Dropped by the owner on 2026-10-21 and not candidates: the pulse pattern generator with its trigger engine and marker (cut from
 0x153D at 15:55, it did not fit; chirps stay host-stepped on the square), runt, window and the pulse-width range triggers.
