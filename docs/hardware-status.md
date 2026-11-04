@@ -1683,3 +1683,21 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x58 19.50 %), CH2 B 1.955 % (2.64 %; 0x58 5.71 %, 0xA8 7.03 %); divider 99 0 / 0. **Against rel-1 (A 6.38 / 8.10, B 1.66
   / 2.03) the two bitstreams are within 0.4 points of each other**: the 10-22 "0x153C 1.0 % vs 0x153D 3.3 %" was the offset
   parking, not the bitstream. `backups/encphase/ab_c153c.npz`.
+- 2026-11-04 10:23-10:5x (lead, owner present): **enc0** (IOB encodes on PLL C2 / C3, 0 ps; `backups/al3_encphase_0_a71430a8_padded.bin`).
+  Two write attempts refused by the tool's double pre-read ("bus unstable": one of the two 1 MiB reads differed; a plain
+  `read --twice` in between was identical), the third wrote and verified c9d3210d (pre-write backup
+  `backups/20261104-102312-pre-write.bin` = 07393bf5). Cold boot: fw 0.2.105 accepts it as 0x153D, no notice, **encode
+  self-check 0 bad** (8943 checked by the end of the run), capture self-check 0 flagged. Wizard with the inputs open:
+  **CH1 A3 B3, CH2 A3 B3** (0x06DB; predicted A3 on both). First A/B invalid for the comparison: CH1 was AC coupled (coupling 1,
+  changed between c153c and this boot, by whom is unknown; rel-1 and c153c ran with DC), which moves the CH1 level crossing
+  and so CH2's window (kept as `ab_enc0_ch1ac.npz`: A 5.43 %, B 1.53 %, every capture on the rising phase). CH1 set back
+  to DC by SET_CHANNEL, phase checked (CH2 94 -> 96..98 at the trigger, as rel-1), rerun `ab_enc0.npz`: raw A 3.115 % (hot
+  zone 5.40 %), B 0.985 % (1.50 %); divider 99 0 / 0.
+  **Finding about the A/B itself**: with CH1 DC the trigger (CH1 rising, level 137) fires on both slopes: CH1 at the ladder
+  input moves 0.03 codes per sample at 200 MSa/s, so the A/B cores' 1-2 code zigzag makes rising crossings on the falling
+  slope too. Every run is a mix of rising-phase captures (CH2 94 -> 98, the carry region) and falling-phase ones (CH2 181 ->
+  177): rel-1 20 / 12, c153c 20 / 12, enc0 15 / 17, so the overall shares are not comparable; per phase and per code they
+  are (scratch `phase_ab.py`, to go into enc_ab.py --analyse). Rising phase, core A: rel-1 10.05 %, c153c 9.48 %, enc0 6.41 %;
+  per median code 0x5D / 0x5E / 0x5F / 0x60: rel-1 32 / 23 / 0.7 / 0.1 %, c153c 33 / 22 / 0.8 / 0.0, enc0 66 / 25 / 6.9 / 1.4
+  (enc0's level distribution sits a fraction of a code higher: fewer samples at 0x5D-0x5E); falling phase A 0.26 / 0.19 /
+  0.20 %; core B rising 2.04 / 2.66 / 1.50, falling 1.02 / 0.78 / 0.53. Verdict waits for rel-2 (run-to-run spread).
