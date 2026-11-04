@@ -69,8 +69,9 @@ int pc_hal_sd_write(uint32_t sector, uint32_t count, const uint8_t *src)
   return 0;
 }
 
-//A fresh boot on 0x153D: sector 708 holds stored (trained on 0x153D) with the clean sets (stored 0 = no trailer)
-static void boot(uint16_t stored, uint16_t sets)
+//A fresh boot on the built-for bitstream: sector 708 holds stored, trained on the bitstream fpga, with the clean sets
+//(stored 0 = no trailer)
+static void boot_on(uint16_t stored, uint16_t sets, uint16_t fpga)
 {
   memset(&fm, 0, sizeof(fm));
   memset(&ev, 0, sizeof(ev));
@@ -85,12 +86,18 @@ static void boot(uint16_t stored, uint16_t sets)
 
   if(stored)
   {
-    cs_trailer_pack(stored, 0x153D, sd708 + CS_TRAILER_OFFSET);
+    cs_trailer_pack(stored, fpga, sd708 + CS_TRAILER_OFFSET);
     cs_ext_pack(sd708, sets);
   }
 
   fpga_capture_init();
   fpga_capture_loaded(sd708);
+}
+
+//Trained on the bitstream this firmware is built for (PC_FW_FPGA_VERSION)
+static void boot(uint16_t stored, uint16_t sets)
+{
+  boot_on(stored, sets, PC_FW_FPGA_VERSION);
 }
 
 //One accepted full-rate capture with CH1 A garbled (the other cores quiet), 5 s after the previous one, then the MAIN
@@ -131,7 +138,7 @@ static void test_guard_acts_on_own_value(void)
   T_EQ(ev.n, 1); T_EQ(ev.a, 0x21); T_EQ(ev.b, 0x08E3);
   T_EQ(sd_writes, 1);
   T_EQ(cs_trailer_unpack(sd708 + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
-  T_EQ(v, 0x08E3); T_EQ(f, 0x153D);
+  T_EQ(v, 0x08E3); T_EQ(f, PC_FW_FPGA_VERSION);
 }
 
 //The bench bug: the sweep writes 0x63 = 0x08E4 through DEBUG_FPGA while the stored (and written) value is 0x08E3, and
@@ -231,6 +238,64 @@ static void test_repeat_ignores_foreign_value(void)
   T_EQ(fm.reg63, 0x08E3);
 }
 
+//fw-153e: a card trained on the previous bitstream (0x153D, the release before 0x153E): the stored value is not applied
+//(power-on 0x08E4, OTHER: Diagnostics asks for Calibrate), the guard and the repeat watch's store do nothing, the card
+//is not written; the wizard's commit binds the new value to the built-for word and the next save stores that
+static void test_stored_for_previous_bitstream(void)
+{
+  uint16_t v, f;
+  uint32_t k;
+  uint8_t  sec[512];
+  pc_hw_cap c;
+
+  T_TRUE(PC_FW_FPGA_VERSION != 0x153D);
+  boot_on(0x08E3, 0xFFFF, 0x153D);
+  pc_hal_cap_state(&c);
+  T_EQ(fm.reg63, CS_PO);
+  T_EQ(fm.reg64, CS_THR_USE);
+  T_EQ(c.value, CS_PO);
+  T_EQ(c.trailer, CS_T_VALID);
+  T_EQ(c.stored, 0x08E3);
+  T_EQ(c.stored_fpga, 0x153D);
+  T_TRUE(c.flags & PC_CAPF_HAS);
+  T_TRUE(c.flags & PC_CAPF_OTHER);
+  T_FALSE(c.flags & PC_CAPF_TRAINED);
+
+  //Garbled captures at the power-on value: REPEAT once, nothing moved, nothing stored
+  for(k=0;k<4;k++)
+    capture_ch1a_garbled();
+
+  pc_hal_cap_state(&c);
+  T_TRUE(c.flags & PC_CAPF_REPEAT);
+  T_FALSE(c.flags & PC_CAPF_MOVED);
+  T_EQ(fm.reg63, CS_PO);
+  T_EQ(sd_writes, 0);
+
+  //A save without a new training keeps the card's trailer as it was (0x153D's value, still not applied)
+  memset(sec, 0, sizeof(sec));
+  fpga_capture_save(sec);
+  T_EQ(cs_trailer_unpack(sec + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
+  T_EQ(v, 0x08E3); T_EQ(f, 0x153D);
+
+  //The wizard's value, committed at its Save: trained on the built-for bitstream, OTHER and REPEAT gone
+  fpga_capture_write(0x06DB);
+  fpga_capture_commit();
+  pc_hal_cap_state(&c);
+  T_EQ(c.stored, 0x06DB);
+  T_EQ(c.stored_fpga, PC_FW_FPGA_VERSION);
+  T_TRUE(c.flags & PC_CAPF_TRAINED);
+  T_FALSE(c.flags & (PC_CAPF_OTHER | PC_CAPF_REPEAT));
+  memset(sec, 0, sizeof(sec));
+  fpga_capture_save(sec);
+  T_EQ(cs_trailer_unpack(sec + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
+  T_EQ(v, 0x06DB); T_EQ(f, PC_FW_FPGA_VERSION);
+
+  //The next boot applies it
+  boot_on(0x06DB, 0, PC_FW_FPGA_VERSION);
+  T_EQ(fm.reg63, 0x06DB);
+  T_TRUE(cap_st.flags & PC_CAPF_TRAINED);
+}
+
 //1.28 (fw-capmetric): a training's quiet sets, residuals and sums per channel for GET_CAL (pc_hal_cap_train). Mock:
 //CH2 A dirty at 2, its residual q per capture 40 at stage 5, 10 at the others (a class (a) mix at 5); CH2 B dirty with
 //its own encode at every stage, clean with the A encode at 3..5, q 1 per capture
@@ -294,6 +359,7 @@ int main(void)
   test_guard_acts_on_own_value();
   test_guard_ignores_foreign_value();
   test_repeat_ignores_foreign_value();
+  test_stored_for_previous_bitstream();
   test_train_note();
   return t_report("test_cap_hw");
 }

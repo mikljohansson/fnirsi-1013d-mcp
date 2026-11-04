@@ -346,7 +346,8 @@ notes" section of `docs/protocol.md`.
 
 Every firmware version runs on exactly one FPGA bitstream, the project's latest (owner decision 2026-10-20: "every
 firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner"). The constant is
-`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153D since fw 0.2.105, `fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
+`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153E since fw-153e, the 0.3.0 release's; 0x153D in fw 0.2.105;
+`fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
 geometry (8192 words, 16382 samples) and every feature decision derive from it, never from the version word the FPGA
 reports. That word is read once at boot (`pc_glue_init`) and compared:
 
@@ -354,13 +355,13 @@ reports. That word is read once at boot (`pc_glue_init`) and compared:
   capture, enc_heal.c) and the capture stages (0x63 / 0x36, cap_stage.c) stay: 0x153B needs them.
 - **Mismatch** (older or newer word): the scope boots into a full-screen notice instead of the scope
   (`ui_diag.c ud_build_fpga_mismatch`, `ui_diag_view.c ui_fpga_mismatch_pass`): "This firmware needs FPGA bitstream
-  0x153D." / "This scope has 0x1532." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
+  0x153E." / "This scope has 0x153D." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
   stock firmware.", with three buttons: Diagnostics (the version word, Save report, the log, Enter FEL; Back returns to
   the notice; no Calibrate, DC shift trim or Volts calibration there), Settings and USB drive (the modal screens of the
   main menu; the notice is redrawn after). The acquisition, the Scope, Spectrum and Frequency response views and the
   generator never run; nothing is written to the FPGA's feature registers at boot. Over USB: GET_INFO 76 carries the
   built-for word and 78 bit 0 the mismatch (GET_HEALTH 124 / 126 the same), every command outside the basic set answers
-  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153D", and PING, GET_INFO, GET_STATUS,
+  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153E", and PING, GET_INFO, GET_STATUS,
   GET_HEALTH, GET_LINK_STATS, GET_EVENT_LOG, GET_CAL, the SD commands, SAVE_REPORT, READ_SCREEN and ENTER_FEL keep
   working (`F_BASIC` in pc_cmds.c), so a host can read the version word, save the report and load another image.
 
@@ -375,6 +376,11 @@ fw-c5 did exactly that for 0x153C: the constant, `PC_FW_FPGA_VERSION_TEXT` (the 
 fw-105 (fw 0.2.105) for 0x153D: the constant and its text, and the checks for a bitstream without the new features
 deleted (the logger's "does not stream" refusal, roll mode's "needs 0x153D" stop; also the wizard's screen and the
 Frequency response's warning for a bitstream without the generator).
+fw-153e for 0x153E (0x153D's registers and behaviour; the ADC encodes from PLL outputs through the pin registers, so
+every build has the same encode timing): the constant and its text only. A calibration saved on 0x153D still loads, but
+the capture stages' stored value is not applied (power-on 0x08E4, OTHER) and the first-run screen asks for Calibrate
+("Calibrated on FPGA bitstream 0x153d: calibrate again for 0x153e.", `ud_first_run_due`) until the wizard's Save stamps
+the new word.
 
 ### Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26)
 
