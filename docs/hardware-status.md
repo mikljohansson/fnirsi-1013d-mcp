@@ -1683,7 +1683,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x58 19.50 %), CH2 B 1.955 % (2.64 %; 0x58 5.71 %, 0xA8 7.03 %); divider 99 0 / 0. **Against rel-1 (A 6.38 / 8.10, B 1.66
   / 2.03) the two bitstreams are within 0.4 points of each other**: the 10-22 "0x153C 1.0 % vs 0x153D 3.3 %" was the offset
   parking, not the bitstream. `backups/encphase/ab_c153c.npz`.
-- 2026-11-04 10:23-10:5x (lead, owner present): **enc0** (IOB encodes on PLL C2 / C3, 0 ps; `backups/al3_encphase_0_a71430a8_padded.bin`).
+- 2026-11-04 10:23-10:38 (lead, owner present): **enc0** (IOB encodes on PLL C2 / C3, 0 ps; `backups/al3_encphase_0_a71430a8_padded.bin`).
   Two write attempts refused by the tool's double pre-read ("bus unstable": one of the two 1 MiB reads differed; a plain
   `read --twice` in between was identical), the third wrote and verified c9d3210d (pre-write backup
   `backups/20261104-102312-pre-write.bin` = 07393bf5). Cold boot: fw 0.2.105 accepts it as 0x153D, no notice, **encode
