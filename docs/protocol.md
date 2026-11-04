@@ -160,7 +160,9 @@ Compatibility rules [D]:
 
 Version word from FPGA command 0x06 (two bytes, high first) [V `S100 fpga_control.c:196-209`, `zaklad.v` :847-855].
 **Since protocol 1.25 (fw-one, owner decision 2026-10-20) every firmware version supports exactly one bitstream, the
-project's latest** (`PC_FW_FPGA_VERSION` in `firmware/scope/pc_cmds.h`, 0x153D since protocol 1.27 (fw 0.2.105), 0x153C in 1.26, 0x153B in 1.25;
+project's latest** (`PC_FW_FPGA_VERSION` in `firmware/scope/pc_cmds.h`, 0x153E since fw-153e (the 0.3.0 release; protocol 1.28
+unchanged: 0x153D's registers and behaviour, the ADC encodes from PLL outputs through the pin registers), 0x153D since
+protocol 1.27 (fw 0.2.105), 0x153C in 1.26, 0x153B in 1.25;
 fpga/al3/dist/manifest.json "recommended"). The firmware reads the word once at boot and compares it with that constant;
 nothing else is derived from it. The capability word, the geometry and every feature decision are the firmware's own:
 
@@ -176,12 +178,18 @@ nothing else is derived from it. The capability word, the geometry and every fea
 On a mismatch the scope boots into a full-screen notice instead of the scope (the word needed, the word found, "flash it
 as the guide says, or remove the card to run the stock firmware"; Diagnostics, Settings and the USB drive stay reachable),
 the acquisition never starts, and every command that is not in the basic set answers **E_UNSUPPORTED detail 1** with the
-text "FPGA bitstream mismatch: this firmware needs 0x153D" (the built-for word, `PC_FW_FPGA_VERSION_TEXT`). The basic set
+text "FPGA bitstream mismatch: this firmware needs 0x153E" (the built-for word, `PC_FW_FPGA_VERSION_TEXT`). The basic set
 keeps the link, the diagnostics and the way out:
 PING, GET_INFO, GET_STATUS, GET_BATTERY, TEST_PATTERN, GET_LINK_STATS, GET_BAD_FRAME, GET_EVENT_LOG, GET_HEALTH,
 READ_SPECTRUM, SD_INFO / SD_READ_SECTORS / SD_STAGE / SD_WRITE_SECTORS, SAVE_REPORT, GET_CAL, READ_SCREEN, FFT_BENCH,
 ENTER_FEL. GET_HEALTH 124..127 repeats the two fields (row 65). A host shows the mismatch as a caveat and does not try to
 work around it: the next bitstream ships with its own firmware.
+
+**0x153E (fw-153e)**: no wire change, so the protocol stays 1.28; only GET_INFO 76 / GET_HEALTH 124, the mismatch text
+and `#VER`'s `fpga=` follow the constant. A scope still on 0x153D is a mismatch. A calibration saved on 0x153D loads,
+but GET_CAL 357 carries OTHER (360 = 0x153D) instead of TRAINED and the capture stages run at the power-on 0x08E4 until
+the wizard trains again; the first-run screen asks for it. Vectors: `host_resp_get_info_153e`,
+`host_resp_get_info_153e_on_153d`, `host_resp_e_unsupported_fpga_mismatch_153e`.
 
 Up to fw 0.2.102 the firmware ran on the stock 0x1432, Atlan4's 0x1532 / 0x1632 (EF2) / 0x1732 (EP4) and every AL3 minor
 0x1533..0x153B with capabilities per word (`pc_variant_from_version`), the encode-heal and core-order workarounds for
