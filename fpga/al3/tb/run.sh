@@ -75,6 +75,11 @@ SEED=${1:-12345}
 WORK=${SIM_WORK:-$HOME/al3-sim}
 DUT=${DUT:-$REPO/fpga/al3/src/zaklad.v}   # design under test (override for mutation runs)
 ONLY=${ONLY:-all}
+# fpga-encphase --iob images (README section 19): the encode clocks of the DUT's al_ip/pll.v as iverilog defines
+# (empty for the release source); exported for encphase.sh and mcuread.sh.
+IVDEFS=${IVDEFS-$(python3 -I "$HERE/encphase_defs.py" "$DUT")}
+export IVDEFS
+if [ -n "$IVDEFS" ]; then echo "encode clock defines: $IVDEFS"; fi
 mkdir -p "$WORK"
 command -v iverilog >/dev/null || { echo "iverilog not installed"; exit 1; }
 # Reference: the file at a git revision with every module renamed to <name>_ref (pll/sample_memory stay shared)
@@ -96,7 +101,7 @@ mkref() {
   [ "$(grep -c 'sample_write_clock <= #0.001 ~sample_write_clock;' "$2")" = 1 ] || { echo "mkref: write clock delay not applied in $1"; exit 1; }
 }
 compile() {  # <out.vvp> <ref.v> <tb.v>
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -o "$1" "$HERE/sim_models.v" "$DUT" "$2" "$3" \
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -o "$1" "$HERE/sim_models.v" "$DUT" "$2" "$3" \
     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
 }
 T0=$(date +%s)
@@ -124,7 +129,7 @@ if [ "$ONLY" = all ] || [ "$ONLY" = fir ]; then
   grep -q -- '-> PASS' "$WORK/model_fir.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = long ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_long.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_long.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_long.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_long.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_long.vvp" +seed=$SEED +scale=${LONG_SCALE:-100} | tee "$WORK/sim_long.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_long.log" || RC=1
 fi
@@ -137,12 +142,12 @@ if [ "$ONLY" = all ] || [ "$ONLY" = seg ]; then
   grep -q -- '-> PASS' "$WORK/model_seg.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = trigpos ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigpos.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigpos.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigpos.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigpos.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_trigpos.vvp" +seed=$SEED +runs=${TRIGPOS_RUNS:-6} +logfile="$WORK/trigpos.log" | tee "$WORK/sim_trigpos.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigpos.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
   if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153D.txt"; then echo "contract transcript = tb/contract_0x153D.txt"
@@ -158,42 +163,42 @@ if [ "$ONLY" = all ] || [ "$ONLY" = mcuread ]; then
   grep -q 'mcuread: PASS' "$WORK/sim_mcuread_all.log" && echo "mcuread: PASS" || { echo "mcuread: FAIL"; RC=1; }
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = adccap ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_adccap.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_adccap.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_adccap.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_adccap.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_adccap.vvp" +seed=$SEED | tee "$WORK/sim_adccap.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_adccap.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = firstrec ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_firstrec.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_firstrec.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_firstrec.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_firstrec.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_firstrec.vvp" +seed=$SEED +total=${FIRSTREC_TOTAL:-16} | tee "$WORK/sim_firstrec.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_firstrec.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = timeout ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_timeout.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_timeout.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_timeout.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_timeout.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_timeout.vvp" +seed=$SEED +total=${TIMEOUT_TOTAL:-2048} +runs=${TIMEOUT_RUNS:-4} +bench=${TIMEOUT_BENCH:-1} | tee "$WORK/sim_timeout.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_timeout.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = trigtypes ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigtypes.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigtypes.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_trigtypes.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_trigtypes.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_trigtypes.vvp" +seed=$SEED +runs=${TRIGTYPES_RUNS:-2} +logfile="$WORK/trigtypes.log" | grep -v '^  intent' | tee "$WORK/sim_trigtypes.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_trigtypes.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = peak ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_peak.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_peak.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_peak.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_peak.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_peak.vvp" +seed=$SEED | tee "$WORK/sim_peak.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_peak.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = counter ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_counter.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_counter.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_counter.vvp" +seed=$SEED | tee "$WORK/sim_counter.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_counter.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = stream ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_stream.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_stream.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_stream.vvp" +seed=$SEED +chunks=${STREAM_CHUNKS:-2} | tee "$WORK/sim_stream.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_stream.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = square ]; then
-  iverilog -g2012 -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_square.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_square.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_square.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_square.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_square.vvp" +seed=$SEED +logfile="$WORK/square.log" | tee "$WORK/sim_square.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_square.log" || RC=1
 fi

@@ -1,16 +1,34 @@
 // Behavioural stand-ins for the Anlogic IP in fpga/al3/src/al_ip, for iverilog only.
-// pll: clk0 = 200 MHz at 0 degrees, clk1 = 200 MHz at 90 degrees (1.25 ns later), as pll.ipc.
+// pll: clk0 = 200 MHz at 0 degrees, clk1 = 200 MHz at 90 degrees (1.25 ns later), as pll.ipc; clk2 / clk3 below.
 // sample_memory: 8192 x 32 simple dual port, synchronous write on clka when cea, synchronous
 // read on clkb (REGMODE NOREG: data valid after the clock edge). The read address is sampled
 // through a 1 ps transport delay so a blocking update of the address register in the same
 // time step (zaklad.v uses `sample_read_offset = ... + 1`) cannot race the read, as in hardware.
 `timescale 1ns / 1ps
 
-module pll (input refclk, input reset, output reg clk0_out = 0, output reg clk1_out = 0);
+// clk2 / clk3: the fpga-encphase --iob images' B and A encode clocks (fpga/al3/README.md section 19), unused otherwise.
+// run.sh sets PLL_C2_NS / PLL_C3_NS from the image's al_ip/pll.v (each output's rising edge after clk0's, ns, minus the
+// IOB's 1.25 ns advance over the fabric encode route; see run.sh); clk1 stays at 1.25 for the references.
+`ifndef PLL_C2_NS
+`define PLL_C2_NS 1.25
+`endif
+`ifndef PLL_C3_NS
+`define PLL_C3_NS 1.25
+`endif
+module pll (input refclk, input reset, output reg clk0_out = 0, output reg clk1_out = 0, output reg clk2_out = 0,
+            output reg clk3_out = 0);
   always #2.5 clk0_out = ~clk0_out;
   initial begin
     #1.25;
     forever #2.5 clk1_out = ~clk1_out;
+  end
+  initial begin
+    #(`PLL_C2_NS);
+    forever #2.5 clk2_out = ~clk2_out;
+  end
+  initial begin
+    #(`PLL_C3_NS);
+    forever #2.5 clk3_out = ~clk3_out;
   end
 endmodule
 
@@ -70,6 +88,16 @@ module AL_LOGIC_BRAM #(
   end
   assign dob = (REGMODE_B == "OUTREG") ? q_b : lat_b;
   assign doa = 0;
+endmodule
+
+// AL_LOGIC_ODDR (TD logic DDR output register; the fpga-encphase --iob images' encode pins), as TD's
+// sim/al/al_logic_io.v without the global reset and the 0.1 ns clock-mux delay: d1 and d2 taken on the rising edge, the
+// pin shows d1 from the rising edge and d2 from the falling edge. A register, not TD's mux of two, so the pin never
+// glitches in zero time.
+module AL_LOGIC_ODDR #(parameter SRMODE = "SYNC") (output reg q = 0, input clk, input d1, input d2, input rst);
+  reg c0 = 0;
+  always @(posedge clk) begin q <= d1; c0 <= d2; end
+  always @(negedge clk) q <= c0;
 endmodule
 
 // AL_LOGIC_IDDR (TD logic DDR input register, 0x153A ADC capture), as TD's sim/al/al_logic_io.v without the global

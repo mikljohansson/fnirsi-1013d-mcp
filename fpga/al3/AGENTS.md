@@ -4,6 +4,13 @@ Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
 State on 2026-10-22 (fpga-d3gate, branch `fpga-d3gate`):
+- fpga-encphase (2026-10-27, branch `fpga-encphase`, not merged): **the encode-phase experiment, prepared, not finished**.
+  The release's encode flops are fabric flops (TD merges them; plain flops never pack into those pads), which is why the
+  pads move with every roll; an `AL_LOGIC_ODDR` per pin on new PLL outputs C2 / C3 packs into the IOB and fixes the pads
+  (B 6.97 / A 7.34 ns in all 29 rolls). All three images pinned with every clock closed, rebuilt to the same hashes and
+  through the two-seed run.sh (2026-11-02; enc+250 passes at its trained stages only, so the wizard retrain on the bench is
+  mandatory). Ready for the bench session; nothing flashed. `src/` is still the release. Section "Encode phase experiment, fpga-encphase" below
+  (with the bench session), README section 19.
 - fpga-simrace (2026-11-03, branch `fpga-simrace`): **simulation only, no bitstream change** (release source rebuilds to
   `fd0be7a2...e96a`). Under `ifdef SIM` the write clock toggles 1 ps after its clk_200MHz edge (`zaklad.v`, plus a SIM
   `timescale`), and `run.sh`'s `mkref` gives the references the same delay: write clock processes and testbench monitors
@@ -435,6 +442,88 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## Encode phase experiment, fpga-encphase (2026-10-27)
+
+Brief (coordinator, owner travelling without the scope): prepare roadmap section 6 item 4, knob 2 ("Encode phase") so one
+bench session can run it. Branch `fpga-encphase`. **Nothing flashed; `src/` is still the release 0x153D (`fd0be7a2`), no
+dist entry, no firmware change.** Write-up: README section 19.
+
+- **Finding (task 1).** The release's encode flops are fabric flops (pins' register `NONE`, `#oreg 11`), and TD merges the
+  two B and the two A flops into one register driving two pads plus the self-check: the pad delay is a fabric route, hence
+  6.9 .. 7.9 ns by roll. Plain flops never pack into these pads in TD 4.6.8 (keep + `PACKREG = ON`, posedge, no keep: all
+  `#oreg 11`); `AL_LOGIC_ODDR` does (`#oreg 15`). The `--iob` variant (ODDRs on new PLL outputs C2 = B, C3 = A, fed from
+  `enc_cur`) puts the pads at B 6.97 / A 7.34 ns (release 6.92 / 7.10 and 7.28 / 7.46) in all 29 rolls at that phase, and
+  at exactly +-0.25 ns in the 15 rolls at +-250 ps: the pads no longer depend on placement (README section 19).
+- **Images (task 2): ready for the bench (coordinator, 2026-11-02).** enc-250 (`3fc75a76`, padded `d397e0c2`), enc0
+  (`a71430a8`, padded `c9d3210d`) and enc+250 (`eaac246e`, padded `46a38f24`) close every clock, are pinned in
+  `backups/al3_encphase_*` and rebuild to the same hash. Two-seed run.sh: enc-250 ALL PASS; enc0 ALL PASS except one
+  tb_peak check on seed 12345, an ambiguous latency check (11 and 12 both fit; fixed by fpga-simrace, merged here); enc+250
+  fails tb_trigpos and tb_counter at the power-on capture stages (CH1 A4) and passes both on both seeds at the predicted
+  trained stages A3 B3 (0x63 = 0x06DB). Details README section 19. So: on enc+250 the wizard retrain of step 4 is
+  mandatory before any capture is judged, and its self-check path has only +0.066 ns (a risk of false 0x33 encode errors).
+  Background jobs in WSL must run from an attached `wsl.exe` (the VM shuts down otherwise; that, not memory alone, killed
+  the earlier runs).
+- **Firmware (task 4).** None: the images keep 0x153D and every register; fw 0.2.105 c681efa4 (on the card) runs them. They
+  are identified by sha256 only (`enc_ab.py --image-sha256`), so the session must end with the release flashed back.
+- **Scripts (task 5).** `e_ab.py` / `e_ab2.py` recovered from the 2026-10-22 lead scratchpad
+  (`%TEMP%\claude\D--src-fnirsi-1013d-ai\3a8475b7-...\scratchpad`) and merged into `tools/enc_ab.py` (ruff clean, `--selftest`
+  PASS). The d3gate build helpers from the same scratchpad became `tools/encphase_build.sh`.
+- **Commands.** `tools/encphase_build.sh ~/encph <name> --iob --phase-ps N [--move S A]` (WSL; one image + summary);
+  scratch helpers under `~/encph` (`verdict.py`, `rolls.sh`, `full.sh`: run.sh on a snapshot of an image's src + tb).
+  Another phase: build with the 8 standard moves of README section 19 in parallel, keep a roll with every clock 0 errors,
+  `full.sh` both seeds, pin raw + padded in `backups/`.
+
+### Bench session (the owner with the lead; one sitting, about 2 hours)
+
+Fixed for the whole session, set once and not touched: CH2 probe on the RC ladder's second node, CH1 on its input, both
+grounds on the post's ground, the post's 1 kHz square (enc_ab.py sets it), CH2 range and position (the dcoffset) as on
+2026-10-22 18:27, Filter Off. `enc_ab.py` records range, offset, stages and versions and `--analyse` flags a run that
+differs. Name every run `ab_<image>_<time>.npz` in `backups/encphase/`.
+
+1. **Backups first** (scope on USB, fw 0.2.105 from the card):
+   `fnirsi1013d-sd --port COM10 read 700 11 -o backups/encphase/sd_700-710_pre-encphase_a.bin`, the same to `..._b.bin`,
+   both sha256 equal. Then battery, USB unplugged, FT2232D on J2: `spiflash_d2xx.py probe` = `ef 40 14`,
+   `spiflash_d2xx.py read -o backups/encphase/fpga-flash_pre-encphase.bin --twice`: both must hash to the release flash
+   image `aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc`; anything else: stop. Log in
+   docs/hardware-status.md (check the clock first). The experiment images passed run.sh on two seeds (2026-11-02, with the
+   two exceptions explained in README section 19).
+2. **Release run "rel-1"** (no flash): USB back, wizard with the inputs open (Calibrate, save), probes back to the fixed
+   positions, then
+   `mcp\.venv\Scripts\python -I fpga/al3/tools/enc_ab.py --port COM10 --image rel-1 --image-sha256 aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc --out backups/encphase/ab_rel-1.npz`
+   (about 1 minute).
+3. **0x153C reference "c153c"**: flash `backups/dist-0x153C/...flash1m.bin` (`07393bf5...1f77`) as in "Flashing this unit",
+   power-cycle, FEL fw 0.2.104 (`backups/fw-0.2.104_7c640ab5.bin`: 0.2.105 refuses 0x153C), wizard with the inputs open,
+   probes back, `enc_ab.py --image c153c --image-sha256 07393bf5a728542b7de0738ca8aab7ccbf3b00e7267ca1efd8e66f8c2d361f77`.
+   (enc_ab warns that the FPGA is not 0x153D: expected.) This is the like-for-like 0x153C number the 10-22 acceptance lacked.
+4. **Per experiment image**, in the order enc0, enc-250, enc+250 (each: battery, USB unplugged, `spiflash_d2xx.py write -i
+   backups/al3_encphase_<phase>_<hash8>_padded.bin --yes --confirm-id ef4014`, verified read-back = the padded sha256 of
+   README section 19's table;
+   power-cycle (the card boots 0.2.105); `#VER` = `fpga=0x153d`; GET_HEALTH encode self-check 0 bad; wizard with the inputs
+   open; probes back; `enc_ab.py --image <name> --image-sha256 <padded sha256>`). About 12 minutes each. Note the trained
+   stages the wizard prints and compare with the predictions of README section 19: a different A stage is a surprise to log.
+   Never skip the wizard: on enc+250 the stages stored from the previous image can take CH1 A one stage late (the
+   simulation fails at A4 and passes at A3).
+5. **Return to the release**: write `backups/al3_d3gate_0x153D_fd0be7a2_padded.bin` (`aa252fb7...63cc`), verified;
+   power-cycle; wizard with the inputs open (the stored stages were trained on the last experiment image); probes back;
+   run "rel-2" as in step 2. rel-1 against rel-2 is the session's run-to-run spread. Fallback for the calibration: the
+   step 1 sector backup (`fnirsi1013d-sd write ... --sector 700 --config`, owner present).
+6. `enc_ab.py --analyse backups/encphase/ab_rel-1.npz ab_c153c.npz ab_enc0.npz ab_enc-250.npz ab_enc+250.npz ab_rel-2.npz`
+   prints the comparison; log it in docs/hardware-status.md with the image hashes.
+
+Optional, if the bench asks (each about 12 minutes + an agent's build of about 30 minutes, see README section 19):
+enc-375, enc-125, enc+125, enc+375.
+
+**Decision table** (CH2 A share at divider 0, overall and hot zone; "moves" = differs from enc0 by more than twice the
+rel-1 / rel-2 difference and by at least 0.3 percentage points; divider 99 must stay 0 / 0 everywhere):
+
+| Result | Decision |
+|---|---|
+| enc0 equals the release runs (within the spread) | the IOB build reproduces the release with pads fixed for every roll: adopt `--iob` in the next FPGA build regardless of the rest (it ends the roll lottery) |
+| enc-250 or enc+250 moves (monotonic with the phase) | encode phase matters: the encode-clock variant is the 0x153E candidate (static best phase, or the PLL's dynamic phase trained by the wizard); build the ±125 / ±375 images around the better side |
+| neither moves | drop the runtime-phase idea for the encodes (the residual is not encode timing); roadmap item 4 knob 1 (capture phase) or the analog options of README section 18 |
+| enc0 worse than the release | the A - B offset or the absolute phase of the IOB build differs from the release in silicon (TD models it as equal): try `--skew-ps` 250 / 500 before deciding |
+| any divider 99 error, or a 0x33 / GET_HEALTH encode error | stop: return to the release and report |
 
 ## 0x153D with 0x153C's gated encodes, fpga-d3gate (2026-10-22)
 

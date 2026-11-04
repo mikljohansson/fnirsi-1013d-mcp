@@ -63,6 +63,11 @@ def main():
         e = ep.group(1)
         if e.startswith('o_adc') and kind == 'setup':
             arr = float(re.search(r'Arrival time\s+([\d.]+)', b).group(1))
+            launch = re.search(r'launch clock edge\s+clock\s+([\d.]+)', b)
+            if launch and float(launch.group(1)) < 2.5:
+                # fpga-encphase IOB images: an encode clock edge in [0, 2.5) ns loads the write clock value of the
+                # edge at 2.5, so it is the edge of the next period (TD reports it one period early)
+                arr += 5.0
             enc.setdefault(e, arr)
         if 'iddr' in e:
             pin = sp.group(1)

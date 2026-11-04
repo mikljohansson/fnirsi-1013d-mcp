@@ -274,6 +274,13 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
+- [ ] **Bench the encode-phase experiment** (fpga-encphase, 2026-10-27, branch `fpga-encphase`, roadmap section 6 item 4
+  knob 2): IOB-encode images of 0x153D (-250 / 0 / +250 ps, version word 0x153D, no firmware change); all three pinned
+  in `backups/al3_encphase_*`. Prep done 2026-11-02 (coordinator): two-seed run.sh and hash rebuilds on all three;
+  enc+250 passes only at its trained stages, so the wizard retrain before each A/B is mandatory (README section 19).
+  The A/B script is `fpga/al3/tools/enc_ab.py`; a one-sitting session of about 2 hours (backups,
+  release run, 0x153C reference, three images, back to the release, decision table): `fpga/al3/AGENTS.md` "Encode phase
+  experiment, fpga-encphase", numbers in README section 19. Needs the owner at the bench with the FT2232D.
 - [x] **Simulation race on the derived write clock** (fpga-simrace, branch `fpga-simrace`, fpga/al3/README.md section 20:
   461a70c the 1 ps SIM write clock delay with the references', 639a7de + e2f1bdd tb_peak's latency check). The enc0 tb_peak
   failure that queued it was a checker ambiguity (11 and 12 both fit at N = 200), not a race; the race class is the
