@@ -11,7 +11,7 @@ branch's commit; the maintainer's items and the hardware items are left open.
 ## Content
 
 - [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer.
-      (The roadmap's state line names fw 0.2.105 / 0x153D since 2026-10-26; sections 1-4 are still the 2026-10-20 text.)
+      (The roadmap's state line names 0x153E for the release since 2026-11-04; sections 1-4 are still the 2026-10-20 text.)
 - [ ] Maintainer verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows,
       USB long idle, UI steps), or the item named under "Known issues" in the release notes.
 
@@ -19,6 +19,23 @@ branch's commit; the maintainer's items and the hardware items are left open.
 
 Rewritten 2026-10-26 (docs-rel153d) for the release bitstream 0x153D (the gated build fd0be7a2 of fpga-d3gate). The
 0x153B boxes of 2026-10-20 are history: `fpga/al3/dist/BITSTREAMS.md` keeps 0x153B's bench record.
+
+**Owner decision 2026-11-04 (docs-153e): the release bitstream is 0x153E**, the 0x153D design with the ADC encodes
+driven from PLL outputs through the pin registers (`docs/hardware-status.md` 2026-11-04 10:23-10:38 "enc0" and 11:1x-11:33
+"session end and decisions"). The 0x153D boxes below stay as the record of what 0x153D proved; 0x153D remains attached
+as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). The 0x153E boxes come first.
+
+- [ ] 0x153E built by fpga-153e and pinned: committed `fpga/al3/src`, `tb/run.sh` ALL PASS, every clock closed, raw and
+      padded sha256 in `fpga/al3/dist/BITSTREAMS.md` and `manifest.json` ({{0x153E raw sha256}}, {{0x153E padded
+      sha256}}, {{0x153E merge commit}}). Proof: the fpga-153e handoff in `fpga/al3/AGENTS.md` and the dist rows.
+- [ ] `fpga/al3/dist`: 0x153E `status: recommended`, `min_firmware` = the 0.3.0 firmware; 0x153D `supported`;
+      `python3 -I tools/bitstreams.py check --release` exits 0 ({{N}} bitstreams consistent).
+- [ ] 0x153E flashed on the maintainer's unit (owner at the bench): pre-write double read equal, written, verified,
+      independently read back equal to the padded image's hash; `docs/hardware-status.md` entry with the date.
+- [ ] 0x153E benched on the firmware that expects it: cold boot with no mismatch notice, encode self-check 0 bad, capture
+      self-check 0 flagged, the firmware asks for a calibration and the wizard completes (stages trained), CH2 code
+      errors at 2 and 200 MSa/s with the sweep (`fpga/al3/tools`), counter, a logger run, soak. Proof: the hardware-status
+      entries; the release notes' `{{0x153E bench}}` line filled from them.
 
 - [x] 0x153D pinned by fpga-d3gate (merge f83f80f, 2026-10-22 15:2x): built from a committed `fpga/al3/src` (source
       e3a23c2, roll h1, every clock closed), `tb/run.sh` 18 steps ALL PASS on seeds 12345 and 4242, raw `fd0be7a2...e96a`
@@ -47,13 +64,15 @@ Rewritten 2026-10-26 (docs-rel153d) for the release bitstream 0x153D (the gated 
 
 ## Versions and notes
 
-- [ ] `firmware/scope/pc_cmds.h`: `#define PC_FW_VERSION "0.3.0" ...` (the one quoted literal).
+- [ ] `firmware/scope/pc_cmds.h`: `#define PC_FW_VERSION "0.3.0" ...` (the one quoted literal). Check in the same pass the FPGA
+      version the firmware expects (`PC_FW_FPGA_VERSION` = 0x153E, also the mcp and protocol docs and the simulator) against
+      `fpga/al3/dist/manifest.json` (the `recommended` row).
 - [ ] `mcp/pyproject.toml`: `version = "0.3.0"`.
 - [ ] `CHANGELOG.md`: `## [Unreleased]` first and empty, `## [0.3.0] - YYYY-MM-DD` below it and non-empty; the obsolete
       "Plan for the first tag" block and "Nothing has been tagged yet" removed; the 0.2.46-0.2.50 sub-sections in order.
       The section text and the steps are ready in `docs/release-notes/changelog-0.3.0-draft.md` (rel-gen2, 517f252;
       refreshed up to fa8377b by docs-rel153d, 2026-10-26); delete that file in the release commit.
-- [x] `docs/release-notes/0.3.0.md`: every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact
+- [ ] `docs/release-notes/0.3.0.md` (unticked 2026-11-04, docs-153e: `{{0x153E bench}}` and `{{0x153E tested-on}}` are open): every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact
       checked against `docs/hardware-status.md` once more, user-facing wording only (2026-10-20, rel-gen2, c0ea0c1;
       `mkdocs build --strict` passes). Refreshed for 0x153D and fw 0.2.105 by docs-rel153d on 2026-10-26 (the TODO
       resolved with 0x153D's bench record). Re-check the tested-on line after the release-candidate bench.

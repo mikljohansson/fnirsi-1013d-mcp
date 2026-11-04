@@ -274,13 +274,32 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## FPGA
 
-- [ ] **Bench the encode-phase experiment** (fpga-encphase, 2026-10-27, branch `fpga-encphase`, roadmap section 6 item 4
+- [x] **Bench the encode-phase experiment** (fpga-encphase, 2026-10-27, branch `fpga-encphase`, roadmap section 6 item 4
   knob 2): IOB-encode images of 0x153D (-250 / 0 / +250 ps, version word 0x153D, no firmware change); all three pinned
   in `backups/al3_encphase_*`. Prep done 2026-11-02 (coordinator): two-seed run.sh and hash rebuilds on all three;
   enc+250 passes only at its trained stages, so the wizard retrain before each A/B is mandatory (README section 19).
   The A/B script is `fpga/al3/tools/enc_ab.py`; a one-sitting session of about 2 hours (backups,
   release run, 0x153C reference, three images, back to the release, decision table): `fpga/al3/AGENTS.md` "Encode phase
   experiment, fpga-encphase", numbers in README section 19. Needs the owner at the bench with the FT2232D.
+  Done 2026-11-04 09:4x-11:33 (`docs/hardware-status.md`: reference 0x153C, enc0, enc-250, enc+250, the release back
+  as rel-2, "session end and decisions"). Result: enc0 behaves like the release and was adopted by the owner as
+  **0x153E**; the common phase only trades CH2 core A against core B (-250 ps: A peak 6.9 -> 2.1 %, B 0.7 -> 11.4 %);
+  +250 ps fails at 200 MSa/s (the A cores hold a constant). Roadmap section 6 item 4 has the outcome. The rest of the
+  experiments are parked (items below).
+- [ ] **Flash and bench 0x153E** (owner at the bench with the FT2232D, after fpga-153e pins the image and fw-153e's
+  firmware expects it): flash over the release 0x153D (pre-write double read), cold boot, wizard with the inputs open
+  (the stored calibration is bound to the bitstream), encode and capture self-checks, CH2 A/B with the offset sweep
+  (`enc_sweep.py`; the peak over the sweep, not the parked level), counter, logger, soak; then fill the
+  `{{0x153E bench}}` and `{{0x153E tested-on}}` placeholders of the release notes and the announcement
+  (`docs/plans/release-checklist.md`, FPGA boxes). Lessons from 2026-11-04: one flash per image, CH1 coupling and the
+  CH2 node checked by a capture before every run, the wizard moves the CH2 centre by up to 7 PWM units per run.
+- [ ] **Pin-level encode self-check** (parked by the owner 2026-11-04): the 0x33 self-check reads the fabric copies, not
+  the ODDR pins, so it cannot see the enc+250 failure (A encodes stopped, A cores holding their last value). A check at the
+  pins would close that gap for any future encode build.
+- [ ] **Skew images** (parked by the owner 2026-11-04): common phase trades A against B, so the A - B skew is the knob to
+  try (inference); first candidate A -250 ps with B 0 (`encphase_variant.py --skew-ps`), judged by the offset sweep.
+  Runtime phase and the capture-phase knob stay with it.
+
 - [x] **Simulation race on the derived write clock** (fpga-simrace, branch `fpga-simrace`, fpga/al3/README.md section 20:
   461a70c the 1 ps SIM write clock delay with the references', 639a7de + e2f1bdd tb_peak's latency check). The enc0 tb_peak
   failure that queued it was a checker ambiguity (11 and 12 both fit at N = 200), not a race; the race class is the

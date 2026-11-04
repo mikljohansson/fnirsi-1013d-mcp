@@ -161,7 +161,7 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 | 20000 (10 kSa/s) | 15.1 | 15.4 | CIC2: 15.4 |
 | 100000 (2 kSa/s) | 15.6 (storage) | 15.2 (storage) | CIC2: 15.2 |
 
-## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C and later; 0x153D is the bitstream of release 0.3.0)
+## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C and later; 0x153E is the bitstream of release 0.3.0)
 
 `scope_info` caps `TRIG_TYPES`, `HOLDOFF`, `COUNTER`, `PEAK_DETECT` (`scope_status` features `trig_types`, `counter`,
 `peak`). Not yet benched on the unit when this was written: say so with numbers from them.
@@ -197,7 +197,7 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   read noise from it. Averaging is refused while peak detect is on (the words hold min / max pairs); records are at
   most 8190 samples as with the filters. `scope_report` draws the envelope as a band.
 
-## 3d. The logger and chirps (protocol 1.27, FPGA 0x153D)
+## 3d. The logger and chirps (protocol 1.27, FPGA 0x153D and later)
 
 `scope_info` caps `LOGGER` (`scope_status` features `logger`). Simulator only when this was written: say so with numbers
 from them. There is no pulse-pattern tool: a pattern generator was cut (it did not fit the FPGA); the

@@ -1,7 +1,7 @@
 # Announcement draft (release 0.3.0)
 
 Final draft for the maintainer, rewritten 2026-10-20 (rel-gen2) and refreshed 2026-10-27 (docs-rel153d) for bitstream
-0x153D and firmware 0.2.105, from the README, `docs/release-notes/0.3.0.md`,
+0x153D and firmware 0.2.105 and again 2026-11-04 (docs-153e) for bitstream 0x153E, from the README, `docs/release-notes/0.3.0.md`,
 `CHANGELOG.md`, `docs/hardware-status.md` and `fpga/al3/dist/BITSTREAMS.md`. Every number names its bench source. Two
 placeholders stay until the tag exists: `{{VERSION}}` (0.3.0; firmware and MCP package share it) and `{{RELEASE_URL}}`
 (https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v{{VERSION}}, the tag URL, not `/latest`: v0 releases are
@@ -68,7 +68,8 @@ The numbers are from my unit (AL3A10), not claims about every unit. Sources are 
   3.73 kHz, against 3.72 kHz for the ideal ladder (bench 2026-10-22).
 - **Calibration per ADC core, with a wizard.** Each channel is two interleaved ADC cores with their own zero and gain,
   and the difference changes with the clock mode. The wizard measures both per core and per clock class. It also
-  trains the instant at which the FPGA captures each core's data. A self-check after every 200 MSa/s capture counts
+  trains the instant at which the FPGA captures each core's data (and since bitstream 0x153E the ADC encode clocks come
+  from the PLL through the pin registers, so every build has the same encode timing). A self-check after every 200 MSa/s capture counts
   outliers. On my unit it flagged 0 of 18,865 captures on 0x153A (bench 2026-10-20). A background tracker follows the
   full-rate drift.
 - **USB protocol and MCP server.** Binary, CRC-checked, over USB CDC; no driver on Windows or Linux. PING median 0.89 ms
@@ -127,12 +128,14 @@ measurements while you hold the probes.
 - **The FPGA bitstream needs an SPI programmer.** The config flash is wired only to the FPGA, so the scope cannot flash
   it. You solder pins to the 2x3 header and use a 3.3 V programmer (I use an FT2232D board with a script in the
   repository). Back up the flash twice and compare first. The bitstream is required: the firmware runs only with the
-  release's bitstream, 0x153D, and shows a banner on any other. It is attached to the release with `BITSTREAMS.md`
+  release's bitstream, 0x153E, and shows a banner on any other (0x153D stays attached as supported, but this firmware
+  refuses it). It is attached to the release with `BITSTREAMS.md`
   (hashes, wiring, rollback); the older images stay attached for the record, but this firmware does not run with them.
-- **A known issue on my unit**: at 200 MSa/s with the filter off, 3.32 % of CH2 core A's samples read 4 or more codes
-  high, almost all just below ADC code 96; core B reads 0.37 %, and at 2 MSa/s both read 0 % (bench 2026-10-22). The
-  previous bitstream read about 1 % in a similar run. I accepted it for this release; finer capture timing is on the
-  list for a later bitstream.
+- **A known issue on my unit**: at 200 MSa/s with the filter off, a few percent of CH2 core A's samples read 4 or more
+  codes high, almost all just below ADC code 96, and at 2 MSa/s both cores read 0 % (3.32 % on 0x153D, bench
+  2026-10-22; 3.1 % on the first 0x153E image, 2026-11-04). The share moves with where the signal sits against that
+  level, and shifting the encode phase only traded core A against core B. I accepted it for this release; finer capture
+  timing stays on the list for later. {{0x153E bench}}
 - **The SD card's FAT32 partition must start at 8 MiB (sector 16384) or later.** The firmware sits in the raw sectors
   before it. Most cards start lower, so you recreate the partition. The card tool refuses a card that does not fit and
   says what it needs.
@@ -141,7 +144,7 @@ measurements while you hold the probes.
 - **Atlan4's bootloader and updater are not redistributed.** They exist only as binaries. A script in the release
   downloads them from Atlan4's repository on your machine and checks their sha256.
 - Real limits are unchanged: 200 MS/s per channel, 8 bit, about 30 MHz bandwidth, no DAC.
-- Tested on: one unit, my FNIRSI 1013D with the AL3A10 FPGA (JTAG IDCODE 0x18006C31), bootloader v0.8, bitstream 0x153D,
+- Tested on: one unit, my FNIRSI 1013D with the AL3A10 FPGA (JTAG IDCODE 0x18006C31), bootloader v0.8, bitstream 0x153E ({{0x153E tested-on}}),
   development firmware up to 0.2.105 written to the card and booted from it. Host: Windows 11, with WSL Ubuntu for
   the FEL loader and the card tools; the host tests also run on Linux and Windows in CI.
 - **Use at your own risk.** Flashing the FPGA flash or the SD sectors can leave the scope unbootable until you restore
@@ -158,7 +161,7 @@ Short version; the full steps are on the documentation site (Install).
 1. Download from the release page ({{RELEASE_URL}}): `fnirsi_1013d-fw-{{VERSION}}.bin`,
    `fnirsi_1013d-sdtools-{{VERSION}}.zip`, the `fnirsi1013d` wheel and `SHA256SUMS`. Check the hashes.
 2. Back up your SD card and the FPGA's config flash, twice.
-3. Flash bitstream 0x153D with your SPI programmer. It is required; with any other bitstream the firmware only shows a
+3. Flash bitstream 0x153E with your SPI programmer. It is required; with any other bitstream the firmware only shows a
    banner, so the FPGA comes before the card.
 4. Prepare a spare micro SD card with its FAT32 partition at 8 MiB. Build the SD parts with the tools zip
    (`make_release_sd_package.py build ... --parts parts`) and write only those parts with `make_sd_image.py write`.
