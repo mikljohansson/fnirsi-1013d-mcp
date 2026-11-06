@@ -525,6 +525,30 @@ uptime before and after its run the same way. A request that only times out (no 
 followed by the protocol's recovery; a write/read error or a vanished port is a drop. Exit 0 when nothing failed,
 1 on any failure, drop or restart, 2 when the port cannot be opened at start.
 
+## Hardware battery: `fnirsi1013d-battery`
+
+The release-time test of everything an agent uses: it starts the MCP server over stdio (`python -m fnirsi1013d.server
+--max-tier 3`), calls the tools in named groups as an agent would and judges each step against an explicit expectation
+(the trigger fires or must not, 1 kHz within a tolerance, sample counts, the FFT / DVM rate, segment and hold-off
+intervals, every counter reading valid, logger totals with 0 gaps, UART 0x55 frames, host against device Bode, the
+per-divider core order). Bench: the generator's 1 kHz square on the calibration post into an RC ladder, CH1 on the
+ladder input, CH2 on its second node (the tool sets 1 V/div DC, Filter Off and the generator itself). Close every other
+client of the port first.
+
+```bash
+fnirsi1013d-battery --port <port>                     # every default group, about 4 minutes
+fnirsi1013d-battery --port <port> --groups acq,gen    # some groups (each starts from the bench setup)
+fnirsi1013d-battery --port <port> --groups loopback   # the loopback self-test: CH1 straight on the post
+fnirsi1013d-battery --sim                             # the simulator (an RC on the generator), about 90 s
+fnirsi1013d-battery --list                            # the groups
+```
+
+One `PASS` / `FAIL` / `SKIP` line per step; `battery.json` (every call, its arguments, verdict and result) and
+`battery.md` (counts per group and every step that did not pass, to paste into the bench log) in `--out` (default
+`<home>/battery/<date-time>/`), with the server's stderr in `server.log`. Exit 0 = no FAIL, 1 = a FAIL, 2 = the server
+did not start. `scope_spectrum` is a SKIP unless the scope shows its Spectrum view; on the simulator a step whose model
+is known to differ from the unit is a SKIP that says so.
+
 ## Bench link check: `fnirsi1013d-bench`
 
 `fnirsi1013d-bench [--port <port>] [--census 2000] [--n 200]` runs the firmware's

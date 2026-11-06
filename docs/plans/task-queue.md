@@ -252,6 +252,16 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
+- [ ] **Battery follow-ups** (mcp-battery, 2026-11-06). (1) Firmware: GET_TIMEBASE should report the divider the FPGA
+  holds (`pc_hal_divider_now`) while a host's raw divider runs, not drop it when acq_view_fit snaps the UI's time/div
+  after a SET_TRIGGER total (finding 3; the host now corrects it from GET_DECIM, `Scope._held_timebase`). The spectrum
+  view's "raw divider labelled with the UI rate" (protocol row 45) is the same root. (2) Simulator: the Nth edge with
+  an idle time counts from the arm, the unit waits for an idle gap first (battery T10 on the unit: no trigger; the
+  simulator fires); check the RTL (`tb_trigtypes.v`) and align `TrigQual`. (3) On the unit: `scope_sweep` with
+  `steps=200, rate=100` in RUN and in STOP (`stats.achieved_steps_per_s`, `pending_polls`, `pending_sleeps`) to put the
+  per-step cost without the poll into docs/mcp-tools.md. (4) scope_mask_test fails a record's first sample when an
+  edge sits on it (the time tolerance cannot widen before the record): seen in the simulator, the battery avoids it.
+
 - [x] **fnirsi1013d-bode crashes on a flat CH1 record** (merged 10-20 11:40, bench pending)
 
 - [x] **Server releases the serial port when idle** (merged 10-20 11:40, bench pending)

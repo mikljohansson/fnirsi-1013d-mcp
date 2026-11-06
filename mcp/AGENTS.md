@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (fw-nopat, 2026-10-21: the pattern feature cut, the square kept; mcp-d6, 2026-10-21: protocol 1.27 logger / the generator on P16 / H16 / Bode on P; mcp-c8 / mcp-c8b: protocol 1.26 trigger types / hold-off / peak detect / counter; mcp-soft: decode / mask / CSV / DVM; mcp-gen7: idle port close)
+# mcp/ handoff for agents (mcp-battery, 2026-11-06: fnirsi1013d-battery and the battery's findings; fw-nopat, 2026-10-21: the pattern feature cut, the square kept; mcp-d6, 2026-10-21: protocol 1.27 logger / the generator on P16 / H16 / Bode on P; mcp-c8 / mcp-c8b: protocol 1.26 trigger types / hold-off / peak detect / counter; mcp-soft: decode / mask / CSV / DVM; mcp-gen7: idle port close)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -61,6 +61,7 @@ path. |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
 | `soak.py` | `fnirsi1013d-soak`: long timestamped poll, drops, reopen, counters, event log, restart detection. |
+| `battery.py` | mcp-battery: `fnirsi1013d-battery`, the hardware battery (release step, docs/releasing.md 4.6): the MCP server over stdio (`server_command`, `run_battery`), groups `GROUP_FUNCS` (session .. final, optional loopback), one `Battery.step` per tool call with an explicit expectation (`check(result) -> None | failure text`, `error_check` for an expected refusal, `want_image`, `sim_differs` = SKIP on the simulator where its model is known to differ), `Battery.note` for comparisons (host vs device Bode), `core_shift_rms` = core_order.py's measure, `battery.json` / `battery.md` / `server.log`, exit 1 on a FAIL. Conventions: every group runs after `config` (the bench setup: 1 V/div DC, Filter Off, generator 1 kHz, CH1 trigger at `LEVEL_V`), the level is set with every source change, the generator is switched on again after EXT, segment / hold-off runs use short records, a failed capture is followed by STOP. `--sim` = `SIM_ARGS` (dut_in / dut_out RC, `--ext gen`, `--tb-raw-snap`, `--counter-stale-config`). |
 | `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after; `--fft` runs FFT_BENCH (`Scope.fft_bench`) itself. |
 | `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity`, `fmt_si`. |
@@ -296,6 +297,18 @@ firmware gains). The firmware formula assumes 128 on the compensated mean. Groun
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
 
 ## Tests (`tests/`, 559 with test_report, about 4.5 min)
+
+mcp-battery (2026-11-06): `test_battery` (the battery on `--sim` over most groups, about 26 s: no FAIL, the finding
+steps judged, a FAIL exits 1, `core_shift_rms`), `test_battery_findings` (each finding of the 2026-11-06 battery
+against the simulator: GET_TIMEBASE after a geometry snap = `SimConfig.tb_raw_snap` and the FFT / DVM rate,
+`frequency()` without a period, the counter's first gate after a configuration = `SimConfig.counter_stale_config`, the
+loopback self-test's level and wiring hint, `sweep_gen` without polls). Facts settled: `Scope.get_timebase(cached=False)`
+and `capture_context` check GET_TIMEBASE against GET_DECIM's divider (`_held_timebase`, collaborative firmware with caps
+DECIM; one more request per uncached read); `analysis.frequency` returns a `reason` with None (`FREQ_MIN_SWING_SIGMA` 8,
+`FREQ_MAX_INTERVAL_CV` 0.2, `noise_sigma` from second differences; `frequency_reason` in scope_capture /
+scope_measure); `scope_counter` skips the first new gate after a configure; `sweep_gen` trusts SET_GEN's own pending
+bit and sleeps up to `SWEEP_SLEEP_MAX_S`; SET_GEN / GET_GEN are main-loop requests (34 ms per step with a poll on the
+unit). The simulator's `gen` signal takes `offset` (the post against the probe ground: `gen:high=3.1,offset=-1.24`).
 
 mcp-d6 (2026-10-21): `test_d27` (protocol 1.27: constants, the byte layouts against fw-d4 / fw-d5's vector payloads,
 the generator's pending handshake, the logger: reads, refusals, E_STATE 9 / 0 / 10, the exact duration, the DDR overflow, the

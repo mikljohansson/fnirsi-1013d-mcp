@@ -160,6 +160,6 @@ def test_sweep_tool(sim_factory, tmp_path):
             fast = dict(start="10kHz", stop="20kHz", steps=200, rate=50_000)
             tok = (await c.call("scope_sweep", **fast))["token"]
             r = await c.call("scope_sweep", **fast, confirm_token=tok)
-            assert any("2000 steps/s" in x for x in r["caveats"])
+            assert any("reached" in x and "main-loop pass" in x for x in r["caveats"])
             assert "time_s" in await c.fails("scope_sweep", start="1kHz", stop="2kHz")
     anyio.run(main)

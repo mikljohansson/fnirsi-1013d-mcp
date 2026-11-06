@@ -108,6 +108,11 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
       0x153D with fw 0.2.105 c681efa4 (18:56-19:02, 150 status, 4 health, 4 captures, 0 errors). Run 30 minutes on the
       0.3.0 image.
 - [ ] The long-idle check passes (roadmap section 5 item 4).
+- [ ] The hardware battery passes on the 0.3.0 image (`fnirsi1013d-battery --port <port>`, docs/releasing.md section 4
+      step 6): exit 0, or every FAIL a known issue in the release notes; `battery.md` pasted into
+      docs/hardware-status.md. The loopback group with CH1 on the post (`--groups loopback`) passes. Expected to FAIL
+      until the FPGA core-order fix: the `coreorder` group and the Filter Off captures at 20 kSa/s (finding 1 of
+      2026-11-06).
 - [ ] First-run screen and calibration wizard on the release candidate with the recommended bitstream (the wizard passed
       on fw 0.2.105 with the gated 0x153D on 2026-10-22 17:0x-17:21 and 18:27-18:29; the first-run screen and the 0.3.0
       image remain).

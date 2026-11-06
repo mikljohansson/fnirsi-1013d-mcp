@@ -218,9 +218,10 @@ calibration pin gives the square of `scope_generator` only.
 - **Chirp a filter on the spectrum view** (`scope_sweep`): put the post on the filter's input and CH1 on its output,
   switch the scope to its Spectrum view (or use `scope_capture_and_fft`), then `scope_sweep(start='1kHz',
   stop='100kHz', steps=200, time_s=1)`: the square steps through the frequencies, each step glitch-free and
-  phase-continuous, and the spectrum's peak hold traces the response. The host sends one command per step, so about
-  2,000 steps per second is the limit (the result's `stats` say what was achieved); for a measured magnitude and
-  phase use `scope_bode_sweep` instead. The generator is restored afterwards.
+  phase-continuous, and the spectrum's peak hold traces the response. The host sends one command per step, answered
+  at the scope's next main-loop pass, so the scope sets the pace (29 steps per second on the unit on 2026-11-06 with
+  the screen running; the result's `stats` say what was achieved); for a measured magnitude and phase use
+  `scope_bode_sweep` instead. The generator is restored afterwards.
 - **The generator** (`scope_generator`) is the same pattern underneath: its frequency is exact to 2^-16 of the period
   (`frequency_exact_hz`), edges on the 5 ns grid; 200 MHz / an integer (1 kHz, 1 MHz) has no dither at all.
 
