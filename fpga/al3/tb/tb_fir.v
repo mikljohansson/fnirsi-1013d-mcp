@@ -582,12 +582,14 @@ module tb;
   // so every stored sample whose filter span lies on the ramp gives the lag directly:
   //   lag = w - t0 - (y / G - ramp_lo) / slope,  w = write time, G = 16-bit gain (m^K / 2^shift).
   // Predicted lag: CIC path 120 + 2.5 K (N - 1) ns, FIR path 250 + 17.5 N + 1.25 K (N - 2) ns
-  // (pipeline in write clocks plus the impulse-response centre), plus the 0x153A capture: the decimator
-  // takes adc*_w one write clock after it loaded, and adc*_w holds the pins from 1.5 T + 5 + 2.5 k (core
-  // A, k = 4: 30 ns) and 2 T + 5 + 2.5 k (core B, k = 4: 35 ns) before that edge, so the pair centre is
-  // 42.5 ns earlier than the pins the 0x1535 model took at the edge (+42.5 in the formula). Stimulus
-  // artefacts: the pins hold each value for 7 ns (+3.5 ns) and the two cores of a pair are 5 ns apart as on
-  // the hardware; the measurement reads about +1 .. +3 ns above the formula (0x1535: about +1 ns).
+  // (pipeline in write clocks plus the impulse-response centre), plus the capture: the decimator takes
+  // adc*_w one write clock after it loaded, and since 0x153F adc*_w holds the pins of both cores from one
+  // instant, 2 T + 2.5 k before that edge (k = 3 at power-on: 27.5 ns), so the pair is 37.5 ns earlier than
+  // the pins the 0x1535 model took at the edge (+37.5 in the formula). 0x153A..0x153E took core A 30 ns and
+  // core B 35 ns before the edge at their power-on stages (+42.5). This testbench drives the pins directly,
+  // so a pair is one pin value read twice; on the hardware the cores still sample 5 ns apart, at the ADC.
+  // Stimulus artefact: the pins hold each value for 7 ns (+3.5 ns); the measurement reads about +1 .. +3 ns
+  // above the formula (0x1535: about +1 ns).
   // Also reported: where the EXT edge lies in the record, trigger_address + (t0 - w_ta + lag) / Tout,
   // in output samples; t0 - w_ta is the edge phase after the last write (0 .. 1 output periods).
 
@@ -602,7 +604,7 @@ module tb;
       set_fir(kk, 1'b0, sh, divider, fir);
       n_out = 2 * ((divider / 2) + 1);
       tout = 5.0 * n_out;
-      lag_pred = (fir ? 250.0 + 17.5 * n_out + 1.25 * kk * (n_out - 2) : 120.0 + 2.5 * kk * (n_out - 1)) + 42.5;
+      lag_pred = (fir ? 250.0 + 17.5 * n_out + 1.25 * kk * (n_out - 2) : 120.0 + 2.5 * kk * (n_out - 1)) + 37.5;
       g16 = 1.0;
       for (i = 0; i < kk; i = i + 1) g16 = g16 * (fir ? (divider / 2) + 1 : n_out);
       g16 = g16 / (2.0 ** sh);
