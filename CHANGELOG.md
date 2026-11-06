@@ -1818,6 +1818,18 @@ was found (commit not identified).
 
 ### Host library and MCP server (`mcp/`, package version 0.1.0)
 
+- 2026-11-06 (mcp-battery): **`fnirsi1013d-battery`**, the hardware battery as a tool: it drives the MCP server over
+  stdio as an agent does, in named groups, judges every step against an explicit expectation (PASS / FAIL / SKIP,
+  `battery.json`, a pasteable `battery.md`, exit 1 on a FAIL), runs on the simulator with `--sim` (a pytest smoke test)
+  and is a release step (docs/releasing.md section 4) (ef59c5e). The findings of the 2026-11-06 battery on the unit
+  (2922bf9): `scope_capture_and_fft` and `scope_dvm` no longer label a record with the UI's rate after a record-length
+  change (fw 0.2.105's GET_TIMEBASE drops a raw divider when the UI's time/div snaps; the host checks it against
+  GET_DECIM's divider); a trace without a real period reports no frequency but a `frequency_reason`; `scope_counter`
+  skips the first gate after a configuration (it may hold the old source or duty); `scope_sweep` skips the GET_GEN
+  poll when SET_GEN's answer says taken, and its documentation states the measured pace (34 ms per step, main-loop
+  requests) instead of 2,000 steps / s; the loopback self-test triggers at the measured mid of the post's square and
+  says CH1 must be on the post when nothing triggers; docs/mcp-tools.md names the measure item `delay`.
+
 - 2026-10-21 (fw-cruft, protocol 1.27 row 67): READ_LIVE / LIVE_READ removed (`Cmd.READ_LIVE`, `Caps.LIVE_READ`,
   `ReadLiveReq`, `Scope.read_live`; `P.RETIRED_CMDS`: the simulator answers 0x0206 E_UNSUPPORTED as the firmware does)
   (1777a67); the 0x53 swap / falling-edge flags removed (`DECIM_SWAP`, `DECIM_NEG_A` / `_B`, `DecimConfig.flags`,

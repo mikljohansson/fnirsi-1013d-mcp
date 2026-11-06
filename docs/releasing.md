@@ -237,6 +237,13 @@ This is done once per release, on the bench, by the maintainer or with the maint
      8 digits of the tag commit (`git rev-parse --short=8 vX.Y.Z`). The identity line reads
      `git <hash> of <commit time, UTC>`.
 5. Note the result in `docs/hardware-status.md`: release, image sha256, FEL read-back identical, `#VER`.
+6. **Run the hardware battery** on the release image, the scope on the bench signal (the generator's 1 kHz on the
+   calibration post into the RC ladder, CH1 on its input, CH2 on its second node) and no other client on the port:
+   `fnirsi1013d-battery --port <port>` (about 4 minutes; `python -m fnirsi1013d.battery` from a checkout). It drives the
+   MCP server over stdio as an agent does and judges every step; exit status 0 = no FAIL. A FAIL that the release
+   accepts must be a known issue in `docs/release-notes/X.Y.Z.md`. Paste its `battery.md` into
+   `docs/hardware-status.md` and keep `battery.json` with the bench record. The loopback self-test is a separate group
+   with CH1 straight on the post: `fnirsi1013d-battery --port <port> --groups loopback`.
 
 ## 5. GPL and Atlan4's binary-only parts
 
