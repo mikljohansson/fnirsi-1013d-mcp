@@ -1756,3 +1756,18 @@ Newest entries at the bottom. Format: date, who, what, result.
   `*_wrongnode*` and `ab_enc0_ch1ac` side runs), the tool's pre-write flash backups `backups/20261104-*-pre-write.bin`.
   Lessons for the next bench plan: the sweep from the start, one flash per image; CH1 coupling and the CH2 node checked
   by a capture before every run; the wizard moves the CH2 centre by up to 7 PWM units (1.75 codes) per run.
+- 2026-11-06 14:00-14:04 (lead, owner present): **FPGA flash 0x153D -> 0x153E** (Sipeed FT2232D on J2). probe ef 40 14,
+  status 0x00. Pre-write double read `backups/20261106-pre-0x153E.bin` = aa252fb7e94dca01f064a69d79d813d974024ab77763917a6f5dd9051a1e63cc
+  (the release 0x153D padded image, as required). `spiflash_d2xx.py write -i backups/dist-0x153E/fnirsi_1013d-fpga-al3-0x153e-flash1m.bin
+  --yes --confirm-id ef4014` (image 2782e1b6..., from `tools/bitstreams.py pack` of main 0cd4768, equal to
+  `backups/al3_0x153E_831dc346_padded.bin`): first pass erased 69 sectors, programmed 1104 pages, **VERIFY FAILED**, 2054
+  differing bytes. A double read (`20261106-post-0x153E-readback.bin`, 4b57ff7f..., two reads identical) showed the chip
+  itself was wrong, not the read: one byte at 0x127df (0x30 for 0x18) and the whole sector 0x2b000..0x2bfff = the old
+  content ANDed with the new, i.e. one sector erase was lost and one byte mis-programmed (the J2 contact, as on
+  2026-11-04; that day the double pre-read caught it before the write). Second pass (the tool rewrites only differing
+  sectors; pre-write backup `20261106-140304-pre-write.bin` = 4b57ff7f...): erased 2 sectors, programmed 32 pages,
+  **write verified OK**, sha256 2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8; independent double read
+  `20261106-post-0x153E-readback2.bin` = 2782e1b6..., byte-equal to the image. Rollback = the release 0x153D flash image
+  (aa252fb7...) with fw 0.2.105. The scope was not powered between the two passes. Next: boot (the card's fw 0.2.105
+  c681efa4 expects 0x153D and must show the mismatch notice), SD 700-710 backup, FEL-load the 0x153E firmware
+  (`backups/fw-0.2.105_b278bc0c_e242b53-expects-0x153E.bin`, rebuilt at the bench commit), wizard, release bench.
