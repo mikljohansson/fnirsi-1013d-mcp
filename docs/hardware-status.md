@@ -1932,3 +1932,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   data change 10 .. 12.5 ns after the write clock's rising edge at the capture registers, core B's 7.5 .. 17.5 ns.
   So at 200 MSa/s with the trained stages the interleaved trace has its neighbours swapped as well. 0.3.0 is on hold
   for the FPGA fix (owner, 17:5x: "no rush, let's work out the kinks first").
+- 2026-11-06 19:25-19:27 (lead; the owner switched the scope on again, about 5 minutes warm, stages 0x06DB): **the
+  battery as a tool, first run on the unit** (`fnirsi1013d-battery --port COM10`, merge 3f659ce + ce557ee; record
+  `backups/battery-0.3.0/tool-run1/`): **181 PASS, 20 FAIL, 1 SKIP in 90 s.** Every FAIL is the core-order fault: the
+  core-order group reads the A3 B3 row again (0: +1, 1: +1, 2: 0, 3: 0, 4: +1, 5 .. 999: +1), and ten Filter Off
+  captures at 200 kSa/s and 20 kSa/s now return no frequency ("irregular crossings: no single period") where the
+  swapped neighbours put extra crossings on each edge (the summary used to report 1000 Hz at 200 kSa/s and 2006 Hz at
+  20 kSa/s). The SKIP is scope_spectrum (Scope view). **Finding 3's fix holds on the unit**: after the segmented run the
+  FFT reports 200 kSa/s and the 1 kHz fundamental, the DVM 15 ms records; host and device Bode agree within the tool's
+  0.1 dB / 0.5 degree below 40 kHz; the sweep step without a poll per step passed. An earlier attempt at 19:22 found the
+  scope switched off and printed 199 FAIL lines: the tool now asks scope_info first and stops with one message.
+  To revisit once 0x153F is flashed: whether the new period check is too strict on clean data.
