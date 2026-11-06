@@ -1841,3 +1841,52 @@ Newest entries at the bottom. Format: date, who, what, result.
   `supported`); `tools/bitstreams.py check --release` exits 0 (12 bitstreams consistent). The release notes' and the
   announcement's 0x153E bench lines filled. 15:50: a second 30-minute soak started on the card-booted firmware
   (`backups/encphase/soak_0x153E_20261106_card.log`).
+- 2026-11-06 15:50-16:20 (lead): **second 30-minute soak**, card-booted fw 0.2.105 b278bc0c (`soak_0x153E_20261106_card.log`):
+  17924 requests, **0 failures, 0 drops**, no counter moved, latency median 1.1 ms, p99 2.2 ms. The four drops of the
+  14:20 soak (FEL-loaded image, right after the logger runs) did not recur; cause still open. Windows USB selective
+  suspend is off on AC and no power-source change was logged today.
+- 2026-11-06 16:21-16:45 (lead, owner's request: "a full battery of tests on the MCP and the different functions"):
+  **MCP battery on the unit**, fw 0.2.105 b278bc0c on 0x153E, probes on the ladder (CH1 input, CH2 second node), the
+  generator's 1 kHz on the post. The MCP server over stdio as an agent runs it, 39 tools, about 220 calls; every call,
+  argument and result in `backups/battery-0.3.0/b1..b9_*.json` (script: the session scratchpad's `mcp_battery.py`).
+  **Passed**: scope_info / profile / status / health / get_config / read_calibration / calibration_info / event_log /
+  sd_info (verify) / screenshot; set_channel, set_timebase, set_decimation, set_trigger; captures at 200 MS/s .. 20 kS/s
+  (all triggered, 3000 samples) and with every filter at 1 MS/s (boxcar, boxcar+fir, cic2, cic2+fir, cic3, cic3+fir, peak:
+  1 kHz within 0.03 %, vpp within 3 % of Filter Off); averaging on the host, in the FPGA and edge-aligned; 8 segments;
+  capture_and_fft; dvm; fetch_waveform; arm / wait / stop / run; raw and processed captures; decay_fit on CH2 (tau
+  74.8 us, r2 0.99993); triggers: edge on CH1 and CH2 both slopes, pulse width longer / shorter / negative (fires and
+  refuses as it must), Nth edge with and without an idle time, timeout 300 us fires / 800 us does not, hold-off (segment
+  interval 1.000 ms without, 3.000 ms with 2.5 ms), auto mode triggered (16000 samples) and untriggered (the record
+  shows the live square); counter CH1 / EXT; generator 5 kHz, 5 kHz 25 %, 999.5 Hz, 1 MHz (counter: exact), off, 1 kHz;
+  scope_sweep; host Bode 100 Hz .. 200 kHz (low-pass, -3 dB 3.68 kHz, -90 degrees at 13.7 kHz, 22 of 24 points valid);
+  logger 500 kS/s 8-bit (1,500,000 samples), 2 ch 16-bit 125 kS/s (375,000 each), open-ended 100 kS/s with stop: 0 gaps;
+  export_csv, report, decode (UART at 2000 baud reads the square as 0x55 frames, 0 errors), mask_test 10 / 10 on both
+  channels, save_report (`reports/report-00019-00.txt`). No link error in the whole run.
+  **Findings (the release is not tagged):**
+  1. **Filter Off at divided rates: the two cores are interleaved one sample off.** In the host's trace (B_k, A_k per
+     word) the smooth order is B_k+1, A_k: on every edge neighbouring samples are swapped. At 20 kS/s the 1 kHz square
+     reads 2006 Hz, duty 0.92 (CH2 1356 Hz); at 200 kS/s the edges zigzag but the frequency still reads right; 200 MS/s
+     and every filtered mode are in order. The firmware reads both cores at the same ring word and the host interleaves
+     as protocol 7.3 says, so the FPGA's words hold A 1.5 samples after B, not 0.5, on the unit (the simulation's
+     tb_trigpos passes "core B half a word from core A"). **Not new**: the raw per-core captures of 2026-11-04 show the
+     same relation at divider 99 on the release 0x153D (rel-1, rel-2), on 0x153C and on enc0 (16 of 16 each).
+  2. **The capture self-check runs on Filter Off captures at divided rates and the runtime guard then rewrites the
+     calibrated stages.** `fpga_encode_after_capture` and `pc_enc_rearm` call the 0x36 check after every accepted
+     capture once the encode check is in flag mode (every capture since fw-gated, 2026-10-22); at a divided rate the
+     cores sample a real edge at different instants, a core's count exceeds its partner's by more than 8, and three such
+     captures within a minute reach the guard. Event log: 16:22:27 CH2 B flagged (excess 43), moved 3 -> 4 (0x08DB);
+     16:26:39 CH1 A flagged (excess 15), moved 3 -> 4 (0x08DC); both stored in sector 708. **The unit now runs CH1 A4
+     B3, CH2 A3 B4, not the wizard's A3 B3**, REPEAT is set, 37 captures flagged. Consequence seen: the scope's own
+     frequency-response sweep (`scope_bode_sweep where=device`) ends at once with reason 8, "ADC readout fault". In the
+     firmware since 0.2.105 (also c681efa4, the image that was on the card until today).
+  3. `scope_capture_and_fft` and `scope_dvm` once labelled a 200 kS/s record as 1 MS/s (the 1 kHz fundamental reported
+     at 5 kHz), two seconds after the guard's second move; a step-by-step repeat (fresh, after averaging, after segments)
+     gave 200 kS/s and 1000 Hz every time. Not reproduced without the guard acting.
+  4. Smaller: `scope_capture`'s summary gives a frequency for a flat noisy trace (CH2 at 200 MS/s: 39 MHz, duty 1.0);
+     `scope_sweep` reached 29 steps / s where 100 were asked (199 late steps); the loopback self-test failed all four
+     captures with "no trigger": it needs CH1 straight on the post (the ladder slows the edge) and triggers at +1.65 V
+     where the square against the probe ground tops out at +1.83 V; docs/mcp-tools.md names the measure item
+     `delay(CH1->CH2)`, the tool takes `delay`; encode check: 1 capture re-taken of 97304.
+  Not run: scope_spectrum (the scope must be in its Spectrum view), EXT trigger (no external source; selecting EXT
+  switches the generator off, as documented), scope_calibrate_volts and scope_cal_probe (need a DC reference / open
+  inputs). Scope left in RUN, 1 MS/s, Filter Off, generator 1 kHz.
