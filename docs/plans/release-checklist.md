@@ -30,10 +30,11 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
       `831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1` and padded
       `2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8` in `fpga/al3/dist/BITSTREAMS.md` and
       `manifest.json`. Proof: the fpga-153e handoff in `fpga/al3/AGENTS.md` and the dist rows.
-- [ ] `fpga/al3/dist`: 0x153E `status: recommended`, `min_firmware` = the 0.3.0 firmware; 0x153D `supported`;
-      `python3 -I tools/bitstreams.py check --release` exits 0 (12 bitstreams consistent; status `unbenched` until the bench).
-- [ ] 0x153E flashed on the maintainer's unit (owner at the bench): pre-write double read equal, written, verified,
-      independently read back equal to the padded image's hash; `docs/hardware-status.md` entry with the date.
+- [x] `fpga/al3/dist`: 0x153E `status: recommended` (2026-11-06, after the bench), `min_firmware` = the 0.3.0 firmware;
+      0x153D `supported`; `python3 -I tools/bitstreams.py check --release` exits 0 (12 bitstreams consistent).
+- [x] 0x153E flashed on the maintainer's unit (owner at the bench, 2026-11-06 14:00-14:04): pre-write double read equal
+      (aa252fb7...), written (the first pass failed its verify, the second verified), independently read back equal to
+      the padded image's hash 2782e1b6...; `docs/hardware-status.md` entry of that time.
 - [ ] 0x153E benched on the firmware that expects it: cold boot with no mismatch notice, encode self-check 0 bad, capture
       self-check 0 flagged, the firmware asks for a calibration and the wizard completes (stages trained), CH2 code
       errors at 2 and 200 MSa/s with the sweep (`fpga/al3/tools`), counter, a logger run, soak. Proof: the hardware-status
@@ -74,7 +75,7 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
       "Plan for the first tag" block and "Nothing has been tagged yet" removed; the 0.2.46-0.2.50 sub-sections in order.
       The section text and the steps are ready in `docs/release-notes/changelog-0.3.0-draft.md` (rel-gen2, 517f252;
       refreshed up to fa8377b by docs-rel153d, 2026-10-26); delete that file in the release commit.
-- [ ] `docs/release-notes/0.3.0.md` (unticked 2026-11-04, docs-153e: `{{0x153E bench}}` and `{{0x153E tested-on}}` are open): every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact
+- [x] `docs/release-notes/0.3.0.md` (re-ticked 2026-11-06: the 0x153E bench lines filled from the bench log): every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact
       checked against `docs/hardware-status.md` once more, user-facing wording only (2026-10-20, rel-gen2, c0ea0c1;
       `mkdocs build --strict` passes). Refreshed for 0x153D and fw 0.2.105 by docs-rel153d on 2026-10-26 (the TODO
       resolved with 0x153D's bench record). Re-check the tested-on line after the release-candidate bench.

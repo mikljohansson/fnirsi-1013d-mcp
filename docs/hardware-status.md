@@ -1834,3 +1834,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   --persist-only`): backup of the replaced sectors `backups/sdcard/sd_750-2349_20261106-152347.bin`, write 2.88 s without resends, SD_READ compare of all
   1599 sectors identical, sector 750 verified (eGON.EXE, length 818688, checksum 0xB8E6C8F6). Boot-mode byte and sectors
   16-79 untouched. Next: power cycle from the card (no notice, no first-run screen), then dist `recommended`.
+- 2026-11-06 15:49-15:50 (owner, lead): **power cycle, boot from the card** (fw 0.2.105 b278bc0c): over USB 55 s after the
+  boot GET_INFO fpga 0x153E, fw_fpga 0x153E, flags 0 (no notice); GET_CAL both channels trailer valid, TRAINED, stored
+  0x06DB trained on 0x153E, in effect; the Scope view running (ui_busy 0, RUN); settings flags 0; encode self-check 0 bad
+  of 1344, capture self-check 0 flagged of 1344. **0x153E set `recommended` in `fpga/al3/dist`** (1acacc7; 0x153D stays
+  `supported`); `tools/bitstreams.py check --release` exits 0 (12 bitstreams consistent). The release notes' and the
+  announcement's 0x153E bench lines filled. 15:50: a second 30-minute soak started on the card-booted firmware
+  (`backups/encphase/soak_0x153E_20261106_card.log`).

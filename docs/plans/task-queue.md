@@ -286,7 +286,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   **0x153E**; the common phase only trades CH2 core A against core B (-250 ps: A peak 6.9 -> 2.1 %, B 0.7 -> 11.4 %);
   +250 ps fails at 200 MSa/s (the A cores hold a constant). Roadmap section 6 item 4 has the outcome. The rest of the
   experiments are parked (items below).
-- [ ] **Flash and bench 0x153E** (owner at the bench with the FT2232D; fpga-153e pinned the image 2026-11-04, merge
+- [x] **Flash and bench 0x153E** (done 2026-11-06 14:00-15:50, `docs/hardware-status.md`: flashed, wizard, sweep warm
+  A 5.2 % / B 0.65 %, counter, logger, card boot; `recommended` in dist 1acacc7; the release-note placeholders filled.
+  Open from it: the USB link drops in the soak, next item. Original item:) (owner at the bench with the FT2232D; fpga-153e pinned the image 2026-11-04, merge
   0cd4768: raw `831dc346...02e1`, flash image `2782e1b6...d9d8`, `tb/run.sh` ALL PASS on two seeds, manifest `unbenched`;
   fw-153e's firmware expects it since e8112e3; the owner's checklist is `fpga/al3/AGENTS.md` "0x153E, the IOB encodes"):
   flash over the release 0x153D (pre-write double read), cold boot, wizard with the inputs open
@@ -295,6 +297,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `{{0x153E bench}}` and `{{0x153E tested-on}}` placeholders of the release notes and the announcement
   (`docs/plans/release-checklist.md`, FPGA boxes). Lessons from 2026-11-04: one flash per image, CH1 coupling and the
   CH2 node checked by a capture before every run, the wizard moves the CH2 centre by up to 7 PWM units per run.
+- [ ] **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and
+  the probes connected): 4 drops in 17907 GET_STATUS requests, each a bus suspend (no SOFs) followed 129 ms later by a
+  host bus reset and a normal enumeration, 0.6 s down, no device restart; three host opens failed the same way at 14:12.
+  Find out whether the rate is new (earlier long soaks in `docs/hardware-status.md`), whether it follows the host port /
+  cable, and whether the firmware can do anything; decide if it is a known issue of 0.3.0.
 - [ ] **Pin-level encode self-check** (parked by the owner 2026-11-04): the 0x33 self-check reads the fabric copies, not
   the ODDR pins, so it cannot see the enc+250 failure (A encodes stopped, A cores holding their last value). A check at the
   pins would close that gap for any future encode build.

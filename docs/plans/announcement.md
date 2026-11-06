@@ -135,7 +135,9 @@ measurements while you hold the probes.
   codes high, almost all just below ADC code 96, and at 2 MSa/s both cores read 0 % (3.32 % on 0x153D, bench
   2026-10-22; 3.1 % on the first 0x153E image, 2026-11-04). The share moves with where the signal sits against that
   level, and shifting the encode phase only traded core A against core B. I accepted it for this release; finer capture
-  timing stays on the list for later. {{0x153E bench}}
+  timing stays on the list for later. On the numbered 0x153E image (bench 2026-11-06) the worst case over a sweep of the
+  signal's level was 5.2 % on core A and 0.65 % on core B with the scope warm, and about three times that ten minutes
+  after power-on.
 - **The SD card's FAT32 partition must start at 8 MiB (sector 16384) or later.** The firmware sits in the raw sectors
   before it. Most cards start lower, so you recreate the partition. The card tool refuses a card that does not fit and
   says what it needs.
@@ -144,7 +146,7 @@ measurements while you hold the probes.
 - **Atlan4's bootloader and updater are not redistributed.** They exist only as binaries. A script in the release
   downloads them from Atlan4's repository on your machine and checks their sha256.
 - Real limits are unchanged: 200 MS/s per channel, 8 bit, about 30 MHz bandwidth, no DAC.
-- Tested on: one unit, my FNIRSI 1013D with the AL3A10 FPGA (JTAG IDCODE 0x18006C31), bootloader v0.8, bitstream 0x153E ({{0x153E tested-on}}),
+- Tested on: one unit, my FNIRSI 1013D with the AL3A10 FPGA (JTAG IDCODE 0x18006C31), bootloader v0.8, bitstream 0x153E (flashed and benched 2026-11-06),
   development firmware up to 0.2.105 written to the card and booted from it. Host: Windows 11, with WSL Ubuntu for
   the FEL loader and the card tools; the host tests also run on Linux and Windows in CI.
 - **Use at your own risk.** Flashing the FPGA flash or the SD sectors can leave the scope unbootable until you restore

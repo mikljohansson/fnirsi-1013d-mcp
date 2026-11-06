@@ -3,6 +3,13 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
+State on 2026-11-06 (coordinator, after the bench):
+- **0x153E is flashed on the maintainer's unit, benched and `recommended`** (2026-11-06, `docs/hardware-status.md`
+  14:00-15:50; dist commit 1acacc7): flash verified on the second pass (2782e1b6...), wizard CH1 A3 B3 / CH2 A3 B3,
+  self-checks 0, CH2 sweep peak warm A 5.2 % / B 0.65 % (release 0x153D: 6.9 % / 0.7 %), divided rate 0 / 0, counter and
+  logger pass, fw 0.2.105 b278bc0c (main e242b53) on the card. `tools/bitstreams.py check --release` passes.
+  **The carry-error share falls about 2.5 times between 10 and 80 minutes after power-on** (cold sweep peak A 15 %,
+  B 2.7 %): take any acceptance sweep 30 minutes or more after power-on and log the time since boot.
 State on 2026-11-04 (fpga-153e, branch `fpga-153e`):
 - fpga-153e (2026-11-04): **0x153E built and simulated, not flashed**: the release 0x153D with the four ADC encode
   pins on IOB output registers (`AL_LOGIC_ODDR`) on PLL C2 (B) / C3 (A, +375 ps), the benched enc0 recipe made the
