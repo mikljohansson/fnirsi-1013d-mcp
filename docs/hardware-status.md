@@ -1768,6 +1768,40 @@ Newest entries at the bottom. Format: date, who, what, result.
   sectors; pre-write backup `20261106-140304-pre-write.bin` = 4b57ff7f...): erased 2 sectors, programmed 32 pages,
   **write verified OK**, sha256 2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8; independent double read
   `20261106-post-0x153E-readback2.bin` = 2782e1b6..., byte-equal to the image. Rollback = the release 0x153D flash image
-  (aa252fb7...) with fw 0.2.105. The scope was not powered between the two passes. Next: boot (the card's fw 0.2.105
+  (aa252fb7...) with fw 0.2.105. The two passes were 90 s apart with the programmer left on J2. Next: boot (the card's fw 0.2.105
   c681efa4 expects 0x153D and must show the mismatch notice), SD 700-710 backup, FEL-load the 0x153E firmware
   (`backups/fw-0.2.105_b278bc0c_e242b53-expects-0x153E.bin`, rebuilt at the bench commit), wizard, release bench.
+- 2026-11-06 14:05-14:07 (lead, owner present): **0x153E first boot.** With the card's fw 0.2.105 c681efa4: `#VER` fpga=0x153e,
+  GET_INFO fw_fpga 0x153D, flags 1 (the mismatch, as it must). SD 700-710 read twice over USB:
+  `backups/sd_700-710_pre-0x153E_a.bin` = `_b.bin` = dbe3d49d99ff7b4059c46780cb5ca9c401d6fe286c9f5e67aeb55ecd316c7718.
+  FEL load (RAM only, `fnirsi1013d-flash`, ENTER_FEL) of `backups/fw-0.2.105_b278bc0c_e242b53-expects-0x153E.bin`
+  (GCC 10 of main e242b53, sha256 b278bc0c8eae4ee0e4b5592bdb5c562140ff7a6cd2bf59db0b02aed33336049e): back on COM10 in 15 s,
+  GET_INFO fpga 0x153E, fw_fpga 0x153E, flags 0 (no notice); encode self-check 0 bad, boot33 0xf7; capture stages at the
+  power-on 0x08E4 (the stored calibration is 0x153D's, not applied). Nothing persisted to the card yet.
+- 2026-11-06 14:07-14:12 (owner): **wizard on 0x153E**, inputs open, saved: **CH1 A3 B3, CH2 A3 B3** (0x06DB, as enc0 on
+  2026-11-04). GET_CAL training record: CH1 A quiet 2, 3, 5 (q 121 / 121 / 143 / 119 at stages 2..5), CH1 B 2..5 (q about 720);
+  CH2 A quiet 2, 3, 5 (q 2162 / 2152 / 185167 / 2191; stage 4: 25801 outliers), CH2 B 2..5 (q about 1760). So stage 3 is as
+  good as any for CH2 A. Probes back on the ladder (CH1 input, CH2 second node). Three host opens between 14:12 and 14:13
+  failed with WriteFile error 22 (the USB drop signature of 2026-10-18), three others worked; none since.
+- 2026-11-06 14:13-14:16 (lead, owner present): **0x153E CH2 code errors.** Pre-checks by capture: CH1 and CH2 DC, both A
+  cores move at 200 MSa/s (raw A medians 95 / 182 with the square), CH2's low level 93..96 rising to 100 over the window:
+  the same signal and the same parking as rel-1 / c153c / enc0 of 2026-11-04 (first 150 samples 94.1, last 150 100.0;
+  rel-1 94.2 / 100.0), offset_pwm 859 as then. Stages 0x06DB, encode self-check 0 bad of 8444, capture self-check 0 flagged.
+  `fpga/al3/tools/enc_ab.py` (`backups/encphase/ab_0x153E.npz`): **divider 99: 0 / 0 errors** (16 captures); divider 0
+  overall A 7.29 %, B 1.31 %; rising phase (CH2 low, at the 0x5F/0x60 carry) **A 13.44 %, B 2.09 %**. The same
+  measurement at the same parking on 2026-11-04: release 0x153D (rel-1) A 10.05 %, B 2.04 %; 0x153C A 9.48 %, B 2.66 %;
+  enc0 A 6.41 %, B 1.50 % (parked 1.3 codes higher, not like for like). Per median code, core A, 0x153E / release:
+  0x5E 28.8 / 22.6 %, 0x5F 3.6 / 0.7 %, 0x60 2.3 / 0.1 %, 0x61 and above 0 / 0.
+  `enc_sweep.py` twice (`sweep_0x153E_1.npz`, `_2.npz`, offsets 849..869): **peak A 15.09 % / 14.46 %, B 1.95 % / 2.68 %**
+  (at offsets 859 / 860), mean over the sweep A 5.8 / 5.6 %, B 0.83 / 0.83 %, A - B level +0.33 / +0.38 codes (rel-2: -0.44,
+  enc-250: +0.76). The handoff's reference (rel-2's sweep, 2026-11-04 11:13) is A 6.94 %, B 0.66 %; but rel-1, the same
+  release image one wizard run earlier that day, already read 10.05 % / 2.04 % at one offset, so that reference understates
+  the release. **Read: at 200 MSa/s with Filter Off, 0x153E's CH2 core A is about 1.3 to 1.4 times the release's at the same
+  parking (different day), core B the same; the sweep peaks are about twice rel-2's on A and three to four times on B. The
+  errors stay within two codes of the one carry. Not the "like the release" result the adoption assumed** (that rested on
+  enc0's plain A/B at another parking; the enc0 sweep was not taken). The owner decides.
+- 2026-11-06 14:17-14:20 (lead): **counter and logger on 0x153E.** GET_COUNTER, CH1 (the 1 kHz square at the ladder input),
+  gate 0.1 s: 1000.002 / 1000.002 / 1000.001 Hz valid at 200 MSa/s, duty 50.07 %; Filter Off at 500 kSa/s: not valid, GATED
+  (by design). Logger, 5 s each: 1 ch RAW8 500 kS/s 1,250,000 words, 1 ch 16-bit 250 kS/s 1,250,000 words, 2 ch 16-bit
+  125 kS/s 625,000 words: **0 words lost**, no gap, no overflow. Health after: encode self-check 0 bad of 11234, 0 flagged.
+  14:20: 30-minute GET_STATUS soak started (`backups/encphase/soak_0x153E_20261106.log`); the sweep is repeated after it, warm.
