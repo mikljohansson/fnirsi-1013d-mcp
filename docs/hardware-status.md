@@ -1922,3 +1922,13 @@ Newest entries at the bottom. Format: date, who, what, result.
   **Consequence: a fixed one-word shift in the firmware or the host cannot be right at every rate and stage; the capture
   of core A has to follow the edge its data really changes on (an FPGA change, a new bitstream).** 17:30: fw 2bdecac
   (4e60f6cd) FEL-loaded again; the card holds the same build.
+- 2026-11-06 17:59-18:03 (owner, lead): the owner power-cycled the scope by mistake: it booted fw 2bdecac from the card
+  (no notice, the moved stages 0x08DC still stored). **Wizard again** (owner, inputs open, 126 s after the power-on, so a
+  cold run): **CH1 A3 B3, CH2 A3 B3 (0x06DB)**, stored, trained on 0x153E; CH1 A and B quiet at 2..5 (q 86 / 304 at
+  stage 3), CH2 A quiet at 2, 3, 5 (q 1300; stage 4: 63 outliers), CH2 B quiet at 2..5. Probes back on the ladder.
+  **Core order at the trained A3 B3**, CH1, 12 captures per divider: **divider 0: +1; 1: +1; 2, 3: 0; 4: +1; 5, 6, 7, 9,
+  19, 999: +1** (winner RMS 0.7 .. 2.8 codes, runner-up 3.2 .. 15). **The data-align model's row for A3 B3, all eleven
+  points**, including the two that differ from A4 B3 (divider 0: 0 -> +1, divider 4: 0 -> +1). From both rows: core A's
+  data change 10 .. 12.5 ns after the write clock's rising edge at the capture registers, core B's 7.5 .. 17.5 ns.
+  So at 200 MSa/s with the trained stages the interleaved trace has its neighbours swapped as well. 0.3.0 is on hold
+  for the FPGA fix (owner, 17:5x: "no rush, let's work out the kinks first").
