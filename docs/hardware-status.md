@@ -1831,6 +1831,6 @@ Newest entries at the bottom. Format: date, who, what, result.
   A 3.50 %, B 0.27 %; sweeps `sweep_0x153E_5.npz`, `_6.npz`: **peak A 5.17 % / 5.12 %, B 0.61 % / 0.65 %** (the
   release's reference: 6.94 % / 0.66 %); encode self-check 0 bad of 110232, capture self-check 0 flagged of 107674.
   15:23: **fw 0.2.105 b278bc0c (main e242b53, built for 0x153E) persisted to the card** (`fnirsi1013d-flash
-  --persist-only`): backup of the replaced sectors `backups/sd_750-2048_20261018-154957.bin`, write 2.88 s without resends, SD_READ compare of all
+  --persist-only`): backup of the replaced sectors `backups/sdcard/sd_750-2349_20261106-152347.bin`, write 2.88 s without resends, SD_READ compare of all
   1599 sectors identical, sector 750 verified (eGON.EXE, length 818688, checksum 0xB8E6C8F6). Boot-mode byte and sectors
   16-79 untouched. Next: power cycle from the card (no notice, no first-run screen), then dist `recommended`.
