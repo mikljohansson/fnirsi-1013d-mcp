@@ -3974,7 +3974,8 @@ static int pc_enc_rearm(pc_session *s, uint32_t start)
 
   if(act != EH_REARM)
   {
-    //fw 0.2.79: the outlier counters of the accepted capture (the self-check, cap_stage.h)
+    //fw 0.2.79: the outlier counters of the accepted capture (the self-check, cap_stage.h; read only when the ADCs
+    //ran at full rate, fw-capgate: cap_hw.c)
     pc_hal_cap_check();
     return 0;
   }

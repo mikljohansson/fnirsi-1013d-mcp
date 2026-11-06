@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // cap_hw.c - the target side of FPGA 0x153A's capture stages (cap_stage.h, fw 0.2.79): the 0x63 value at boot (the trained
 // one stored with the calibration when it was trained on this bitstream, else the power-on 0x08E4), the 0x36 read after
-// every accepted full-rate capture (self-check, GET_HEALTH, event 23), the wizard's training and the stored value
+// every accepted full-rate capture (self-check, GET_HEALTH, event 23; never after a gated one: fpga_capture_check), the wizard's training and the stored value
 // (sector 708 bytes 488..503, through pc_diag.c's calibration load / save hooks). fw 0.2.105: the trained clean sets
 // (bytes 504..511) and the runtime guard (cap_stage.h "Runtime guard").
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -9,6 +9,7 @@
 #include "types.h"
 #include "fpga_control.h"
 #include "pc_hal.h"
+#include "pc_hooks.h"
 #include "pc_cmds.h"
 #include "pc_transport.h"
 #include "cap_stage.h"
@@ -201,6 +202,16 @@ void fpga_capture_check(void)
   uint32 k;
 
   if(!(cap_st.flags & PC_CAPF_HAS) || cap_training)
+    return;
+
+  //fw-capgate (bench 2026-11-06): the counts compare the two cores of a chip, which see a signal alike only while the
+  //ADCs run at 200 MSa/s (divider 0, any filter, peak detect: the cores sample 5 ns apart). Filter Off at a divided rate
+  //gates the encodes: the cores sample at least half a record sample apart, a real edge counts on one core alone and
+  //was flagged (a 1 kHz square at 200 kSa/s: excess 15 and 43; the guard moved CH2 B and CH1 A off their trained
+  //stages and stored that, REPEAT then ended every Frequency response sweep with reason 8). The callers reach this
+  //after every accepted capture since the 0x33 check covers every capture (fw-gated, 2026-10-22). A gated capture is
+  //not read: no count, no flag, no REPEAT, no guard; GET_HEALTH keeps the last full-rate read
+  if(!pc_glue_adc_full_rate())
     return;
 
   hw = cap_read(cap_st.cnt);

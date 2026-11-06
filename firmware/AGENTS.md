@@ -7283,3 +7283,29 @@ hashes), GCC 13 841,216 -> 841,728, PC_DEBUG 841,728 -> 842,240.
    the 30-minute soak).
 Regression signs: the notice on 0x153E (the constant), the first-run screen after step 4 (the provenance or the trailer
 not stamped with 0x153E), TRAINED on the first 0x153E boot (the trailer applied across bitstreams).
+
+## 96. fw-capgate: the capture self-check only after full-rate captures (fw 0.2.105, protocol 1.28 unchanged)
+
+Coordinator, 2026-11-06, found by the MCP battery on the unit (`docs/hardware-status.md` 16:21-16:45, finding 2).
+
+**The fault.** `fpga_capture_check` (cap_hw.c: read 0x36, flag a core whose count exceeds its chip partner's by more than
+8, REPEAT after 3 flags in a minute, then the runtime guard) is called after every accepted capture: by
+`fpga_encode_after_capture` (the UI) and `pc_enc_rearm` (the host), which both go on past their divider test whenever the
+encode check runs in flag mode, and that is every capture since fw-gated (2026-10-22). Its premise holds only with the
+ADCs at 200 MSa/s (the cores 5 ns apart). With Filter Off at a divided rate the encodes are gated, the cores sample half
+a record sample apart or more (see the queue's core-order item), and a real edge counts on one core alone. On the bench:
+CH2 B excess 43 and CH1 A excess 15 on a 1 kHz square, the guard moved both (0x06DB -> 0x08DB -> 0x08DC, stored in sector
+708), REPEAT stayed set and `pc_bode.c`'s `bh_check` ended every device sweep with reason 8.
+
+**The fix.** `fpga_capture_check` returns before the read unless `pc_glue_adc_full_rate()` (divider 0, or a filter / peak
+detect written): no count, no flag, no REPEAT, no guard for a gated capture; GET_HEALTH keeps the last full-rate read
+(`reads` still means "full-rate captures whose counts were read"). pc_bode.c already read 0x36 only at legacy divider 0.
+Host test `test_gated_capture_is_not_checked` (test_cap_hw.c: five gated captures leave no trace, three full-rate ones
+still move the core, a gated one in between changes nothing).
+
+**Bench.** FEL-load, then Filter Off captures of a square at 20 MSa/s .. 20 kSa/s (the battery's rates group, host
+averaging at 200 kSa/s): GET_HEALTH `captures_flagged` must not grow and the 0x63 value must stay. A unit the old code
+moved: run the wizard (it trains the stages and clears REPEAT), then `scope_bode_sweep where=device` must run.
+
+**Not fixed here**: the stored value of a moved unit is not put back by the firmware; the guard still has no way to
+tell a moved core from a trained one after its store.

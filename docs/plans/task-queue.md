@@ -297,6 +297,19 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `{{0x153E bench}}` and `{{0x153E tested-on}}` placeholders of the release notes and the announcement
   (`docs/plans/release-checklist.md`, FPGA boxes). Lessons from 2026-11-04: one flash per image, CH1 coupling and the
   CH2 node checked by a capture before every run, the wizard moves the CH2 centre by up to 7 PWM units per run.
+- [ ] **Filter Off at divided rates: the cores are interleaved one sample off** (MCP battery 2026-11-06, finding 1; release
+  blocker until decided). In the host's trace the smooth order is B_k+1, A_k, not B_k, A_k: edges zigzag, a 1 kHz square
+  at 20 kSa/s reads 2006 Hz. 200 MSa/s and filtered captures are in order. Same relation in the raw captures of
+  2026-11-04 on 0x153D, 0x153C and enc0, so it predates 0x153E. Find where the extra sample comes from (the FPGA's gated
+  capture path against the AD9288's output timing; tb_trigpos passes the designed order), whether it depends on the
+  stages, and fix it where it belongs (FPGA word alignment, or the firmware's READ_RAW / trace order and the host's
+  interleave for the gated class); the UI's Filter Off trace is the same data. Data: `backups/battery-0.3.0/b2_rates.json`,
+  `backups/encphase/ab_*.npz` (d99 arrays).
+- [ ] **Smaller findings of the MCP battery 2026-11-06** (`docs/hardware-status.md` 16:21-16:45): `scope_capture_and_fft`
+  / `scope_dvm` once labelled a 200 kSa/s record 1 MSa/s right after the guard's stage move (not reproduced; check the
+  settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100
+  steps / s; the loopback self-test's trigger level (+1.65 V against a square that tops at +1.83 V over the probe
+  ground) and its need for CH1 straight on the post; docs/mcp-tools.md `delay(CH1->CH2)` against the tool's `delay`.
 - [ ] **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and
   the probes connected): 4 drops in 17907 GET_STATUS requests, each a bus suspend (no SOFs) followed 129 ms later by a
   host bus reset and a normal enumeration, 0.6 s down, no device restart; three host opens failed the same way at 14:12.

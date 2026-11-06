@@ -258,6 +258,18 @@ sections 74 to 79.
   through it. A rewrite of the same value never switched a relay (the FPGA latches the byte); this removes the bus
   rounds and makes the relay writes countable (fpga_model, mock HAL). (4ca4ea0)
 
+**The capture self-check no longer flags Filter Off captures at divided rates (fw-capgate).**
+
+- **The outlier counters are read only after captures taken with the ADCs at full rate** (bench 2026-11-06, the MCP
+  battery on 0x153E: a 1 kHz square captured with Filter Off at 200 kSa/s and 2 MSa/s was flagged, the runtime guard
+  moved CH2 B and then CH1 A off the stages the wizard had trained and stored that on the card, and with REPEAT set
+  every Frequency response sweep ended with reason 8, "ADC readout fault"). The check compares the two cores of a
+  chip, which see a signal alike only 5 ns apart; with the encodes gated they sample half a record sample apart and a
+  real edge counts on one core alone. Since the encode check covers every capture (0.2.105, fw-gated) the self-check
+  was reached after every capture; `fpga_capture_check` now returns unless the FPGA holds divider 0, a filter or peak
+  detect. A unit that was moved needs one calibration (it trains the stages again and clears REPEAT). Wire unchanged.
+  Host test `test_gated_capture_is_not_checked`; firmware/AGENTS.md section 96.
+
 **Bad stored settings no longer leave the scope unusable (fw-settings0).**
 
 - **A stored settings record is checked whole before it is applied** (bench 2026-11-04: the card's record had a valid

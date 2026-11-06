@@ -44,6 +44,10 @@ static void raw_write_63(uint16_t v)
 static uint32_t now_ms;
 uint32_t pc_hal_ms(void) { return now_ms; }
 
+//fw-capgate: what the FPGA holds (1: divider 0, a filter or peak detect; 0: Filter Off at a divided rate)
+static int full_rate = 1;
+int pc_glue_adc_full_rate(void) { return full_rate; }
+
 static struct { uint32_t n; uint8_t a; uint16_t b; } ev;
 void pc_usb_log_fpga_capture(uint8 a, uint16 b) { ev.n++; ev.a = a; ev.b = b; }
 
@@ -78,6 +82,7 @@ static void boot_on(uint16_t stored, uint16_t sets, uint16_t fpga)
   memset(sd708, 0, sizeof(sd708));
   sd_writes = 0;
   now_ms    = 1000;
+  full_rate = 1;
 
   memset(&cap_st, 0, sizeof(cap_st));
   memset(&cap_watch, 0, sizeof(cap_watch));
@@ -139,6 +144,53 @@ static void test_guard_acts_on_own_value(void)
   T_EQ(sd_writes, 1);
   T_EQ(cs_trailer_unpack(sd708 + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
   T_EQ(v, 0x08E3); T_EQ(f, PC_FW_FPGA_VERSION);
+}
+
+//fw-capgate (bench 2026-11-06): Filter Off at a divided rate. The counters differ between the cores on a real edge
+//(the encodes are gated, the cores sample half a record sample apart): the capture is not read at all, so it neither
+//flags, counts toward REPEAT nor reaches the guard, and it leaves no trace in the state. Back at full rate three flags
+//are needed again
+static void test_gated_capture_is_not_checked(void)
+{
+  pc_hw_cap c;
+  int i;
+
+  boot(0x08E4, 0xFFFF);
+  full_rate = 0;
+
+  for(i=0;i<5;i++)
+    capture_ch1a_garbled();
+
+  T_EQ(fm.reg63, 0x08E4);
+  T_EQ(ev.n, 0);
+  T_EQ(sd_writes, 0);
+  pc_hal_cap_state(&c);
+  T_EQ(c.value, 0x08E4);
+  T_EQ(c.reads, 0);
+  T_EQ(c.flagged_n, 0);
+  T_EQ(c.flagged, 0);
+  T_FALSE(c.flags & (PC_CAPF_READ | PC_CAPF_FLAGGED | PC_CAPF_REPEAT | PC_CAPF_MOVED));
+
+  full_rate = 1;
+  capture_ch1a_garbled();
+  capture_ch1a_garbled();
+  T_EQ(fm.reg63, 0x08E4);
+  T_EQ(ev.n, 0);
+  pc_hal_cap_state(&c);
+  T_EQ(c.reads, 2);
+  T_EQ(c.flagged_n, 2);
+
+  //A gated capture in between changes nothing
+  full_rate = 0;
+  capture_ch1a_garbled();
+  full_rate = 1;
+  T_EQ(fm.reg63, 0x08E4);
+
+  capture_ch1a_garbled();
+  T_EQ(fm.reg63, 0x08E3);
+  pc_hal_cap_state(&c);
+  T_TRUE(c.flags & PC_CAPF_MOVED);
+  T_EQ(c.reads, 3);
 }
 
 //The bench bug: the sweep writes 0x63 = 0x08E4 through DEBUG_FPGA while the stored (and written) value is 0x08E3, and
@@ -357,6 +409,7 @@ static void test_train_note(void)
 int main(void)
 {
   test_guard_acts_on_own_value();
+  test_gated_capture_is_not_checked();
   test_guard_ignores_foreign_value();
   test_repeat_ignores_foreign_value();
   test_stored_for_previous_bitstream();

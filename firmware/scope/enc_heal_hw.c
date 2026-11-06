@@ -148,7 +148,8 @@ int fpga_encode_after_capture(void)
 
   if(rearm != EH_REARM)
   {
-    //fw 0.2.79: 0x153A's outlier counters of the accepted capture (self-check, cap_hw.c)
+    //fw 0.2.79: 0x153A's outlier counters of the accepted capture (self-check, cap_hw.c; it reads them only when the
+    //ADCs ran at full rate, fw-capgate)
     fpga_capture_check();
     return 0;
   }
