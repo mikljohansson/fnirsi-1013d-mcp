@@ -1805,3 +1805,19 @@ Newest entries at the bottom. Format: date, who, what, result.
   (by design). Logger, 5 s each: 1 ch RAW8 500 kS/s 1,250,000 words, 1 ch 16-bit 250 kS/s 1,250,000 words, 2 ch 16-bit
   125 kS/s 625,000 words: **0 words lost**, no gap, no overflow. Health after: encode self-check 0 bad of 11234, 0 flagged.
   14:20: 30-minute GET_STATUS soak started (`backups/encphase/soak_0x153E_20261106.log`); the sweep is repeated after it, warm.
+- 2026-11-06 14:20-14:50 (lead): **30-minute GET_STATUS soak on 0x153E** (`backups/encphase/soak_0x153E_20261106.log`):
+  17907 requests, **4 failures = 4 link drops** (14:21:30, 14:21:36, 14:39:27, 14:45:48; down 0.58 / 0.62 / 0.59 / 0.58 s),
+  device restarts 0, latency median 1.1 ms, p99 2.4 ms. Each drop on the device side: suspend (no SOFs), 129 ms later a
+  bus reset and a normal enumeration; the same signature as the three failed opens at 14:12 and as 2026-10-18. The USB is
+  the MCU's, not the FPGA's; whether the bench wiring (the FT2232D still on the PC, the probes on the post) plays a part is
+  not checked. Open item: repeat the soak with the programmer unplugged before the release.
+- 2026-11-06 14:51-14:52 (lead): **0x153E CH2 code errors, warm** (46 min after the boot, same probes, offset_pwm 859,
+  stages 0x06DB, encode self-check 0 bad of 58067). `ab_0x153E_warm.npz`: divider 99 0 / 0; divider 0 overall A 2.79 %,
+  B 0.63 %; rising phase A 5.49 %, B 0.89 % (cold at 14:14: 13.44 % / 2.09 %). Sweeps `sweep_0x153E_3.npz`, `_4.npz`:
+  **peak A 5.74 % / 6.01 %, B 1.02 % / 0.88 %**, mean over the sweep A 2.8 / 2.7 %, B 0.39 / 0.35 % (cold: peak A 15.09 /
+  14.46 %, B 1.95 / 2.68 %). The release's sweep reference (rel-2, 2026-11-04 11:13, about 1.5 h into that session):
+  A 6.94 %, B 0.66 %. **Read: the carry-error share falls by a factor of about 2.5 between 10 and 46 minutes after power-on;
+  warm, 0x153E is at the release's warm reference on core A and slightly above it on core B. The cold comparison of 14:14
+  against rel-1 mixed two unknown warm-up states, so it does not show a regression. Lesson for the acceptance measure: the
+  sweep is taken at least 30 minutes after power-on, and the time since boot is logged with it.** The wizard of 14:07 ran
+  about 2 minutes after the FEL load (cold); a warm re-run before the firmware is persisted is the owner's call.
