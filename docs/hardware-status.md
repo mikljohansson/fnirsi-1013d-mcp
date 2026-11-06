@@ -1890,3 +1890,15 @@ Newest entries at the bottom. Format: date, who, what, result.
   Not run: scope_spectrum (the scope must be in its Spectrum view), EXT trigger (no external source; selecting EXT
   switches the generator off, as documented), scope_calibrate_volts and scope_cal_probe (need a DC reference / open
   inputs). Scope left in RUN, 1 MS/s, Filter Off, generator 1 kHz.
+- 2026-11-06 16:46-16:57 (lead): **fw-capgate (2bdecac) benched.** Host tests (test_cap_hw 112 checks) and the three
+  builds pass. GCC 10 image of 2bdecac, sha256 4e60f6cd71f1fb2704c99ddd89b4f7327792baefa045428efc99d9ae4120dbcf
+  (`backups/fw-0.2.105_4e60f6cd_2bdecac-capgate.bin`), FEL-loaded 16:50. The battery's rates and acquisition groups again
+  (the captures that had flagged: Filter Off at 20 MSa/s .. 20 kSa/s, 16-record averaging at 200 kSa/s):
+  **captures_flagged 0, no event 23, 0x63 unchanged** (0x08DC, the moved value; reads 483 -> 605 while the encode check
+  counted 483 -> 1248: the gated captures are no longer read). REPEAT is gone with the reboot, and the scope's own
+  frequency response runs: device sweep 100 Hz .. 200 kHz done in 2.4 s, 22 of 24 points valid, against the host sweep
+  within 0.05 dB and 0.1 degree up to 40 kHz (-3 dB 3673 / 3679 Hz, -90 degrees 13722 / 13718 Hz). 16:56: **persisted to
+  the card** (backup `backups/sdcard/sd_750-2349_20261106-165612.bin`, 1599 sectors compared identical, checksum
+  0x29B1C181). **Still to do on the unit: the wizard once more (the stored stages are the moved CH1 A4 B3, CH2 A3 B4).**
+  Finding 3 again in the same battery sequence without the guard acting (FFT and DVM label a 200 kSa/s record 1 MSa/s:
+  the 1 kHz fundamental at 5 kHz), and not in ten shorter sequences: `backups/battery-0.3.0/c1_*.json`, `c3_*.json`.
