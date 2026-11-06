@@ -14,20 +14,25 @@
 #   6. tb_seg.v against our 0x1535 (REF1535_REV, default e2aec2e): sequencer off equivalence, then
 #      segment and averaging runs (0x1536), logged and checked by seg_model.py. SEG_P1 (default 12)
 #      sets the number of random equivalence captures of its first phase.
-#   7. tb_trigpos.v (0x1537): trigger position determinism with an AD9288 pipeline model, the firmware's
-#      byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and random phases, then
-#      the configuration race at slow legacy rates. TRIGPOS_RUNS (default 6) runs per case.
+#   7. tb_trigpos.v (0x1537): trigger position determinism with an AD9288 pipeline model (data align as the unit does
+#      it since 0x153F), the firmware's byte sequences, shuffled cases (K = 0..3, FIR, dividers 0..399, CH1 / EXT) and
+#      random phases, core B half a word before core A in every legacy word, then the configuration race at slow legacy
+#      rates. TRIGPOS_RUNS (default 6) runs per case.
 #   8. tb_seqcontract.v: the firmware's sequencer byte sequences (protocol 1.17) against the simulated FPGA; the
-#      transcript must equal tb/contract_0x153E.txt (the reference for the firmware's host tests).
+#      transcript must equal tb/contract_0x153F.txt (the reference for the firmware's host tests).
 #   9. encphase.sh MODE=check (0x1538): tb_encphase.v, the encode pins against the write clock after the firmware's
 #      UI and host arm sequences at swept write phases, plain and with delay-annotated encode flop inputs, and the
 #      0x33 self-check catching a late CH2 A flop.
 #  10. mcuread.sh (0x1539): tb_mcuread.v, the MCU readout with the firmware's read sequences at swept strobe timing and
 #      per-bit pad delays: every byte right at every sample time after the rising edge; the 0x1538 reference
 #      (REF1538_REV, default ce943bf) shows the bench's mixed bytes when the MCU samples sooner than the pad delay.
-#  11. tb_adccap.v (0x153A): the ADC capture stages against a behavioural AD9288 whose buses are in transition from tV
-#      to tPD after the encode (own encode, or the A encode in data-align mode), encode pad delay swept: clean exactly
-#      where the window formula says, outlier counters exact, B first by T/2 at every rate with the matching reference.
+#  11. tb_adccap.v (0x153A, 0x153F): the ADC capture against a behavioural AD9288 pair in the data-align mode the unit
+#      shows (both buses released after the B encode; the release edge, the delay D per core and the pairing are
+#      parameters). Two runs. The design under test: B[k] half a word before A[k] at every divider 0..9, 19, 99, 999,
+#      at every stage clean on both cores, over D_A 9..14 x D_B 7..18 ns at the divided rates and with the buses
+#      changing together at divider 0, clean exactly where the model says, outlier counters exact ("STRICT ORDER:
+#      PASS"). The unchanged 0x153E source (REF153E_REV, default da645d0): the model's acceptance, the two rows the
+#      bench measured on 2026-11-06 reproduced cell by cell, and the strict check failing on it ("STRICT ORDER: FAIL").
 #  12. tb_firstrec.v (fpga-gen10): the first decimated record after a mode / shift / rate change at divider 4095 with the
 #      firmware's exact byte sequences (both arm orders), exact from word 0; the transient without the settle wait and
 #      the stale-shift fault model (whole record 0xFFFF) for comparison. FIRSTREC_TOTAL words per record (default 16).
@@ -71,6 +76,7 @@ REF_REV=${REF_REV:-a947e78}
 REF1533_REV=${REF1533_REV:-2839258}
 REF1534_REV=${REF1534_REV:-6d4c8ad}
 REF1535_REV=${REF1535_REV:-e2aec2e}
+REF153E_REV=${REF153E_REV:-da645d0}
 SEED=${1:-12345}
 WORK=${SIM_WORK:-$HOME/al3-sim}
 DUT=${DUT:-$REPO/fpga/al3/src/zaklad.v}   # design under test (override for mutation runs)
@@ -150,8 +156,8 @@ if [ "$ONLY" = all ] || [ "$ONLY" = contract ]; then
   iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_seqcontract.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_seqcontract.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_seqcontract.vvp" +transcript="$WORK/contract.txt" | tee "$WORK/sim_contract.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_contract.log" || RC=1
-  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153E.txt"; then echo "contract transcript = tb/contract_0x153E.txt"
-  else echo "contract transcript differs from tb/contract_0x153E.txt"; RC=1; fi
+  if cmp -s "$WORK/contract.txt" "$HERE/contract_0x153F.txt"; then echo "contract transcript = tb/contract_0x153F.txt"
+  else echo "contract transcript differs from tb/contract_0x153F.txt"; RC=1; fi
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = encphase ]; then
   MODE=check SIM_WORK="$WORK" DUT="$DUT" bash "$HERE/encphase.sh" "$SEED" | tee "$WORK/sim_encphase.log"
@@ -166,6 +172,14 @@ if [ "$ONLY" = all ] || [ "$ONLY" = adccap ]; then
   iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_adccap.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_adccap.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
   vvp -n "$WORK/tb_adccap.vvp" +seed=$SEED | tee "$WORK/sim_adccap.log"
   grep -q 'RESULT: .* -> PASS' "$WORK/sim_adccap.log" || RC=1
+  grep -q 'STRICT ORDER: PASS' "$WORK/sim_adccap.log" || RC=1
+  # the model's acceptance: the unchanged 0x153E source (its encode clocks are the DUT's: the same al_ip/pll.v) must give
+  # the bench's rows and fail the strict order check
+  if [ -n "$REF_SRC_DIR" ]; then cat "$REF_SRC_DIR/$REF153E_REV.v"; else git -c safe.directory='*' -C "$REPO" show "$REF153E_REV:fpga/al3/src/zaklad.v"; fi > "$WORK/zaklad_153e.v"
+  iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_adccap_153e.vvp" "$HERE/sim_models.v" "$WORK/zaklad_153e.v" "$HERE/tb_adccap.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true
+  vvp -n "$WORK/tb_adccap_153e.vvp" +seed=$SEED | tee "$WORK/sim_adccap_153e.log"
+  grep -q 'RESULT: .* -> PASS' "$WORK/sim_adccap_153e.log" || RC=1
+  grep -q 'STRICT ORDER: FAIL' "$WORK/sim_adccap_153e.log" || RC=1
 fi
 if [ "$ONLY" = all ] || [ "$ONLY" = firstrec ]; then
   iverilog -g2012 $IVDEFS -DSIM -Wall -Wno-timescale -Wno-implicit -s tb -o "$WORK/tb_firstrec.vvp" "$HERE/sim_models.v" "$DUT" "$HERE/tb_firstrec.v"     2>&1 | grep -v -E 'sensitive to all|implicit|Extra digits' || true

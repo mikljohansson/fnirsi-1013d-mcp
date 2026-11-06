@@ -2,7 +2,7 @@
 //                           Code for FNIRSI 1013D oscilloscope
 //                                      Atlan and PECO
 //=====================================================================================
-// fnirsi-1013d-mcp changes (version word 0x153E, see fpga/al3/README.md "Changes"):
+// fnirsi-1013d-mcp changes (version word 0x153F, see fpga/al3/README.md "Changes"):
 //  - 0x1533: external trigger input on the calibration pin P133 (o_1khz_calib). Command 0x15
 //    value 2 selects EXT; 0 = CH1 and 1 = CH2 are unchanged. Edge from command 0x16.
 //    Read command 0x28: bit0 = live EXT pin level, bit1 = generator driving the pin,
@@ -102,6 +102,16 @@
 //    placement (TD, typical corner). The encode sequence is 0x153D's at every rate and after any write; the 0x33
 //    self-check reads fabric copies of the encodes (same D, same clock edges as the ODDRs), not the pins. Version byte
 //    0x3E, every register and every other path as in 0x153D. C1 (clk_ADC) stays enabled in the PLL, unused.
+//  - 0x153F (fpga-153f, bench 2026-11-06, fpga/al3/README.md section 22): the two cores of a word paired as designed
+//    at every rate. The unit's AD9288s release both output buses after the same edge (the write clock's rising edge,
+//    about 11 ns after it at the pins), not each after its own encode as 0x153A..0x153E's capture assumed, so those
+//    stored core B one conversion late at most rates and stages. Both cores of a chip are now captured at the same
+//    instant: at full rate (divider 0, any filter, peak detect) at the chip's stage from 0x63 (bits 2:0 CH1, 8:6 CH2;
+//    core A's instants and latency as before), at divided rates 2.5 ns after the write clock's rising edge whatever
+//    the stage. 0x63 bits 5:3, 11:9 (the B cores' stages) and 13:12 (B from the A-encode path) have no function any
+//    more; power-on 0x06DB. Core A, the trigger position (0x14 / 0x18), the filters, peak detect, the counter, the
+//    logger and every other register are 0x153E's; core A is one word earlier at dividers 1 to 3 (and 4 at stage 4),
+//    where 0x153E took it one release late. Version byte 0x3F.
 //-------------------------------------------------------------------------------------
 
 //Simulation only: the time unit of the 1 ps write clock delay (see "sample_write_clock <= #0.001" below), whatever the
@@ -1118,6 +1128,8 @@ module fnirsi_1013D
   reg sce_q     = 0;                       //0x1538, see "Sample write clock" (declared here for swc_rose)
   reg swc_sh    = 0;                       //copy of sample_write_clock, loaded from it (a difference lasts one clock)
   reg swc_rose = 0;                        //0x1539: the write clock rises on the next falling clk_200MHz edge (or rose on the last)
+  reg cap_full = 0;                        //0x153F: the write clock runs at full rate ("ADC data capture"; set in
+                                           //"Sample rate divider"; declared here so that either section may move)
 
   wire ext_rise = ext_level & ~ext_level_prev;
   wire ext_fall = ~ext_level & ext_level_prev;
@@ -1224,42 +1236,49 @@ module fnirsi_1013D
   );
 
 //---------------------------------------------------------------------------
-//ADC data capture (0x153A). Every pin goes into an IOB DDR input register (AL_LOGIC_IDDR on clk_200MHz: q2 = the pin at
-//the last falling edge, q1 = at the rising edge 2.5 ns before that, both handed over on the rising edge), followed by two
-//more rising-edge stages. A write clock edge E (either edge: both are falling clk_200MHz edges) then sees the pins as
-//sampled at E - 5 (stage 0, q2), E - 7.5 (1, q1), E - 10 (2), E - 12.5 (3), E - 15 (4) and E - 17.5 ns (5); the IOB
-//registers have a fixed pad delay, so these instants do not move with placement.
+//ADC data capture (0x153A, the instants and the pairing since 0x153F). Every pin goes into an IOB DDR input register
+//(AL_LOGIC_IDDR on clk_200MHz: q2 = the pin at the last falling edge, q1 = at the rising edge 2.5 ns before that, both
+//handed over on the rising edge), followed by three more rising-edge stages. A rising clk_200MHz edge P then sees the
+//pins as sampled at P - 7.5 (tap 0, q2), P - 10 (1, q1), P - 12.5 (2) .. P - 25 ns (7); the IOB registers have a fixed
+//pad delay, so these instants do not move with placement.
 //
-//Each core's data is timed by its own encode (AD9288: valid from tPD max 6 ns after the encode rising edge to tV min
-//2 ns after the next one, i.e. a 4 ns transition once per encode period T = 10 (D + 1) ns at every rate). Core B is
-//encoded on the RISING write clock edge R (encB = write clock, pad 6.7..7.0 ns after R), core A on the FALLING edge F
-//(encA = its complement). So the B pins are stable over [R - T + 13.3, R + 9.3] relative to every rising edge and the
-//A pins over [F - T + 13.1, F + 9.1] relative to every falling edge, whatever T is; stages 3 and 4 (E - 12.5, E - 15)
-//lie inside those at every rate with 1.6..1.9 ns to spare against the datasheet limits (TT numbers of this build,
-//fpga/al3/README.md "Changes" section 10). The A cores are therefore captured against the falling edge and the B cores
-//against the rising edge: stage registers sA (falling) and sB (rising) take the six phases from the clk_200MHz chain
-//(wire-only 2.5 ns paths), the per-core pick (command 0x63, 3 bits per core) is registered one write clock later on the
-//same edge (a_m on the falling edge, b_m on the rising one), and adc*_w takes both on the rising edge: the only
-//half-period paths are register-to-register wires. A word then holds the B sample encoded T/2 before its A sample (B
-//first, as 1.00o5 and 0x1535/0x1538), at every rate, by construction: the A instant is T/2 later than the B instant.
+//What the ADCs do (the maintainer's unit, bench 2026-11-06, fpga/al3/README.md "Changes" section 22): both output buses
+//of a chip change after the SAME edge, the write clock's rising edge R (= the B encode's rising edge), about 11 ns after
+//it at these registers, and one such release carries the designed pair: the B sample and the A sample taken half a word
+//after it. 0x153A..0x153E captured each core against its own encode edge (B at R - c, A at F - c), as the datasheet's
+//normal operation would need: the two cores of a word then came from different releases at most rates (core B one
+//conversion late at every divider but 2, 3 and, by stage, 0 and 4).
 //
-//If the ADC's data-align mode is on (S1 = S2 = 1 per pecostm32's schematic; the bench of 0x1538/0x1539 fits the
-//align-off timing, so power-on is off), the B data is re-timed by the chip to the A encode: 0x63 bit 12 (CH1) / 13
-//(CH2) then takes the B core from the falling-edge path (sBf, bf_m), where its window is the A core's. Either way the
-//word stays B-first. A wrong stage or reference garbles the core (rail values, jumps) instead of shifting it; the
-//outlier counters (read 0x36, threshold 0x64) count such words per core from 0x01 = 1 through the capture, so the
-//firmware can check every full-rate capture and train the stages at a quiet input.
+//0x153F: both cores of a chip are taken at the same instant, into cap_h on the rising clk_200MHz edge 12.5 ns after
+//every R (cap_st, from swc_rose), so they always hold the same release and the word is the designed pair at every rate:
+//  - full rate (divider 0, any filter, peak detect: T = 10 ns): the pins at R - 2.5 k, k = the chip's stage from
+//    command 0x63 (2..5; the same instants and the same latency as core A had in 0x153A..0x153E, so a trained A stage
+//    keeps its meaning). The buses are stable for about 6 of the 10 ns, so the stage is trained per chip at a quiet
+//    input as before; any stage that is clean on both cores gives the designed pair (both sides of the transition).
+//  - divided rates (K = 0, divider >= 1: T >= 20 ns, one encode per word): the pins at R + 2.5 ns, whatever the stage:
+//    with the unit's D of about 11 ns the transition of the previous R's release lies 11 ns back at T = 20 ns (more at
+//    every slower rate) and that of this R's release 9 ns ahead, and the capture is clean for any D from 4.5 to 20.5 ns
+//    with a transition 4 ns wide. Nothing is trained and no rate has a borderline.
+//adc*_w takes cap_h on the next rising write clock edge, 7.5 ns later or more (a wire path). Core A's data reach
+//adc*A_w with 0x153E's latency at divider 0 and at every divider from 5 up; at dividers 1, 2 and 3 (and 4 at stage 4)
+//0x153E held core A one release back, so there core A is one word earlier now, as at the slow rates.
+//
+//A stage inside the transition garbles both cores (rail values, jumps) instead of shifting them; the outlier counters
+//(read 0x36, threshold 0x64) count such words per core from 0x01 = 1 through the capture, so the firmware can check
+//every full-rate capture and train the stages at a quiet input.
 
   wire [31:0] adc_pin = { i_adc2B_d, i_adc2A_d, i_adc1B_d, i_adc1A_d };
   wire [31:0] adc_q1, adc_q2;
-  reg  [31:0] adc_d1 = 0, adc_d2 = 0, adc_dd1 = 0, adc_dd2 = 0;
-  //Command 0x63 (two bytes high first): bits 2:0 CH1 A stage, 5:3 CH1 B, 8:6 CH2 A, 11:9 CH2 B (stage k = pins
-  //5 + 2.5 k ns before the core's edge, 6 and 7 act as 5), bit 12 CH1 B / bit 13 CH2 B from the A-encode path, bits
-  //15:14 unused. Command 0x64: outlier threshold, codes. TD 4.6.8 ignores Verilog initial values (every flop configures
-  //to 0; a bitstream built with other values here is byte-identical), so the registers hold the value XOR its power-on
-  //value and 0 means the default. Power-on 0x08E4: CH1 A stage 4, CH1 B 4, CH2 A 3, CH2 B 4, B from its own encode (the
-  //stage with the larger margin per core over the builds of README section 10, tb/capture_margins.py).
-  localparam [15:0] CAP_SEL_PO = 16'h08E4;
+  reg  [31:0] adc_d1 = 0, adc_d2 = 0, adc_dd1 = 0, adc_dd2 = 0, adc_e1 = 0, adc_e2 = 0;
+  //Command 0x63 (two bytes high first): bits 2:0 CH1 stage, 8:6 CH2 stage (both cores of the chip; stage k = the pins
+  //at R - 2.5 k ns at full rate, k = 2..5, other values alias by their low two bits: 6 as 2, 7 as 3, 0 as 4, 1 as 5).
+  //Bits 5:3, 11:9 (the B cores' own stages until 0x153E) and 15:12 (13:12: B from the A-encode path) are stored and
+  //read back, nothing else; the firmware writes the chip's stage into the B field too. Command 0x64: outlier
+  //threshold, codes. TD 4.6.8 ignores Verilog initial values (every flop configures to 0; a bitstream built with other
+  //values here is byte-identical), so the registers hold the value XOR its power-on value and 0 means the default.
+  //Power-on 0x06DB: stage 3 on both chips (the stage the unit trains on 0x153E; its instant at divider 0, R + 2.5 ns
+  //modulo the period, is the divided rates' fixed one).
+  localparam [15:0] CAP_SEL_PO = 16'h06DB;
   localparam [7:0]  CAP_THR_PO = 8'd8;
   reg  [15:0] cap_sel_x = 0;
   reg  [7:0]  cap_thr_x = 0;
@@ -1280,54 +1299,44 @@ module fnirsi_1013D
       adc_d2  <= adc_q2;
       adc_dd1 <= adc_d1;
       adc_dd2 <= adc_d2;
+      adc_e1  <= adc_dd1;
+      adc_e2  <= adc_dd2;
     end
 
-  //The six phases per core as a 48-bit bus, stage k in bits [8k+7:8k]; chA = { CH2 A, CH1 A }, chB = { CH2 B, CH1 B }
-  wire [95:0] chA = { adc_dd1[23:16], adc_dd2[23:16], adc_d1[23:16], adc_d2[23:16], adc_q1[23:16], adc_q2[23:16],
-                      adc_dd1[7:0],   adc_dd2[7:0],   adc_d1[7:0],   adc_d2[7:0],   adc_q1[7:0],   adc_q2[7:0] };
-  wire [95:0] chB = { adc_dd1[31:24], adc_dd2[31:24], adc_d1[31:24], adc_d2[31:24], adc_q1[31:24], adc_q2[31:24],
-                      adc_dd1[15:8],  adc_dd2[15:8],  adc_d1[15:8],  adc_d2[15:8],  adc_q1[15:8],  adc_q2[15:8] };
-
-  reg [95:0] sA  = 0;                      //falling write clock edge: the A cores' phases
-  reg [95:0] sBf = 0;                      //falling edge: the B cores' phases (A-encode reference)
-  reg [95:0] sB  = 0;                      //rising edge: the B cores' phases
-
-  function [7:0] cap_pick(input [2:0] sel, input [47:0] s);
-    case(sel)
-      3'd0:    cap_pick = s[7:0];
-      3'd1:    cap_pick = s[15:8];
-      3'd2:    cap_pick = s[23:16];
-      3'd3:    cap_pick = s[31:24];
-      3'd4:    cap_pick = s[39:32];
-      default: cap_pick = s[47:40];
+  //One chip's word { B, A } for cap_h: at divided rates tap 1 (the pins at R + 2.5 on the capture edge R + 12.5), at
+  //full rate tap k + 2 for stage k (the pins at R - 2.5 k)
+  function [15:0] cap_pick(input full, input [1:0] sel, input [15:0] q1, input [15:0] dd2, input [15:0] dd1,
+                           input [15:0] e2, input [15:0] e1);
+    case({ full, sel })
+      3'b110:  cap_pick = dd2;             //stage 2: tap 4
+      3'b111:  cap_pick = dd1;             //stage 3: tap 5
+      3'b100:  cap_pick = e2;              //stage 4: tap 6
+      3'b101:  cap_pick = e1;              //stage 5: tap 7
+      default: cap_pick = q1;
     endcase
   endfunction
 
-  reg [15:0] a_m  = 0;                     //falling edge: picked { CH2 A, CH1 A }
-  reg [15:0] bf_m = 0;                     //falling edge: picked { CH2 B, CH1 B }, A-encode reference
-  reg [15:0] b_m  = 0;                     //rising edge: picked { CH2 B, CH1 B }
+  reg [1:0]  cap_st = 0;                   //swc_rose two clocks on: cap_st[1] is seen by the rising edge 12.5 ns after R
+  reg [31:0] cap_h = 0;                    //{ CH2 B, CH2 A, CH1 B, CH1 A } as taken on that edge
 
-  always @(negedge sample_write_clock)
+  always @(posedge clk_200MHz)
     begin
-      sA   <= chA;
-      sBf  <= chB;
-      a_m  <= { cap_pick(cap_sel[8:6],  sA[95:48]),  cap_pick(cap_sel[2:0], sA[47:0]) };
-      bf_m <= { cap_pick(cap_sel[11:9], sBf[95:48]), cap_pick(cap_sel[5:3], sBf[47:0]) };
+      cap_st <= { cap_st[0], swc_rose };
+
+      if(cap_st[1])
+        cap_h <= { cap_pick(cap_full, cap_sel[7:6], adc_q1[31:16], adc_dd2[31:16], adc_dd1[31:16], adc_e2[31:16], adc_e1[31:16]),
+                   cap_pick(cap_full, cap_sel[1:0], adc_q1[15:0],  adc_dd2[15:0],  adc_dd1[15:0],  adc_e2[15:0],  adc_e1[15:0]) };
     end
 
-  always @(posedge sample_write_clock)
-    sB <= chB;
-
-  //The captured word, registered on the rising edge; every consumer (sample memory, trigger, decimator, record mirror,
-  //outlier counters) takes it from here and writes or uses it on the next rising edge.
+  //The captured word, registered on the rising write clock edge; every consumer (sample memory, trigger, decimator,
+  //record mirror, outlier counters) takes it from here and writes or uses it on the next rising edge.
   reg [7:0] adc1A_w = 0, adc1B_w = 0, adc2A_w = 0, adc2B_w = 0;
   always @(posedge sample_write_clock)
     begin
-      b_m     <= { cap_pick(cap_sel[11:9], sB[95:48]), cap_pick(cap_sel[5:3], sB[47:0]) };
-      adc1A_w <= a_m[7:0];
-      adc2A_w <= a_m[15:8];
-      adc1B_w <= cap_sel[12] ? bf_m[7:0]  : b_m[7:0];
-      adc2B_w <= cap_sel[13] ? bf_m[15:8] : b_m[15:8];
+      adc1A_w <= cap_h[7:0];
+      adc1B_w <= cap_h[15:8];
+      adc2A_w <= cap_h[23:16];
+      adc2B_w <= cap_h[31:24];
     end
 
 //---------------------------------------------------------------------------
@@ -1353,45 +1362,6 @@ module fnirsi_1013D
     .clkb  (sample_read_clock)
     //.ceb   (1'b1)
   );
-
-//-------------------------------------------------------------------------------------
-//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
-//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
-//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
-//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
-//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
-//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
-//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
-
-  reg        ho_st_q = 0;
-  reg [32:0] ho_cnt = 0;
-  reg        ho_run = 0;
-  reg        ho_en = 0;                    //0x1B != 0, registered
-  reg [1:0]  ho_ct_s = 0;
-  reg        ho_ct_d = 0;
-  assign     ho_act = ho_run & ho_en;
-
-  always @(posedge clk_200MHz)
-    begin
-      ho_st_q <= sampling_triggered;
-      ho_en   <= (trig_holdoff != 32'd0);
-      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
-      ho_ct_d <= ho_ct_s[1];
-
-      if(ho_ct_s[1] ^ ho_ct_d)
-        ho_run <= 0;
-      else if(sampling_triggered & ~ho_st_q)
-        begin
-          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
-          ho_run <= 1;
-        end
-      else
-        begin
-          ho_cnt <= ho_cnt - 33'd1;
-          if(ho_cnt[32])
-            ho_run <= 0;
-        end
-    end
 
 //-------------------------------------------------------------------------------------
 //Sample write clock
@@ -1521,6 +1491,11 @@ module fnirsi_1013D
   //1 (enable now) or counter + 1, so: enable now ? divider == 0 : divider <= counter
   always @(negedge clk_200MHz)
     sce_q <= sample_clock_enable ? (sample_rate_divider_eff == 20'd0) : (sample_rate_divider_eff <= sample_rate_counter);
+
+  //0x153F: the capture's rate class ("ADC data capture"). Static while a capture runs (the firmware writes 0x0D and the
+  //filter registers before the arm).
+  always @(posedge clk_200MHz)
+    cap_full <= (sample_rate_divider_eff == 20'd0);
 
 //-------------------------------------------------------------------------------------
 //Decimation filter control and data path (0x1534)
@@ -1998,6 +1973,45 @@ assign sampling_enable = ~(
         trigger_read_address <= pretrigger_samples;   //Starting point in memory
       else if((sampling_half_way == 1)&&(sampling_enable == 1)&&swc_adv&&sample_write_enable)   //0x153B: frozen at the stop
         trigger_read_address <= trigger_read_address + 1;
+    end
+
+//-------------------------------------------------------------------------------------
+//Trigger hold-off (0x153C, command 0x1B in 5 ns units, 0 = off; docs/plans/fpga-0x153c.md section 3.6). From the rise
+//of sampling_triggered (the trigger of a record) the trigger check is masked (ho_act into trigger_check_enable) for
+//0x1B clocks of clk_200MHz. The timer is not reset by cap_rst (sequencer restarts) nor by 0x01 = 1 alone, so the records
+//of a train keep their spacing across sequencer restarts and MCU re-arms; 0x01 = 1 clears it when 0x66 bit 0 was
+//written before (ho_clr_t, a toggle from the MCU clock domain), and 0x1B = 0 turns the mask off at once. 33-bit signed
+//down counter as the sequencer's hold-off (q_hc): loaded with 0x1B - 2, the mask ends on the clock after its sign sets,
+//exactly 0x1B clocks after the trigger for every 0x1B >= 1.
+
+  reg        ho_st_q = 0;
+  reg [32:0] ho_cnt = 0;
+  reg        ho_run = 0;
+  reg        ho_en = 0;                    //0x1B != 0, registered
+  reg [1:0]  ho_ct_s = 0;
+  reg        ho_ct_d = 0;
+  assign     ho_act = ho_run & ho_en;
+
+  always @(posedge clk_200MHz)
+    begin
+      ho_st_q <= sampling_triggered;
+      ho_en   <= (trig_holdoff != 32'd0);
+      ho_ct_s <= { ho_ct_s[0], ho_clr_t };
+      ho_ct_d <= ho_ct_s[1];
+
+      if(ho_ct_s[1] ^ ho_ct_d)
+        ho_run <= 0;
+      else if(sampling_triggered & ~ho_st_q)
+        begin
+          ho_cnt <= { 1'b0, trig_holdoff } - 33'd2;
+          ho_run <= 1;
+        end
+      else
+        begin
+          ho_cnt <= ho_cnt - 33'd1;
+          if(ho_cnt[32])
+            ho_run <= 0;
+        end
     end
 
 //-------------------------------------------------------------------------------------
@@ -3149,7 +3163,7 @@ assign sampling_enable = ~(
                   4'h0:
                     o_mcu_data <= 8'h15;
                   4'h1:
-                    o_mcu_data <= 8'h3E;
+                    o_mcu_data <= 8'h3F;
                 endcase
               end
 

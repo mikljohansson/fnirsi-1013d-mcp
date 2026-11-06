@@ -4,8 +4,8 @@
 Since 0x153E the committed source drives the four ADC encode pins from IOB output registers (AL_LOGIC_ODDR) on PLL C2
 (clk_ADCB, the B encodes, 0 degrees) and C3 (clk_ADCA, the A encodes, 375 ps after C2): the recipe of the fpga-encphase
 image enc0, adopted by the owner on 2026-11-04. An experiment image is this script applied to the source, so it is
-reproducible from the commit that holds both (build it with tools/encphase_build.sh). The images keep the version word
-0x153E; they are told apart by their sha256 only (tools/enc_ab.py --image-sha256).
+reproducible from the commit that holds both (build it with tools/encphase_build.sh). The images keep the source's
+version word (0x153F now); they are told apart by their sha256 only (tools/enc_ab.py --image-sha256).
 
     python3 -I fpga/al3/tools/encphase_variant.py OUT_DIR [--phase-ps N] [--skew-ps S] [--move SECTION ANCHOR]...
 

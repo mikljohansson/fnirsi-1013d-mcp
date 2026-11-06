@@ -6,7 +6,7 @@
 // drives it.
 //   G. The generator on 0x50 alone (nothing else written): the pin is driven low (the idle level) with 0x50 = 1, hi-Z
 //      with 0x50 = 0; 0x51 / 0x52 (the DDS) and the cut pattern registers 0x6E / 0x6F / 0x76 .. 0x7D change nothing;
-//      idle level 1 through 0x6D bit 2; 0x28 bit 1; 0x39 reads 0 while off; 0x06 = 0x153E (0x153D before the IOB encodes).
+//      idle level 1 through 0x6D bit 2; 0x28 bit 1; 0x39 reads 0 while off; 0x06 = 0x153F (0x153D before the IOB encodes, 0x153E before the paired capture).
 //   L. The start latency: step 0 begins 7 .. 8 clocks (35 .. 40 ns) after the rising edge of the 0x6D data strobe.
 //   S. The square wave, programmed with the firmware's SET_GEN sequence (P16 / H16 of section 7.4: entry 0 high, entry 1
 //      low, 0x6D = 0x33 to enable, 0x23 for a change) at 1 kHz, 999.5 Hz, 10 kHz 25 %, 1 MHz, 10 MHz, 7.3 MHz, the
@@ -67,24 +67,28 @@ module tb;
   endtask
 
   //---------------------------------------------------------------------------------
-  // AD9288 model (as tb_trigpos.v): sample on the encode rising edge, output 4 encode cycles later, tPD 3.3 ns
+  // AD9288 model (as tb_trigpos.v): sample on the own encode's rising edge
 
   localparam [7:0] LO = 8'd40, HI = 8'd210;
   reg [7:0] pA [0:7];
   reg [7:0] pB [0:7];
   integer ia, ib;
   initial for (ia = 0; ia < 8; ia = ia + 1) begin pA[ia] = LO; pB[ia] = LO; end
+  // data align as the maintainer's unit does it (0x153F, fpga/al3/README.md "Changes" section 22; tb_adccap.v's
+  // rule 2): each core samples on its own encode, both buses change 10 ns after the B encode pin's rising edge
+  // (11.25 ns after the write clock's rising edge) to the B sample of 5 B encodes before and the A sample taken
+  // half a word after that one
   always @(posedge e1A) begin
     for (ia = 7; ia > 0; ia = ia - 1) pA[ia] = pA[ia - 1];
     pA[0] = sig ? HI : LO;
-    adc1A <= #3.3 pA[4];
-    adc2A <= #3.3 8'd255 - pA[4];
   end
   always @(posedge e1B) begin
     for (ib = 7; ib > 0; ib = ib - 1) pB[ib] = pB[ib - 1];
     pB[0] = sig ? HI : LO;
-    adc1B <= #3.3 pB[4];
-    adc2B <= #3.3 8'd255 - pB[4];
+    adc1B <= #10.0 pB[5];
+    adc2B <= #10.0 8'd255 - pB[5];
+    adc1A <= #10.0 pA[4];
+    adc2A <= #10.0 8'd255 - pA[4];
   end
 
   //---------------------------------------------------------------------------------
@@ -293,7 +297,7 @@ module tb;
     check(rd_d[1] == 1'b0, "G: 0x28 bit 1 = 0 with the pin hi-Z");
     mon_pad = 0;
     rd2(8'h06);
-    check(rd16 == 16'h153E, "cmd 0x06 reads 0x153E");
+    check(rd16 == 16'h153F, "cmd 0x06 reads 0x153F");
 
     //-------------------------------------------------------------------------------
     // L. The start latency: the first edge 8 .. 9 clocks (40 .. 45 ns) after the rising edge of the 0x6D data strobe

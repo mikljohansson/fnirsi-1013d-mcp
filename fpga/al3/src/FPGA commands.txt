@@ -1,6 +1,8 @@
 // Copy of Atlan4's "FPGA commands.txt" (D:\src\Fnirsi1013D\Verzia 1.xxx\FPGA for 1.xxx\), updated
 // for fpga/al3/src/zaklad.v of fnirsi-1013d-mcp. Changes against Atlan4's file:
-//  - 0x06 returns 0x15 0x3E (0x153E = 0x153D with the ADC encode pins driven by IOB output registers on PLL C2 / C3,
+//  - 0x06 returns 0x15 0x3F (0x153F = 0x153E with both cores of a chip captured at the same instant, so a word holds
+//    the designed pair at every rate; 0x63 keeps its layout but only the two A fields select, power-on 0x06DB,
+//    fpga/al3/README.md section 22; 0x153E = 0x153D with the ADC encode pins driven by IOB output registers on PLL C2 / C3,
 //    no register change, fpga/al3/README.md section 21; 0x153D = 0x153C with the streaming logger, the pattern generator in place of the DDS
 //    and its trigger engine, see the 0x153D bullets below; 0x153C = 0x153B with the trigger types and hold-off, peak detect, the hardware counter and
 //    the cruft removal listed last below; 0x153B = 0x153A with records that end on the auto time-out or the forced stop
@@ -30,6 +32,8 @@
 //    0x53 bits 3 / 4 read back but select nothing any more. Write 0x36 (CH2 relays) is unchanged. The legacy data
 //    reach the memory 4 words later than on 0x1539 at 200 MSa/s (3 words at divided rates, 40 ns with K >= 1); EXT
 //    is not delayed, so the EXT-to-data offset grows by that much (fpga/al3/README.md section 10).
+//    0x153F: 0x63 bits 2:0 = CH1 stage, 8:6 = CH2 stage, for both cores of the chip, used at full rate only; bits 5:3,
+//    11:9 and 15:12 are stored and read back, nothing else; power-on 0x06DB. 0x36 and 0x64 are unchanged.
 //  - 0x5E, 0x5F, 0x60, 0x66 (new writes), 0x34, 0x37 (new reads), 0x1B (meaning changes), 0x153C C1
 //    (docs/plans/fpga-0x153c.md sections 2, 3): trigger types pulse width / Nth edge / timeout on CH1, CH2 and EXT,
 //    and the trigger hold-off on 0x1B (u32, 5 ns units; Atlan4 stored it and never used it, 0x153B and before). With
@@ -189,7 +193,7 @@
 
             8'h36: //ADC capture (0x153A), 10 bytes high byte first
                   4'h0, 4'h1:
-                    o_mcu_data <= cap_sel[15:8], cap_sel[7:0];   //the 0x63 value in effect (power-on 0x08E4)
+                    o_mcu_data <= cap_sel[15:8], cap_sel[7:0];   //the 0x63 value in effect (power-on 0x06DB)
                   4'h2, 4'h3:
                     o_mcu_data <= oc_1A[15:8], oc_1A[7:0];       //CH1 A outlier count since the last 0x01 = 1
                   4'h4, 4'h5:
@@ -476,21 +480,28 @@
                                                     //completes; then 0x0A = 1. Cleared by 0x01 = 1.
 
 //---------------------------------------------------------------------------------------
-// ADC capture (0x153A). Every ADC pin is sampled by an IOB DDR register on clk_200MHz; a write clock edge E sees
-// the pins as they were 5 + 2.5 k ns before it (stage k = 0..5). Core A of a chip is encoded on the falling write
-// clock edge and captured against it, core B on the rising edge and captured against that, so each core's data
-// window has the same position relative to its own edge at every sample rate; stages 3 and 4 lie inside it with
-// 1.3..2 ns to spare against the AD9288 limits (tV 2 ns, tPD 6 ns) on the owner's unit per TD's numbers, 2 and 5
-// are reserves for a drifted window. A word holds the B sample encoded T/2 before its A sample (B first) at every
-// rate. Setting a core inside its transition gives rail values and jumps, not a shifted trace: train with 0x36.
+// ADC capture (0x153A; instants and pairing since 0x153F). Every ADC pin is sampled by an IOB DDR register on
+// clk_200MHz in 2.5 ns steps. The unit's AD9288s change both output buses of a chip after the same edge, the write
+// clock's rising edge R (the B encode), about 11 ns after it at the pins, and one such release holds the designed
+// pair: the B sample and the A sample taken T/2 after it. Both cores of a chip are therefore captured at one instant:
+//   full rate (0x0D = 0, any filter, peak detect; T = 10 ns): the pins at R - 2.5 k ns, k = the chip's stage (2..5).
+//     The buses are stable for about 6 of the 10 ns: train the stage at a quiet input with 0x36 (a stage inside the
+//     transition gives rail values and jumps on both cores, not a shifted trace). Every stage that is clean on both
+//     cores gives the designed pair.
+//   divided rates (K = 0, 0x0D >= 1): the pins 2.5 ns after R, whatever the stage; nothing to train.
+// A word holds the B sample encoded T/2 before its A sample (B first) at every rate (0x153A..0x153E: core B one
+// conversion late at most rates and stages on the unit). Core A has 0x153E's instants and latency at full rate.
 
-            8'h63: //ADC capture stages and B reference, 2 bytes high byte first; power-on 0x08E4
+            8'h63: //ADC capture stages, 2 bytes high byte first; power-on 0x06DB
                   4'h0:
-                    cap_sel[15:8] <= io_mcu_data;   //bit 13 CH2 B / bit 12 CH1 B timed by the chip's A encode (ADC
-                                                    //data-align mode; power-on 0 = by its own encode), [11:9] CH2 B stage
+                    cap_sel[15:8] <= io_mcu_data;   //[8] the top bit of the CH2 stage; [15:9] no function since 0x153F
+                                                    //(0x153A..0x153E: 13 / 12 B from the A-encode path, [11:9] CH2 B stage)
                   4'h1:
-                    cap_sel[7:0] <= io_mcu_data;    //[8:6] CH2 A stage, [5:3] CH1 B, [2:0] CH1 A (6 and 7 act as 5)
-                    //Takes effect at the next write clock edges; write it before 0x01 = 1 of the capture it is for.
+                    cap_sel[7:0] <= io_mcu_data;    //[8:6] CH2 stage, [2:0] CH1 stage (both cores of the chip; 2..5, other
+                                                    //values alias by their low two bits: 6 as 2, 7 as 3, 0 as 4, 1 as 5);
+                                                    //[5:3] no function since 0x153F (CH1 B stage before). The firmware
+                                                    //writes the chip's stage into the B field too.
+                    //Takes effect at the next capture edges; write it before 0x01 = 1 of the capture it is for.
 
             8'h64: //Outlier threshold for the 0x36 counters, 1 byte, codes; power-on 8
                     cap_thr <= io_mcu_data;

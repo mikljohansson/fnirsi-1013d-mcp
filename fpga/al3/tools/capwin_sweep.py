@@ -21,6 +21,10 @@ it sees the guard act (the 0x63 value changed under it or GET_HEALTH reports the
     python -I fpga/al3/tools/capwin_sweep.py --analyse capwin.npz      # print the report of a saved run again
     python -I fpga/al3/tools/capwin_sweep.py --selftest                # the analysis on synthetic data, no scope
 
+0x153F and later capture both cores of a chip at one instant, the chip's stage (0x63's A field): sweep the A cores
+only (--cores "CH1 A,CH2 A"); both cores of the channel are reported for every stage, and the B fields select nothing
+(a B core in --cores is skipped with a notice).
+
 Run it with the mcp venv's Python (mcp/.venv), which has the fnirsi1013d package; --analyse and --selftest need only
 numpy. Output: the report on stdout, and with --out an .npz with every capture's raw cores (keys "c{core}_s{stage}_a",
 "..._b": uint8, captures x words; "meta": JSON) for later analysis.
@@ -234,6 +238,11 @@ def sweep(args) -> int:
             print("this firmware has no DEBUG_RAW (DEBUG_FPGA): load a PC_DEBUG image")
             return 2
         orig, _ = read_0x36(s)
+        if s.info().fpga_version >= 0x153F and any(c & 1 for c in cores):
+            print("FPGA 0x153F or later: one stage per chip (the A field), the B cores are not swept")
+            cores = [c for c in cores if not c & 1]
+            if not cores:
+                return 2
         moved0 = guard_moved(s)
         print(f"0x63 now 0x{orig:04X}; guard moved this boot: {moved0}")
         raw: dict[tuple[int, int], tuple[list, list]] = {}

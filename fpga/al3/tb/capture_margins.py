@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ADC capture margins of a placed AL3 build (0x153A and later), from TD's own numbers and the AD9288 datasheet.
+"""ADC capture margins of a placed AL3 build (0x153F and later), from TD's own numbers and the AD9288 datasheet.
 
 Usage (in WSL):  python3 -I capture_margins.py <io.timing> [tV_min tPD_max board_ns] [--bits]
 
@@ -9,33 +9,32 @@ Usage (in WSL):  python3 -I capture_margins.py <io.timing> [tV_min tPD_max board
 zaklad.sdc (tb/capture_report.sh: import_device, import_db FPGA_pr.db, read_sdc, report_timing -ep_num 2000
 -path_num 1). It gives, per pin:
   - encode outputs: the pad arrival of each o_adc*_enc* relative to the clk_200MHz rising edge before the launching
-    clk_ADC falling edge (launch at 3.75 ns; the write clock edge that the encode follows is at 2.5 ns, so the pad
-    switches at E + arrival - 2.5 for either write clock edge E);
+    encode clock edge (the write clock edge that the encode follows is at 2.5 ns, so the pad switches at
+    E + arrival - 2.5 for either write clock edge E);
   - ADC data inputs: the setup and hold points of each pin's IOB DDR register (pad time relative to its clock edge).
-AD9288 (datasheet rev. C, table 1, VD = VDD = 3.0 V, full temperature): data of a core is valid from tPD max (6 ns) after
-its encode rising edge to tV min (2 ns) after the next one, so the pins are in transition for 4 ns per encode period T
-and stable for T - 4 ns. Board: extra delay on the encode trace plus the data trace (default 0.3 ns; both are short).
 
-0x153A (fpga/al3/README.md "Changes" section 10): core A is encoded on the falling write clock edge and captured against
-it, core B on the rising edge and captured against that; stage k samples the pins 5 + 2.5 k ns before the core's own
-edge. The window of the sample a stage sees therefore has the same position relative to that edge at every rate (its
-start is encode + tPD - T, its end encode + tV, both relative to the edge), and the margins below hold for every divider.
-With 0x63 bit 12 / 13 the B core is taken from the falling-edge path (ADC data-align mode: B data re-timed by the chip to
-the A encode); those margins are printed as "B/A-ref" rows.
+Model (fpga/al3/README.md "Changes" section 22, the maintainer's unit on 2026-11-06): both output buses of a chip change
+after the rising edge of its B encode, i.e. after the write clock's rising edge R, whatever the rate. With the
+datasheet's figures taken from that edge (rev. C, table 1: tV min 2 ns, tPD max 6 ns) the pins of both cores are in
+transition from encB pad + board + tV to encB pad + board + tPD after every R and stable for the rest of the period
+T. The bench put the middle of that transition 10 .. 12.5 ns after R for core A; the defaults give 9.3 .. 13.3.
 
-Prints, per core and stage, the margins to the start and the end of the valid window (worst bit of the core, pin
-aperture included), marks the best stage of the allowed pair (3, 4; 2 and 5 keep the word association only when the
-window has drifted towards them and are shown in brackets), and exits 1 if the power-on stage of a core has less than
-1 ns. POWER_ON must match CAP_SEL_PO in zaklad.v.
+0x153F captures both cores of a chip at one instant:
+  - full rate (T = 10 ns): the pins at R - 2.5 k ns for the chip's stage k = 2..5 (command 0x63). The stage is trained
+    per unit; the rows show which stages the datasheet limits leave clean (a stage at or inside the transition is
+    "--"; the unit's trained stage 3 lies just after the transition's typical end).
+  - divided rates (T >= 20 ns): the pins at R + 2.5 ns, fixed. Its margins are printed for T = 20 ns (the tightest:
+    back to the end of the previous release's transition, forward to the start of this R's) and the script exits 1 if
+    either is under 1 ns: nothing trains this instant.
+Margins are per core, worst bit, pin aperture included.
 """
 import re
 import sys
 
-POWER_ON = {"1A": 4, "1B": 4, "2A": 3, "2B": 4}          # CAP_SEL_PO = 16'h08E4: bits 2:0 1A, 5:3 1B, 8:6 2A, 11:9 2B
-ALLOWED = (3, 4)
-CORES = [("1A", "i_adc1A_d", "o_adc1_encA"), ("1B", "i_adc1B_d", "o_adc1_encB"),
-         ("2A", "i_adc2A_d", "o_adc2_encA"), ("2B", "i_adc2B_d", "o_adc2_encB"),
-         ("1B/A-ref", "i_adc1B_d", "o_adc1_encA"), ("2B/A-ref", "i_adc2B_d", "o_adc2_encA")]
+STAGES = (2, 3, 4, 5)                                    # 0x63: the chip's stage, R - 2.5 k ns at full rate
+T_DIV = 2.5                                              # divided rates: the pins at R + 2.5 ns
+CORES = [("1A", "i_adc1A_d", "o_adc1_encB"), ("1B", "i_adc1B_d", "o_adc1_encB"),
+         ("2A", "i_adc2A_d", "o_adc2_encB"), ("2B", "i_adc2B_d", "o_adc2_encB")]
 
 
 def blocks(txt):
@@ -87,8 +86,8 @@ def main():
         return 2
     print("encode pads (ns after their write clock edge; A: the falling edge, B: the rising edge): " +
           ", ".join("%s %.2f" % (k, v - 2.5) for k, v in sorted(enc.items())))
-    print("AD9288 tV %.1f ns, tPD %.1f ns, board %.1f ns; window relative to the core's edge = "
-          "[encode + tPD - T, encode + tV] at every T" % (tv, tpd, board))
+    print("AD9288 tV %.1f ns, tPD %.1f ns, board %.1f ns; both buses of a chip in transition over "
+          "[encB + tV, encB + tPD] after every rising write clock edge R" % (tv, tpd, board))
     if bits:
         print("data pins: setup / hold point in ns relative to the IOB clock edge (the pin must be stable over "
               "[setup, hold]); per core the spread of the setup points")
@@ -97,38 +96,31 @@ def main():
             print("  core %-3s " % core + " ".join("d%d %+.2f/%+.2f" % (i, p[0], p[1]) for i, p in enumerate(pts))
                   + "  skew %.2f" % (max(p[0] for p in pts) - min(p[0] for p in pts)))
     bad = 0
-    T = 10.0                                             # the margins are the same at every rate (see above)
+
+    def margins(t, e, ap0, ap1, T):
+        """(ns after the end of the last transition, ns before the start of the next) for a capture at t after R, or
+        None inside a transition; e = the release pad edge after R."""
+        lo, hi = t + ap0, t + ap1                        # the pin must be stable over [lo, hi]
+        for n in range(-6, 3):
+            ws, we = e + T * n + tpd, e + T * (n + 1) + tv
+            if ws <= lo and hi <= we:
+                return lo - ws, we - hi
+        return None
+
     for core, pin, encpin in CORES:
-        e = enc[encpin] - 2.5 + board                    # encode pad rise, ns after the core's edge
+        e = enc[encpin] - 2.5 + board                    # the B encode's pad rise, ns after R
         ap0 = min(din["%s[%d]" % (pin, i)][0] for i in range(8))
         ap1 = max(din["%s[%d]" % (pin, i)][1] for i in range(8))
-        row = []
-        best = None
-        for k in range(6):
-            t = -5.0 - 2.5 * k                           # pad sampling instant of stage k, relative to the edge
-            lo, hi = t + ap0, t + ap1                    # the pin must be stable over [lo, hi]
-            m = None
-            for n in range(-4, 2):                       # encodes T apart
-                ws, we = e + T * n + tpd, e + T * (n + 1) + tv
-                if ws <= lo and hi <= we:
-                    m = (lo - ws, we - hi)
-            row.append(m)
-            if m and k in ALLOWED and (best is None or min(m) > min(row[best])):
-                best = k
-        print("  core %-8s (encode %.2f ns after its edge): " % (core, e)
-              + "  ".join(("k%d %s" if k in ALLOWED else "[k%d %s]")
-                          % (k, ("%.2f/%.2f%s" % (m[0], m[1], "*" if k == best else "")) if m else "  --  ")
-                          for k, m in enumerate(row)))
-        if core in POWER_ON:
-            p = row[POWER_ON[core]]
-            if not p or min(p) < 1.0:
-                bad += 1
-                print("    power-on stage %d: margin %s < 1 ns" % (POWER_ON[core], "%.2f" % min(p) if p else "none"))
-            elif best is not None and best != POWER_ON[core]:
-                print("    power-on stage %d has %.2f ns, stage %d would have %.2f" %
-                      (POWER_ON[core], min(p), best, min(row[best])))
-    print("margins: start/end of the valid window in ns, worst bit; * best allowed stage" +
-          ("" if not bad else "; %d cores below 1 ns" % bad))
+        row = [margins(-2.5 * k, e, ap0, ap1, 10.0) for k in STAGES]
+        dv = margins(T_DIV, e, ap0, ap1, 20.0)
+        print("  core %-2s (release %.2f ns after R): full rate " % (core, e)
+              + "  ".join("k%d %s" % (k, ("%.2f/%.2f" % m) if m else "  --  ") for k, m in zip(STAGES, row))
+              + "   divided (T 20) %s" % (("%.2f/%.2f" % dv) if dv else "--"))
+        if not dv or min(dv) < 1.0:
+            bad += 1
+            print("    divided rates: margin %s < 1 ns" % ("%.2f" % min(dv) if dv else "none"))
+    print("margins: after the last transition / before the next, ns, worst bit; full-rate stages are trained per unit" +
+          ("" if not bad else "; %d cores below 1 ns at the divided rates" % bad))
     return 1 if bad else 0
 
 
