@@ -928,6 +928,12 @@ async def _run_session(params: Any, groups: list[str], run: Run, echo: Callable[
     async with stdio_client(params, errlog=err) as (r, w):
         async with ClientSession(r, w) as session:
             await session.initialize()
+            # Without a scope every step would fail the same way (bench 2026-11-06: 199 FAIL lines with the scope
+            # switched off): one read first, and a run that cannot start says so once (main: exit status 2)
+            pre = await session.call_tool("scope_info", {})
+            if pre.isError:
+                text = " ".join(c.text for c in pre.content if getattr(c, "type", "") == "text")
+                raise RuntimeError(f"the scope does not answer scope_info, nothing was run: {text[:300]}")
             b = Battery(session, run, echo, sim=sim)
             # every group starts from the bench setup (channels, Filter Off, the generator, the CH1 trigger)
             for g in (["config"] if "config" not in groups and groups != ["session"] else []) + groups:
@@ -978,6 +984,8 @@ def main(argv: list[str] | None = None) -> int:
         run = anyio.run(lambda: run_battery(groups, port=a.port, sim=a.sim, coreorder_n=a.coreorder_captures,
                                             errlog=out / "server.log"))
     except Exception as e:  # noqa: BLE001 - the server did not start or the session broke
+        while isinstance(e, BaseExceptionGroup) and e.exceptions:  # anyio's task group wraps the cause
+            e = e.exceptions[0]
         print(f"fnirsi1013d-battery: cannot run: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     meta = {"started": started.isoformat(timespec="seconds"), "port": a.port, "sim": a.sim, "groups": groups,

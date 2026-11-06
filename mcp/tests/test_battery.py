@@ -58,3 +58,14 @@ def test_list_and_bad_group(capsys):
     assert "coreorder" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         B.main(["--sim", "--groups", "nope"])
+
+
+def test_battery_stops_at_once_without_a_scope(capsys, tmp_path):
+    """No scope on the port: one message and exit status 2, not a FAIL line per step (bench 2026-11-06)."""
+    from fnirsi1013d import battery
+
+    assert battery.main(["--port", "tcp://127.0.0.1:9", "--groups", "session", "--out", str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert "cannot run" in err and "scope_info" in err
+    assert not (tmp_path / "battery.md").exists()
+
