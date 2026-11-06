@@ -1821,3 +1821,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   against rel-1 mixed two unknown warm-up states, so it does not show a regression. Lesson for the acceptance measure: the
   sweep is taken at least 30 minutes after power-on, and the time since boot is logged with it.** The wizard of 14:07 ran
   about 2 minutes after the FEL load (cold); a warm re-run before the firmware is persisted is the owner's call.
+- 2026-11-06 15:1x-15:24 (owner, lead): **0x153E accepted by the owner for 0.3.0** (15:1x, on the warm numbers). Since the
+  flash only USB and the probes were connected (the programmer was off J2), so the four soak drops are not the programmer's.
+  **Wizard re-run warm** by the owner (inputs open, uptime 69 min, saved): again CH1 A3 B3, CH2 A3 B3 (0x06DB), GET_CAL
+  trailer valid, TRAINED, trained on 0x153E, provenance fw 0.2.105 / FPGA 0x153e. Training q warm / cold: CH1 A stage 3
+  71 / 121 (stage 4 now quiet too), CH1 B 156 / 721, CH2 A 1459 / 2152 (stage 4: 366 outliers, cold 25801; quiet 2, 3, 5),
+  CH2 B 1353 / 1775. Centres: CH1 offset_pwm 871, CH2 861. With this calibration, probes checked by capture (CH1 and CH2
+  DC, CH2 93 rising to 99): `ab_0x153E_warmcal.npz` divider 99 0 / 0, divider 0 overall A 1.71 %, B 0.36 %, rising phase
+  A 3.50 %, B 0.27 %; sweeps `sweep_0x153E_5.npz`, `_6.npz`: **peak A 5.17 % / 5.12 %, B 0.61 % / 0.65 %** (the
+  release's reference: 6.94 % / 0.66 %); encode self-check 0 bad of 110232, capture self-check 0 flagged of 107674.
+  15:23: **fw 0.2.105 b278bc0c (main e242b53, built for 0x153E) persisted to the card** (`fnirsi1013d-flash
+  --persist-only`): backup of the replaced sectors `backups/sd_750-2048_20261018-154957.bin`, write 2.88 s without resends, SD_READ compare of all
+  1599 sectors identical, sector 750 verified (eGON.EXE, length 818688, checksum 0xB8E6C8F6). Boot-mode byte and sectors
+  16-79 untouched. Next: power cycle from the card (no notice, no first-run screen), then dist `recommended`.
