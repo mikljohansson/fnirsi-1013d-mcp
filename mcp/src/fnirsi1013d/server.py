@@ -968,6 +968,7 @@ def _channel_result(cap: Capture, name: str, inline_max: int) -> dict[str, Any]:
     out: dict[str, Any] = {k: _r6(v) for k, v in st.items()}
     out.update({"frequency": _r6(fr["frequency"]) if fr["frequency"] else None,
                 "duty": _r6(fr["duty"]) if fr["duty"] is not None else None,
+                **({"frequency_reason": fr["reason"]} if fr.get("reason") else {}),
                 "clipped_samples": int(ch.clipped.sum()), "volts_per_lsb": _r6(ch.volts_per_lsb),
                 "scaling": ch.scale.source if ch.scale is not None else "firmware"})
     if ch.peak:  # 1.26: the envelope's extremes and width
@@ -2917,8 +2918,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         timeout_s: Annotated[float, Field(gt=0, le=10)] = 2.0,
     ) -> dict[str, Any]:
         """Measurements computed on the host from raw data with calibration: vpp, vmin, vmax, mean, rms, ac_rms,
-        frequency, period, duty, rise_time, fall_time, delay(CH1->CH2). Tier 0 on an existing capture, tier 1 if
-        capture=true.
+        frequency, period, duty, rise_time, fall_time, delay (CH1 -> CH2). Tier 0 on an existing capture, tier 1 if
+        capture=true. Frequency, period and duty need a swing well above the sample noise, a whole period in the record
+        and regular crossings; otherwise they are null and `frequency_reason` says why.
 
         Rise times below ~12 ns (0.35 / 30 MHz) measure the scope, not the signal."""
         all_items = ["vpp", "vmin", "vmax", "mean", "rms", "ac_rms", "frequency", "period", "duty", "rise_time",
@@ -2948,6 +2950,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                         m[it] = _r6(st_[it])
                     elif it in ("frequency", "period", "duty"):
                         m[it] = _r6(fr[it]) if fr[it] is not None else None
+                        if fr[it] is None and fr.get("reason"):
+                            m["frequency_reason"] = fr["reason"]
                     elif it == "rise_time":
                         m[it] = _r6(A.transition_time(v, cap.dt, "rising"))
                     elif it == "fall_time":
@@ -3032,9 +3036,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 if hysteresis != "auto" and not 1 <= int(hysteresis) <= 255:
                     raise ToolError("scope_counter: hysteresis is 1..255 codes or 'auto'")
                 kw["hysteresis"] = P.COUNTER_AUTO if hysteresis == "auto" else int(hysteresis)
+            t_cfg = None
             if kw:
                 notes += sess.ensure_control()
                 cur = s.read_counter(**kw)
+                t_cfg = time.monotonic()
             if cur.gate == 0:
                 raise ToolError("scope_counter: the counter gate is off; pass gate='100ms' (or '10ms', '1s')")
             gate_s = cur.gate_s
@@ -3042,13 +3048,24 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             last_seq: int | None = None
             auto = P.COUNTER_AUTO in (s.counter_level_cfg, s.counter_hyst_cfg)
             retune_skips = 1 if auto and eff_src != "EXT" else 0
-            deadline = time.monotonic() + (3 * gate_s + 0.5) * (readings + retune_skips) + 2.0
-            first = True
+            deadline = time.monotonic() + (3 * gate_s + 0.5) * (readings + retune_skips + 1) + 2.0
+            # A configuration takes effect at the scope's next main-loop pass, which restarts the gate; the configure
+            # answer is the result held before it, and a gate ending in that pass was counted under the old settings
+            # (battery 2026-11-06 G3 / G5: the old source, a duty from before the change). The host cannot tell when a
+            # result's gate ended (it sees it at its next poll), so the first new result after a configure is skipped:
+            # the gate after it began after the restart.
+            stale = 0
+            skip_first = t_cfg is not None
+            if skip_first:
+                last_seq = cur.seq
             while len(snaps) < readings and time.monotonic() < deadline:
-                r = cur if first and kw else s.read_counter()  # a configure call already answered a snapshot
-                first = False
+                r = s.read_counter()
                 if r.new and r.seq != last_seq:
                     last_seq = r.seq
+                    if skip_first:
+                        skip_first = False
+                        stale += 1
+                        continue
                     tgt = P.counter_auto_target(r.min, r.max, s.counter_level_cfg, s.counter_hyst_cfg)
                     if (not snaps and retune_skips and not r.valid and tgt is not None
                             and not P.counter_auto_fits(r.level, r.hysteresis, tgt)):
@@ -3059,6 +3076,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     snaps.append(r)
                     continue
                 time.sleep(min(0.05, max(0.005, gate_s / 10)))
+            if stale:
+                notes.append("the first gate after the configuration was skipped: it may have begun before the "
+                             "configuration took effect (counted under the previous source / gate / thresholds)")
             if not snaps:
                 raise ToolError("scope_counter: no new gate result within the wait; check the scope")
             src_name = snaps[-1].effective_source
@@ -3857,10 +3877,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     ) -> dict[str, Any]:
         """Chirp the generator's square on the calibration pin (protocol 1.27, contract 7.3): the host sends one
         SET_GEN per step, each a glitch-free, phase-continuous change taken at the next step boundary (before a step
-        that comes sooner than one period the host polls GET_GEN until the previous one was taken). Host-paced: a USB
-        round trip per step (about 0.2 ms in REMOTE) limits it to about 2,000 steps per second; a faster request is
-        run as fast as the link allows and the caveats say so (the device-paced 5,000 steps / s needs a firmware
-        CHIRP command, not in this protocol). Use it with the Spectrum view or scope_capture_and_fft to see a
+        that comes sooner than one period the host waits until the previous one was taken). Host-paced: SET_GEN is
+        answered at the scope's next main-loop pass, so each step costs a pass (the unit on 2026-11-06: 34 ms per step
+        with one GET_GEN poll each, 29 steps / s); a faster request runs as fast as the scope answers and the stats
+        say what was reached (a device-paced chirp needs a firmware CHIRP command, not in this protocol). Use it with the Spectrum view or scope_capture_and_fft to see a
         filter's response. The generator is restored as found. Needs a token (drives the pin)."""
         args = {"start": start, "stop": stop, "steps": steps, "time_s": time_s, "rate": rate, "spacing": spacing,
                 "shape": shape, "duty_percent": duty_percent}
@@ -3903,10 +3923,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             finally:
                 note = s.restore_gen(saved)
             cav = list(notes)
-            if sr > HOST_STEP_RATE:
-                cav.append(f"{sr:.0f} steps/s requested: a host-paced chirp reaches about {HOST_STEP_RATE} steps/s "
-                           "(one USB round trip per step); achieved "
-                           f"{stats['achieved_steps_per_s'] or 0:.0f} steps/s")
+            got = stats["achieved_steps_per_s"] or 0.0
+            if got < 0.8 * sr:
+                cav.append(f"{sr:.0f} steps/s requested, {got:.0f} reached: a host-paced chirp sends one SET_GEN per "
+                           "step, answered at the scope's next main-loop pass (tens of ms while the screen runs), "
+                           "so the pace is the scope's, not the link's")
             if stats["late_steps"]:
                 cav.append(f"{stats['late_steps']} step(s) came more than half a step late (worst "
                            f"{fmt_si(stats['worst_late_s'], 's')}): host / USB scheduling")
@@ -4354,21 +4375,37 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
     try:
         s.set_channel(0, enable=True, range_index=1, coupling=0, dcoffset=0, probe_index=1)  # 2.5 V/div at 1x
         cfg = s.get_channel(0)
-        mid = int(round(s.scale(0, cfg).raw_a_for_volts(1.65)))
+        # the post's square against the probe ground spans about -1.24 .. +1.86 V (CAL_OUTPUT_NOTE): its mid is
+        # +0.31 V, the level used until a capture has measured the swing
+        mid = int(round(s.scale(0, cfg).raw_a_for_volts(CAL_OUTPUT_MID_V)))
         prof = s.profile()
         total = 8000 if prof.programmable else 3000  # >= 4 periods of 10 kHz at 20 MS/s
         pre = total // 2
         s.set_trigger(source=0, edge=0, level=mid, mode=1, pretrigger_samples=pre, total_samples=total)
+        wiring = ("CH1 must be on the calibration post directly (probe tip on the post, ground clip on the probe "
+                  "ground): a filter or ladder in between slows the edges and moves the levels")
         # T4 needs edges between the two cores of a word: the generator's edges lie on the ADC's 5 ns grid since
         # 0x153D, so an even period (1 MHz = 200 clocks) puts every edge at the same core; P = 201 clocks alternates
         for f_hz, duty, rates in ((10e3, 0.5, (2e6, 20e6)), (T4_HZ, 0.25, (50e6, 200e6))):
             s.set_gen(enable=True, freq_hz=f_hz, duty=duty)
-            for fs in rates:
+            for i, fs in enumerate(rates):
                 n = max(0, int(P.BASE_CLOCK_HZ // fs) - 1)
                 s.set_timebase(divider=n)
+                if i == 0:  # the level from the measured swing: an auto capture, core A's 5 / 95 % codes
+                    s.set_trigger(mode=0)
+                    probe = s.capture(["CH1"], 1.0, keep_raw=True)
+                    s.set_trigger(mode=1)
+                    if probe is not None and probe.channels["CH1"].raw_a is not None:
+                        a_lo, a_hi = (float(x) for x in np.percentile(probe.channels["CH1"].raw_a, [5, 95]))
+                        if a_hi - a_lo >= SELF_TEST_MIN_SWING_CODES:
+                            mid = int(round((a_lo + a_hi) / 2))
+                            s.set_trigger(level=mid)
+                        else:
+                            check(f"swing {fmt_si(f_hz, 'Hz')} on CH1", False, codes=a_hi - a_lo, reason=wiring)
                 cap = s.capture(["CH1"], 1.0, keep_raw=True)
                 if cap is None:
-                    check(f"capture {fmt_si(f_hz, 'Hz')} at {fmt_si(fs, 'S/s')}", False, reason="no trigger")
+                    check(f"capture {fmt_si(f_hz, 'Hz')} at {fmt_si(fs, 'S/s')}", False,
+                          reason=f"no trigger at code {mid}: {wiring}")
                     continue
                 v = cap.channels["CH1"].volts
                 fr = A.frequency(v, cap.dt)
@@ -4390,7 +4427,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
         # T7: FORCE in normal mode with no signal
         s.set_gen(enable=False)
         if prof.has(P.Caps.FORCE_TRIGGER):
-            s.set_trigger(mode=1)
+            s.set_trigger(mode=1, level=250)  # out of reach of the idle input and its noise: only FORCE ends it
             s.arm()
             t0 = time.monotonic()
             s.force()
@@ -4418,8 +4455,10 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
                                                   "failures without that connection are expected."]}
 
 
-#: a host-paced chirp's step rate: one USB round trip (about 0.2 ms in REMOTE) per SET_GEN (contract 7.4)
-HOST_STEP_RATE = 2000
+#: the calibration post's square against the probe ground: about -1.24 .. +1.86 V (VRF1, CAL_OUTPUT_NOTE), mid +0.31 V
+CAL_OUTPUT_MID_V = 0.31
+#: the self-test's smallest core-A swing (5..95 %) that counts as the post's square (2.5 V/div: about 3.1 V = 63 codes)
+SELF_TEST_MIN_SWING_CODES = 20
 #: the self-test's fast square: an odd period of 201 clocks of 5 ns (995.02 kHz)
 T4_HZ = P.BASE_CLOCK_HZ / 201
 

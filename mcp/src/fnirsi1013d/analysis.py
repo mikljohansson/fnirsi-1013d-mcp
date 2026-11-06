@@ -60,21 +60,53 @@ def crossings(v: np.ndarray, level: float, edge: str = "rising", hysteresis: flo
     return idx + frac
 
 
-def frequency(v: np.ndarray, dt: float) -> dict[str, float | None]:
-    """Frequency, period and duty from mean-level crossings with 10 % hysteresis."""
+#: frequency(): the 2..98 % swing must be this many times the sample noise (sigma from the second differences) for a
+#: crossing to be an edge, and the rising crossings this regular (std / mean of their intervals) to be one period.
+#: The battery's flat CH2 at 200 MSa/s (2026-11-06 R0b: 11 codes of noise and slope) has 5.6 and 0.45 and read 39 MHz
+#: with duty 1.0; the noise-only records of that day 2..3.3 and 0.5..0.8; every real square 22 .. 4000 and below 0.004.
+FREQ_MIN_SWING_SIGMA = 8.0
+FREQ_MAX_INTERVAL_CV = 0.2
+
+
+def noise_sigma(v: np.ndarray) -> float:
+    """Sample noise (rms) of a record from the median absolute second difference: edges and slopes are outliers to
+    it, so a square or a slow sine leaves it at the noise."""
     v = np.asarray(v, dtype=np.float64)
+    if v.size < 5:
+        return 0.0
+    d2 = v[2:] - 2 * v[1:-1] + v[:-2]
+    return float(np.median(np.abs(d2 - np.median(d2))) * 1.4826 / math.sqrt(6))
+
+
+def frequency(v: np.ndarray, dt: float) -> dict[str, Any]:
+    """Frequency, period and duty from mid-level crossings with 10 % hysteresis, or None with a ``reason``: the swing
+    must stand out of the noise (FREQ_MIN_SWING_SIGMA), the record must hold a whole period (two rising crossings)
+    and the crossings must be regular (FREQ_MAX_INTERVAL_CV), else noise on a flat or slow trace counts as edges."""
+    v = np.asarray(v, dtype=np.float64)
+
+    def none(reason: str) -> dict[str, Any]:
+        return {"frequency": None, "period": None, "duty": None, "reason": reason}
+
     if v.size < 4:
-        return {"frequency": None, "period": None, "duty": None}
+        return none("too few samples")
     lo, hi = np.percentile(v, 2), np.percentile(v, 98)
     if hi - lo <= 0:
-        return {"frequency": None, "period": None, "duty": None}
+        return none("flat record")
+    sig = noise_sigma(v)
+    if sig > 0 and (hi - lo) < FREQ_MIN_SWING_SIGMA * sig:
+        return none(f"no edges: the swing is {(hi - lo) / sig:.1f} x the sample noise (needs "
+                    f"{FREQ_MIN_SWING_SIGMA:g})")
     mid = 0.5 * (lo + hi)
     hy = 0.1 * (hi - lo)
     r = crossings(v, mid, "rising", hy)
     f = crossings(v, mid, "falling", hy)
     if r.size < 2:
-        return {"frequency": None, "period": None, "duty": None}
-    period = float(np.mean(np.diff(r))) * dt
+        return none("less than one whole period in the record")
+    iv = np.diff(r)
+    if iv.size > 1 and float(np.std(iv) / np.mean(iv)) > FREQ_MAX_INTERVAL_CV:
+        return none(f"irregular crossings (interval spread {float(np.std(iv) / np.mean(iv)):.2f} of the mean): no "
+                    "single period")
+    period = float(np.mean(iv)) * dt
     duty = None
     highs = []
     for x in r[:-1]:

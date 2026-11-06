@@ -122,7 +122,7 @@ class Signal:
         if self.kind == "gate":
             return 0.5 * (self.p("high", 3.3) + self.p("low", 0.0))
         if self.kind == "gen":
-            return 1.65
+            return self.p("offset", 0.0) + 0.5 * self.p("high", 3.3)
         if self.kind in ("dut_in", "dut_out"):
             return self.p("offset", -1.24) + self.p("gain", 1.0) * 0.5 * self.p("high", 3.1)
         if self.kind in SERIAL_KINDS:
@@ -170,7 +170,8 @@ class Signal:
         if k == "gen":
             if not gen.enable:
                 return np.zeros_like(t)
-            return np.where(gen.pin(t) > 0, self.p("high", 3.3), 0.0)
+            # ``offset``: the probe ground's view (-1.24 V: the post's 0 / 3.1 V square against VRF1 reads -1.24 / +1.86)
+            return self.p("offset", 0.0) + np.where(gen.pin(t) > 0, self.p("high", 3.3), 0.0)
         if k in ("dut_in", "dut_out"):
             off, g = self.p("offset", -1.24), self.p("gain", 1.0)
             if not gen.enable or not gen.frequency_hz:
@@ -565,6 +566,16 @@ class SimConfig:
     #: a small ring the DDR ring overflows and the next chunk carries the gap)
     log_ring_bytes: int = 8 << 20
     log_stall_s: float = 0.0
+    #: fw 0.2.105 GET_TIMEBASE (battery finding 3, 2026-11-06): a host's raw divider (SET_TIMEBASE mode 1) is what
+    #: GET_TIMEBASE reports only until the UI's time/div moves; a SET_TRIGGER total / pretrigger that the UI's time/div
+    #: at the UI's own rate does not fit snaps it (acq_view_fit) without a 0x0D write, the session drops tb_raw, and
+    #: GET_TIMEBASE then reports the UI table's divider while the FPGA (GET_DECIM divider, GET_CAPTURE_INFO, the
+    #: captures) keeps the raw one. Off: the simulator reports the divider in effect (the intended behaviour).
+    tb_raw_snap: bool = False
+    #: the firmware's GET_COUNTER configure (fpga_counter_config, battery 2026-11-06 G3 / G5): the answer is the
+    #: result held before the configuration, which the next main-loop pass applies (restarting the gate). Off: the
+    #: simulator answers with the new configuration at once
+    counter_stale_config: bool = False
 
 
 #: the simulated running build's commit time (yy mm dd hh mm ss, UTC) and hash (GET_INFO fw_build)
@@ -877,6 +888,11 @@ class Device:
         self.settings = Settings()
         self.settings.trigger.pretrigger_samples = 1500
         self.settings.trigger.total_samples = 3000
+        #: the UI's own time/div and rate indices (kept while a host's raw divider runs; SimConfig.tb_raw_snap)
+        self.ui_tb = (self.settings.tpd_index, self.settings.sr_index)
+        #: SimConfig.tb_raw_snap: the divider GET_TIMEBASE reports after the session dropped the raw one (None: the
+        #: divider in effect)
+        self.tb_reported_divider: int | None = None
         self.cal = [Calibration(adc_b_comp=-round(self.cfg.core_b_offset[0])),
                     Calibration(adc_b_comp=-round(self.cfg.core_b_offset[1]))]
         self.snapshot: Settings | None = None
@@ -1032,6 +1048,8 @@ class Device:
         self.counter_level_eff = P.COUNTER_DEFAULT_LEVEL
         self.counter_hyst_eff = P.COUNTER_DEFAULT_HYST
         self.counter_seq_read: int | None = None
+        #: SimConfig.counter_stale_config: (gate, source, level, hysteresis, t) before the last configure
+        self.counter_old: tuple[int, int, int, int, float] | None = None
         #: the last gate evaluated (the auto rule runs once per gate) and its snapshot
         self.counter_seq_eval: int | None = None
         self.counter_last: P.CounterResp | None = None
@@ -2064,6 +2082,7 @@ class Device:
             sr = P.TIME_PER_DIV_SAMPLE_RATE[ui_index]
             s = self.settings
             s.divider, s.tpd_index, s.sr_index = P.SAMPLE_RATE_DIVIDERS[sr], ui_index, sr
+            self.ui_tb, self.tb_reported_divider = (ui_index, sr), None
             self._bump_if_changed(before)
 
     def ui_set_trigger(self, **fields: int) -> None:
@@ -2344,7 +2363,10 @@ class Device:
 
     def timebase(self) -> P.Timebase:
         s = self.settings
-        tb = P.timebase_for_divider(s.divider, s.tpd_index, s.sr_index)
+        if self.tb_reported_divider is not None:  # SimConfig.tb_raw_snap: fw 0.2.105 reports the UI's table divider
+            tb = P.timebase_for_divider(self.tb_reported_divider, *self.ui_tb)
+        else:
+            tb = P.timebase_for_divider(s.divider, s.tpd_index, s.sr_index)
         dec = self.decim_config()
         if dec.k:  # 1.9: the output period N x 5 ns
             tb.sample_rate_hz, tb.sample_period_ps = P.BASE_CLOCK_HZ // dec.n, min(5000 * dec.n, 0xFFFFFFFF)
@@ -2973,11 +2995,41 @@ class Device:
                 raise _DevErr(P.Status.E_UNSUPPORTED, 1, "roll/long timebases not available remotely")
             sr = P.TIME_PER_DIV_SAMPLE_RATE[r.value]
             s.divider, s.tpd_index, s.sr_index = P.SAMPLE_RATE_DIVIDERS[sr], r.value, sr
+            self.ui_tb = (r.value, sr)
         elif r.mode == 1:
             s.divider, s.tpd_index, s.sr_index = r.value, 0xFF, 0xFF
         else:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"mode {r.mode}")
+        self.tb_reported_divider = None
         return self._ok(req, self.timebase().pack())
+
+    def _ui_tb_snap(self, total: int) -> None:
+        """SimConfig.tb_raw_snap: the firmware's acq_view_fit after a SET_TRIGGER geometry change. The UI's time/div
+        must show its ten divisions inside the record at the UI's own rate (tbv_viable, simplified: 10 x time/div x
+        fs <= total - 1); one that does not is snapped to the nearest that does, and a session running a raw divider
+        forgets it (pc_settings_track): GET_TIMEBASE reports the UI's table divider from then on, the FPGA keeps the
+        raw one, settings_seq moves."""
+        s = self.settings
+        tpd, sr = self.ui_tb
+        if not self.cfg.tb_raw_snap or s.sr_index != 0xFF or not P.MIN_REMOTE_TIMEPERDIV_INDEX <= tpd <= 34 or \
+                sr >= len(P.SAMPLE_RATE_DIVIDERS):
+            return
+        fs = P.BASE_CLOCK_HZ / (P.SAMPLE_RATE_DIVIDERS[sr] + 1)
+
+        def viable(i: int) -> bool:
+            return 10 * P.TIME_PER_DIV[i] * fs <= total - 1 and P.TIME_PER_DIV[i] * fs >= 10
+
+        if viable(tpd):
+            return
+        ok = [i for i in range(P.MIN_REMOTE_TIMEPERDIV_INDEX, 35) if viable(i)]
+        if not ok:
+            return
+        self.ui_tb = (min(ok, key=lambda i: (abs(i - tpd), i)), sr)
+        self.tb_reported_divider = P.SAMPLE_RATE_DIVIDERS[sr]
+        s.tpd_index, s.sr_index = self.ui_tb
+        self.settings_seq = (self.settings_seq + 1) & 0xFFFFFFFF  # the fingerprint loses the raw divider's term
+        if self.settings_seq == P.SEQ_INVALID:
+            self.settings_seq = 0
 
     def _cmd_get_trigger(self, req: P.Frame) -> P.Frame:
         return self._ok(req, self.trigger().pack())
@@ -3030,6 +3082,8 @@ class Device:
                 raise _DevErr(P.Status.E_BAD_ARG, 4, f"pretrigger {new.pretrigger_samples} > total - 2 "
                                                      f"({new.total_samples - 2})")
         self.settings.trigger = new
+        if r.mask & (M.M_PRETRIGGER | M.M_TOTAL):
+            self._ui_tb_snap(new.total_samples)
         return self._ok(req, self.trigger().pack())
 
     def _cmd_set_trigger2(self, req: P.Frame) -> P.Frame:
@@ -3064,6 +3118,18 @@ class Device:
             # at the first read the firmware has run since boot: its earlier gates have tuned the thresholds
             first = seq - 2 if self.counter_seq_eval is None else self.counter_seq_eval + 1
             for k in range(max(first, seq - 2), seq + 1):
+                old = self.counter_old
+                if old is not None and (k - 1) * gate_s < old[4]:  # SimConfig.counter_stale_config
+                    new = (self.counter_gate, self.counter_source, self.counter_level_eff, self.counter_hyst_eff)
+                    (self.counter_gate, self.counter_source, self.counter_level_eff,
+                     self.counter_hyst_eff) = old[:4]
+                    try:
+                        self.counter_last = self._counter_gate(k, gate_s)
+                    finally:
+                        (self.counter_gate, self.counter_source, self.counter_level_eff,
+                         self.counter_hyst_eff) = new
+                    continue
+                self.counter_old = None
                 self.counter_last = self._counter_gate(k, gate_s)
             self.counter_seq_eval = seq
         assert self.counter_last is not None
@@ -3156,6 +3222,13 @@ class Device:
                 raise _DevErr(P.Status.E_BAD_ARG, 2, f"source {r.source}")
             if r.level != P.COUNTER_AUTO and r.hysteresis > r.level:  # level 0 is auto
                 raise _DevErr(P.Status.E_BAD_ARG, 4, "hysteresis > level")
+            held = None
+            if self.cfg.counter_stale_config:
+                held = self.counter_snapshot()
+                # the gate running now ends under the old configuration (the firmware's pass applies the new one
+                # after taking that gate's result)
+                self.counter_old = (self.counter_gate, self.counter_source, self.counter_level_eff,
+                                    self.counter_hyst_eff, self.now() - self.t_boot)
             self.counter_gate, self.counter_source = r.gate, r.source
             self.counter_level, self.counter_hyst = r.level, r.hysteresis
             # the firmware's next pass writes the pinned values (an auto hysteresis under a pinned level is clamped)
@@ -3170,6 +3243,8 @@ class Device:
             self.counter_seq_eval = int((self.now() - self.t_boot) / gate_s) - 1 if gate_s > 0 else None
             self.counter_last = None
             self.counter_seq_read = None
+            if held is not None:
+                return self._ok(req, held.pack())
         return self._ok(req, self.counter_snapshot().pack())
 
     def _cmd_arm(self, req: P.Frame) -> P.Frame:
@@ -4632,7 +4707,8 @@ def build_config(args: argparse.Namespace) -> SimConfig:
                      seed=args.seed, fail_responses_over=args.fail_responses_over, caps_override=args.caps,
                      legacy=args.legacy, ui_capture_period_s=args.ui_period,
                      ext_signal=parse_signal(args.ext) if args.ext else None,
-                     log_ring_bytes=args.log_ring, log_stall_s=args.log_stall)
+                     log_ring_bytes=args.log_ring, log_stall_s=args.log_stall, tb_raw_snap=args.tb_raw_snap,
+                     counter_stale_config=args.counter_stale_config)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -4673,6 +4749,11 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--log-stall", type=parse_quantity, default=0.0, metavar="S",
                     help="the logger's host reads stall for S seconds from 0.1 s after LOG_START (tests the DDR "
                          "overflow: the next chunk carries the gap)")
+    ap.add_argument("--tb-raw-snap", action="store_true",
+                    help="model fw 0.2.105's GET_TIMEBASE: after a SET_TRIGGER geometry change that snaps the UI's "
+                         "time/div, a host's raw divider is no longer reported (the FPGA keeps it)")
+    ap.add_argument("--counter-stale-config", action="store_true",
+                    help="model the firmware's GET_COUNTER configure: the answer is the result held before it")
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap
 

@@ -370,7 +370,7 @@ per-unit calibration when there is one). Caveats: 8-bit SFDR, firmware scaling, 
 divider is labelled with the UI time base's rate" (known firmware limit).
 
 **`measure`** (tier 0 on an existing capture, 1 if it captures). Items: `vpp`, `vmin`, `vmax`, `mean`,
-`rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay(CH1->CH2)`. Computed on the
+`rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay` (CH1 -> CH2). Computed on the
 host from raw data with calibration. Caveat on rise time: "rise times below ~12 ns (0.35 / 30 MHz) measure
 the scope, not the signal".
 
@@ -543,12 +543,18 @@ steps, 20 ns edge jitter).
 **`sweep`** (`scope_sweep`, tier 3, token; protocol 1.27, contract 7.3 / 7.4). A chirp of the generator's square:
 `start` / `stop` (Hz), `steps` (2..200,000), `time_s` (one pass) or `rate` (steps per second), `spacing` linear / log,
 `shape` single / triangle (start -> stop -> start), `duty_percent`. Host-stepped: one SET_GEN per step, each a
-glitch-free, phase-continuous change of the square's two entries; before a step that comes sooner than one period of
-the frequency in effect the host polls GET_GEN until the previous change was taken (`pending`; the FPGA takes a commit
-within 3 clocks, or at the boundary of a step with less left). A USB round trip per step (about 0.2 ms in REMOTE) limits a host chirp to about
-**2,000 steps per second**; a faster request runs as fast as the link allows and says so (the device-paced 5,000
-steps / s needs a firmware CHIRP command, not in this protocol). At most 600 s per call. Returns the statistics (steps
-sent, achieved steps / s, late steps, polls) and restores the generator it found. Watch it on the scope's Spectrum
+glitch-free, phase-continuous change of the square's two entries; SET_GEN answers with the GEN status read after its
+commit, and only when that still says `pending` and the next step comes sooner than the step in progress can last
+(one period) does the host wait: it sleeps the rest when at most 5 ms is left, else polls GET_GEN until the change was
+taken (the FPGA takes a commit within 3 clocks, or at the boundary of a step with less left). **The pace is the
+scope's main loop, not the link**: SET_GEN and GET_GEN are answered at the next main-loop pass (dispatch flags F_SCOPE
+/ F_MODAL in `pc_cmds.c`), so each request costs one pass. Measured on the unit (battery 2026-11-06, fw 0.2.105,
+1 kHz .. 10 kHz in 200 log steps asked at 100 steps / s): 6.76 s, 34 ms per step with one GET_GEN poll per step, 29
+steps / s. Without the poll (SET_GEN's own answer says taken) a step should cost one pass; the rate in RUN and in STOP
+is still to be measured (`scope_sweep` with `steps=200, rate=100` in each state: `stats.achieved_steps_per_s`,
+`pending_polls`, `pending_sleeps`). A faster request runs as fast as the scope answers and the caveats say what was
+reached (a device-paced chirp needs a firmware CHIRP command, not in this protocol). At most 600 s per call. Returns
+the statistics (steps sent, achieved steps / s, late steps, polls, sleeps) and restores the generator it found. Watch it on the scope's Spectrum
 view or with `scope_capture_and_fft`.
 
 **`bode_sweep`** (`scope_bode_sweep`, tier 3, token, caps DECIM and the generator): frequency response CH2 / CH1 of a
@@ -637,7 +643,7 @@ PI decay characterisation with the TX gate on CH2:
 6. `acquisition_control(action='run')` if the scope should run on its own again.
 
 VLF RX phase measurement: `set_timebase(window=2e-3)`, trigger on the TX reference on CH2, `averaged_capture
-(n=32, channels=[CH1, CH2])`, then `measure(delay(CH1->CH2))` and `capture_and_fft` on both for amplitude and
+(n=32, channels=[CH1, CH2])`, then `measure(items=['delay'])` (CH1 -> CH2) and `capture_and_fft` on both for amplitude and
 phase at the operating frequency.
 
 ## 6. Host-side processing notes

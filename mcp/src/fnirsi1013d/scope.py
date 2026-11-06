@@ -48,6 +48,9 @@ SCALING_CAVEAT = ("Absolute volts use the per-unit calibration when one covers t
 SAVE_REPORT_TIMEOUT_S = 15.0
 #: protocol 1.15: the oldest GET_CAL a conversion uses (the v4 tracker's values move with the full-rate cores)
 CAL_TRACK_AGE_S = 1.0
+#: sweep_gen: a commit still pending is waited out by sleeping when at most this much of the step in progress is left
+#: (a GET_GEN poll waits for a main-loop pass of the scope, which the 2026-11-06 battery put at tens of ms in RUN)
+SWEEP_SLEEP_MAX_S = 0.005
 
 
 def channel_index(ch: str | int) -> int:
@@ -578,9 +581,13 @@ class Scope:
         before and after agree). Legacy firmware: settings_seq 0, the settings cannot change under REMOTE."""
         for _ in range(attempts):
             st0 = self.status()
-            ctx = CaptureContext(st0.settings_seq, self.get_trigger(cached=False), self.get_timebase(cached=False),
-                                 {c: self.get_channel(c, cached=False) for c in (0, 1)},
-                                 self.get_decim().next if self.info.caps & P.Caps.DECIM else None)
+            trig = self.get_trigger(cached=False)
+            tb = P.Timebase.unpack(self._req(P.Cmd.GET_TIMEBASE))
+            ds = self.get_decim() if self.info.caps & P.Caps.DECIM else None
+            if ds is not None:
+                tb = self._held_timebase(tb, ds)
+            ctx = CaptureContext(st0.settings_seq, trig, tb, {c: self.get_channel(c, cached=False) for c in (0, 1)},
+                                 ds.next if ds is not None else None)
             if not self.shared:
                 return ctx
             st1 = self.status()
@@ -631,9 +638,27 @@ class Scope:
         return cfg
 
     def get_timebase(self, cached: bool = True) -> P.Timebase:
+        """GET_TIMEBASE, checked against the divider the FPGA holds (GET_DECIM, caps DECIM; ``_held_timebase``)."""
         if not cached or self._tb is None:
-            self._tb = P.Timebase.unpack(self._req(P.Cmd.GET_TIMEBASE))
+            tb = P.Timebase.unpack(self._req(P.Cmd.GET_TIMEBASE))
+            held = self.shared and self.info.caps & P.Caps.DECIM  # GET_DECIM: collaborative firmware (1.9+)
+            self._tb = self._held_timebase(tb, self.get_decim()) if held else tb
         return self._tb
+
+    @staticmethod
+    def _held_timebase(tb: P.Timebase, ds: P.DecimState) -> P.Timebase:
+        """The time base the next capture runs at. fw 0.2.105's GET_TIMEBASE reports a host's raw divider (SET_TIMEBASE
+        mode 1) only until the UI's time/div moves: a SET_TRIGGER total the UI's time/div does not fit snaps it
+        (acq_view_fit) and the session forgets the raw divider, so GET_TIMEBASE then reports the UI table's divider
+        while the FPGA keeps the raw one (battery 2026-11-06, finding 3: a 200 kSa/s record labelled 1 MSa/s by the
+        capture-context tools). GET_DECIM's divider is the one the FPGA holds (fw 0.2.87, pc_hal_divider_now), as is
+        GET_CAPTURE_INFO's; on a mismatch the time base is rebuilt from it (the output period N x 5 ns with the filter
+        on, as GET_TIMEBASE computes it from the held divider anyway)."""
+        if ds.divider == tb.divider:
+            return tb
+        nxt = ds.next
+        ps = 5000 * (nxt.n if nxt.k else ds.divider + 1)
+        return P.Timebase(0xFF, 0xFF, ds.divider, P.BASE_CLOCK_HZ * 5000 // ps, min(ps, 0xFFFFFFFF))
 
     def set_timebase(self, *, divider: int | None = None, ui_index: int | None = None) -> P.Timebase:
         if (divider is None) == (ui_index is None):
@@ -926,10 +951,13 @@ class Scope:
                   sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
                   cancel: Callable[[], bool] | None = None) -> dict[str, Any]:
         """A host-stepped chirp (contract 7.3 / 7.4): one SET_GEN per frequency, ``step_s`` apart on the host clock.
-        Before each step the previous commit must have been taken: when the step comes sooner than one period of the
-        frequency in effect the GEN is polled until ``pending`` clears (else the pace alone guarantees it). Returns
-        the statistics: steps sent, the achieved step rate, late steps (the USB round trip, about 0.2 ms in REMOTE,
-        limits a host chirp to about 2,000 steps per second) and the polls."""
+        Before each step the previous commit must have been taken: SET_GEN answers with the GEN status read after its
+        commit, so a step whose answer says taken needs nothing more; otherwise, when the next step comes sooner than
+        the step in progress can last (one period of the previous frequency or the new one, whichever is longer),
+        the rest is slept when it is at most ``SWEEP_SLEEP_MAX_S`` and GET_GEN is polled until ``pending`` clears
+        when it is longer. SET_GEN and GET_GEN are answered at the scope's next main-loop pass, so each request costs
+        a pass: the battery of 2026-11-06 measured 34 ms per step with one poll per step (29 steps / s for 100
+        asked). Returns the statistics: steps sent, the achieved step rate, late steps, the polls and the sleeps."""
         fl = [float(f) for f in freqs]
         if not fl:
             raise ValueError("no frequencies")
@@ -938,10 +966,11 @@ class Scope:
             why = P.gen_check(p16, P.gen_h16(p16, int(round(duty * 10000))))
             if why:
                 raise ValueError(f"{f:g} Hz at duty {duty:g}: {why}")
-        polls = late = 0
+        polls = late = sleeps = 0
         worst_late = 0.0
         prev_period = 0.0
         t_last = None
+        taken = True
         t0 = clock()
         sent = 0
         for i, f in enumerate(fl):
@@ -956,17 +985,23 @@ class Scope:
                 if i and lag > 0.5 * step_s:
                     late += 1
                     worst_late = max(worst_late, lag)
-            if t_last is not None and clock() - t_last < prev_period:
-                _, n = self.wait_gen_taken(timeout_s=max(1.0, 3 * prev_period), sleep=sleep, clock=clock)
-                polls += n
-            self.set_gen(freq_hz=f, duty=duty)
+            if t_last is not None and not taken:
+                rest = prev_period - (clock() - t_last)
+                if 0 < rest <= SWEEP_SLEEP_MAX_S:
+                    sleep(rest)
+                    sleeps += 1
+                elif rest > 0:
+                    _, n = self.wait_gen_taken(timeout_s=max(1.0, 3 * prev_period), sleep=sleep, clock=clock)
+                    polls += n
+            g = self.set_gen(freq_hz=f, duty=duty)
             t_last = clock()
-            prev_period = 1.0 / f
+            taken = not g.pending
+            prev_period = max(1.0 / f, 1.0 / fl[i - 1]) if i else 1.0 / f
             sent += 1
         elapsed = clock() - t0
         return {"steps": sent, "elapsed_s": elapsed, "step_s": step_s,
                 "achieved_steps_per_s": (sent - 1) / elapsed if sent > 1 and elapsed > 0 else None,
-                "late_steps": late, "worst_late_s": worst_late, "pending_polls": polls,
+                "late_steps": late, "worst_late_s": worst_late, "pending_polls": polls, "pending_sleeps": sleeps,
                 "f_first": fl[0], "f_last": fl[sent - 1] if sent else None}
 
     # --- streaming logger (protocol 1.27, FPGA 0x153D) ----------------------------------------------------
