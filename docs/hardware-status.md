@@ -1902,3 +1902,23 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x29B1C181). **Still to do on the unit: the wizard once more (the stored stages are the moved CH1 A4 B3, CH2 A3 B4).**
   Finding 3 again in the same battery sequence without the guard acting (FFT and DVM label a 200 kSa/s record 1 MSa/s:
   the 1 kHz fundamental at 5 kHz), and not in ten shorter sequences: `backups/battery-0.3.0/c1_*.json`, `c3_*.json`.
+- 2026-11-06 17:22-17:30 (lead): **core order against the divider (finding 1), and a model that fits.** The analysis
+  agent's note is `docs/plans/core-order-gated.md` on branch `fpga-coreorder` (4efd805): the RTL pairs the cores as
+  designed, the saved records are off by one at every divided rate they cover, dividers 1..8 had never been measured.
+  Measured now, CH1 on the ladder input (the fast step of each rising edge, trigger at code 115), raw per-core records,
+  12 captures per divider, the shift s of core B that makes the edge smooth (0 = designed, +1 = B one conversion late);
+  three runs agree, stages CH1 A4 B3 (the guard's value), fw 2bdecac and its PC_DEBUG build:
+  **divider 0: 0; 1: +1; 2, 3, 4: 0; 5, 6, 7, 9, 19, 999: +1** (RMS of the winner 0.5 .. 2.7 codes against 5 .. 12 for
+  the runner-up; divider 99 undecided on this edge, +1 in the 2026-11-04 records). So the order is not one fixed shift:
+  it changes with the word period T = 10 (D + 1) ns. **Model (inference, fits all eleven points):** both cores' data
+  change after the same edge, the write clock's rising edge R (the B encode), about D = 12 ns after it, as an AD9288 in
+  data-align mode does, not each after its own encode as the capture logic assumes. Core B, taken at R - cB, then holds
+  the release of nB = ceil((cB + D) / T) periods back; core A, taken at F - cA = R + T/2 - cA, that of
+  nA = ceil((cA + T/2 + D) / T) back; s = 1 + (nB - 1) - (nA - 1), with c = 5 + 2.5 x stage ns. For A4 B3 this gives
+  exactly the measured row. For the trained A3 B3 it predicts divider 0: +1 (as the one edge of R0b, 16:22), 1: +1,
+  2 and 3: 0, 4: on the boundary (49.5 against 50 ns), 5 and up: +1: to be checked after the next wizard run. A first
+  stage map through DEBUG_FPGA 0x63 writes gave unclear cells that contradict the three plain runs at the same stages;
+  the tool's stage write before each capture is suspect, its numbers are not used (`backups/battery-0.3.0/e1_map_ch1.json`).
+  **Consequence: a fixed one-word shift in the firmware or the host cannot be right at every rate and stage; the capture
+  of core A has to follow the edge its data really changes on (an FPGA change, a new bitstream).** 17:30: fw 2bdecac
+  (4e60f6cd) FEL-loaded again; the card holds the same build.

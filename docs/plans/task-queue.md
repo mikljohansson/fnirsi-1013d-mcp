@@ -305,6 +305,12 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   stages, and fix it where it belongs (FPGA word alignment, or the firmware's READ_RAW / trace order and the host's
   interleave for the gated class); the UI's Filter Off trace is the same data. Data: `backups/battery-0.3.0/b2_rates.json`,
   `backups/encphase/ab_*.npz` (d99 arrays).
+  2026-11-06 17:30: measured per divider on CH1 at A4 B3 (0: 0; 1: +1; 2..4: 0; 5 and up: +1) and a model that fits every
+  point: both cores' data change after the write clock's rising edge (AD9288 data-align mode), the logic assumes each
+  after its own encode (`docs/hardware-status.md` 17:22-17:30; the agent's note on branch `fpga-coreorder`). The order
+  depends on the word period and the stages, so the fix is in the FPGA: capture core A against the edge its data
+  changes on and make the pairing the same at every rate (0x153F; testbench ADC model first). Check first: the model's
+  row for the trained A3 B3 after the next wizard run.
 - [ ] **Smaller findings of the MCP battery 2026-11-06** (`docs/hardware-status.md` 16:21-16:45): `scope_capture_and_fft`
   / `scope_dvm` once labelled a 200 kSa/s record 1 MSa/s right after the guard's stage move (not reproduced; check the
   settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100
