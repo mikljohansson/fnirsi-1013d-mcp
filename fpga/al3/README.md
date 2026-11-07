@@ -3307,6 +3307,20 @@ passing" compiles) every compile passes. Latencies 11 and 12 both explain all 71
 random input rarely has its max or min in its end pairs, and the check took the first fit. `check_words` now tries
 every latency, passes when the boxcar's latency fits and prints the others ("also fit"). Expected latencies are unchanged.
 
+**Addendum (fpga-153f review, 2026-11-07): the stimulus must stay on the grid.** The delay above only orders an MCU
+write against a write clock edge when the two are not on the same instant, and the testbenches' strobes (13.1 / 17 / 13
+ns, fractions in 0.1 ns steps from an integer start) never were. But a stimulus process that resumes on the write clock
+(`@(posedge dut.sample_write_clock)`, or `wait ()` on a register of the write clock domain such as `sampling_half_way`,
+which is updated at the same delayed instant) carries the 1 ps from then on, and every tenth strobe after that lands on
+the exact instant of a later write clock edge. On that instant iverilog runs the write clock processes between the
+instant's updates again: tb_seg seed 12345 on 0x153F wrote 0x01 = 1 at 68452660.001 ns, the reference's registers read
+`sample_system_reset` already set, the design's read the wire `cap_rst` not yet updated, and the design reset one edge
+later than the reference (10 mismatching samples; the hazard of this section, let back in by the testbench, not a
+difference of the design: in hardware the write is asynchronous and either edge is a legal outcome for both). The seg
+run had hundreds of such coincidences after its first segment run, nearly all on reads. Fix in the four equivalence
+testbenches: a `regrid` task (`#(1 - frac($realtime))`) after every such wait, so the strobes return to the integer grid
+where the edge is always 1 ps after the write. A new wait on a dut signal in a stimulus process needs the same call.
+
 ### 21. 0x153E: the encodes from IOB registers on PLL C2 / C3 (fpga-153e, 2026-11-04)
 
 **What it is.** The release 0x153D with the fpga-encphase enc0 recipe made permanent (the owner's decision of 2026-11-04
@@ -3552,7 +3566,31 @@ clock in 2: **q10, the trigger hold-off before "Capture of the trigger address" 
 logger before "Trigger types" (4.929 ns). `cap_full` is declared beside `swc_rose` so that "Sample write clock" and
 the capture block may both move.
 
-**Tests.** `tb/run.sh` (18 steps, `REF_SRC_DIR` with `da645d0.v` added) on seeds 12345 and 4242 (2026-11-06/07, snapshots of the committed `src` + `tb`): **16 of the 18 steps PASS on both seeds, every check** (12345 / 4242: ext 39; decim 106 / 108 + cic_model 1868 / 1882 samples; long 8; trigpos 1252 (37 cases); contract 42 and the transcript = `contract_0x153F.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 35952 strict + 6298 acceptance, STRICT ORDER PASS on the design and FAIL on da645d0; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102). The two equivalence steps against the old references each have one seed with a one-word transient: **fir** seed 12345 PASS (166 checks + cic_model 1570 samples, with the +37.5 ns formula of 80af605; the first run's 12 failures were the old +42.5), seed 4242 167 checks, 1 failed: phase 4 ("FIR off again identical to 0x1534"), 320 of 84.5 M compared samples in one 30 ns window at a stopped capture, the CIC outputs 1 .. 3 LSB apart; the traced run shows the two decimators' first integrators 2 apart over the whole window with identical inputs (`pa` / `pb` equal at every edge), an offset from the single-instance phases that a comb re-arm lets through once. **seg** seed 4242 PASS (55 + seg_model 22 runs), seed 12345 55 checks, 1 failed: phase 4 ("modes off again identical to 0x1535"), 10 samples in one 10 ns window: a 0x01 = 1 write in the same simulation time step as the write clock edge (the testbench's MCU process had synchronised to a write clock edge, so its strobes carry the edge's 1 ps offset, README section 20); the reference resets on `sample_system_reset`, a register already updated, the design on `cap_rst`, a wire of it whose update event ran after the design's write-clock blocks in that step (`ssr 1 cap_rst 0` in the trace), so the design resets one edge later in the simulation only, and the rest of the record is equal (seg_model: 22 runs, 0 failures on the same log). Both repeat exactly with the hold-off block at its old place (the move is not the cause) and both are simulation-ordering artefacts of the equivalence testbenches, not differences of the design; the fix belongs in the testbenches (step the MCU process off the edge after every `@(posedge dut.sample_write_clock)` / `wait` on a write-clock signal, and re-arm the references' decimators with the design's), left for the simulation agent; the traces, the run logs and the trace scripts are in the main checkout's `backups/fpga-153f-sim/` (`segtrace_12345.log`, `firtrace_4242.log`).
+**Tests.** `tb/run.sh` (18 steps, `REF_SRC_DIR` with `da645d0.v` added) on seeds 12345 and 4242 (2026-11-07, the review of
+fpga-153f, snapshots of the committed `src` + `tb`, both seeds in parallel, 8307 / 7558 s): **ALL PASS on seeds 12345
+and 4242, every step, no exception.** Per step (12345 / 4242): ext 39; decim 107 + cic_model 1868 / 1882 samples; fir 168 + cic_model 1575 / 1610 samples; long 8; seg 54 / 56 + seg_model 22 runs 0 failures; trigpos 1252 (37 cases); contract 42 and the transcript = `contract_0x153F.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 35952 strict + 6298 acceptance, STRICT ORDER PASS on the design and FAIL on da645d0; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102.
+
+The author's runs of 2026-11-06/07 on the same RTL had one failing step per seed, tb_seg 12345 (10 mismatching samples in
+one 10 ns window) and tb_fir 4242 (320 in one 30 ns window); the review traced both to the testbenches, so the RTL and
+the bitstream are unchanged:
+- **tb_seg seed 12345**: the testbench's MCU process had resumed on `@(posedge dut.sample_write_clock)` in `start_capture`
+  (the segment log arm) and carried the write clock's 1 ps simulation delay from then on; 4789 of its later strobes fell
+  on the exact instant of a write clock edge (nearly all reads), one of them the 0x01 = 1 data byte at 68452660.001 ns.
+  On that instant the 0x1535 reference's write clock registers read `sample_system_reset` already set and the design's
+  read the wire `cap_rst` (= `sample_system_reset | seq_rst_c`) still 0, so the design reset one edge later (`tmo 1/0`,
+  `cnt 60870/0`, `trig 0/1`, `en 0/1` in the MISMATCH lines: the whole capture state one edge apart, then equal again).
+  That is the ordering hazard of section 20, which the 1 ps delay rules out only for strobes on the integer-nanosecond
+  grid; in hardware the write is asynchronous and either edge is a legal outcome for 0x1535 and 0x153F alike. Fix: the
+  `regrid` task after every such wait in the four equivalence testbenches (section 20, addendum).
+- **tb_fir seed 4242**: the 0x29 read-back test wrote 0x53 = 0x07 (K = 3 with bit 2 set) at 64997.5 us. Bit 2 was the
+  core swap until 0x153B and the 0x1534 reference still decodes it; with K = 3 its swapped prefilter differs from the
+  design's on the one edge where `pe` / `pl` still hold the unswapped pair, and its never-reset first integrators kept
+  an offset of 2 (CH1) and 4 (CH2) for the rest of the run (`dif1 0 -> 2, dif2 0 -> 4` at 64997.530 us, no other change
+  before phase 5). The offset is invisible while the combs are in steady state and leaks into `dec_out` once after a K
+  change (the phase 5 note in `tb_fir.v`); in this run the leak fell into a compared window of phase 4. Fix: the test
+  writes 0x03 there and checks "bits 4..2 read 0" in phase 5, after the last equivalence phase (one more check).
+Neither failure depended on the hold-off block's place; both are reproducible on the unchanged source with
+`backups/fpga-153f-sim/` (main checkout) and the review's traces beside them.
 
 **Bench.** Not flashed (status `unbenched`). The firmware contract and the bench list are in AGENTS.md "0x153F, the
 paired capture, fpga-153f".
