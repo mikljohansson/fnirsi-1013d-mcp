@@ -1996,3 +1996,15 @@ Newest entries at the bottom. Format: date, who, what, result.
   gave the same value as the power-on one the first runs used, so the order was measured before and after training. Encode
   check: 1 capture re-taken (event adc_fullrate_garbled at a rate write in this run, recovered, 0 accepted bad), of 35703, as
   on 0x153E (1 of 97304).
+- 2026-11-07 10:34-10:38 (lead, owner present): **0x153F, CH2 code errors and the battery**, probes back on the ladder, 42
+  minutes after power-on, the warm calibration, offset_pwm 861. `ab_0x153F.npz`: divider 99 0 / 0; divider 0 rising phase A
+  6.43 %, B 1.37 %. Sweeps `sweep_0x153F_1.npz`, `_2.npz`: **peak A 6.38 / 6.42 %, B 1.76 / 1.45 %**, mean A 3.46 / 3.45 %, B
+  0.70 / 0.59 %. The bench list's limit (0x153E at 80 minutes, warm calibration: A 5.17 / 5.12 %, B 0.61 / 0.65 %) is not
+  met at this time; 0x153E at 46 minutes read A 5.7 / 6.0 %, B 1.0 / 0.9 %. A warm-up series follows (10:52, 11:12, 11:32).
+  **`fnirsi1013d-battery`: 201 PASS, 0 FAIL, 1 SKIP** (spectrum needs its view; `backups/battery-0.3.0/tool-run2-0x153F/`):
+  the core-order group and the ten Filter Off frequency steps that failed on 0x153E pass. Counter on the 1 kHz at the
+  divided rates, read past the gate flag: E 99, T 19800200 / 19800000 / 19800000 at 2 MSa/s, 200 and 20 kSa/s = 999.99 /
+  1000.00 / 1000.00 Hz, so the counter's divided-rate miscount is gone with the pairing (the firmware still marks it
+  GATED, not valid). Encode check: 3 captures re-taken of 42926, all recovered, 0 accepted bad, events during the
+  battery's rate changes; 0x153E had 1 of 97304 in a run with fewer rate changes per capture: not compared like for
+  like, to watch. Capture self-check 0 flagged of 7562.
