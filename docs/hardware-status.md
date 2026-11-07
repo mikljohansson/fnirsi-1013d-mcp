@@ -1964,3 +1964,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   `backups/fw-0.2.105_1d36d9b5_53da95a-expects-0x153F.bin` (GCC 10 of 53da95a, sha256
   1d36d9b52e9b88be7b61c92009ba946c78fca8308d715820eb834796b0dfbcbd). Next: the owner's J2 session per fpga/al3/AGENTS.md
   "(b) Coordinator's bench list" and firmware/AGENTS.md section 97; then the release docs move from 0x153E to 0x153F.
+- 2026-11-07 09:43-09:50 (lead, owner present): **FPGA flash 0x153E -> 0x153F.** Over USB first, card fw 2bdecac: SD 700-710
+  twice, `backups/sd_700-710_pre-0x153F_a.bin` = `_b.bin` = bdaa3fba8b43ebd29311518627ca6719ee9b9644feeee38b9347a93198a715a7.
+  FEL load (RAM) of fw 1d36d9b5 (main 53da95a) on 0x153E: GET_INFO fpga 0x153E, fw_fpga 0x153F, flags 1; a capture answers
+  E_UNSUPPORTED detail 1 "this firmware needs 0x153F". Then J2 (USB out, battery): probe ef 40 14, status 0x00; pre-write
+  double read `backups/20261107-pre-0x153F.bin` = 2782e1b6... (the 0x153E image, as required); write of
+  `backups/dist-0x153F/fnirsi_1013d-fpga-al3-0x153f-flash1m.bin`: 69 sectors erased, 1104 pages, **verified OK on the first
+  pass**, d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc; independent double read
+  `backups/20261107-post-0x153F-readback.bin` byte-equal to the image. Rollback: the 0x153E image (2782e1b6...) with fw 2bdecac.
