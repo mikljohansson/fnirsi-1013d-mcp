@@ -1984,3 +1984,15 @@ Newest entries at the bottom. Format: date, who, what, result.
   200 MHz / 201, each core folded on the period, delay d with B[k] = f(2k), A[k] = f(2k + d): **CH1 and CH2 d = +1, the
   designed delay, 30 of 30 captures each** (RMS at d = 0 / +1 / +2: 0.96 / 0.90 / 1.08 and 0.96 / 0.81 / 0.98; the 0x153E
   fault would be d = +3). 0 flagged. To repeat after the wizard.
+- 2026-11-07 10:2x-10:31 (owner, lead): **wizard on 0x153F, warm** (about 30 minutes after power-on, inputs open, saved):
+  stage 3 on both chips, 0x06DB, stored and trained on 0x153F. Per core: CH1 A and B quiet at 2..5; CH2 A and B quiet at 2, 3,
+  5 (stage 4: core A 19800 outliers, q 270260). **Both probes on the post itself** (the owner's point: the ladder rounds the
+  square, which leaves the order checks little slope; the methods do not need a square, but a sharper signal separates
+  better). `core_delay_fold.py` generalised to every divider (generator 200 MHz / 401, equivalent-time fold), 8 captures per
+  divider: **d = +1, the designed delay, 8 of 8 on both channels at dividers 0, 1, 2, 3, 4, 5, 6, 7, 9, 19, 99, 999.** RMS at
+  the designed delay 0.5 .. 0.9 codes against 1.0 .. 54 at d = 0 and +2 (divider 9: 0.5 / 4.5 / 5.0; divider 99: 0.5 / 37 /
+  37). Divider 0 is the shallow one (CH1 1.1 / 1.1 / 1.2, CH2 0.9 / 1.0 / 1.1, d = +3 1.5 / 1.4): 8 of 8 there, and 30 of 30
+  on the ladder, but it rests on votes, not on a deep minimum. Divider 999's d = +3 (2.4) is an alias of the fold. A retrain
+  gave the same value as the power-on one the first runs used, so the order was measured before and after training. Encode
+  check: 1 capture re-taken (event adc_fullrate_garbled at a rate write in this run, recovered, 0 accepted bad), of 35703, as
+  on 0x153E (1 of 97304).
