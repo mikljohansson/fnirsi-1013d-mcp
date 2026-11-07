@@ -997,13 +997,13 @@ static void test_peak(void)
 
 #define CNT_PASS_STROBES  17
 
-static int cnt_full_rate = 1;           //fw-gated: what pc_glue_adc_full_rate would say (1: divider 0, a filter, peak)
+static uint32_t cnt_gated_div;          //fw-gated: 0 at full rate (divider 0, a filter, peak), else the divider
 
 static uint32_t cnt_pass(uint32_t ms)
 {
   uint32_t s0 = fm.strobes;
 
-  fpga_counter_pass(ms, cnt_full_rate);
+  fpga_counter_pass(ms, cnt_gated_div);
   return fm.strobes - s0;
 }
 
@@ -1081,38 +1081,71 @@ static void test_counter_derive(void)
   T_EQ(fpga_counter_gate_ms(3), 1000);
 }
 
-//fw-gated: a CH1 / CH2 result taken while the encodes run gated (Filter Off at a divided rate: cnt_full_rate 0) is held
-//and derived but marked gated, so it is not usable (VALID, the cards); EXT is never gated; full rate again: usable
+//One 100 ms gate on signal (period_ns, high_ns) with the encodes gated by div; the next ms each call
+static uint32_t cnt_gated_ms = 1000;
+
+static int cnt_gated_gate(uint32_t div, uint64_t period_ns, uint64_t high_ns)
+{
+  fm_cnt_signal(0, period_ns, high_ns, 35, 60, 200);
+  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_CH1, 128, 6);
+  cnt_gated_div = div;
+  cnt_pass(cnt_gated_ms);
+  fm_advance_ns(100000000);
+  cnt_gated_ms += 100;
+  cnt_pass(cnt_gated_ms);
+  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.has_period, 1); T_EQ(fpga_cnt.misfit, 0);
+  T_EQ(fpga_cnt.gated, div != 0);
+  T_EQ(fpga_counter_usable(cnt_gated_ms), !fpga_cnt.coarse);
+  cnt_gated_ms += 1;
+  return !fpga_cnt.coarse;
+}
+
+//fw-gated, fw-031: a CH1 / CH2 result taken while the encodes run gated (Filter Off at a divided rate) is marked gated and
+//is usable (VALID, the cards) inside the limits: high and low time at least 2 samples, T at least 1000 samples. EXT is
+//never gated; at full rate the limits do not apply
 static void test_counter_gated(void)
 {
   fm_reset(0x153F, 199, 901);
   fpga_counter_boot();
-  fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 128, 6);
-  fm_cnt_signal(0, 1000, 500, 35, 60, 200);
-  cnt_full_rate = 0;
-  cnt_pass(1000);
-  fm_advance_ns(100000000);
-  cnt_pass(1100);
-  T_EQ(fpga_cnt.held, 1); T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.has_period, 1);
-  T_EQ(fpga_cnt.misfit, 0); T_EQ(fpga_cnt.gated, 1);
-  T_EQ(fpga_counter_current(1100), 1); T_EQ(fpga_counter_usable(1100), 0);
 
-  //EXT counts the trigger input, not the ADC stream: usable at a gated setting
+  //The bench's 1 kHz at 2 MSa/s, 200 and 20 kSa/s (D 99, 999, 9999; 100 ms: E 99, T 19800000): usable; 10 kSa/s (T 990
+  //samples) is not, nor 5 kSa/s: the record there is longer than the gate
+  T_EQ(cnt_gated_gate(99, 1000000, 500000), 1);
+  T_EQ(fpga_cnt.e, 99); T_EQ(fpga_cnt.t, 19800000); T_EQ(fpga_cnt.freq_uhz, 1000000000);
+  T_EQ(cnt_gated_gate(999, 1000000, 500000), 1);
+  T_EQ(cnt_gated_gate(9999, 1000000, 500000), 1);
+  T_EQ(cnt_gated_gate(19999, 1000000, 500000), 0);
+  T_EQ(fpga_cnt.e, 99);                                         //the numbers are kept, only VALID is withheld
+  T_EQ(cnt_gated_gate(39999, 1000000, 500000), 0);
+
+  //D 199 = 1 us per sample, 2 us per word. 50 %: 4 us (fs / 4) is the last usable period
+  T_EQ(cnt_gated_gate(199, 4000, 2000), 1);
+  T_EQ(cnt_gated_gate(199, 3990, 1995), 0);
+  T_EQ(cnt_gated_gate(199, 1500, 750), 0);                      //an alias near fs / 2 lands here too
+
+  //A narrow pulse or gap: the frequency is far below fs / 4, the shorter time decides
+  T_EQ(cnt_gated_gate(199, 100000, 2000), 1);
+  T_EQ(cnt_gated_gate(199, 100000, 1900), 0);
+  T_EQ(cnt_gated_gate(199, 100000, 98000), 1);
+  T_EQ(cnt_gated_gate(199, 100000, 98100), 0);
+
+  //What no limit sees: fs + 1 kHz folds to 1 kHz in the samples, the stream the model gets here, and is usable, gated
+  T_EQ(cnt_gated_gate(199, 1000000, 500000), 1);
+
+  //Full rate: no limit
+  T_EQ(cnt_gated_gate(0, 100, 50), 1);
+  T_EQ(fpga_cnt.coarse, 0);
+
+  //EXT counts the trigger input, not the ADC stream: usable at a gated setting, whatever the signal
+  cnt_gated_div = 199;
   fm_cnt_signal(2, 100, 50, 0, 0, 0);
   fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_EXT, 128, 6);
-  cnt_pass(1120);
+  cnt_pass(cnt_gated_ms);
   fm_advance_ns(10000000);
-  cnt_pass(1140);
-  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_EXT); T_EQ(fpga_cnt.gated, 0); T_EQ(fpga_counter_usable(1140), 1);
-
-  //CH1 at full rate (the filter on, or divider 0): usable
-  fm_cnt_signal(0, 1000, 500, 35, 60, 200);
-  fpga_counter_config(FPGA_CNT_GATE_10MS, FPGA_CNT_SRC_CH1, 128, 6);
-  cnt_full_rate = 1;
-  cnt_pass(1160);
-  fm_advance_ns(10000000);
-  cnt_pass(1180);
-  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_CH1); T_EQ(fpga_cnt.gated, 0); T_EQ(fpga_counter_usable(1180), 1);
+  cnt_pass(cnt_gated_ms + 20);
+  T_EQ(fpga_cnt.res_src, FPGA_CNT_RES_EXT); T_EQ(fpga_cnt.gated, 0); T_EQ(fpga_cnt.coarse, 0);
+  T_EQ(fpga_counter_usable(cnt_gated_ms + 20), 1);
+  cnt_gated_div = 0;
 }
 
 static void test_counter(void)

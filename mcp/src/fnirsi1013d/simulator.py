@@ -3177,7 +3177,7 @@ class Device:
             ext = self.cfg.noise_lsb * math.sqrt(2 * math.log(n_samples)) if self.cfg.noise_lsb > 0 else 0.0
             resp.min = int(np.clip(np.rint(c.min() - ext), 0, 255))
             resp.max = int(np.clip(np.rint(c.max() + ext), 0, 255))
-        # fw-gated: Filter Off at a divided rate gates the ADC encodes, so a CH1 / CH2 count is not the signal's
+        # fw-gated: Filter Off at a divided rate gates the ADC encodes: a CH1 / CH2 count is flagged, VALID inside the limits
         dec = self.decim_config()
         gated = src != 3 and self.settings.divider != 0 and not dec.k and not dec.peak
         if gated:
@@ -3194,7 +3194,7 @@ class Device:
             e, t, w = gate_count(edges[0], edges[1], edges[2], t_start, gate_s)
             if e >= 1:
                 resp.e, resp.t, resp.w = e, t, w
-                if fits and not gated:
+                if fits and not (gated and P.counter_gated_coarse(e, t, w, self.settings.divider)):
                     resp.flags |= P.COUNTER_F_VALID
                     resp.freq_mhz = P.counter_freq_mhz(e, t)
         return resp

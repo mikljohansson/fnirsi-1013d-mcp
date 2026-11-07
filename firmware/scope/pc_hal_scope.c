@@ -534,6 +534,7 @@ void pc_hal_counter_read(pc_hw_counter *c)
   c->has_period = fpga_cnt.has_period;
   c->misfit     = fpga_cnt.misfit;
   c->gated      = fpga_cnt.gated;
+  c->coarse     = fpga_cnt.coarse;
   c->seq        = fpga_cnt.seq;
   c->res_src    = fpga_cnt.res_src;
   c->res_gate   = fpga_cnt.res_gate;
@@ -559,7 +560,7 @@ void pc_glue_counter_pass(void)
   if(pc_fpga_word != PC_FW_FPGA_VERSION)
     return;
 
-  fpga_counter_pass(timer0ticks, pc_glue_adc_full_rate());
+  fpga_counter_pass(timer0ticks, pc_glue_adc_full_rate() ? 0 : pc_hal_divider_now());
 
   u.valid     = (uint8)(fpga_counter_usable(timer0ticks) && (fpga_cnt.res_src != FPGA_CNT_RES_EXT));
   u.ch        = fpga_cnt.res_src;

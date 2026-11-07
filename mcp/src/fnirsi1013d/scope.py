@@ -653,7 +653,8 @@ class Scope:
         while the FPGA keeps the raw one (battery 2026-11-06, finding 3: a 200 kSa/s record labelled 1 MSa/s by the
         capture-context tools). GET_DECIM's divider is the one the FPGA holds (fw 0.2.87, pc_hal_divider_now), as is
         GET_CAPTURE_INFO's; on a mismatch the time base is rebuilt from it (the output period N x 5 ns with the filter
-        on, as GET_TIMEBASE computes it from the held divider anyway)."""
+        on, as GET_TIMEBASE computes it from the held divider anyway). Firmware after 0.3.0 reports the held divider
+        itself (protocol row 69), so this then changes nothing; it stays for 0.3.0 and older."""
         if ds.divider == tb.divider:
             return tb
         nxt = ds.next

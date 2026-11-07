@@ -36,14 +36,28 @@
 //   misfit. Misfit results are not VALID and do not feed the cards (the record's measurement shows). EXT results and
 //   results dropped by the rate-change rule do not move the thresholds.
 // - A host configuration (GET_COUNTER what = 1) is only noted; the next pass writes it (0x62, 0x61 = 0, 0x61 = value).
-// - Gated encodes (fw-gated, owner 2026-10-22): the counter compares the ADC stream, which runs at 200 MSa/s only at
-//   divider 0, with any filter and with peak detect. Filter Off at a divided rate gates the encodes with the divider (FPGA
-//   0x153C and the rebuilt 0x153D), so the stream is the divided one and the count is wrong for anything faster than a
-//   few samples per period (bench 2026-10-21 17:53 on 0x153C). A CH1 / CH2 result taken while the FPGA holds such a
-//   setting is marked gated (GET_COUNTER flags bit 4): not VALID, the cards show the record's measurement. The rate-change
-//   rule above drops a gate that spans a 0x0D / 0x53 write, so the setting at the pass is the one the gate ran at.
+// - Gated encodes (fw-gated, owner 2026-10-22; fw-031): the counter compares the ADC stream, which runs at 200 MSa/s only
+//   at divider 0, with any filter and with peak detect. Filter Off at a divided rate gates the encodes with the divider,
+//   so the stream holds one sample per (D + 1) clocks: a CH1 / CH2 result taken at such a setting is marked gated
+//   (GET_COUNTER flags bit 4), which is information, not a fault. Up to 0x153E the cores were paired wrong there and
+//   the count was wrong (bench 2026-10-21 17:53); on 0x153F it is right (bench 2026-11-07: E 99, T 19800200 / 19800000 /
+//   19800000 at 2 MSa/s, 200 and 20 kSa/s on 1 kHz). What the divided stream still costs: an edge is known to a sample
+//   at best (the 2 MSa/s reading above is one word, two samples, off), and anything shorter than a sample can fall
+//   between two samples. So a gated result is coarse (not VALID, the cards show the record's measurement) unless
+//   - its high time and its low time are each at least FPGA_CNT_MIN_PHASE_SAMPLES (2) samples, one word, the bench's
+//     T step: every high and low phase then holds a sample, so no period is lost, and a 50 % signal is counted up to
+//     fs / 4. A pulse shorter than that counts as a sample or two when it is caught at all, so the rule on the two
+//     times, not on the frequency, is what sees it; and
+//   - T holds at least FPGA_CNT_MIN_T_SAMPLES (1000) samples: one word over T is then at most 2e-3 (the cards show
+//     four digits), and the gate is not much shorter than the 3000-sample record the card would show instead. At the
+//     100 ms gate that is 20 kSa/s and faster; 1 s also takes 10, 5 and 2 kSa/s.
+//   **What no rule can see: aliasing.** A signal above fs / 2 folds to a lower frequency in the samples themselves, so
+//   fs + 1 kHz reads 1 kHz here, and in the record and the trace alike: nothing in E, T, W or min / max tells it. The
+//   limits above reject the folded signals that land near fs / 2 and no others. Gated stays set on a VALID result so a
+//   host can say so. The rate-change rule above drops a gate that spans a 0x0D / 0x53 write, so the setting at the
+//   pass is the one the gate ran at.
 // - A result is current while the gate is on and it is younger than three gates plus 100 ms (the configured gate);
-//   with E >= 1, not misfit and not gated it feeds the measurement cards of its source channel (ui_meas.c) and
+//   with E >= 1, not misfit and not coarse it feeds the measurement cards of its source channel (ui_meas.c) and
 //   GET_COUNTER's VALID bit (fpga_counter_usable).
 //
 // Arithmetic (64-bit integers, no floating point; one clock = 5 ns): frequency = E x 2e8 / T Hz, in uHz through a
@@ -78,6 +92,9 @@
 #define FPGA_CNT_HYST_MIN       6     //auto hysteresis floor (about twice the analog noise rms on a quiet input)
 #define FPGA_CNT_AUTO_MIN_SPAN  12    //auto: a gate's max - min below this is no signal
 
+#define FPGA_CNT_MIN_PHASE_SAMPLES  2      //gated: the shortest high and low time, in samples (one word)
+#define FPGA_CNT_MIN_T_SAMPLES      1000   //gated: the shortest T, in samples
+
 typedef struct
 {
   //Configuration asked for (boot, or GET_COUNTER what = 1)
@@ -102,7 +119,8 @@ typedef struct
   uint8_t  min, max;
   uint32_t res_ms;              //when it was read (the pass's clock)
   uint8_t  misfit;              //auto: counted at thresholds its own min / max do not ask for, or no signal (not VALID)
-  uint8_t  gated;               //CH1 / CH2 counted while the ADC encodes ran gated (Filter Off at a divided rate): not VALID
+  uint8_t  gated;               //CH1 / CH2 counted while the ADC encodes ran gated (Filter Off at a divided rate)
+  uint8_t  coarse;              //gated and outside the limits above (not VALID)
 
   //Derived from E / T / W (fpga_counter_derive); 0 when E = 0
   uint8_t  has_period;          //E >= 1
@@ -131,14 +149,15 @@ void fpga_counter_boot(void);
 void fpga_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hyst);
 
 //Once per main-loop pass after the capture readout: the rate-change rule, the 0x35 read, the auto thresholds and a
-//pending configuration (see above). now_ms = the pass's clock; full_rate = the ADC encodes run at 200 MSa/s for what the
-//FPGA holds (divider 0, any filter, peak detect: pc_glue_adc_full_rate), else a CH1 / CH2 result taken is gated
-void fpga_counter_pass(uint32_t now_ms, int full_rate);
+//pending configuration (see above). now_ms = the pass's clock; gated_div = 0 when the ADC encodes run at 200 MSa/s for what
+//the FPGA holds (divider 0, any filter, peak detect: pc_glue_adc_full_rate), else the divider they are gated with: a CH1 /
+//CH2 result taken is gated, and coarse outside the limits
+void fpga_counter_pass(uint32_t now_ms, uint32_t gated_div);
 
 //The held result is current: the gate is on and it is younger than three configured gates plus 100 ms
 int fpga_counter_current(uint32_t now_ms);
 
-//The held result is usable (VALID, the cards): current, with a period, not misfit, not gated
+//The held result is usable (VALID, the cards): current, with a period, not misfit, not coarse
 int fpga_counter_usable(uint32_t now_ms);
 
 //The derived values of E / T / W as above; 0 when e == 0 (the outputs are then 0)

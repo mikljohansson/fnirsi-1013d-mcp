@@ -7413,3 +7413,59 @@ shallower gives 2 less everywhere). Bench: an edge on EXT and CH1 together (the 
 0..5, 9 and 199: the CH1 edge at the pretrigger within the synchroniser's 22 ns. The filtered (K >= 1) shifts and the
 ADC trigger position do not change. Host tests: test_session's 0x153A block (dividers 1, 3, 4), mcp test_capture_stages
 and test_ext_trigger (dividers 1, 3, 4 on the simulator, whose EXT model follows the table).
+
+## 98. fw-031: the ACQ chip's Roll, GET_TIMEBASE through a snap, the counter at gated rates (fw 0.3.0 unchanged until the bump, protocol 1.28 unchanged, rows 69 and 70)
+
+Branch `fw-031` from main cd9b126. Brief (coordinator, 2026-11-07): three 0.3.1 items, no hardware, no version bump.
+Commits f737cee, 101e056, d27da9d, then this section and the queue. **Nothing benched, nothing flashed.**
+
+**The ACQ chip** (f737cee). `ui_acq_chip_line2` (ui_ctrl.c, test_ui `test_acq_row`) gives the chip's second line: "Roll",
+"avg" or none; `scope_acqusition_settings` centres it in the 30 px block. The menu's box needed nothing: 1.00o5's "Long
+mode" / "Short mode" texts at the two draw sites are painted over at once by `pc_glue_roll_label` ("Roll" / "mode",
+colour for the state), so they are never read; left in place. `docs/guide/screens.md` and `docs/glossary.md` named them.
+
+**GET_TIMEBASE** (101e056; battery finding 3). `pc_settings_track` ended `tb_raw` whenever the UI's index moved, and a snap
+moves it without a 0x0D. Now a raw divider ends only when the FPGA holds the UI table's divider (`pc_hal_divider_now` ==
+`pc_hal_timebase_read`'s) and the index or rate moved or the divider was rewritten; while it runs `pc_timebase_body`
+answers 0xFF / 0xFF and the held divider, so another writer's 0x0D (the logger, a sweep) shows too, and GET_CAPTURE_INFO
+keeps index 0xFF. Not done on purpose: comparing held and table outside a raw divider, because roll and the logger hold
+dividers of their own and a host reads the UI's index there. A rate tapped in STOP lives in `acq_view` and moves nothing
+here. `Scope._held_timebase` stays (0.3.0 and older), `SimConfig.tb_raw_snap` too (it models them). The spectrum's "raw
+divider labelled with the UI rate" (the queue's note on row 45) is a screen label, not this path: not touched.
+
+**The counter** (d27da9d). The count at gated rates was the pairing fault; the honest limits are what remain (full reasoning:
+`fpga_counter.h` "Gated encodes"):
+- The stream at divider D holds a sample per D + 1 clocks (`k_st` updates on the write clock's rise and fall, zaklad.v).
+  The bench's T moved by 200 clocks at D 99, one word, so T's step is taken as a word, not the sample the RTL suggests.
+- `coarse` (fpga_counter.c `cnt_coarse`, not on the wire): gated and high or low time under 2 samples, or T under 1000
+  samples. VALID and the cards (`fpga_counter_usable`) now test `coarse`, not `gated`; `gated` stays, flags bit 4.
+- **The limit in words**: a 50 % signal up to fs / 4; the two times rather than the frequency, because a narrow pulse at
+  a low rate is what gets lost; 20 kSa/s and faster at the 100 ms gate, since below it the gate holds fewer samples
+  than the 3000-sample record that would replace it. 1 kHz at 10 kSa/s therefore stays on the record.
+- **Not detectable**: fs + 1 kHz reads 1 kHz. The samples themselves fold, so the record and trace do too; the cards are
+  no worse than before, GET_COUNTER is. `scope_counter` adds the alias caveat to every gated result and gives a word's
+  resolution; `gated` is why the flag stays.
+- `fpga_counter_pass` takes `gated_div` (0 at full rate), mcp `P.counter_gated_coarse` mirrors the rule (simulator,
+  server). The edit in server.py is inside `scope_counter` only (mcp-031 works in the same file). Battery: no step
+  asserts a gated result not valid, nothing to change. 0.3.0's release notes keep their known issue: true for 0.3.0.
+
+**Checks**: `make gcc10`, `make`, `make PC_DEBUG=1 BUILD=build-dbg` 0 warnings: 817,152 / 840,704 / 841,216 bytes; `make -C
+host_tests test` green (test_ui, test_session 73287, test_fpga_bus 13415, check_vectors 168, check_retired_regs); mcp
+pytest and ruff (CI selection) clean.
+
+**Bench (coordinator / owner; FEL load of this branch's `make gcc10`, FPGA 0x153F, generator 1 kHz on the post, CH1 on it)**
+1. Roll mode on: the chip reads ACQ / Roll, the block orange, the text inside the block. Off, Average on: ACQ / avg. Off: ACQ
+   alone. The menu's box reads Roll / mode, green while on.
+2. `scope_set_timebase` divider 999, then a SET_TRIGGER total the time/div does not fit (the battery's segment run, 1000
+   samples): the snap notice shows, GET_TIMEBASE 0xFF / 0xFF, divider 999, 200 kS/s, equal to GET_DECIM; `scope_fft` or
+   `scope_measure` label 200 kSa/s. A rate tap on the screen: GET_TIMEBASE gives the UI's pair and that divider.
+3. Counter, Filter Off, gate 100 ms: 2 MSa/s, 200 and 20 kSa/s: `gated` and `valid` true, 1 kHz within a word, the Freq card
+   the same; 10 kSa/s: `gated`, not valid, a caveat, the card on the record's value. The auto thresholds must settle at
+   these rates (a misfit at every gate would hold VALID off: the one thing the 2026-11-07 reading past the flag did not show).
+4. The limits on the signal: 200 kSa/s Filter Off, generator 40 kHz (fs / 5): valid; 60 kHz (fs / 3.3): not valid; 1 kHz at 2 %
+   duty (20 us = 4 samples): valid, at 0.5 % (5 us = 1 sample): not valid. A non-locked source if one is at hand: T should
+   jitter by a word, E not at all.
+5. The alias, to confirm what the docs say: 200 kSa/s Filter Off, generator 201 kHz: reads 1 kHz, `gated`, `valid`, the
+   caveat; Anti-alias on: 201 kHz. Report if it reads anything else.
+6. `fnirsi1013d-battery --port COM10`: the counter and rates groups as on 0.3.0.
+Regression signs: "Long" anywhere on the screen, a raw divider surviving a UI rate tap, VALID at 10 kSa/s on 100 ms.

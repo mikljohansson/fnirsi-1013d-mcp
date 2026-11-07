@@ -396,11 +396,13 @@ with several, a `.npz` (kind `counter`, `scope_report` plots it) and the `resolu
 the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy (about 1e-5, uncalibrated) on top.
 Auto thresholds (the boot setting, fw-ctrauto): after each gate the firmware centres the band on the gate's raw
 min / max midpoint; a gate counted at thresholds that do not fit it (a new signal or range) is not valid and the next
-one is retuned, so the tool skips one such first gate. With Filter Off below 200 MSa/s the encodes are gated by the divider, the counter sees the divided stream, and the
-firmware gives the result `gated` true and `valid` false with a caveat saying so (GET_COUNTER flags bit 4); the scope's
-cards then show the record's measurement. Up to FPGA 0x153E such a count was not reliable; on 0x153F the bench read
-the right count past the flag (999.99 Hz at 2 MSa/s, 1000.00 Hz at 200 and 20 kSa/s on the 1 kHz square, 2026-11-07), but
-the flag stays until the firmware lifts it. Valid counts: 200 MSa/s, any filter, Peak. Caveats: no valid count (fewer than two edges: raise the gate,
+one is retuned, so the tool skips one such first gate. With Filter Off below 200 MSa/s the encodes are gated by the divider and the counter sees the divided stream: the
+result has `gated` true (GET_COUNTER flags bit 4). Firmware after 0.3.0 on FPGA 0x153F gives it `valid` true while the high and low
+times are at least two samples each (a 50 % signal up to a quarter of the sample rate) and the edges span at least 1000 samples
+(at the 100 ms gate 20 kSa/s and faster, at 1 s 2 kSa/s); `resolution` is then one word of two samples, not one 5 ns clock, and a
+caveat says that **a signal above half the sample rate reads as its alias**, as in the trace, with nothing in the result to show it.
+Outside the limits `valid` is false and a caveat says why; the scope's cards then show the record's measurement. Firmware
+0.3.0 and older never give a gated result `valid`. Full resolution and no alias: 200 MSa/s, any filter, Peak. Caveats: no valid count (fewer than two edges: raise the gate,
 check the source), a signal under the 12-code span auto needs or outside pinned thresholds (says which), vmin / vmax
 include the noise extremes. Wire: request u8 what (0 read / 1 configure), gate, source, level, hysteresis, 3 x 0
 (level 0 / hysteresis 0 = auto; a non-zero level refuses hysteresis > level);

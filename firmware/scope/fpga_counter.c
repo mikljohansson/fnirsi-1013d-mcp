@@ -105,7 +105,16 @@ void fpga_counter_config(uint8_t gate, uint8_t source, uint8_t level, uint8_t hy
 //----------------------------------------------------------------------------------------------------------------------------------
 // The pass
 
-static void cnt_take(fpga_counter_state *c, uint32_t now_ms, int full_rate)
+//A gated result outside the limits (fpga_counter.h "Gated encodes"): div + 1 clocks per sample
+static int cnt_coarse(const fpga_counter_state *c, uint32_t div)
+{
+  uint64_t sample = (uint64_t)div + 1;
+  uint64_t phase  = FPGA_CNT_MIN_PHASE_SAMPLES * sample * c->e;
+
+  return (c->w < phase) || (c->t < c->w + phase) || (c->t < FPGA_CNT_MIN_T_SAMPLES * sample);
+}
+
+static void cnt_take(fpga_counter_state *c, uint32_t now_ms, uint32_t gated_div)
 {
   const uint8_t *b = c->raw;
 
@@ -119,7 +128,8 @@ static void cnt_take(fpga_counter_state *c, uint32_t now_ms, int full_rate)
   c->min      = b[14];
   c->max      = b[15];
   c->res_ms   = now_ms;
-  c->gated    = (uint8_t)(!full_rate && (c->res_src != FPGA_CNT_RES_EXT));
+  c->gated    = (uint8_t)(gated_div && (c->res_src != FPGA_CNT_RES_EXT));
+  c->coarse   = (uint8_t)(c->gated && cnt_coarse(c, gated_div));
   c->has_period = (uint8_t)fpga_counter_derive(c->e, c->t, c->w, &c->freq_uhz, &c->period_ps, &c->width_ps, &c->low_ps,
                                                &c->duty_ppm);
   c->results++;
@@ -208,7 +218,7 @@ static void cnt_auto_check(fpga_counter_state *c, uint8_t *level, uint8_t *hyst)
   }
 }
 
-void fpga_counter_pass(uint32_t now_ms, int full_rate)
+void fpga_counter_pass(uint32_t now_ms, uint32_t gated_div)
 {
   fpga_counter_state *c = &fpga_cnt;
   uint32_t i;
@@ -243,7 +253,7 @@ void fpga_counter_pass(uint32_t now_ms, int full_rate)
       c->dropped++;
     else
     {
-      cnt_take(c, now_ms, full_rate);
+      cnt_take(c, now_ms, gated_div);
       cnt_auto_check(c, &level, &hyst);
 
       if(c->misfit && ((level != c->level) || (hyst != c->hyst)))
@@ -296,5 +306,5 @@ int fpga_counter_current(uint32_t now_ms)
 
 int fpga_counter_usable(uint32_t now_ms)
 {
-  return fpga_counter_current(now_ms) && fpga_cnt.has_period && !fpga_cnt.misfit && !fpga_cnt.gated;
+  return fpga_counter_current(now_ms) && fpga_cnt.has_period && !fpga_cnt.misfit && !fpga_cnt.coarse;
 }

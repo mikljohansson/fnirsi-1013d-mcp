@@ -252,7 +252,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
-- [ ] **Battery follow-ups** (mcp-battery, 2026-11-06). (1) Firmware: GET_TIMEBASE should report the divider the FPGA
+- [ ] **Battery follow-ups** (mcp-battery, 2026-11-06). (1) **Done, fw-031 101e056, bench section 98.** Firmware: GET_TIMEBASE should report the divider the FPGA
   holds (`pc_hal_divider_now`) while a host's raw divider runs, not drop it when acq_view_fit snaps the UI's time/div
   after a SET_TRIGGER total (finding 3; the host now corrects it from GET_DECIM, `Scope._held_timebase`). The spectrum
   view's "raw divider labelled with the UI rate" (protocol row 45) is the same root. (2) Simulator: the Nth edge with
@@ -334,7 +334,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `COUNTER_F_GATED` decided from the bench, the legacy EXT shift (last commit of the branch, model numbers) checked with
   an edge on EXT and CH1, and the user-facing docs (install guide, 0.3.0 release notes, roadmap, release checklist) moved
   from 0x153E to 0x153F.
-- [ ] **Lift `COUNTER_F_GATED` on 0x153F** (bench 2026-11-07 10:34-10:38): read past the flag, the counter on the 1 kHz square
+- [x] **Lift `COUNTER_F_GATED` on 0x153F** (fw-031 d27da9d: GATED stays as information, VALID inside limits; bench firmware/AGENTS.md section 98) (bench 2026-11-07 10:34-10:38): read past the flag, the counter on the 1 kHz square
   gave 999.99 / 1000.00 / 1000.00 Hz at 2 MSa/s, 200 and 20 kSa/s Filter Off, so the divided-rate miscount went with the
   pairing (`fpga/al3/AGENTS.md` "0x153F" item 7). The firmware still marks the result GATED, not valid, and the cards take
   the record's measurement. Lift the flag, let the cards use the counter there, update the known issue, docs/mcp-tools.md,
@@ -357,7 +357,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100
   steps / s; the loopback self-test's trigger level (+1.65 V against a square that tops at +1.83 V over the probe
   ground) and its need for CH1 straight on the post; docs/mcp-tools.md `delay(CH1->CH2)` against the tool's `delay`.
-- [ ] **ACQ chip says "Long" in roll mode** (owner 2026-11-07, 0.3.1): `menu.c:2024` draws "Long" (1.00o5's wording) while the CTRL page calls the mode Roll; the chip should read "ACQ Roll". Check the ACQ menu's "Long mode" / "Short mode" box at `menu.c:5076` and `:5182` in the same pass, and `docs/guide/screens.md:16`.
+- [x] **ACQ chip says "Long" in roll mode** (fw-031 f737cee, bench firmware/AGENTS.md section 98) (owner 2026-11-07, 0.3.1): `menu.c:2024` draws "Long" (1.00o5's wording) while the CTRL page calls the mode Roll; the chip should read "ACQ Roll". Check the ACQ menu's "Long mode" / "Short mode" box at `menu.c:5076` and `:5182` in the same pass, and `docs/guide/screens.md:16`.
 - [ ] **Zero at the shorted input against the two-polarity zero** (bench 2026-11-07, `docs/hardware-status.md` 14:42): up to 1.5 codes on CH2 ranges 2 and 4, -1 code on CH1 range 2, where +-1 V gives +-20 mV. Check the code 128 carry as the cause (a slow ramp or dither across 128); full rate reads up to 0.65 code high on both channels.
 - [ ] **scope_self_test_loopback judges from too little** (bench 2026-11-07 14:14, 0.3.1): 7 of 15 checks failed with no fault behind them. 25 % duty at 995 kHz on the post's slow edge (swing 2.1 V, duty 0.29..0.36): use 50 % or a lower frequency; T4 decides from one capture at 2.5 V/div (1000 captures in protocol section 12; over 200 at 1 V/div B first 0 drops, A first 134): many captures at 1 V/div; T5 tolerance +-1 against the simulated word + 1 (measured 1..2); T7 cannot pass on a release build (FORCE is debug-only): SKIP.
 - [ ] **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and

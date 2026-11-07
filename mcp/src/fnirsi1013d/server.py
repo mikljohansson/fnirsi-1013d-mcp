@@ -3111,16 +3111,28 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 out["frequency_spread_hz"] = _r6(max(freqs) - min(freqs))
                 out["frequency_mean_hz"] = _r6(sum(freqs) / len(freqs))
             res_rel = last.resolution
-            out["resolution"] = (f"one 5 ns clock in {last.t} over the {fmt_si(gate_s, 's')} gate: "
-                                 f"{res_rel:.2g} relative ({fmt_si(res_rel * (last.frequency_hz or 0), 'Hz')}); the "
-                                 "50 MHz crystal's accuracy (about 1e-5, uncalibrated) dominates above that"
-                                 if last.valid else "no valid count: counted on the gated ADC encodes" if last.gated
-                                 else "no valid count: fewer than two edges in the gate")
-            if last.gated:
-                notes.append("not valid: counted while Filter Off at a divided sample rate gates the ADC encodes (the "
-                             "counter then sees the divided sample stream, not the signal). Set a filter "
-                             "(scope_set_decimation), Peak, or 200 MSa/s for the counter; the scope's cards show the "
-                             "record's measurement meanwhile")
+            divider = s.get_timebase(cached=False).divider if last.gated else 0
+            coarse = last.gated and not last.valid and P.counter_gated_coarse(last.e, last.t, last.w, divider)
+            if last.gated and last.valid:  # edges known to a word of two samples, not a clock
+                res_rel = 2 * (divider + 1) / last.t
+                out["resolution"] = (f"one word of two samples ({fmt_si(2 * (divider + 1) * 5e-9, 's')}) over the "
+                                     f"{fmt_si(gate_s, 's')} gate: {res_rel:.2g} relative "
+                                     f"({fmt_si(res_rel * (last.frequency_hz or 0), 'Hz')})")
+            else:
+                out["resolution"] = (f"one 5 ns clock in {last.t} over the {fmt_si(gate_s, 's')} gate: "
+                                     f"{res_rel:.2g} relative ({fmt_si(res_rel * (last.frequency_hz or 0), 'Hz')}); the "
+                                     "50 MHz crystal's accuracy (about 1e-5, uncalibrated) dominates above that"
+                                     if last.valid else "no valid count: counted on the gated ADC encodes" if last.gated
+                                     else "no valid count: fewer than two edges in the gate")
+            if last.gated and last.valid:
+                notes.append("counted on the divided sample stream (Filter Off below 200 MSa/s): a signal above half "
+                             "the sample rate reads as its alias, as in the trace, and nothing in the count shows it. "
+                             "A filter (scope_set_decimation), Peak or 200 MSa/s give the true frequency")
+            elif coarse:
+                notes.append("not valid: counted while Filter Off at a divided sample rate gates the ADC encodes, and "
+                             "the high or low time is under two samples or the edges span under 1000 samples. Set a "
+                             "filter (scope_set_decimation), Peak, or 200 MSa/s for the counter; the scope's cards "
+                             "show the record's measurement meanwhile")
             elif not last.valid:
                 notes.append("no valid count in the gate: raise the gate time, check the level against the signal "
                              "(scope_capture shows it) or the source")

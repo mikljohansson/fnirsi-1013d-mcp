@@ -13,7 +13,7 @@ slow, the trigger chip with the run state, the generator button and the battery.
 program on the PC has the scope's serial port open or has sent it a request in the last moments.
 
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
-- Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
+- Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, Roll mode (green while on; the ACQ chip then reads Roll), Average
   mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base), Filter and Sample. The menu also shows the pass time, how long one screen update takes.
   The Sample Rate and Time per Division choices stand in grids of five columns; a grey time/div cannot show the record
   at this rate. While stopped, a tapped sample rate is the setting for the next RUN: it shows green and in the ACQ chip,
@@ -82,9 +82,12 @@ top of the menu. A new unit shows Freq, Vpp and Vavg on each enabled channel. Th
 them; the number at the top left of each item in the menu is its place. Freq, Period, the widths and the duties read
 "no period" while the record holds fewer than three crossings. The values are taken over the whole record, and Vrms
 includes the DC level. On the trigger channel Freq, Period, the widths and the duties come from the FPGA's hardware
-counter instead, counted at 200 MSa/s over 100 ms with thresholds that follow the signal (centred between its lowest
-and highest level); with Filter Off below 200 MSa/s, for a moment after the signal or the range changes, and for a
-signal smaller than about half a division, they show the record's values.
+counter instead, counted over 100 ms with thresholds that follow the signal (centred between its lowest and highest
+level): at 200 MSa/s, or with a filter or Peak, on every sample; with Filter Off below 200 MSa/s on the samples of the
+chosen rate, and then only from 20 kSa/s up and while the signal's high and low times are at least two samples each (up
+to a quarter of the sample rate for a 50 % signal). Otherwise, for a moment after the signal or the range changes, and
+for a signal smaller than about half a division, they show the record's values. A signal above half the sample rate
+with Filter Off reads as its alias, on the trace and on the cards: nothing on the screen shows it; Anti-alias does.
 
 **Touch on the plot.**
 

@@ -390,10 +390,37 @@ static void test_timebase(void)
   r = req(PC_CMD_SET_TIMEBASE, p, 8);
   T_EQ(pc_get_u32(r.p + 8), 40000000); T_EQ(pc_get_u32(r.p + 12), 25000);
 
-  //The raw divider holds until the UI selects a time base again
-  mock.tb.timeperdiv = 23; mock.tb.samplerate = 5; mock.tb.divider = 39;
+  //The raw divider holds until the UI selects a time base again, which writes the table's divider to the FPGA
+  mock.tb.timeperdiv = 23; mock.tb.samplerate = 5; mock.tb.divider = 39; mock.fpga_divider = 39;
+  r = req(PC_CMD_GET_STATUS, 0, 0);
   r = req(PC_CMD_GET_TIMEBASE, 0, 0);
   T_EQ(r.p[0], 23); T_EQ(pc_get_u32(r.p + 4), 39); T_EQ(S.tb_raw, 0);
+
+  //The same divider again from the UI at another index: the UI's pair is what runs
+  p[0] = 1; pc_put_u32(p + 4, 39);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.p[0], 0xFF);
+  mock.tb.timeperdiv = 24;
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], 24); T_EQ(pc_get_u32(r.p + 4), 39); T_EQ(S.tb_raw, 0);
+
+  //Someone else's 0x0D while a raw divider runs (a logger, a sweep) and back: GET_TIMEBASE says what the FPGA holds, and
+  //a UI write of the table's divider at the same index ends the raw divider
+  p[0] = 1; pc_put_u32(p + 4, 4);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  mock.tb.divider = 39;                                         //the table's, as pc_hal_timebase_read gives it
+  mock.fpga_divider = 999;
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], 0xFF); T_EQ(pc_get_u32(r.p + 4), 999); T_EQ(pc_get_u32(r.p + 8), 200000);
+  mock.fpga_divider = 4;
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], 0xFF); T_EQ(pc_get_u32(r.p + 4), 4);
+  mock.fpga_divider = 39;
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], 24); T_EQ(pc_get_u32(r.p + 4), 39); T_EQ(S.tb_raw, 0);
 }
 
 static void test_trigger(void)
@@ -3549,9 +3576,10 @@ static resp_t enc_capture(void)
 }
 
 //fw 0.2.87 (firmware/AGENTS.md section 57, fpga/al3/AGENTS.md "First-record saturation"): the host's raw divider 4095,
-//then a UI time/div snap that writes no 0x0D (acq_view_fit) and clears tb_raw at the next poll, then a host ARM with
-//CIC2 + FIR: the arm computes N and the shift from the divider the FPGA holds (N 4096, S 15), not from the UI table
-//(D 199: S 7, every word 0xFFFF on the bench). GET_DECIM and GET_CAPTURE_INFO report that divider.
+//then a UI time/div snap that writes no 0x0D (acq_view_fit), then a host ARM with CIC2 + FIR: the arm computes N and the
+//shift from the divider the FPGA holds (N 4096, S 15), not from the UI table (D 199: S 7, every word 0xFFFF on the
+//bench). GET_DECIM and GET_CAPTURE_INFO report that divider, and since battery finding 3 (2026-11-06) GET_TIMEBASE too:
+//the snap does not end the raw divider, a capture's index stays 0xFF and the UI's own write of the rate ends it.
 static void test_decim_held_divider(void)
 {
   resp_t  r;
@@ -3573,7 +3601,8 @@ static void test_decim_held_divider(void)
   mock.tb.divider    = 199;
   r = req(PC_CMD_GET_STATUS, 0, 0);
   r = req(PC_CMD_GET_TIMEBASE, 0, 0);
-  T_TRUE(r.p[0] != 0xFF);                                       //tb_raw forgotten: GET_TIMEBASE shows the UI's index
+  T_EQ(r.p[0], 0xFF); T_EQ(r.p[1], 0xFF); T_EQ(S.tb_raw, 1);    //the snap wrote no 0x0D: the raw divider still runs
+  T_EQ(pc_get_u32(r.p + 4), 4095); T_EQ(pc_get_u32(r.p + 8), 200000000u / 4096);
   r = req(PC_CMD_GET_DECIM, 0, 0);
   T_EQ(pc_get_u32(r.p + 16), 4095); T_EQ(pc_get_u32(r.p + 4), 4096); T_EQ(r.p[3], 15);
   T_EQ(pc_get_u32(r.p + 20), 200000000u / 4096);
@@ -3584,6 +3613,13 @@ static void test_decim_held_divider(void)
   r = wait_done(1000);
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 16), 4095); T_EQ(r.p[69], 15); T_EQ(pc_get_u32(r.p + 72), 4096);
+  T_EQ(r.p[20], 0xFF);
+
+  //The UI selects a rate: the table's divider reaches the FPGA, the UI's pair is the truth again
+  mock.fpga_divider = 199;
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], mock.tb.timeperdiv); T_EQ(pc_get_u32(r.p + 4), 199); T_EQ(S.tb_raw, 0);
 }
 
 //fw 0.2.79 (protocol 1.24): the capture stages: caps bit 19 and features bit 7, the EXT shifts 4 / 3 words later, 0x53
@@ -4237,11 +4273,15 @@ static void test_counter(void)
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
   mock.cnt.misfit = 0;
-  //fw-gated: a result counted on the gated encodes (Filter Off at a divided rate): flags bit 4, not VALID
+  //fw-gated, fw-031: a result counted on the gated encodes (Filter Off at a divided rate): flags bit 4, VALID inside the
+  //limits (fpga_counter.h), E / T / W kept and no frequency outside them
   mock.cnt.gated = 1; mock.cnt.seq = 21;
   r = get_counter(0, 0, 0, 0, 0);
-  T_EQ(r.p[0], 0x11); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
-  mock.cnt.gated = 0;
+  T_EQ(r.p[0], 0x13); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 10000000);
+  mock.cnt.coarse = 1;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x10); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
+  mock.cnt.gated = 0; mock.cnt.coarse = 0;
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.p[0], 0x02);
   //freq_mHz: round half up, saturating above 4294967.295 Hz (1 MHz, 30 MHz, 100 MHz)

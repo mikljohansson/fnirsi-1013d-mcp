@@ -114,7 +114,7 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
   how often each point of the plot is hit.
 - **wfm/s**: records drawn per second in the phosphor view.
 - **Pass time**: how long one screen update takes, shown in the ACQ menu.
-- **Roll mode**: the slow time bases (Long mode in the ACQ menu), where the trace scrolls across the screen without a
+- **Roll mode**: the slow time bases (the Roll mode box in the ACQ menu), where the trace scrolls across the screen without a
   trigger.
 
 ## Frequency response terms
