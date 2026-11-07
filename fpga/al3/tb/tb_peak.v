@@ -1,7 +1,8 @@
 // Peak detect testbench (fpga/al3/src/zaklad.v, 0x153C, command 0x56 bit 1). Run with run.sh (ONLY=peak) or vvp.
 //
-// The ADC model of tb_trigpos.v (each core samples the analog input vin on its encode edge, 4 encode cycles of
-// pipeline, 3.3 ns tPD) is driven with a random analog signal that changes every 2 to 7 ns, plus short spikes.
+// The ADC model of tb_trigpos.v (each core samples the analog input vin on its encode edge; since 0x153F both buses
+// change together after the B encode, data align as the unit does it) is driven with a random analog signal that
+// changes every 2 to 7 ns, plus short spikes.
 // A monitor logs the decimator's inputs adc*_w (the captured samples of 0x153A, cores B then A in time) at every
 // rising write clock edge and every word written to the sample memory.
 //  1. min / max: with 0x56 bit 1, every 16-bit word is { max, min } of exactly the 2P samples the K = 1 boxcar sums
@@ -61,17 +62,21 @@ module tb;
   reg [7:0] pB [0:7];
   integer ia, ib;
   initial for (ia = 0; ia < 8; ia = ia + 1) begin pA[ia] = 40; pB[ia] = 40; end
+  // data align as the maintainer's unit does it (0x153F, fpga/al3/README.md "Changes" section 22; tb_adccap.v's
+  // rule 2): each core samples on its own encode, both buses change 10 ns after the B encode pin's rising edge
+  // (11.25 ns after the write clock's rising edge) to the B sample of 5 B encodes before and the A sample taken
+  // half a word after that one
   always @(posedge e1A) begin
     for (ia = 7; ia > 0; ia = ia - 1) pA[ia] = pA[ia - 1];
     pA[0] = vin;
-    adc1A <= #3.3 pA[4];
-    adc2A <= #3.3 8'd255 - pA[4];
   end
   always @(posedge e1B) begin
     for (ib = 7; ib > 0; ib = ib - 1) pB[ib] = pB[ib - 1];
     pB[0] = vin;
-    adc1B <= #3.3 pB[4];
-    adc2B <= #3.3 8'd255 - pB[4];
+    adc1B <= #10.0 pB[5];
+    adc2B <= #10.0 8'd255 - pB[5];
+    adc1A <= #10.0 pA[4];
+    adc2A <= #10.0 8'd255 - pA[4];
   end
 
   // signal modes: 0 random (changes every 2..7 ns), 1 flat with 6 ns spikes (spike_hi up, else down)

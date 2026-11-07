@@ -214,6 +214,25 @@
    ],
    "status": "recommended",
    "bench": "built 2026-11-04 (fpga-153e, roll i2 da645d0: every clock 0 errors, clk_200MHz 4.802 ns, 6439 LUT / 5912 reg / 7454 LE = 86.3 %, #oreg 15, encode pads B 6.97 / A 7.34 ns on both chips; a fresh rebuild of the committed source gives the same bytes); tb/run.sh 18 steps on seeds 12345 and 4242: ALL PASS on both seeds, every step, no exception; flashed 2026-11-06 14:00-14:04 (pre-write = the 0x153D padded image aa252fb7..; the first pass failed its verify with one lost sector erase and one wrong byte, the second pass verified, independent double read back 2782e1b6..); benched 14:05-15:50 on fw 0.2.105 b278bc0c (main e242b53, built for 0x153E; docs/hardware-status.md): no mismatch notice; the wizard with the inputs open trained CH1 A3 B3, CH2 A3 B3 (0x06DB) cold and again warm; encode self-check 0 bad of 110232, capture self-check 0 flagged of 107674; CH2 code errors (Filter Off, 1 kHz square from the post through an RC ladder, samples 4+ codes above a 3-sample median): 0 % on both cores at 2 MSa/s; at 200 MSa/s the peak over the CH2 offset sweep (tools/enc_sweep.py: the square's low level moved across the 0x5F/0x60 carry in 0.25-code steps) A 5.17 % / 5.12 %, B 0.61 % / 0.65 % with the warm calibration 80 min after power-on (0x153D on 2026-11-04: 6.94 % / 0.66 %), and A 15.1 % / B 2.7 % 10 min after power-on: the share falls about 2.5 times as the unit warms up, so the sweep counts only 30 min or more after power-on; counter on CH1 1 kHz 1000.002 Hz valid at 200 MSa/s, GATED (not valid, by design) with Filter Off at 500 kSa/s; logger 1 ch RAW8 500 kS/s, 1 ch 16-bit 250 kS/s, 2 ch 16-bit 125 kS/s, 5 s each, 0 words lost; fw persisted to the card 15:23 and booted from it 15:49 (no notice, the trained stages in effect); accepted by the owner for 0.3.0 at 15:1x; recommended since 2026-11-06"
+  },
+  {
+   "version": "0x153F",
+   "file": "al3-0x153F.bin",
+   "size": 282898,
+   "sha256": "e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0",
+   "flash_image_sha256": "d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc",
+   "source_commit": "ea38475265677137714adb0f533351d2dbdd56fa",
+   "built_with": "Anlogic TD 4.6.8 SP1 (V4.6.116866), fpga/al3/build.sh",
+   "min_firmware": "0.3.0",
+   "features": [
+    "as 0x153E",
+    "both ADC cores of a chip captured at one instant, so a Filter Off word holds the designed pair (core B half a word before core A) at every rate: at full rate (divider 0, any filter, peak detect) at the chip's stage, 0x63 bits 2:0 CH1 and 8:6 CH2, with core A's instants and latency of 0x153E; at divided rates 2.5 ns after the write clock's rising edge whatever the stage. 0x153A to 0x153E took each core against its own encode edge; the maintainer's unit, whose AD9288s release both output buses after the B encode, then stored core B one conversion late at most rates and stages (bench 2026-11-06, fpga/al3/README.md section 22)",
+    "0x63 keeps its layout; bits 5:3 and 11:9 (the B cores' stages) and 13:12 (B from the A-encode path) select nothing any more; power-on 0x06DB (stage 3 on both chips)",
+    "core A one word earlier than on 0x153E at dividers 1 to 3 (the legacy EXT shift); the trigger position, the filters, peak detect, the counter, the logger, the generator and every other register as 0x153E",
+    "capability bits as 0x153E"
+   ],
+   "status": "unbenched",
+   "bench": "built 2026-11-06 (fpga-153f, roll q10 ea38475: every clock 0 errors, clk_200MHz 4.789 ns, 6401 LUT / 5673 reg / 7272 LE = 84.2 %, #ireg 33, #oreg 15, encode pads B 6.97 / A 7.34 ns on both chips as on 0x153E; a fresh rebuild of the committed source gives the same bytes); `tb/run.sh` (18 steps, `REF_SRC_DIR` with `da645d0.v` added) on seeds 12345 and 4242 (2026-11-07, the review of fpga-153f, snapshots of the committed `src` + `tb`): **ALL PASS on both seeds, every step, no exception** (12345 / 4242: ext 39; decim 107 + cic_model 1868 / 1882 samples; fir 168 + cic_model 1575 / 1610 samples; long 8; seg 54 / 56 + seg_model 22 runs 0 failures; trigpos 1252 (37 cases); contract 42 and the transcript = `contract_0x153F.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 35952 strict + 6298 acceptance, STRICT ORDER PASS on the design and FAIL on da645d0; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102). The author's runs of 2026-11-06/07 on the same RTL had one failing step per seed (tb_seg 12345, tb_fir 4242); the review traced both to the testbenches and fixed them there (a stimulus process that had inherited the write clock's 1 ps simulation delay, and the 0x1534 reference's swap bit written in a compared phase; README section 22 \"Tests\" and the section 20 addendum), the bitstream unchanged; not flashed"
   }
  ]
 }

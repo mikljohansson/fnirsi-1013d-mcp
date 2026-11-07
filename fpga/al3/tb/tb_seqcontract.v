@@ -85,24 +85,28 @@ module tb;
   endtask
 
   //---------------------------------------------------------------------------------
-  // ADC: AD9288-like, 4 encode cycles pipeline (as tb_trigpos.v), CH1 = step LO/HI, CH2 its complement
+  // ADC: AD9288-like (as tb_trigpos.v), CH1 = step LO/HI, CH2 its complement
 
   localparam [7:0] LO = 8'd40, HI = 8'd210;
   reg [7:0] pA [0:7];
   reg [7:0] pB [0:7];
   integer ia, ib;
   initial for (ia = 0; ia < 8; ia = ia + 1) begin pA[ia] = LO; pB[ia] = LO; end
+  // data align as the maintainer's unit does it (0x153F, fpga/al3/README.md "Changes" section 22; tb_adccap.v's
+  // rule 2): each core samples on its own encode, both buses change 10 ns after the B encode pin's rising edge
+  // (11.25 ns after the write clock's rising edge) to the B sample of 5 B encodes before and the A sample taken
+  // half a word after that one
   always @(posedge e1A) begin
     for (ia = 7; ia > 0; ia = ia - 1) pA[ia] = pA[ia - 1];
     pA[0] = adc_in ? HI : LO;
-    adc1A <= #3.3 pA[4];
-    adc2A <= #3.3 8'd255 - pA[4];
   end
   always @(posedge e1B) begin
     for (ib = 7; ib > 0; ib = ib - 1) pB[ib] = pB[ib - 1];
     pB[0] = adc_in ? HI : LO;
-    adc1B <= #3.3 pB[4];
-    adc2B <= #3.3 8'd255 - pB[4];
+    adc1B <= #10.0 pB[5];
+    adc2B <= #10.0 8'd255 - pB[5];
+    adc1A <= #10.0 pA[4];
+    adc2A <= #10.0 8'd255 - pA[4];
   end
 
   //---------------------------------------------------------------------------------

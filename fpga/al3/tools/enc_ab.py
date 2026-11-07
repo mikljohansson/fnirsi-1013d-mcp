@@ -21,7 +21,7 @@ depends on where the signal's flat levels sit against the 0x5F / 0x60 carry (har
 script records CH2's range, coupling and offset (dcoffset / offset_pwm), the trained capture stages in effect (GET_HEALTH
 cap_value), the encode self-check counters, firmware and FPGA version words and the image's sha256 / label you pass
 (the firmware cannot see which image is flashed: every experiment image reports its source's version word, 0x153D for
-the fpga-encphase images, 0x153E for images made from the 0x153E source). --analyse warns when two runs differ in any
+the fpga-encphase images, the source's word, 0x153F now, for images made from it). --analyse warns when two runs differ in any
 of them.
 
 Phases (--analyse, bench session 2026-11-04): the trigger (CH1 rising at the ladder input) also fires on the falling
@@ -67,6 +67,8 @@ KNOWN_IMAGES = {
     "46a38f24e3a56aff45d0113247ac5a82cfbc059b66689659e4a2049d6e440b6f": "fpga-encphase enc+250 (0x153D word), flash",
     "831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1": "0x153E (IOB encodes), raw",
     "2782e1b6246d6f1bf7603a2d011ff550e01d47f71953ccce4b6c25069f74d9d8": "0x153E (IOB encodes), flash image",
+    "e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0": "0x153F (cores paired at every rate), raw",
+    "d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc": "0x153F (cores paired at every rate), flash image",
 }
 #: keys of the recorded settings that must match for two runs to be comparable
 COMPARE_KEYS = ("ch2", "cap_value", "fw", "gen", "trigger_mode")
@@ -245,9 +247,9 @@ def run(args) -> int:
         }
         print(f"{args.image}: fw {meta['fw']} FPGA 0x{info.fpga_version:04X}, stages {meta['cap_text']}, "
               f"CH2 {meta['ch2']}, encode self-check {meta['enc']}", flush=True)
-        if info.fpga_version != 0x153E:
-            print(f"NOTE: the FPGA reports 0x{info.fpga_version:04X}, not 0x153E (expected for the fpga-encphase "
-                  "images, 0x153D and 0x153C; images made from the 0x153E source keep 0x153E)")
+        if info.fpga_version != 0x153F:
+            print(f"NOTE: the FPGA reports 0x{info.fpga_version:04X}, not 0x153F (expected for 0x153E, the "
+                  "fpga-encphase images, 0x153D and 0x153C; images made from the source keep its word)")
         try:
             s.set_decim(0)
             if args.gen_hz:

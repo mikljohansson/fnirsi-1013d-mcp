@@ -5,10 +5,13 @@
 // trigger at the same place in the stored record on every run, or does the decimator/FIR latency, the trigger
 // detector (raw or decimated stream) or the record pointer arithmetic add run-to-run variation?
 //
-// One instance (dut = src/zaklad.v). The ADCs are a behavioural AD9288: each core samples the analog input on
-// the rising edge of its encode pin (the dut's o_adc1_encA / encB) and outputs that sample `pl` encode cycles
-// later (+pl, default 4 = the datasheet's pipeline delay), 3.3 ns after the encode edge. The testbench keeps the
-// sampling instant of every value next to it, so each stored legacy sample has a known true time.
+// One instance (dut = src/zaklad.v). The ADCs are a behavioural AD9288 pair in the data-align mode the unit shows
+// (0x153F, fpga/al3/README.md "Changes" section 22; tb_adccap.v's rule 2): each core samples the analog input on the
+// rising edge of its encode pin (the dut's o_adc1_encA / encB), and both buses change 10 ns after the B encode pin's
+// rising edge (11.25 ns after the write clock's rising edge, the unit's D) to the B sample taken pl + 1 B encodes
+// before and the A sample taken half a word after that one (+pl, default 4: core A 4.5 encode cycles after its
+// sampling, core B 5; the bench fixes the pairing, not the depth). The testbench keeps the sampling instant of every
+// value next to it, so each stored legacy sample has a known true time.
 // The analog input is a step (CH1 LO -> HI, CH2 its complement) at a random instant te; the EXT pad carries the
 // same step (generator loopback). 0x153A: the sampling-instant tags are carried through a shadow of the dut's
 // capture pipeline, so the monitor knows the instant of every stored sample (see the monitors below).
@@ -65,7 +68,6 @@ module tb;
 
   integer errors = 0, checks = 0;
   real    dab;                                          // legacy: core B's sampling instant - core A's in a word (ns)
-  integer dab_sign = 0;
   integer seed;
   integer logf;
 
@@ -80,7 +82,9 @@ module tb;
   endtask
 
   //---------------------------------------------------------------------------------
-  // AD9288 model: sample on the encode rising edge, output pl encode cycles later, tPD 3.3 ns
+  // AD9288 model (data align as the unit does it): sample on the own encode's rising edge, both buses released TDA
+  // after the B encode pin's rising edge with the pair { B sample pl + 1 back, A sample pl back }
+  localparam real TDA = 10.0;
 
   localparam [7:0] LO = 8'd40, HI = 8'd210;
   integer pl;
@@ -98,54 +102,56 @@ module tb;
     for (ia = 7; ia > 0; ia = ia - 1) begin pA[ia] = pA[ia - 1]; qA[ia] = qA[ia - 1]; end
     pA[0] = sig ? HI : LO;
     qA[0] = $realtime * 1000.0;
-    adc1A <= #3.3 pA[pl];
-    adc2A <= #3.3 8'd255 - pA[pl];
-    tagA  <= #3.3 qA[pl];
   end
 
   always @(posedge e1B) begin
     for (ib = 7; ib > 0; ib = ib - 1) begin pB[ib] = pB[ib - 1]; qB[ib] = qB[ib - 1]; end
     pB[0] = sig ? HI : LO;
     qB[0] = $realtime * 1000.0;
-    adc1B <= #3.3 pB[pl];
-    adc2B <= #3.3 8'd255 - pB[pl];
-    tagB  <= #3.3 qB[pl];
+    adc1B <= #(TDA) pB[pl + 1];
+    adc2B <= #(TDA) 8'd255 - pB[pl + 1];
+    tagB  <= #(TDA) qB[pl + 1];
+    adc1A <= #(TDA) pA[pl];
+    adc2A <= #(TDA) 8'd255 - pA[pl];
+    tagA  <= #(TDA) qA[pl];
   end
 
   //---------------------------------------------------------------------------------
   // Monitors
 
-  // 0x153A: the tags follow the dut's capture pipeline (fpga/al3/README.md "Changes" section 10): IOB DDR register
-  // on clk_200MHz (q2 = pin at the falling edge, q1 = at the rising edge, both out on the rising edge), two more
-  // rising-edge stages, the stage registers on the write clock edges (A and the A-referenced B on the falling edge,
-  // B on the rising edge), the per-core pick one write clock later on the same edge, then adc*_w on the rising edge.
+  // The tags follow the dut's capture pipeline (0x153F, zaklad.v "ADC data capture"): IOB DDR register on clk_200MHz
+  // (q2 = pin at the falling edge, q1 = at the rising edge, both out on the rising edge), three more rising-edge
+  // stages, cap_h on the rising clk_200MHz edge that sees cap_st[1] (tap 1 at divided rates, tap stage + 2 at full
+  // rate, both cores of the chip alike), then adc*_w on the rising write clock edge.
   // twA / twB are the sampling instants of dut.adc1A_w / dut.adc1B_w; a change of the dut's pipeline must be
   // mirrored here (tb_adccap.v checks the dut's word association independently).
-  reg [63:0] tA_c0 = 0, tA_q2 = 0, tA_t0 = 0, tA_q1 = 0, tA_d1 = 0, tA_d2 = 0, tA_dd1 = 0, tA_dd2 = 0;
-  reg [63:0] tB_c0 = 0, tB_q2 = 0, tB_t0 = 0, tB_q1 = 0, tB_d1 = 0, tB_d2 = 0, tB_dd1 = 0, tB_dd2 = 0;
-  reg [63:0] tsA [0:5];
-  reg [63:0] tsB [0:5];
-  reg [63:0] tsBf [0:5];
-  reg [63:0] ta_m = 0, tb_m = 0, tbf_m = 0, twA = 0, twB = 0;
-  integer    tsi;
-  initial for (tsi = 0; tsi < 6; tsi = tsi + 1) begin tsA[tsi] = 0; tsB[tsi] = 0; tsBf[tsi] = 0; end
-  wire [2:0] selA = (dut.cap_sel[2:0] > 3'd5) ? 3'd5 : dut.cap_sel[2:0];
-  wire [2:0] selB = (dut.cap_sel[5:3] > 3'd5) ? 3'd5 : dut.cap_sel[5:3];
+  reg [63:0] tA_c0 = 0, tA_q2 = 0, tA_t0 = 0, tA_q1 = 0, tA_dd1 = 0, tA_dd2 = 0, tA_d1 = 0, tA_d2 = 0, tA_e1 = 0, tA_e2 = 0;
+  reg [63:0] tB_c0 = 0, tB_q2 = 0, tB_t0 = 0, tB_q1 = 0, tB_dd1 = 0, tB_dd2 = 0, tB_d1 = 0, tB_d2 = 0, tB_e1 = 0, tB_e2 = 0;
+  reg [63:0] thA = 0, thB = 0, twA = 0, twB = 0;
+  function [63:0] tpick(input full, input [1:0] sel, input [63:0] q1, input [63:0] dd2, input [63:0] dd1,
+                        input [63:0] e2, input [63:0] e1);
+    case ({full, sel})
+      3'b110:  tpick = dd2;
+      3'b111:  tpick = dd1;
+      3'b100:  tpick = e2;
+      3'b101:  tpick = e1;
+      default: tpick = q1;
+    endcase
+  endfunction
   always @(negedge dut.clk_200MHz) begin tA_c0 <= tagA; tB_c0 <= tagB; end
   always @(posedge dut.clk_200MHz) begin
     tA_q2 <= tA_c0; tA_t0 <= tagA; tA_q1 <= tA_t0; tA_d1 <= tA_q1; tA_d2 <= tA_q2; tA_dd1 <= tA_d1; tA_dd2 <= tA_d2;
+    tA_e1 <= tA_dd1; tA_e2 <= tA_dd2;
     tB_q2 <= tB_c0; tB_t0 <= tagB; tB_q1 <= tB_t0; tB_d1 <= tB_q1; tB_d2 <= tB_q2; tB_dd1 <= tB_d1; tB_dd2 <= tB_d2;
-  end
-  always @(negedge dut.sample_write_clock) begin
-    tsA[0] <= tA_q2; tsA[1] <= tA_q1; tsA[2] <= tA_d2; tsA[3] <= tA_d1; tsA[4] <= tA_dd2; tsA[5] <= tA_dd1;
-    tsBf[0] <= tB_q2; tsBf[1] <= tB_q1; tsBf[2] <= tB_d2; tsBf[3] <= tB_d1; tsBf[4] <= tB_dd2; tsBf[5] <= tB_dd1;
-    ta_m <= tsA[selA]; tbf_m <= tsBf[selB];
+    tB_e1 <= tB_dd1; tB_e2 <= tB_dd2;
+    if (dut.cap_st[1]) begin
+      thA <= tpick(dut.cap_full, dut.cap_sel[1:0], tA_q1, tA_dd2, tA_dd1, tA_e2, tA_e1);
+      thB <= tpick(dut.cap_full, dut.cap_sel[1:0], tB_q1, tB_dd2, tB_dd1, tB_e2, tB_e1);
+    end
   end
   always @(posedge dut.sample_write_clock) begin
-    tsB[0] <= tB_q2; tsB[1] <= tB_q1; tsB[2] <= tB_d2; tsB[3] <= tB_d1; tsB[4] <= tB_dd2; tsB[5] <= tB_dd1;
-    tb_m <= tsB[selB];
-    twA <= ta_m;
-    twB <= dut.cap_sel[12] ? tbf_m : tb_m;
+    twA <= thA;
+    twB <= thB;
   end
 
   // every memory write: its time and (legacy) the sampling instants of the A and B values it stores
@@ -291,7 +297,7 @@ module tb;
   reg [7:0]  rbB [0:8191];
   reg [7:0]  smp [0:16383];
   reg [63:0] stt [0:16383];
-  integer    mem_bad, nd_bad, ord_bad, o_s, wcross, is_legacy;
+  integer    mem_bad, nd_bad, ord_bad, o_s, wcross, is_legacy, dab_bad;
   real       tns, fx, lat;
   reg        bus_ta_ok;
 
@@ -431,12 +437,15 @@ module tb;
       $fdisplay(logf, "RUN case %0d K %0d fir %0d D %0d src %0d pre %0d tot %0d stb %0.0f stale %0d ta %0d wa_edge %0d trig %0d ci %0d off %0d wcross %0d tns %0.2f fx %0.3f lat %0.1f membad %0d ndbad %0d dab %0.2f",
                 c, c_k[c], c_fir[c], c_d[c], c_src[c], pre_w, tot_w, stb, stale_pre, ta, wa_edge, trig, ci, o_s, wcross,
                 tns, fx, lat, mem_bad, nd_bad, (wB[(start + pre_w) & 8191] * 1.0 - wA[(start + pre_w) & 8191]) / 1000.0);
-      // A/B order: core B's sample of a word lies half a word after (or before) core A's, the same way in every run
+      // A/B order, strict (0x153F): core B's sample of a word is taken half a word BEFORE core A's (protocol 7.3), in
+      // every word of the record; +-0.5 ns covers the A - B encode offset (0.375 ns)
       if (is_legacy) begin
-        dab = (wB[(start + pre_w) & 8191] * 1.0 - wA[(start + pre_w) & 8191]) / 1000.0;
-        if (dab_sign == 0) dab_sign = (dab > 0) ? 1 : -1;
-        check(((dab > 0) ? 1 : -1) == dab_sign && (dab * dab_sign > 0.5 * tw_ns - 0.5) && (dab * dab_sign < 0.5 * tw_ns + 0.5),
-              "legacy A/B order: core B half a word from core A, same sign in every run");
+        dab_bad = 0;
+        for (i = 0; i < tot_w; i = i + 1) begin
+          dab = (wB[(start + i) & 8191] * 1.0 - wA[(start + i) & 8191]) / 1000.0;
+          if (!(dab < -0.5 * tw_ns + 0.5 && dab > -0.5 * tw_ns - 0.5)) dab_bad = dab_bad + 1;
+        end
+        check(dab_bad == 0, "legacy A/B order: core B half a word before core A in every word of the record");
       end
       check(done == 1 && trig == 1 && ci > 0, "capture triggered and the step is in the record");
       check(bus_ta_ok, "0x14 over the bus equals trigger_address");
@@ -490,19 +499,25 @@ module tb;
     if (!$value$plusargs("order=%d", order)) order = 0;
     if (!$value$plusargs("logfile=%s", logname)) logname = "trigpos.log";
     logf = $fopen(logname, "w");
-    $display("tb_trigpos: seed %0d, %0d runs per case, ADC pipeline %0d encode cycles, config order %0d", seed, nruns, pl, order);
+    $display("tb_trigpos: seed %0d, %0d runs per case, ADC pipeline A %0d.5 / B %0d encode cycles (data align, release on the B encode), config order %0d", seed, nruns, pl, pl + 1, order);
     #300;
     wr1(8'h50, 8'h00);                                  // generator off: EXT reads the loopback step
     wr1(8'h57, 8'h00);
     rd2(8'h06);
     $display("version %h", rd16);
 
-    // cases: legacy (K = 0) at 200, 20, 1 and 0.5 MSa/s, and 16-bit K = 1..3 with and without the FIR at
+    // cases: legacy (K = 0) at 200, 20, 1 and 0.5 MSa/s and at 100 .. 33 MSa/s, and 16-bit K = 1..3 with and without the FIR at
     // N = 200 (1 MSa/s), N = 20 (10 MSa/s), N = 64 and N = 4; sources CH1 (level) and EXT
     add_case(2'd0, 1'b0, 32'd0,   2'd0); add_case(2'd0, 1'b0, 32'd0,   2'd2);
     add_case(2'd0, 1'b0, 32'd9,   2'd0); add_case(2'd0, 1'b0, 32'd9,   2'd2);
     add_case(2'd0, 1'b0, 32'd199, 2'd0); add_case(2'd0, 1'b0, 32'd199, 2'd2);
     add_case(2'd0, 1'b0, 32'd399, 2'd0);
+    // 0x153F: the small dividers (T = 20 .. 60 ns), where 0x153E's core order and core A's latency changed with the rate
+    add_case(2'd0, 1'b0, 32'd1, 2'd0); add_case(2'd0, 1'b0, 32'd1, 2'd2);
+    add_case(2'd0, 1'b0, 32'd2, 2'd0); add_case(2'd0, 1'b0, 32'd2, 2'd2);
+    add_case(2'd0, 1'b0, 32'd3, 2'd0); add_case(2'd0, 1'b0, 32'd3, 2'd2);
+    add_case(2'd0, 1'b0, 32'd4, 2'd0); add_case(2'd0, 1'b0, 32'd4, 2'd2);
+    add_case(2'd0, 1'b0, 32'd5, 2'd0); add_case(2'd0, 1'b0, 32'd5, 2'd2);
     for (k1 = 1; k1 <= 3; k1 = k1 + 1) begin
       add_case(k1, 1'b0, 32'd199, 2'd0); add_case(k1, 1'b0, 32'd199, 2'd2);
       add_case(k1, 1'b1, 32'd199, 2'd0); add_case(k1, 1'b1, 32'd199, 2'd2);

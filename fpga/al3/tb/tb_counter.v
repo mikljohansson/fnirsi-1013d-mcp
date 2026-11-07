@@ -89,17 +89,21 @@ module tb;
   reg [7:0] pB [0:7];
   integer ia, ib;
   initial for (ia = 0; ia < 8; ia = ia + 1) begin pA[ia] = 60; pB[ia] = 60; end
+  // data align as the maintainer's unit does it (0x153F, fpga/al3/README.md "Changes" section 22; tb_adccap.v's
+  // rule 2): each core samples on its own encode, both buses change 10 ns after the B encode pin's rising edge
+  // (11.25 ns after the write clock's rising edge) to the B sample of 5 B encodes before and the A sample taken
+  // half a word after that one
   always @(posedge e1A) begin
     for (ia = 7; ia > 0; ia = ia - 1) pA[ia] = pA[ia - 1];
     pA[0] = vin;
-    adc1A <= #3.3 pA[4];
-    adc2A <= #3.3 8'd255 - pA[4];
   end
   always @(posedge e1B) begin
     for (ib = 7; ib > 0; ib = ib - 1) pB[ib] = pB[ib - 1];
     pB[0] = vin;
-    adc1B <= #3.3 pB[4];
-    adc2B <= #3.3 8'd255 - pB[4];
+    adc1B <= #10.0 pB[5];
+    adc2B <= #10.0 8'd255 - pB[5];
+    adc1A <= #10.0 pA[4];
+    adc2A <= #10.0 8'd255 - pA[4];
   end
 
   //---------------------------------------------------------------------------------
@@ -255,7 +259,7 @@ module tb;
     wr1(8'h50, 8'h00);                                   // generator off: EXT is the pad
     ext_en = 1;
     rd2(8'h06);
-    check(rd16 == 16'h153B || rd16 == 16'h153C || rd16 == 16'h153D || rd16 == 16'h153E, "cmd 0x06 reads 0x153B .. 0x153E");
+    check(rd16 == 16'h153B || rd16 == 16'h153C || rd16 == 16'h153D || rd16 == 16'h153E || rd16 == 16'h153F, "cmd 0x06 reads 0x153B .. 0x153F");
     check(dut.k_seq == 0 && dut.cnt_gate == 0 && dut.cnt_lvl == 0 && dut.cnt_hys == 0, "counter off at power-on, thresholds 0");
     // power-on read: nothing published, min reads 255, everything else 0
     rd_counter;

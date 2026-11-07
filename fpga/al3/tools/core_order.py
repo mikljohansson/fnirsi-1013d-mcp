@@ -12,7 +12,9 @@ s = +1 = core B one conversion late. Prints the winner per capture as votes and 
 
 Model that fitted the unit on 0x153E (AD9288 in data-align mode: both cores' data change D = 12 ns after the write
 clock's rising edge R; core B taken at R - cB, core A at R + T/2 - cA, c = 5 + 2.5 x stage ns, T = 10 (divider + 1) ns):
-s = 1 + (ceil((cB + D) / T) - 1) - (ceil((cA + T/2 + D) / T) - 1). Run with the mcp venv's Python; LOCAL-safe except
+s = 1 + (ceil((cB + D) / T) - 1) - (ceil((cA + T/2 + D) / T) - 1). On 0x153F (both cores of a chip taken at one
+instant, fpga/al3/README.md section 22) every divider must read s = 0, at the trained stages and after a retrain.
+Run with the mcp venv's Python; LOCAL-safe except
 that it sets the sample rate, Filter Off and the trigger (it restores the rate and a mid-level trigger)."""
 import os
 import sys

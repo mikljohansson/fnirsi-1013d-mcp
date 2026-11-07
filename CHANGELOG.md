@@ -2001,6 +2001,20 @@ was found (commit not identified).
 
 ### Tooling, FPGA and documentation
 
+- Added: FPGA bitstream **0x153F** in `fpga/al3/dist` (unbenched, not flashed; the firmware still runs on 0x153E):
+  both ADC cores of a chip are captured at one instant, so with Filter Off a ring word holds the designed pair, core B
+  half a word before core A, at every rate. The 2026-11-06 bench found core B one conversion late at most dividers and
+  stages on 0x153A..0x153E (zigzag edges, a 1 kHz square read as 2006 Hz at 20 kSa/s): the unit's ADCs release both
+  output buses after the B encode, not each after its own. One capture stage per chip in 0x63 (bits 2:0 / 8:6, used at
+  200 MSa/s and with the filters; none at the divided rates), power-on 0x06DB; core A one word earlier at dividers 1 to
+  3. `fpga/al3/tb/tb_adccap.v` models that release (edge, delay and pairing as parameters), reproduces the bench's rows
+  on the unchanged 0x153E source and checks the order strictly on the design; `tb/run.sh` step 11 runs both. The
+  firmware contract and the bench list: `fpga/al3/AGENTS.md` "0x153F, the paired capture"; `fpga/al3/README.md`
+  section 22 (ea38475). The review of the branch (2026-11-07) traced the two residual `tb/run.sh` failures (tb_seg seed
+  12345, tb_fir seed 4242) to the testbenches and fixed them there, the bitstream unchanged: a stimulus process that
+  waits on a dut write clock signal now returns to the integer-nanosecond grid (`regrid` in the four equivalence
+  testbenches; README section 20 addendum), and tb_fir no longer hands the 0x1534 reference its core-swap bit before the
+  last equivalence phase. `tb/run.sh` is ALL PASS on seeds 12345 and 4242.
 - Changed: `firmware/tools/bode_cells.py` prints each record's CH1 fundamental in codes and `NO TONE` when there is
   none, and counts the toneless records at the end (fpga-gen13: the 2026-10-20 19:52 bench on 0x153B read the leak of
   toneless records as splices; fpga/al3/AGENTS.md "0x153B 'spliced' on the unit"). `fpga/al3/tb/tb_timeout.v` gets case B,

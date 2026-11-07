@@ -6,6 +6,13 @@ works out where the offset can and cannot come from, recommends a fix and lists 
 No hardware was touched; no bitstream was built. [M] = measured from saved data, [V] = read in the source, [I] =
 inference.
 
+**Superseded in part (fpga-153f, 2026-11-06).** The per-divider measurements of 2026-11-06 17:22 and 17:59
+(`docs/hardware-status.md`) show that the order changes with the word period and the stage, so section 2.2 ("the ADC
+alone decides it", a one-conversion latency difference at every rate) and the fix of section 3.1 (core B one register
+earlier) do not hold. What fits every cell is both buses changing after the write clock's rising edge; the fix is
+bitstream 0x153F, both cores of a chip captured at one instant: `fpga/al3/README.md` section 22. Sections 1 (the
+verification), 2.4, 2.5 and 3.4 stand.
+
 ## 1. Verification
 
 Conventions. A word k holds core A's sample A[k] and core B's sample B[k] (firmware reads both cores at the same ring

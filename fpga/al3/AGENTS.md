@@ -3,6 +3,20 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
+State on 2026-11-06 (fpga-153f, branch `fpga-153f`, after the coordinator's bench of the same day):
+- fpga-153f review (2026-11-07, branch `fpga-153f-review` on top of `fpga-153f`): the two residual `tb/run.sh` failures
+  (tb_seg 12345, tb_fir 4242) were testbench defects, fixed in `tb/` (the stimulus grid `regrid`, the 0x1534 swap bit);
+  **`tb/run.sh` ALL PASS on seeds 12345 and 4242**, RTL, bitstream and hashes unchanged (`e581a67f...`, flash image
+  `d255ca38...`). Design review: no fault found; the open points are bench items (section "0x153F, the paired capture").
+- fpga-153f (2026-11-06): **0x153F built and simulated, not flashed**: 0x153E with both cores of a chip captured at one
+  instant, so a Filter Off word holds the designed pair (B[k] half a word before A[k]) at every rate. The bench found
+  core B one conversion late at most dividers and stages: the unit's ADCs release both buses after the write clock's
+  rising edge, not each after its own encode. Full rate: the chip's stage from 0x63 bits 2:0 / 8:6 (core A's instants
+  of 0x153E); divided rates: 2.5 ns after the rising edge, no stage. 0x63 bits 5:3, 11:9, 13:12 are dead, power-on
+  0x06DB, version byte 0x3F. Roll q10 (ea38475): every clock 0 errors, clk_200MHz 4.789 ns, 7272 LE, encode pads
+  B 6.97 / A 7.34 ns; `dist/al3-0x153F.bin` `e581a67f...ece0`, flash image `d255ca38...d5bc`, status unbenched, min
+  firmware 0.3.0 (to be built for 0x153F); 0x153E stays recommended. Section "0x153F, the paired capture, fpga-153f"
+  below (the firmware contract, the coordinator's bench list), README section 22.
 State on 2026-11-06 (coordinator, after the bench):
 - **0x153E is flashed on the maintainer's unit, benched and `recommended`** (2026-11-06, `docs/hardware-status.md`
   14:00-15:50; dist commit 1acacc7): flash verified on the second pass (2782e1b6...), wizard CH1 A3 B3 / CH2 A3 B3,
@@ -173,8 +187,8 @@ State on 2026-11-04 (fpga-153e, branch `fpga-153e`):
 | Path | What |
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
-| `tb/` | iverilog testbench, `run.sh [seed]`, eighteen steps (18: `tb_square.v`, the fractional square generator, 0x153D; 17: `tb_stream.v`, the streaming logger, 0x153D; 16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153E.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture stages against an AD9288 transition model, 0x153A; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
-| `tools/` | Bench and build helpers (README sections 18, 19, 21): `enc_ab.py` (CH2 code-error A/B per image, `--analyse` per phase and per code), `enc_sweep.py` (CH2 offset sweep, the per-core peak = the acceptance measure, `--analyse` per level), `encphase_variant.py` (phase / skew / roll trees from `src/`), `encphase_build.sh` (one roll or image + summary), `capwin_sweep.py`. Each Python tool has `--selftest`; run the bench ones with the mcp venv's Python. |
+| `tb/` | iverilog testbench, `run.sh [seed]`, eighteen steps (18: `tb_square.v`, the fractional square generator, 0x153D; 17: `tb_stream.v`, the streaming logger, 0x153D; 16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153F.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture against an AD9288 pair in the unit's data-align mode (release edge, delay and pairing as parameters): strict core order on the design and the bench's rows on the unchanged 0x153E source, 0x153A / 0x153F; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
+| `tools/` | Bench and build helpers (README sections 18, 19, 21): `enc_ab.py` (CH2 code-error A/B per image, `--analyse` per phase and per code), `enc_sweep.py` (CH2 offset sweep, the per-core peak = the acceptance measure, `--analyse` per level), `encphase_variant.py` (phase / skew / roll trees from `src/`), `encphase_build.sh` (one roll or image + summary), `capwin_sweep.py`, `core_order.py` (the core order per divider on the unit, section 22: 0x153F must read s = 0 everywhere). Each Python tool but `core_order.py` (positional arguments only) has `--selftest`; run the bench ones with the mcp venv's Python. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -209,8 +223,9 @@ wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compar
 - Wall clock is 11 to 16 s (about 35 s for 0x1534). On failure it exits non-zero and prints "BUILD FAILED" with the first errors.
 - Overrides: `TD_HOME`, `TD_SHIM`, `FLOW` (`atlan` default, `donwulff`), `SRC_REV` (git revision of `src/`); the
   first argument is the work dir.
-- Current `src/` (0x153E, the IOB encodes, commit da645d0) gives `build/FPGA.bin` sha256
-  `831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1` (= `dist/al3-0x153E.bin`; about 2 min). 0x153D
+- Current `src/` (0x153F, the paired capture, commit ea38475) gives `build/FPGA.bin` sha256
+  `e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0` (= `dist/al3-0x153F.bin`; about 2 min). 0x153E
+  (commit da645d0) gave `831dc3465e7bdddf67bfd263755f00f7fc95fcd5e487a9ca52ec49e2531602e1` (= `dist/al3-0x153E.bin`). 0x153D
   (commit e3a23c2) gave `fd0be7a2c715e3106b1501986640cdf64a1c8af64c534502701e5d836d32e96a` (= `dist/al3-0x153D.bin`). The
   reverted full-rate 0x153D (50b4abe) gave `0e2cdbce22dbc7059fc93590d41c05673b7914234da8e2775d293e294134150e`, the
   pre-full-rate 0x153D (ecdc6f0) gave `11b83ce70fddb657127b2e685e4d290281dc53fd6959f9459a071854b7dcba97`. 0x153C
@@ -230,6 +245,13 @@ wsl -d <distro> -- python3 -I /mnt/d/path/to/fnirsi-1013d-mcp/fpga/al3/td/compar
   match 0x1532 and that K = 0 (including EXT) matches 0x1533.
 - Run testbench work from PowerShell (`wsl -d <distro> -- bash <script>`). Git Bash rewrites `/mnt/...` arguments.
   Concurrent runs need different `SIM_WORK` directories.
+- **Equivalence testbenches: the stimulus stays on the integer-nanosecond grid** (README section 20 and its addendum). After
+  any `@(posedge dut.sample_write_clock)` or `wait ()` on a write clock register in a stimulus process, call `regrid`
+  (tb_ext_trigger / tb_decim / tb_fir / tb_seg have it); otherwise the MCU strobes inherit the write clock's 1 ps
+  simulation delay and later land on the exact instant of a write clock edge, where the dut and the reference can see a
+  write in a different order (tb_seg seed 12345 on 0x153F). Do not give the references a register bit they decode and the
+  dut does not (0x53 bit 2, the 0x1534 / 0x1535 swap; bits 4..3, their falling-edge capture) before the last equivalence
+  phase: it desynchronises their never-reset CIC integrators (tb_fir seed 4242 on 0x153F).
 - **Several agents share the one WSL instance** (coordinator, 2026-10-21). Detached runs (`setsid nohup`) die when no
   `wsl.exe` stays attached, so keep an attached wsl process alive for the duration (`wsl -d <distro> -- sleep <s>` from
   the agent's shell). Run every job under a work directory named after your agent (`~/c4/...`) and kill only by PID or by
@@ -364,8 +386,12 @@ References:
   `sample_write_clock` at the 13-bit `sample_write_address`. Port B is read by the MCU at `sample_read_address`.
 - ADC encode generation on negedge `clk_ADC` (A is the complement of B); sample-rate divider on negedge
   `clk_200MHz` (100/(N+1) MHz rule).
+- ADC data capture (0x153A, the instants since 0x153F), in the section "Display brightness control": IOB DDR registers
+  and a three-stage chain on `clk_200MHz`, `cap_h` (both cores of a chip at one instant: the chip's stage from 0x63 at
+  full rate, R + 2.5 ns at divided rates, strobe `cap_st`, rate class `cap_full`), `adc*_w` on the rising write clock
+  edge. Every consumer reads `adc*_w`.
 - Capture logic on `sample_write_clock`: write address, pretrigger (0x0B) and total (0x0C) counts, trigger
-  compare on the raw ADC core A inputs (rising/falling), auto time-out, trigger address.
+  compare on the captured core A samples (rising/falling), auto time-out, trigger address.
 - MCU bus on `i_mcu_clk`: command latch (`i_mcu_dcs` = 1), write decoder (0x01, 0x0B-0x0E, 0x15-0x17, 0x1A,
   0x1B, 0x1F, 0x32-0x38, 0x50, 0x53-0x66, 0x69, 0x6A, 0x6C, 0x6D), read mux (0x05, 0x06, 0x0A, 0x14, 0x18, 0x20-0x23,
   0x28-0x39). 0x0F, 0x3C, 0x41 and 0x24-0x27 went in 0x153C (section "0x153C built, fpga-c4"), 0x51 / 0x52 in 0x153D
@@ -459,6 +485,110 @@ Decimation filter (0x1534), open items:
 - Next design: 0x1535, a CIC compensation FIR as the intended default mode (maintainer direction): built, see below and
   `README.md` section 5. 0x1534 is accepted by the bench session (2026-10-18) and is
   being flashed with fw 0.2.33.
+
+## 0x153F, the paired capture, fpga-153f (2026-11-06)
+
+Brief (coordinator, after the 2026-11-06 bench): with Filter Off the two cores of a channel were not paired as designed
+(core B one conversion late at most dividers and stages, by `tools/core_order.py`); the unit's ADCs release both buses
+after the same edge. 0x153F = 0x153E with the cores paired right at every rate; testbench first; build, dist
+(unbenched), docs. Branch `fpga-153f`. **Nothing flashed.** README section 22 has the fault, the model, the fix, the
+numbers and the testbench in full.
+
+- **Model (inference, fits all 23 bench cells).** Both output buses of a chip change D after the write clock's rising
+  edge R (the B encode), D about 11 ns at the pins (core A 10 .. 12.5, core B 7.5 .. 17.5 from the order rows; the stage
+  scans say B's is A's), and one release holds the designed pair. It is the datasheet's data-align pair (Fig. 4) leaving
+  on the other encode edge. Only the pairing and the edge are measured, not the pipeline depth.
+- **Source** (ea38475): `src/zaklad.v` "ADC data capture". One register `cap_h` takes both cores of a chip on the rising
+  clk_200MHz edge 12.5 ns after every R: at full rate (divider 0, any filter, peak detect) the pins at R - 2.5 k, k =
+  the chip's stage (0x63 bits 2:0 CH1, 8:6 CH2; core A's instants and latency of 0x153E), at divided rates the pins at
+  R + 2.5 ns whatever the stage. `adc*_w` loads `cap_h` on the next rising write clock edge. Version byte 0x3F. The
+  hold-off block sits before "Capture of the trigger address" (the closing roll).
+- **tb.** `tb_adccap.v` (parametrised model, acceptance on 0x153E, strict order on 0x153F), `run.sh` step 11 runs both
+  (`REF153E_REV=da645d0`; in a worktree `REF_SRC_DIR` needs `da645d0.v` = 0x153E's `zaklad.v`, `~/f153f/refs` has all
+  seven references), `tb_trigpos.v` (model, mirror, strict order, dividers 1..5), the five short-model testbenches,
+  `contract_0x153F.txt`, the version checks. `tb/capture_margins.py` reports the new instants.
+- **Build** (README section 22): every clock closed (clk_200MHz 4.789 ns, sample_write_clock 9.616, i_mcu_clk 23.250,
+  clkc[2] 3.731, clkc[3] 4.189; clkc[0] the SDC artefact); 6401 LUT / 5673 reg / 7272 LE (84.2 %), `#ireg 33`,
+  `#oreg 15`; encode pads 1A / 1B / 2A / 2B = 7.34 / 6.97 / 7.34 / 6.97 ns (0x153E's). 2 of 15 distinct placements
+  closed (16 builds under `~/f153f/b`); q10 kept. Raw `e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0`,
+  padded **`d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc`** (`backups/al3_0x153F_e581a67f.bin`,
+  `..._padded.bin` in the main checkout); a fresh rebuild of the committed source (`~/f153f/b/final`) gives the same raw
+  sha256.
+- **run.sh.** `tb/run.sh` (18 steps, `REF_SRC_DIR` with `da645d0.v` added) on seeds 12345 and 4242 (2026-11-07, the
+  review of fpga-153f, snapshots of the committed `src` + `tb`, 8307 / 7558 s): **ALL PASS on both seeds, every step,
+  no exception.** Per step (12345 / 4242): ext 39; decim 107 + cic_model 1868 / 1882 samples; fir 168 + cic_model 1575 / 1610 samples; long 8; seg 54 / 56 + seg_model 22 runs 0 failures; trigpos 1252 (37 cases); contract 42 and the transcript = `contract_0x153F.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 35952 strict + 6298 acceptance, STRICT ORDER PASS on the design and FAIL on da645d0; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102. The author's runs of 2026-11-06/07 had one failing step per
+  seed (tb_seg 12345, tb_fir 4242); the review found both in the testbenches and fixed them there, the RTL and the hashes
+  are unchanged (README section 22 "Tests" and the section 20 addendum): tb_seg's MCU process had inherited the write
+  clock's 1 ps simulation delay from an `@(posedge dut.sample_write_clock)` and later wrote 0x01 = 1 on the exact instant
+  of a write clock edge, where the design reads the wire `cap_rst` and the 0x1535 reference the register behind it (a
+  `regrid` task after every such wait in the four equivalence testbenches); tb_fir's 0x29 test wrote 0x53 bit 2, the
+  0x1534 reference's core swap, which left its CIC integrators 2 / 4 apart from the design's for the rest of the run (now
+  written 0 there, the bits-4..2-read-0 check moved to phase 5). The author's traces and run logs are in the main
+  checkout's `backups/fpga-153f-sim/`.
+- **dist.** `dist/al3-0x153F.bin`, manifest status `unbenched`, `min_firmware` 0.3.0 (the build that expects 0x153F,
+  not written yet); 0x153E stays `recommended`. `tools/bitstreams.py check` passes; `check --release` passes as long as
+  the firmware expects 0x153E.
+
+**(a) Firmware and host contract** (for the firmware agent; nothing in `firmware/` or `mcp/` was changed here):
+1. **`PC_FW_FPGA_VERSION` 0x153F** (`pc_cmds.h`, the text beside it), the mcp side's built-for word and the simulator.
+2. **0x63: one stage per chip.** Bits 2:0 = CH1, 8:6 = CH2, both cores, used at full rate only. Bits 5:3, 11:9, 13:12
+   select nothing; write the chip's stage into the B field too (so `cs_stage` and the texts "CH1 A3 B3" stay true), bits
+   15:12 = 0. Power-on **0x06DB** (`CS_PO`, `CAP_POWER_ON` in mcp, the simulator, protocol 5.1 and row 64).
+3. **Training per chip** (`cap_stage.c`): `cs_pass` already sets both cores of the channel to stage s; after it the
+   chip's set = `quiet[A] & quiet[B]`, the pick is `cs_pick` of that set and goes into both fields; the tie pass
+   measures a candidate with both cores at it and a count on either core removes it for the chip; the noise bound stays
+   per core. The reference pass is gone (`cs_ref_bit`, `CS_REF_*`, `clean_ref` / `quiet_ref` / `sum_ref` / `q_ref`,
+   `cs_train.ref`, the " A-clk" text): a chip with no common quiet stage fails as CS_E_DIRTY. `cs_guard`: a flagged
+   core's stage leaves both cores' sets and the new pick goes into both fields. The stored sets (sector 708 bytes
+   504..511) hold the chip's set for both cores. A stored value trained on 0x153E is not applied (the version word
+   differs), so the wizard runs once after the flash; expect stage 3 on both chips (0x06DB).
+4. **Self-check** (`cs_excess`): unchanged in code. A stage inside the common transition now garbles both cores of a
+   chip alike, which the partner rule does not flag; the training's absolute counts and the residual metric catch it
+   at calibration. On this unit core A's errors beside its clean stage are its own (README section 18), so the rule
+   keeps its use. fw-capgate (no self-check and no guard at divided rates) is required: the stage has no effect there.
+5. **Pipeline constants.** Divider 0 and every filtered or peak-detect mode: none change (core A's stage instants and
+   latency are 0x153E's; core B's data are one conversion newer than at the trained B3, which is the fix). ADC trigger
+   position (0x14 / 0x18): unchanged at every rate (the step's core A word stays pretrigger + 1). Legacy EXT
+   (`pc_decim_ext_shift_legacy`, 12 at divider 0, 14 above): against 0x153E **core A is one word (two samples) earlier
+   at dividers 1, 2 and 3** and unchanged at 0 and from 4 up, so the smallest change is 12 at dividers 1..3. Neither
+   table value was ever benched, and the model's depth is open: tb_trigpos with the new model (core A 4.5 encode cycles
+   deep) reads EXT minus CH1 = 14.5 samples at divider 0, 13 at 1, 13.5 at 2 and 3, 14.5 at 4 and 5, 15 at 9 and 199
+   (midpoints of six runs); a core A one cycle shallower gives 2 less in every cell. An external edge on EXT and CH1
+   decides (the note's run E6); until then the table is a model number on either bitstream.
+6. **Order.** Protocol 7.3 holds as written at every rate: ring word k = B[k], A[k], core B sampled half a word before
+   core A; `PC_INTERLEAVE_ORDER` 0, READ_RAW layouts, READ_TRACE, the UI trace, `acal_track`'s A - B model, averaging,
+   segments, the logger's lanes and the counter's pair need no change. 7.3 should say: "0x153F: both cores of a chip
+   are captured at one instant, so the pair is right by construction at the divided rates, and at 200 MSa/s for every
+   stage clean on both cores as long as the chip's two buses change together (benched with core_order.py)"; caps bit 12
+   INTERLEAVE_UNVERIFIED may clear on 0x153F once the bench list below has passed, not from 0x33 (which reports the
+   encode flops, not the data pairing).
+7. **Counter.** `COUNTER_F_GATED` (Filter Off at D > 0 not valid) was most likely this fault (the counter takes core B
+   as the earlier sample of the pair); lift it only after the bench shows 1 kHz at 20 kSa/s Filter Off.
+8. Host tools: `tools/capwin_sweep.py` sweeps the A fields only on 0x153F (it says so); `tools/enc_ab.py` knows the
+   image's hashes; `mcp`'s `cap_stages_text` loses " A-clk".
+
+**(b) Coordinator's bench list for the flashed image** (firmware first: the build that expects 0x153F; backups as in the
+0x153E checklist below, pre-write read = `2782e1b6...d9d8`, write `d255ca38...d5bc`, rollback = 0x153E's image with its
+firmware):
+1. Boot: `#VER` fpga=0x153f, no notice, encode self-check 0 bad, capture self-check 0 flagged.
+2. Wizard with the inputs open (Calibrate, save): **stage 3 on both chips expected (0x06DB)**; log the per-core quiet
+   sets from GET_CAL and the chip's set (A's and B's sets in common). A chip without a common stage is a stop.
+3. `python fpga/al3/tools/core_order.py 0,1,2,3,4,5,6,7,9,19,99,999 12 CH1 COM10` and the same for CH2 (the probe on
+   the ladder's input, as on 2026-11-06): **s = 0 at every divider on both channels**; then the wizard again and both
+   runs again (a retrain must not change it). If the guard moves a stage, repeat at the moved stage. Any +1 or -1 at a
+   divided rate contradicts the model (report the row); a +-1 at divider 0 only means the chip's two buses do not change
+   together there (README section 22, the limit at 200 MSa/s).
+4. CH2 offset sweep, 30 minutes or more after power-on (log the time since boot): `tools/enc_sweep.py --image 0x153F
+   --image-sha256 d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc --out backups/sweep_0x153F_1.npz`,
+   twice: no worse than 0x153E's warm peak, **core A 5.2 %, core B 0.65 %** (core B now sits at core A's instant, old
+   B5: the 2026-10-22 sweep read CH2 B 1.69 / 1.29 / 1.50 % at B3 / B4 / B5, the stage-independent class). Divider 99
+   (`tools/enc_ab.py`): **0 / 0 errors**.
+5. Divider-0 capture with the probes on the ladder: both A cores move with B. Then 100 MSa/s and 50 MSa/s Filter Off
+   captures of the square's edge (dividers 1 and 3: the rates whose instant changed most): clean edges, no zigzag.
+6. Counter on CH1 1 kHz at 200 MSa/s (valid, 1000 Hz) and, read with the gate ignored, at 20 kSa/s Filter Off (item 7
+   above); logger and square checks of README sections 16 / 17; EXT if a second source is at hand (item 5 above).
+7. On a clean run: manifest 0x153F `recommended` with the bench record, 0x153E `supported`, `tools/bitstreams.py
+   check --release` with the firmware's word at 0x153F.
 
 ## 0x153E, the IOB encodes, fpga-153e (2026-11-04)
 

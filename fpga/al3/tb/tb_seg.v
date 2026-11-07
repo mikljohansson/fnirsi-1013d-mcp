@@ -242,6 +242,22 @@ module tb;
     end
   endtask
 
+  // Back on the integer-nanosecond grid the stimulus started on (fpga-153f review, README section 20). In simulation the
+  // write clock changes 1 ps after the clk_200MHz edge, so a stimulus process that resumes on it (@(posedge
+  // dut.sample_write_clock), or wait () on a register of the write clock domain such as sampling_half_way) carries that
+  // 1 ps from then on, and every tenth MCU strobe after it (the 13.1 / 17 / 13 pattern) lands on the exact instant of a
+  // later write clock edge. On that instant the dut and the reference can see the write differently (a wire of the
+  // written register, cap_rst, against the register itself, sample_system_reset: tb_seg seed 12345 reset one edge later
+  // than 0x1535), an order the 1 ps delay exists to rule out and the lockstep comparison cannot accept. Called after
+  // every such wait, so the strobes keep the grid where the edge is always 1 ps after the write.
+  task regrid;
+    real fr;
+    begin
+      fr = $realtime - $rtoi($realtime);
+      if (fr > 0.0) #(1.0 - fr);
+    end
+  endtask
+
   task wr_cmd(input [7:0] c);
     begin
       mcu_rws = 1; mcu_dcs = 1; mcu_dout = c;
@@ -318,7 +334,8 @@ module tb;
       wr1(8'h01, 8'h01);
       if (seg_log_arm) begin
         @(posedge dut.sample_write_clock);              // the reset acts from this edge on
-        #1 seg_log = 1; seg_log_arm = 0;
+        regrid;                                         // 0.999 ns after it: back on the grid
+        seg_log = 1; seg_log_arm = 0;
       end
       polls = 0;
       rd1(8'h05);
@@ -792,7 +809,7 @@ module tb;
     ext_en = 0;
     rd2(8'h06);
     $display("version dut %h ref %h", rd16_d, rd16_r);
-    check(rd16_d == 16'h153E, "cmd 0x06 reads 0x153E");
+    check(rd16_d == 16'h153F, "cmd 0x06 reads 0x153F");
     check(rd16_r == 16'h1535, "reference cmd 0x06 reads 0x1535");
     wr1(8'h57, 8'h00);
     rd_status;
@@ -857,6 +874,7 @@ module tb;
     #500;
     start_capture;
     wait (dut.sampling_half_way === 1'b1);
+    regrid;
     #2000;
     step_val = 1;
     wait_done(20000);
