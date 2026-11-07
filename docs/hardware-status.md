@@ -2008,3 +2008,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   GATED, not valid). Encode check: 3 captures re-taken of 42926, all recovered, 0 accepted bad, events during the
   battery's rate changes; 0x153E had 1 of 97304 in a run with fewer rate changes per capture: not compared like for
   like, to watch. Capture self-check 0 flagged of 7562.
+- 2026-11-07 10:52-11:33 (lead): **0x153F warm-up series**, CH2 offset sweep twice at each time, probes untouched
+  (`sweep_0x153F_1052a..1132b.npz`). Peak A / B: 60 min 6.80, 6.39 / 1.10, 1.39 %; **80 min 5.84, 5.75 / 1.08, 0.89 %**; 100 min
+  6.00, 5.51 / 1.07, 1.02 %. Mean over the sweep A 3.2 -> 2.75 %, B 0.5 -> 0.40 %. So warm-up took core B from about 1.6 to about
+  1.0 % and it has levelled there. Against 0x153E at 80 minutes (A 5.2, B 0.65 %, warm calibration, 2026-11-06): **A about 11 %
+  higher, B about 50 % higher; the bench list's limit is not met.** Against the release 0x153D (A 6.94, B 0.66 %): A lower, B
+  higher. Mean over the sweep at 80 minutes: 0x153F A 3.05, B 0.41 %; 0x153E A 2.6, B 0.27 %. The two days are one unit, one
+  run each: the spread between sweeps here is 0.1 .. 0.5 points. Divider 99 stays 0 / 0. Owner's decision pending; 0x153F not
+  marked recommended, the card still holds fw 2bdecac (a power cycle shows the notice).
