@@ -4273,11 +4273,15 @@ static void test_counter(void)
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.p[0], 0x00); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
   mock.cnt.misfit = 0;
-  //fw-gated: a result counted on the gated encodes (Filter Off at a divided rate): flags bit 4, not VALID
+  //fw-gated, fw-031: a result counted on the gated encodes (Filter Off at a divided rate): flags bit 4, VALID inside the
+  //limits (fpga_counter.h), E / T / W kept and no frequency outside them
   mock.cnt.gated = 1; mock.cnt.seq = 21;
   r = get_counter(0, 0, 0, 0, 0);
-  T_EQ(r.p[0], 0x11); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
-  mock.cnt.gated = 0;
+  T_EQ(r.p[0], 0x13); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 10000000);
+  mock.cnt.coarse = 1;
+  r = get_counter(0, 0, 0, 0, 0);
+  T_EQ(r.p[0], 0x10); T_EQ(pc_get_u32(r.p + 4), 1000); T_EQ(pc_get_u32(r.p + 20), 0);
+  mock.cnt.gated = 0; mock.cnt.coarse = 0;
   r = get_counter(0, 0, 0, 0, 0);
   T_EQ(r.p[0], 0x02);
   //freq_mHz: round half up, saturating above 4294967.295 Hz (1 MHz, 30 MHz, 100 MHz)

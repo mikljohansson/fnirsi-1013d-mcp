@@ -17,6 +17,10 @@ published as pre-releases.
 - The ACQ chip reads "ACQ" / "Roll" in roll mode, the word the rest of the UI uses; it read "Long".
 - GET_TIMEBASE keeps a host's raw divider through a time/div snap: the FPGA's divider, not the UI table's, after a
   SET_TRIGGER total the UI's time/div does not fit (MCP battery finding 3).
+- GET_COUNTER and the cards use the counter with Filter Off below 200 MSa/s on FPGA 0x153F: a result stays GATED as
+  information and is VALID while its high and low times are at least two samples and its edges span 1000 samples (a
+  50 % signal up to fs / 4, 20 kSa/s and faster at the 100 ms gate). A signal above fs / 2 reads as its alias there,
+  as it does in the trace.
 
 ## [0.3.0] - 2026-11-07
 

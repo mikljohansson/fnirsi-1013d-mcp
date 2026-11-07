@@ -348,11 +348,21 @@ def test_counter_on_the_simulator(sim_factory):
         assert r.effective_source == "EXT" and (r.min, r.max) == (0, 255) and r.frequency_hz == pytest.approx(10e3)
         r = s.read_counter(source="trigger", level=250, hysteresis=6)  # the level above the signal: no edges
         assert not r.valid and r.e == 0 and r.frequency_hz is None
-        # fw-gated: Filter Off at a divided rate gates the encodes: CH1 / CH2 results are flagged and never VALID; a
-        # filter (or peak detect) runs them at full rate again; EXT is never gated
+        # fw-gated, fw-031: Filter Off at a divided rate gates the encodes: CH1 / CH2 results are flagged, VALID inside
+        # the limits (high and low time two samples, T 1000 samples); a filter (or peak detect) runs them at full rate
+        # again; EXT is never gated
         s.set_timebase(divider=49)
-        r = s.read_counter(gate=1, source="CH1", level=0, hysteresis=0)
-        assert r.gated and not r.valid and r.freq_mhz == 0 and r.frequency_hz is None
+        r = s.read_counter(gate=1, source="CH1", level=0, hysteresis=0)  # auto: this gate ran at the pinned level 250
+        assert r.gated and not r.valid
+        r = s.read_counter(source="CH1")
+        assert r.gated and r.valid and r.frequency_hz == pytest.approx(10e3, rel=1e-6)
+        s.set_timebase(divider=3999)  # 50 kSa/s: the 20 us high time is one sample
+        r = s.read_counter(source="CH1")
+        assert r.gated and not r.valid and r.freq_mhz == 0 and r.frequency_hz is None and r.e >= 1
+        assert P.counter_gated_coarse(r.e, r.t, r.w, 3999) and not P.counter_gated_coarse(r.e, r.t, r.w, 1999)
+        assert P.counter_gated_coarse(10, 19_800_000, 9_900_000, 19999)  # T 990 samples at 10 kSa/s
+        assert not P.counter_gated_coarse(0, 0, 0, 99)
+        s.set_timebase(divider=49)
         r = s.read_counter(source="EXT")
         assert not r.gated and r.valid
         s.set_decim("boxcar")
@@ -636,11 +646,16 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             r = await c.call("scope_set_trigger", type="pulse_width", width="1ns", hold_off="0s")
             assert r["applied"]["type"]["width_samples"] == 1 and any("clamped" in x for x in r["caveats"])
             await c.call("scope_set_trigger", type="edge")
-            # the counter: tier 0 read, tier 1 configure. fw-gated: at 10 MSa/s with Filter Off the encodes are gated,
-            # the count is not valid and says why
+            # the counter: tier 0 read, tier 1 configure. fw-gated: at 10 MSa/s with Filter Off the encodes are gated:
+            # valid inside the limits, with the alias caveat and a word's resolution; outside them not valid, says why
             r = await c.call("scope_counter")
-            assert r["gated"] and not r["valid"] and r["frequency_hz"] is None and r["readings"][0]["gated"]
-            assert any("gates the ADC encodes" in x for x in r["caveats"])
+            assert r["gated"] and r["valid"] and r["frequency_hz"] == pytest.approx(10e3, rel=1e-6)
+            assert r["readings"][0]["gated"] and "one word" in r["resolution"]
+            assert any("alias" in x for x in r["caveats"])
+            await c.call("scope_set_timebase", divider=3999)
+            r = await c.call("scope_counter")
+            assert r["gated"] and not r["valid"] and r["frequency_hz"] is None
+            assert any("under two samples" in x for x in r["caveats"])
             await c.call("scope_set_timebase", sample_rate="200MS/s")
             r = await c.call("scope_counter")
             assert r["source"] == "CH1" and r["frequency_hz"] == pytest.approx(10e3, rel=1e-6)

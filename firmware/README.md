@@ -518,9 +518,10 @@ source change restarts the gate, a same-value write and a level change do not. T
   at a time. The **Freq, Period, +Width, -Width, +Duty and -Duty** cards of that channel show the counter's values
   (frequency E / (T x 5 ns), period T x 5 ns / E, high and low time, duty W / T; four significant digits in the record's
   formats, so the text never changes shape) while the counter holds a **current result with a period**: the gate on, the
-  result younger than three gates + 100 ms, E >= 1, the thresholds fitting it, and the ADC encodes at full rate while it
-  was counted (200 MSa/s, any filter, peak detect; fw-gated: Filter Off at a divided rate gates the encodes, the counter
-  then sees the divided stream, `pc_glue_adc_full_rate`, GET_COUNTER flags bit 4). Everything else shows the record's measurement as before: the other
+  result younger than three gates + 100 ms, E >= 1, the thresholds fitting it, and, when Filter Off at a divided rate
+  gated the encodes (`pc_glue_adc_full_rate`, GET_COUNTER flags bit 4: the counter then sees the divided stream), high
+  and low time of at least two samples and T of at least 1000 samples (`fpga_counter.h` "Gated encodes"; a signal above
+  fs / 2 aliases there as it does in the trace). Everything else shows the record's measurement as before: the other
   channel's timing cards, every voltage card (Vmax .. Vp), the reference traces, an EXT-source result, and a result
   without edges (the signal under the Schmitt thresholds, or slower than two edges per gate: at 100 ms that is below
   about 20 Hz, where the record at a slow time base measures it). The cards show a result from the pass after the one

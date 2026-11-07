@@ -2432,8 +2432,12 @@ COUNTER_F_NEW = 0x01  # a gate ended since the last read
 COUNTER_F_VALID = 0x02  # E >= 1: at least two edges in the gate
 COUNTER_F_EXT = 0x04  # the effective source is EXT
 COUNTER_F_CH2 = 0x08  # the effective source is CH2 (neither: CH1)
-#: fw-gated (fw 0.2.105): CH1 / CH2 counted while the ADC encodes ran gated (Filter Off at a divided rate): never VALID
+#: fw-gated (fw 0.2.105): CH1 / CH2 counted while the ADC encodes ran gated (Filter Off at a divided rate). Never VALID
+#: up to fw 0.3.0; after it information, VALID inside the limits (``counter_gated_coarse``)
 COUNTER_F_GATED = 0x10
+#: The limits of a gated result (firmware fpga_counter.h): shortest high and low time and shortest T, in samples
+COUNTER_GATED_MIN_PHASE_SAMPLES = 2
+COUNTER_GATED_MIN_T_SAMPLES = 1000
 #: the firmware's boot thresholds (0x62) for the first gate; the auto rule replaces them after it
 COUNTER_DEFAULT_LEVEL, COUNTER_DEFAULT_HYST = 128, 6
 #: GET_COUNTER level / hysteresis 0 = auto (fw-ctrauto, the boot configuration): after each gate the firmware centres
@@ -2493,8 +2497,8 @@ class CounterResp(Payload):
     thresholds in effect: the auto ones unless pinned), 20 u32 freq_mHz (the firmware's E / (T x 5 ns) in millihertz,
     saturating; 0 when invalid). VALID also needs the gate's thresholds to fit its min / max under auto (a gate
     counted while the thresholds were being retuned, or with no signal, is not VALID: E / T / W still given), and
-    for CH1 / CH2 the ADC encodes at full rate (divider 0, a filter, peak detect): Filter Off at a divided rate gates
-    them, the result then has COUNTER_F_GATED and is never VALID.
+    for CH1 / CH2 at Filter Off and a divided rate, where the ADC encodes are gated (COUNTER_F_GATED), a result inside
+    the limits of ``counter_gated_coarse`` (up to fw 0.3.0 a gated result is never VALID).
     Derived: frequency = E / (T x 5 ns), period = T x 5 ns / E, width = W x 5 ns / E, duty = W / T; resolution one
     clock over the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy on top."""
 
@@ -2523,8 +2527,8 @@ class CounterResp(Payload):
 
     @property
     def gated(self) -> bool:
-        """Counted on the gated ADC encodes (Filter Off below 200 MSa/s): the stream is the divided one, the count
-        is not the signal's (fw 0.2.105, flags bit 4)."""
+        """Counted on the gated ADC encodes (Filter Off below 200 MSa/s): the stream is the divided one, edges are
+        known to a word and a signal above fs / 2 aliases (fw 0.2.105, flags bit 4)."""
         return bool(self.flags & COUNTER_F_GATED)
 
     @property
@@ -2558,6 +2562,14 @@ class CounterResp(Payload):
     def resolution(self) -> float | None:
         """Relative resolution of the frequency: one clock in T."""
         return 1.0 / self.t if self.valid else None
+
+
+def counter_gated_coarse(e: int, t: int, w: int, divider: int) -> bool:
+    """A gated result outside the firmware's limits (fpga_counter.h "Gated encodes"), not VALID: high or low time under
+    two samples, or T under 1000 samples, at divider + 1 clocks per sample. False without a period."""
+    sample = divider + 1
+    phase = COUNTER_GATED_MIN_PHASE_SAMPLES * sample * e
+    return e >= 1 and (w < phase or t - w < phase or t < COUNTER_GATED_MIN_T_SAMPLES * sample)
 
 
 def counter_freq_mhz(e: int, t: int) -> int:

@@ -82,9 +82,12 @@ top of the menu. A new unit shows Freq, Vpp and Vavg on each enabled channel. Th
 them; the number at the top left of each item in the menu is its place. Freq, Period, the widths and the duties read
 "no period" while the record holds fewer than three crossings. The values are taken over the whole record, and Vrms
 includes the DC level. On the trigger channel Freq, Period, the widths and the duties come from the FPGA's hardware
-counter instead, counted at 200 MSa/s over 100 ms with thresholds that follow the signal (centred between its lowest
-and highest level); with Filter Off below 200 MSa/s, for a moment after the signal or the range changes, and for a
-signal smaller than about half a division, they show the record's values.
+counter instead, counted over 100 ms with thresholds that follow the signal (centred between its lowest and highest
+level): at 200 MSa/s, or with a filter or Peak, on every sample; with Filter Off below 200 MSa/s on the samples of the
+chosen rate, and then only from 20 kSa/s up and while the signal's high and low times are at least two samples each (up
+to a quarter of the sample rate for a 50 % signal). Otherwise, for a moment after the signal or the range changes, and
+for a signal smaller than about half a division, they show the record's values. A signal above half the sample rate
+with Filter Off reads as its alias, on the trace and on the cards: nothing on the screen shows it; Anti-alias does.
 
 **Touch on the plot.**
 
