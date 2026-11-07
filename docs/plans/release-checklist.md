@@ -170,9 +170,9 @@ the 0.3.0 firmware. The 0x153F boxes come first.
       2026-10-27 added acq-menu.png and acq-menu-roll.png and replaced the stale "What's next" list).
 - [x] README links checked (every relative link resolves on GitHub): 2026-10-27 on docs-rel153d, 24 relative links, all
       tracked files or directories. Re-check if the README changes before the tag.
-- [ ] Credits and AI attribution wording confirmed by the maintainer (README "Credits", F12).
-- [ ] GitHub repository description, topics, Discussions on if the announcement uses them, issue templates (F11).
-- [ ] Vendored `research/tools/vendor/capstone/lib/capstone.dll` licence notice checked (F11).
+- [x] Credits and AI attribution wording confirmed by the maintainer (README "Credits", F12), 2026-11-07, unchanged.
+- [x] GitHub repository description, topics, Discussions on if the announcement uses them, issue templates (F11), 2026-11-07: description kept, ten topics, Discussions on, bug and unit-report templates.
+- [x] Vendored `research/tools/vendor/capstone/lib/capstone.dll` licence notice checked (F11), 2026-11-07: not in the tree since eb55f9d or in any release; it remains in git history only (6c7327c), the owner closes it with no notice added.
 - [x] `docs/plans/announcement.md` final draft (2026-10-20, rel-gen2, 203933c): `{{VERSION}}` and `{{RELEASE_URL}}` kept
       for the tag, screenshots, the bitstream note (attached with `BITSTREAMS.md`) and the tested-on line filled; the clip
       and the other maintainer decisions are the checklist at the top of that file. Refreshed for 0x153D, fw 0.2.105 and
