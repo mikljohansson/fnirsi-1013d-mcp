@@ -1,0 +1,42 @@
+name: Bug report
+description: Something on the scope, the MCP server or the install does not behave as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only one unit has been tested so far, so exact versions and a report from the scope help a lot.
+        **Do not attach anything you have not checked for private data.**
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: Diagnostics on the scope, or `#VER` over USB (for example 0.3.0)
+    validations:
+      required: true
+  - type: input
+    id: fpga
+    attributes:
+      label: FPGA bitstream
+      description: The version word Diagnostics shows (for example 0x153f)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: Include the settings (time base, filter, trigger) and the signal if it concerns a measurement.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostics report
+      description: Diagnostics can save a report to the card (`reports/report-*.txt`), or use `scope_save_report`. Paste it or attach it.
+      render: text

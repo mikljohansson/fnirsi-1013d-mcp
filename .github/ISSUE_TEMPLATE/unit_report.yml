@@ -1,0 +1,44 @@
+name: Does it work on my unit
+description: Tell us how an install went on your FNIRSI 1013D, working or not
+labels: [unit-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only one unit, with the Anlogic AL3A10 FPGA, has been tested. Reports from other units are the most useful thing you can send,
+        including "it worked". Other FPGA variants are not supported: please do not flash a bitstream on one.
+  - type: input
+    id: variant
+    attributes:
+      label: FPGA variant
+      description: The chip marking, and the JTAG IDCODE if you read it (AL3A10 is 0x18006C31). See docs/hardware-prep.md.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Firmware and bitstream
+      description: For example 0.3.0 and 0x153f
+    validations:
+      required: true
+  - type: input
+    id: card
+    attributes:
+      label: SD card
+      description: Brand and size
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with problems
+        - Does not boot
+        - Did not try to flash
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: What you saw
+      description: The calibration wizard's stages, anything odd, and a Diagnostics report if you can.
