@@ -346,7 +346,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   pairing (`fpga/al3/AGENTS.md` "0x153F" item 7). The firmware still marks the result GATED, not valid, and the cards take
   the record's measurement. Lift the flag, let the cards use the counter there, update the known issue, docs/mcp-tools.md,
   docs/protocol.md and the simulator. Not in 0.3.0 unless the coordinator says so.
-- [ ] **Capture instant for core B at full rate** (parked 2026-11-07): 0x153F takes core B at core A's instant, and the CH2
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Capture instant for core B at full rate** (parked 2026-11-07): 0x153F takes core B at core A's instant, and the CH2
   sweep's peak on core B rose from 0.65 to 1.0 % (mean 0.27 to 0.41 %, 80 minutes after power-on; core A 5.2 to 5.8 %,
   `docs/hardware-status.md` 10:52-11:33). Revisit whether a chip can keep the pairing with an instant better for core B
   at 200 MSa/s (README section 22, "its limit at 200 MSa/s"). Accepted by the owner for 0.3.0.
@@ -355,7 +355,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   take over at divider 0 when a level sits at a carry (CH2 voted +1 over 1571 words on 2026-11-07, not an edge). Use
   `fpga/al3/tools/core_delay_fold.py` in place of core_order at divider 0: generator at 200 MHz / 401, both probes on the
   post, d = +1 expected. Its port is fixed to COM10 today, and divider 0's minimum is shallow, so judge by votes.
-- [ ] **Legacy EXT shift on 0x153F** (firmware/AGENTS.md section 97, 72af746): 12 samples at dividers 0..3 comes from the model,
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Legacy EXT shift on 0x153F** (firmware/AGENTS.md section 97, 72af746): 12 samples at dividers 0..3 comes from the model,
   never benched: an edge on EXT and CH1 together, Filter Off, dividers 0..5, 9 and 199. Needs a second source. The release
   notes name it under "Not benched". INTERLEAVE_UNVERIFIED on 0x153F was not decided on the bench either.
 - [ ] **Encode check re-takes on 0x153F** (to watch): 3 captures re-taken of 42926 during the battery's rate changes, all
@@ -376,10 +376,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   Find out whether the rate is new (earlier long soaks in `docs/hardware-status.md`), whether it follows the host port /
   cable, and whether the firmware can do anything; decide if it is a known issue of 0.3.0. 2026-11-06 15:50: a second soak,
   card-booted, had 0 drops; cause still open. In the 0.3.0 release notes as a known issue (docs-153f); no soak on 0x153F yet.
-- [ ] **Pin-level encode self-check** (parked by the owner 2026-11-04): the 0x33 self-check reads the fabric copies, not
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Pin-level encode self-check** (parked by the owner 2026-11-04): the 0x33 self-check reads the fabric copies, not
   the ODDR pins, so it cannot see the enc+250 failure (A encodes stopped, A cores holding their last value). A check at the
   pins would close that gap for any future encode build.
-- [ ] **Skew images** (parked by the owner 2026-11-04): common phase trades A against B, so the A - B skew is the knob to
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Skew images** (parked by the owner 2026-11-04): common phase trades A against B, so the A - B skew is the knob to
   try (inference); first candidate A -250 ps with B 0 (`encphase_variant.py --skew-ps`), judged by the offset sweep.
   Runtime phase and the capture-phase knob stay with it.
 
@@ -395,7 +395,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   the way: the UI roll mode still reads the removed 0x24 / 0x26, reported to the coordinator)
 - [x] **Pin and flash 0x153B** (flashed 10-20 19:31, benched good 20:40-20:49, recommended)
 - [x] **Long free-running testbench** for the decimation filter: fpga-gen4's 0x1535 work (tb/run.sh, seeds 12345/1/77, 13 FIR mutations caught; fpga/al3/README.md section 5, commit 292a596)
-- [ ] **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Open input / EXT bench tests 1-4** from fpga/al3/README.md "Changes" section 2 (needs an external 3.3 V source
   referenced to USB ground).
 
 ## Owner bench verdicts outstanding
@@ -419,10 +419,10 @@ symptom reappears. The phosphor capture loop is a design study, not a fix.
   (check: CHANGELOG 0.2.45 says calibration v2 is superseded by v3; hardware-status 10-19 10:26 shows v3 zeros exact at 0 V, but the PWM sweep and the 1.000 V / 0.010 V volts points are not recorded.)
 - [x] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (re-read 2026-11-07 14:42: 128.10 / 128.77 codes, +0.1 / +0.8; what is left is the item "Zero at the shorted input") (10-18 late): channel offset with the cores
   agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
-- [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
   a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
   Remains: the capture loop itself; the design note docs/plans/phosphor-fast-capture.md landed with fw 0.2.58 and the scope-view pass is 15 ms median with the MMU (hardware-status 10-19 08:10).
-- [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
+- [x] (Won't do for the foreseeable future, owner 2026-11-07.) **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
   CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
   Data of 2026-11-07 14:42 (lab supply +-1 V, not the post): gain errors at 1 MS/s CH1 -2.4, +0.5, -1.1, -0.4 %, CH2 +1.5, +1.8, -0.4,
   +1.0 % at 5, 2.5, 1, 0.5 V/div: within 2 %, but the spread is over the 0.3 % limit even without 5 V/div (six codes per volt). Open: decide
