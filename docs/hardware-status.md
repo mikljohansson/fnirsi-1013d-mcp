@@ -1972,3 +1972,15 @@ Newest entries at the bottom. Format: date, who, what, result.
   `backups/dist-0x153F/fnirsi_1013d-fpga-al3-0x153f-flash1m.bin`: 69 sectors erased, 1104 pages, **verified OK on the first
   pass**, d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc; independent double read
   `backups/20261107-post-0x153F-readback.bin` byte-equal to the image. Rollback: the 0x153E image (2782e1b6...) with fw 2bdecac.
+- 2026-11-07 09:52-09:58 (lead, owner present): **0x153F first boot and the core order.** fw 1d36d9b5 by FEL after the
+  card's 2bdecac showed the notice: GET_INFO fpga 0x153F, fw_fpga 0x153F, flags 0; encode check boot33 0xf7, 0 bad; stages
+  at the power-on 0x06DB (stage 3 both chips); the stored calibration OTHER (trained on 0x153E, not applied), the first-run
+  screen, dismissed with Later. Cold, not yet calibrated for this bitstream. `core_order.py`, 12 captures per divider,
+  CH1 and then CH2 on the ladder input: **s = 0 at every divided rate on both channels** (dividers 1..7, 9, 19, 99, 999;
+  winner RMS 0.4 .. 4.3 codes against 2.9 .. 15 for the runner-up; divider 99 by votes, 12 of 12, its edge fits poorly;
+  CH2 divider 1 one vote of 6 at -1). 0x153E's row at the same stages was +1, +1, 0, 0, +1, +1 ... Divider 0: CH1 s = 0
+  (4 captures, margin 2x); CH2 voted +1 over 1571 "moving" words, which are carry errors at its parked level, not an edge,
+  and a step-only fit on the 1 kHz square was noise-limited. New method (`fpga/al3/tools/core_delay_fold.py`): generator at
+  200 MHz / 201, each core folded on the period, delay d with B[k] = f(2k), A[k] = f(2k + d): **CH1 and CH2 d = +1, the
+  designed delay, 30 of 30 captures each** (RMS at d = 0 / +1 / +2: 0.96 / 0.90 / 1.08 and 0.96 / 0.81 / 0.98; the 0x153E
+  fault would be d = +3). 0 flagged. To repeat after the wizard.
