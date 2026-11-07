@@ -13,7 +13,7 @@ slow, the trigger chip with the run state, the generator button and the battery.
 program on the PC has the scope's serial port open or has sent it a request in the last moments.
 
 - Tap a channel chip for the input: V/div, coupling, probe factor, invert.
-- Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, roll mode (Long mode / Short mode), Average
+- Tap ACQ for the acquisition: Sample Rate, Time per Division, Memory, Roll mode (green while on; the ACQ chip then reads Roll), Average
   mode (every displayed trace is the mean of N records, N chosen so the records fit 40 ms: up to 64 at 200 MSa/s, 4 at 1 MSa/s with the filter, single records at 10 kSa/s and slower; the same kind of result whatever the filter and time base), Filter and Sample. The menu also shows the pass time, how long one screen update takes.
   The Sample Rate and Time per Division choices stand in grids of five columns; a grey time/div cannot show the record
   at this rate. While stopped, a tapped sample rate is the setting for the next RUN: it shows green and in the ACQ chip,

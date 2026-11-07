@@ -12,6 +12,10 @@ published as pre-releases.
 
 ## [Unreleased]
 
+### Firmware
+
+- The ACQ chip reads "ACQ" / "Roll" in roll mode, the word the rest of the UI uses; it read "Long".
+
 ## [0.3.0] - 2026-11-07
 
 The first tagged release. The firmware (`PC_FW_VERSION`) and the mcp package share the version 0.3.0. The user-facing

@@ -162,6 +162,11 @@ int ui_acq_peak_applied(const ui_acq_in *in)
   return in->peak && !in->spectrum && !in->roll;
 }
 
+const char *ui_acq_chip_line2(int roll, int average)
+{
+  return roll ? "Roll" : average ? "avg" : 0;
+}
+
 void ui_acq_row_build(const ui_acq_in *in, ui_acq_row *r)
 {
   static const char *const peak_note[UI_ACQ_NOTE_LINES] = { "Peak:", "Filter and", "Average", "not applied" };

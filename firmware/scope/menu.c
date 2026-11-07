@@ -1992,7 +1992,8 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
 
 void scope_acqusition_settings(int mode)
 {
-  uint8 a = 0;
+  const char *line2;
+
   //Clear the area first
   display_set_fg_color(BLACK_COLOR);
   display_fill_rounded_rect(ACQ_BUTTON_XPOS, ACQ_BUTTON_YPOS, ACQ_BUTTON_BG_WIDTH, ACQ_BUTTON_BG_HEIGHT, 2);
@@ -2017,18 +2018,13 @@ void scope_acqusition_settings(int mode)
     return;
   }
 
-  //Display the acquisition identifier text
-  if (scopesettings.long_mode)
-  {
-      display_text(ACQ_BUTTON_XPOS + 4, ACQ_BUTTON_YPOS + 3, "ACQ");        //long time base mode
-      display_text(ACQ_BUTTON_XPOS + 2, ACQ_BUTTON_YPOS + 17, "Long"); 
-  } 
-  else 
-  {
-      if(scopesettings.average_mode) {display_text(ACQ_BUTTON_XPOS + 5, ACQ_BUTTON_YPOS + 17, "avg"); a=8;}    //Average mode 
-      display_text(ACQ_BUTTON_XPOS + 4, ACQ_BUTTON_YPOS + 11-a, "ACQ");    //short time base mode
-  } 
-  
+  //The chip's words (ui_acq_chip_line2): "ACQ" alone, or over the mode's second line centred in the block
+  line2 = ui_acq_chip_line2(scopesettings.long_mode, scopesettings.average_mode);
+  display_text(ACQ_BUTTON_XPOS + 4, ACQ_BUTTON_YPOS + (line2 ? 3 : 11), "ACQ");
+
+  if(line2)
+    display_text(ACQ_BUTTON_XPOS + (ACQ_BUTTON_WIDTH - ui_text_width(&font_2, line2)) / 2, ACQ_BUTTON_YPOS + 17, (int8 *)line2);
+
   //Check if inactive or active
   if(mode == 0)
   {

@@ -2458,6 +2458,14 @@ static void test_acq_row(void)
   //Normal (AcqMenuSample): Filter Off, Sample "Normal" grey-box white text, no note
   r = acq(0, 0, 0, 0, 0, ui_filter_name(UI_FILTER_OFF));
   T_STR(r->line1[UI_ACQ_ROLL], "Roll");       T_STR(r->line2[UI_ACQ_ROLL], "mode");
+
+  //The ACQ chip says what the menu's box says, and its second line fits the 30 px block (ACQ_BUTTON_WIDTH)
+  T_STR(ui_acq_chip_line2(1, 0), r->line1[UI_ACQ_ROLL]);
+  T_STR(ui_acq_chip_line2(1, 1), "Roll");
+  T_STR(ui_acq_chip_line2(0, 1), "avg");
+  T_TRUE(ui_acq_chip_line2(0, 0) == 0);
+  T_TRUE(ui_text_width(&font_2, ui_acq_chip_line2(1, 0)) <= 30);
+  T_TRUE(ui_text_width(&font_2, ui_acq_chip_line2(0, 1)) <= 30);
   T_STR(r->line1[UI_ACQ_AVERAGE], "Average"); T_STR(r->line2[UI_ACQ_AVERAGE], "mode");
   T_STR(r->line1[UI_ACQ_FILTER], "Filter");   T_STR(r->line2[UI_ACQ_FILTER], "Off");
   T_STR(r->line1[UI_ACQ_SAMPLE], "Sample");   T_STR(r->line2[UI_ACQ_SAMPLE], "Normal");

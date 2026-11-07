@@ -185,6 +185,10 @@ typedef struct
   const char *note[UI_ACQ_NOTE_LINES];     //0 = empty line
 } ui_acq_row;
 
+//The ACQ chip's line under "ACQ": "Roll" in roll mode (the word of the menu's Roll mode box), "avg" with Average on, 0 for
+//none ("ACQ" alone, centred). Average is kept in roll, which wins: the chip holds two lines
+const char *ui_acq_chip_line2(int roll, int average);
+
 //Sample Peak is applied to the acquisition: Scope (the Spectrum acquires Normal), not in roll mode (no 16-bit path there)
 int  ui_acq_peak_applied(const ui_acq_in *in);
 
