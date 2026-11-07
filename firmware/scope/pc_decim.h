@@ -168,6 +168,10 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c);
 //section 48 (D 1..8 not simulated)
 //0x153A+ (cap): the IOB capture and the stage pick take 4 words more at divider 0 and 3 at divided rates (fpga/al3/README.md
 //section 10, tb_trigpos: legacy EXT +14..15 samples at D 0, +16..17 at D 9, +17..18 at D 199 against CH1 +2..3): 12 / 14
+//fw-153f, 0x153F (fpga/al3/AGENTS.md "0x153F, the paired capture", contract (a) item 5: "against 0x153E core A is one
+//word (two samples) earlier at dividers 1, 2 and 3 and unchanged at 0 and from 4 up, so the smallest change is 12 at
+//dividers 1..3"): 12 at dividers 0..3, 14 from 4 up. Model numbers on either bitstream (never benched; the model's
+//pipeline depth is open: an edge on EXT and CH1 decides, firmware/AGENTS.md section 97)
 uint32_t pc_decim_ext_shift_legacy(uint32_t divider, int cap);
 
 //The EXT shift of a capture with configuration c at divider (0x0D): pc_decim_ext_shift for K >= 1, else the legacy one.

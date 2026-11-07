@@ -2265,16 +2265,16 @@ static void test_ext_trigger(void)
   T_EQ(r.p[9] & 0x20, 0);
 
   //fw 0.2.72: legacy EXT shift, the ADC pipeline's words plus the capture stages' 4 / 3 (fw 0.2.79): 14 samples at
-  //D >= 1, 12 at D 0: fewer pretrigger words, GET_CAPTURE_INFO 70 the shift in samples, the record start 0x14 - the
-  //words written, edge back at pretrigger
+  //D >= 1, 12 at D 0 (fw-153f, 0x153F: 12 at D 0..3, 14 from D 4): fewer pretrigger words, GET_CAPTURE_INFO 70 the
+  //shift in samples, the record start 0x14 - the words written, edge back at pretrigger
   {
-    static const uint32_t divs[] = { 199, 9, 1, 0 };
+    static const uint32_t divs[] = { 199, 9, 4, 3, 1, 0 };
     uint8_t p[8];
     int i;
 
-    for(i=0;i<4;i++)
+    for(i=0;i<6;i++)
     {
-      uint32_t sh = divs[i] ? 14 : 12;
+      uint32_t sh = (divs[i] >= 4) ? 14 : 12;
 
       memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, divs[i]);
       r = req(PC_CMD_SET_TIMEBASE, p, 8);
@@ -3619,13 +3619,15 @@ static void test_capture_stages(void)
   T_EQ(r.len, 432); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
   T_EQ(pc_get_u16(r.p + 358), 0x0924); T_EQ(pc_get_u16(r.p + 360), 0x153A); T_EQ(pc_get_u16(r.p + 362), 0x0924);
 
-  //EXT shifts: legacy 12 samples at divider 0 and 14 above (0x1539: 4 / 8); K >= 1 40 ns more
+  //EXT shifts: legacy 12 samples at dividers 0..3 (fw-153f, 0x153F: core A one word earlier at 1..3) and 14 from 4 up
+  //(0x1539: 4 / 8); K >= 1 40 ns more
   has = pc_decim_has();
   T_EQ(has, PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES);
   T_EQ(has, PC_DECIM_HAS_FIR | PC_DECIM_HAS_CAPSTAGES);
   pc_decim_config(0, 0x1C, 19, 3000, has, &c);
   T_EQ(c.cap, 1); T_EQ(pc_decim_mode(&c), 0);                   //0x53 bits 4..2 select nothing: written 0
   T_EQ(pc_decim_ext_shift_at(&c, 19), 14); T_EQ(pc_decim_ext_shift_at(&c, 0), 12); T_EQ(pc_decim_ext_shift_at(&c, 1999), 14);
+  T_EQ(pc_decim_ext_shift_at(&c, 1), 12); T_EQ(pc_decim_ext_shift_at(&c, 3), 12); T_EQ(pc_decim_ext_shift_at(&c, 4), 14);
   pc_decim_config(1, 0, 1, 3000, has, &c);   T_EQ(pc_decim_ext_shift(&c), 16);       //(240 + 5 + 80) / 20 = 16.25 (0x1539: 12)
   pc_decim_config(2, 0, 19, 3000, has, &c);  T_EQ(pc_decim_ext_shift(&c), 3);        //(240 + 95 + 80) / 200 = 2.08
   pc_decim_config(0, 0x08, 19, 3000, PC_DECIM_HAS_FIR, &c);

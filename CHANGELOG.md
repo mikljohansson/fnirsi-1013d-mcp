@@ -309,6 +309,9 @@ sections 74 to 79.
   "CH1 A3 B3" (the B field is written equal to the A field). Stored format and wire layouts unchanged (b935a88). mcp:
   the built-for word, the power-on value, no " A-clk" (7cf2029). protocol.md 5.1, 7.3, rows 64 / 68 and three host
   vectors (0684ef1). Not benched; `tools/bitstreams.py check --release` fails until the bench marks 0x153F recommended.
+- **EXT trigger at 100, 66.7 and 50 MSa/s (dividers 1..3) with Filter Off**: the shift that puts the EXT edge at the
+  trigger point is 12 samples there (was 14), as at 200 MSa/s; 0x153F takes core A one word earlier at those rates
+  (fpga-153f's contract). Model numbers, not benched. mcp `ext_shift_legacy` follows.
 
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 

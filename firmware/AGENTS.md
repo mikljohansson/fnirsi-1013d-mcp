@@ -7402,3 +7402,14 @@ gives another hash), GCC 13 840,704, PC_DEBUG 841,216; mcp pytest 559 passed, ru
 8. The battery: `fnirsi1013d-battery --port COM10` (the core-order group must now PASS), then the 30-minute soak.
 Regression signs: the notice on 0x153F (the constant), different A and B fields after a training (cs_with_chip not
 used), a guard move of one field only, TRAINED on the first 0x153F boot (a 0x153E trailer applied).
+
+**The legacy EXT shift** (the branch's last commit, on its own so the reviewer of fpga-153f can change or revert it):
+`pc_decim_ext_shift_legacy` (cap) 12 at dividers 0..3, 14 from 4 up (was 12 at 0, 14 above); mcp `ext_shift_legacy`
+the same. Taken from `fpga/al3/AGENTS.md` (branch fpga-153f 28203f9) "0x153F, the paired capture", contract (a) item 5:
+"against 0x153E **core A is one word (two samples) earlier at dividers 1, 2 and 3** and unchanged at 0 and from 4 up,
+so the smallest change is 12 at dividers 1..3". Neither table value was ever benched and the model's depth is open
+(tb_trigpos reads EXT minus CH1 14.5 / 13 / 13.5 / 13.5 / 14.5 samples at dividers 0 / 1 / 2 / 3 / 4; a core A one cycle
+shallower gives 2 less everywhere). Bench: an edge on EXT and CH1 together (the note's run E6), Filter Off, dividers
+0..5, 9 and 199: the CH1 edge at the pretrigger within the synchroniser's 22 ns. The filtered (K >= 1) shifts and the
+ADC trigger position do not change. Host tests: test_session's 0x153A block (dividers 1, 3, 4), mcp test_capture_stages
+and test_ext_trigger (dividers 1, 3, 4 on the simulator, whose EXT model follows the table).

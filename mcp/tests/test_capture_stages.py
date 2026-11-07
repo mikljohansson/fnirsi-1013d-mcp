@@ -156,6 +156,7 @@ def test_cal_probe_zero_split_zero_since_0_2_79():
 def test_ext_shifts_0x153a():
     cap = P.DECIM_HAS_FIR | P.DECIM_HAS_CAPSTAGES
     assert P.ext_shift_legacy(0, True) == 12 and P.ext_shift_legacy(9, True) == 14
+    assert [P.ext_shift_legacy(d, True) for d in (1, 2, 3, 4)] == [12, 12, 12, 14]  # fw-153f, 0x153F
     assert P.ext_shift_legacy(0) == 4 and P.ext_shift_legacy(9) == 8
     leg = P.decim_config(0, 0, 9, 4000, cap)
     assert leg.cap and leg.ext_shift_at(9) == 14 and leg.ext_shift_at(0) == 12

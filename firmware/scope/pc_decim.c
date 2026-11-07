@@ -259,8 +259,9 @@ uint32_t pc_decim_ext_shift(const pc_decim_cfg *c)
 
 uint32_t pc_decim_ext_shift_legacy(uint32_t divider, int cap)
 {
+  //fw-153f: 0x153F's one-instant capture takes core A one word earlier at dividers 1..3 (pc_decim.h)
   if(cap)
-    return divider ? 14 : 12;
+    return (divider >= 4) ? 14 : 12;
 
   return divider ? 8 : 4;
 }

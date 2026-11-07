@@ -2205,9 +2205,10 @@ def ext_shift_legacy(divider: int, cap: bool = False) -> int:
     the edge: the AD9288's 4-encode pipeline is 4 words at every legacy rate, 2 at divider 0 where the EXT
     synchroniser takes most of a 10 ns word (fpga/al3/README.md section 7 finding 4, tb_trigpos model numbers).
     1.24 (fw 0.2.79, ``cap`` = FPGA 0x153A+ capture stages): 12 at divider 0, 14 above (the IOB capture and the stage
-    pick take 4 / 3 words more)."""
+    pick take 4 / 3 words more). fw-153f (FPGA 0x153F, one capture instant per chip): core A one word earlier at
+    dividers 1..3, so 12 at dividers 0..3 and 14 from 4 up (model numbers, not benched)."""
     if cap:
-        return 14 if divider else 12
+        return 14 if divider >= 4 else 12
     return 8 if divider else 4
 
 
