@@ -3485,7 +3485,8 @@ both cores but not s = 0):
 
 So with D_A at the unit's 11 ns every clean stage pairs right for D_B from 10 to 13 ns, and none of the 58 mispaired
 cells has |D_A - D_B| <= w. The unit's stage scans (both buses dirty at the same instant) put it in the middle of that
-band; `tools/core_order.py` at divider 0, at the trained stage and after a retrain, is the bench check of it.
+band; `tools/core_order.py` at divider 0, at the trained stage and after a retrain, was to be the bench check of it (on
+the bench carry errors took its metric over at divider 0, so `tools/core_delay_fold.py` did it: "Bench" below).
 
 **What else changes.** Core A's latency is 0x153E's at divider 0 (same stage) and at every divider from 5 up (from 4 up
 at stage 3); at dividers 1, 2 and 3 0x153E held core A one release back (nA = 2), so there core A is one word (two
@@ -3592,8 +3593,47 @@ the bitstream are unchanged:
 Neither failure depended on the hold-off block's place; both are reproducible on the unchanged source with
 `backups/fpga-153f-sim/` (main checkout) and the review's traces beside them.
 
-**Bench.** Not flashed (status `unbenched`). The firmware contract and the bench list are in AGENTS.md "0x153F, the
-paired capture, fpga-153f".
+**Bench** (2026-11-07, `docs/hardware-status.md` 09:43-11:33; the firmware contract and the bench list are in AGENTS.md
+"0x153F, the paired capture, fpga-153f"). Flashed over 0x153E, verified on the first pass, read back equal to
+`d255ca38...d5bc`; fw 1d36d9b5 (main 53da95a) over FEL. **Status `recommended` since abd988a, accepted by the owner.**
+
+- **Wizard**, warm, inputs open: stage 3 on both chips, 0x06DB, the same as the power-on value the first order runs used.
+  CH1 A and B quiet at 2..5, CH2 A and B quiet at 2, 3, 5.
+- **Core order.** `tools/core_order.py`, 12 captures per divider, probes on the ladder: **s = 0 at every divided rate on
+  both channels** (dividers 1..7, 9, 19, 99, 999), where 0x153E read the rows at the top of this section. At divider 0
+  CH1 read 0, and CH2 voted +1 over 1571 "moving" words, which are carry errors at its parked level, not an edge.
+- **`tools/core_delay_fold.py`**, made for that: the generator at 200 MHz / 401 (P prime, so a core's samples cover every
+  phase of the period at any divider), each core folded on the period, delay d with B[k] = f(2 (D + 1) k),
+  A[k] = f(2 (D + 1) k + d (D + 1)); d = +1 designed, +3 = core B one conversion late. Positional arguments only, no
+  `--selftest`, the port fixed to COM10; it puts the generator back to 1 kHz. Both probes on the post itself: any periodic
+  waveform works, but the ladder's rounding makes the minimum shallow. **d = +1, 8 of 8 on both channels at dividers 0,
+  1, 2, 3, 4, 5, 6, 7, 9, 19, 99, 999**, RMS at the designed delay 0.5 .. 0.9 codes against 1.0 .. 54 at d = 0 and +2.
+  Divider 0 is the shallow one (CH1 1.1 / 1.1 / 1.2, CH2 0.9 / 1.0 / 1.1 at d = 0 / +1 / +2; d = +3 1.5 / 1.4): it rests on
+  votes (8 of 8 here, 30 of 30 on the ladder at 200 MHz / 201), not on a deep minimum. Divider 999's d = +3 (2.4) is an
+  alias of the fold.
+- **Code errors, CH2 offset sweep** (`tools/enc_sweep.py`, twice at each time, peak over the sweep; the warm calibration):
+
+  | Minutes after power-on | Peak A % | Peak B % |
+  |---|---|---|
+  | 42 | 6.38 / 6.42 | 1.76 / 1.45 |
+  | 60 | 6.80 / 6.39 | 1.10 / 1.39 |
+  | 80 | 5.84 / 5.75 | 1.08 / 0.89 |
+  | 100 | 6.00 / 5.51 | 1.07 / 1.02 |
+
+  Mean over the sweep at 80 minutes A 3.05 %, B 0.41 % (0x153E A 2.6 %, B 0.27 %). Divider 99: 0 / 0. **The bench list's
+  limit, no worse than 0x153E's warm peak of A 5.2 %, B 0.65 %, was missed**: at 80 minutes A about 11 % and B about 50 %
+  higher, on one unit, a day apart, with a spread between sweeps of 0.1 .. 0.5 points; against the release 0x153D (A 6.94 %,
+  B 0.66 %) A lower, B higher. Core B now sits at core A's instant, the stage-independent class the AGENTS.md list named
+  beforehand (inference that this is why it rose). **The owner accepted it for the right core order.** Revisiting core B's instant at full rate is parked
+  (`docs/plans/task-queue.md`).
+- **Battery** (`fnirsi1013d-battery`, `backups/battery-0.3.0/tool-run2-0x153F/`): 201 PASS, 0 FAIL, 1 SKIP (the spectrum step
+  needs its view); the core-order group and the ten Filter Off frequency steps that failed on 0x153E pass. Capture
+  self-check 0 flagged of 7562. Encode check 3 captures re-taken of 42926, all recovered, 0 accepted bad, during the
+  battery's rate changes; 0x153E's 1 of 97304 came from a run with fewer rate changes per capture, so not like for like.
+- **Counter** on the 1 kHz at the divided rates, read past the gate flag: E 99, T 19800200 / 19800000 / 19800000 at 2 MSa/s,
+  200 and 20 kSa/s = 999.99 / 1000.00 / 1000.00 Hz. The miscount went with the pairing; the firmware still marks it GATED,
+  not valid (queued).
+- **Not run**: the EXT shift (no second source). No 30-minute soak on 0x153F at the time of writing.
 
 ## Device facts from the datasheet
 

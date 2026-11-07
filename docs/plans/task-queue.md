@@ -307,7 +307,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `{{0x153E bench}}` and `{{0x153E tested-on}}` placeholders of the release notes and the announcement
   (`docs/plans/release-checklist.md`, FPGA boxes). Lessons from 2026-11-04: one flash per image, CH1 coupling and the
   CH2 node checked by a capture before every run, the wizard moves the CH2 centre by up to 7 PWM units per run.
-- [ ] **Filter Off at divided rates: the cores are interleaved one sample off** (MCP battery 2026-11-06, finding 1; release
+- [x] **Filter Off at divided rates: the cores are interleaved one sample off** (done 2026-11-07: fixed in the FPGA by 0x153F,
+  merge 7f4ed8e, firmware merge 53da95a; the designed core delay at twelve rates on both channels, battery 201 PASS, 0 FAIL,
+  1 SKIP, `docs/hardware-status.md` 09:52-10:38. Original item:) (MCP battery 2026-11-06, finding 1; release
   blocker until decided). In the host's trace the smooth order is B_k+1, A_k, not B_k, A_k: edges zigzag, a 1 kHz square
   at 20 kSa/s reads 2006 Hz. 200 MSa/s and filtered captures are in order. Same relation in the raw captures of
   2026-11-04 on 0x153D, 0x153C and enc0, so it predates 0x153E. Find where the extra sample comes from (the FPGA's gated
@@ -321,7 +323,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   depends on the word period and the stages, so the fix is in the FPGA: capture core A against the edge its data
   changes on and make the pairing the same at every rate (0x153F; testbench ADC model first). Check first: the model's
   row for the trained A3 B3 after the next wizard run.
-- [ ] **Bench fw-153f on 0x153F** (branch `fw-153f`, 2026-11-07; firmware/AGENTS.md section 97 has the steps): FEL-load
+- [x] **Bench fw-153f on 0x153F** (done 2026-11-07 09:43-11:33, `docs/hardware-status.md`: flashed, wizard 0x06DB, core order,
+  sweep, battery; `recommended` in dist abd988a, the sweep limit missed and accepted by the owner; user docs moved by docs-153f.
+  Open from it: the items below, the 30-minute soak (release checklist). Original item:) (branch `fw-153f`, 2026-11-07;
+  firmware/AGENTS.md section 97 has the steps): FEL-load
   on 0x153E (the notice names 0x153F), flash 0x153F (`fpga/al3/AGENTS.md` "0x153F" part (b)), `#VER fpga=0x153f`, the
   first-run prompt, the wizard trains one stage per chip (expect 0x06DB) and GET_CAL shows it, `core_order.py` s = 0 at
   every divider on both channels, the CH2 sweep 30 min after power-on, `fnirsi1013d-battery --port COM10`. Then: manifest
@@ -329,6 +334,24 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `COUNTER_F_GATED` decided from the bench, the legacy EXT shift (last commit of the branch, model numbers) checked with
   an edge on EXT and CH1, and the user-facing docs (install guide, 0.3.0 release notes, roadmap, release checklist) moved
   from 0x153E to 0x153F.
+- [ ] **Lift `COUNTER_F_GATED` on 0x153F** (bench 2026-11-07 10:34-10:38): read past the flag, the counter on the 1 kHz square
+  gave 999.99 / 1000.00 / 1000.00 Hz at 2 MSa/s, 200 and 20 kSa/s Filter Off, so the divided-rate miscount went with the
+  pairing (`fpga/al3/AGENTS.md` "0x153F" item 7). The firmware still marks the result GATED, not valid, and the cards take
+  the record's measurement. Lift the flag, let the cards use the counter there, update the known issue, docs/mcp-tools.md,
+  docs/protocol.md and the simulator. Not in 0.3.0 unless the coordinator says so.
+- [ ] **Capture instant for core B at full rate** (parked 2026-11-07): 0x153F takes core B at core A's instant, and the CH2
+  sweep's peak on core B rose from 0.65 to 1.0 % (mean 0.27 to 0.41 %, 80 minutes after power-on; core A 5.2 to 5.8 %,
+  `docs/hardware-status.md` 10:52-11:33). Revisit whether a chip can keep the pairing with an instant better for core B
+  at 200 MSa/s (README section 22, "its limit at 200 MSa/s"). Accepted by the owner for 0.3.0.
+- [ ] **200 MSa/s pairing check in the battery**: the `coreorder` group uses core_order's moving-word metric, which carry errors
+  take over at divider 0 when a level sits at a carry (CH2 voted +1 over 1571 words on 2026-11-07, not an edge). Use
+  `fpga/al3/tools/core_delay_fold.py` in place of core_order at divider 0: generator at 200 MHz / 401, both probes on the
+  post, d = +1 expected. Its port is fixed to COM10 today, and divider 0's minimum is shallow, so judge by votes.
+- [ ] **Legacy EXT shift on 0x153F** (firmware/AGENTS.md section 97, 72af746): 12 samples at dividers 0..3 comes from the model,
+  never benched: an edge on EXT and CH1 together, Filter Off, dividers 0..5, 9 and 199. Needs a second source. The release
+  notes name it under "Not benched". INTERLEAVE_UNVERIFIED on 0x153F was not decided on the bench either.
+- [ ] **Encode check re-takes on 0x153F** (to watch): 3 captures re-taken of 42926 during the battery's rate changes, all
+  recovered, 0 accepted bad; 0x153E had 1 of 97304 in a run with fewer rate changes per capture, so not like for like.
 - [ ] **Smaller findings of the MCP battery 2026-11-06** (`docs/hardware-status.md` 16:21-16:45): `scope_capture_and_fft`
   / `scope_dvm` once labelled a 200 kSa/s record 1 MSa/s right after the guard's stage move (not reproduced; check the
   settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100
@@ -338,7 +361,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   the probes connected): 4 drops in 17907 GET_STATUS requests, each a bus suspend (no SOFs) followed 129 ms later by a
   host bus reset and a normal enumeration, 0.6 s down, no device restart; three host opens failed the same way at 14:12.
   Find out whether the rate is new (earlier long soaks in `docs/hardware-status.md`), whether it follows the host port /
-  cable, and whether the firmware can do anything; decide if it is a known issue of 0.3.0.
+  cable, and whether the firmware can do anything; decide if it is a known issue of 0.3.0. 2026-11-06 15:50: a second soak,
+  card-booted, had 0 drops; cause still open. In the 0.3.0 release notes as a known issue (docs-153f); no soak on 0x153F yet.
 - [ ] **Pin-level encode self-check** (parked by the owner 2026-11-04): the 0x33 self-check reads the fabric copies, not
   the ODDR pins, so it cannot see the enc+250 failure (A encodes stopped, A cores holding their last value). A check at the
   pins would close that gap for any future encode build.

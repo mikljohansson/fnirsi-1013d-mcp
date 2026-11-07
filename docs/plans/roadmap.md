@@ -8,6 +8,11 @@ be true before the tag. Dates are 2026. **State as of 2026-10-22 19:52** (the pa
 owner moved the release to FPGA 0x153E**, the 0x153D design with the ADC encodes driven from PLL outputs through the pin
 registers (section 6 item 4 has the experiment behind it); 0x153D stays attached as `supported`, the 0.3.0 firmware
 expects 0x153E only, and 0x153E still has to be built, pinned, flashed and benched (`docs/plans/release-checklist.md`).
+**Update 2026-11-07: the release is on FPGA 0x153F**, 0x153E with both ADC cores of a chip captured at one instant, after
+the MCP battery of 2026-11-06 found the Filter Off samples mis-ordered at most rates. 0x153E was flashed and benched on
+2026-11-06 but never released; it stays attached as `supported`, as does 0x153D. 0x153F is flashed on the maintainer's
+unit, benched and `recommended` (abd988a); the firmware expects it only. The bench list's sweep limit was missed and the
+owner accepted that for the right core order. Left before the tag: the 30-minute soak on 0x153F and the release steps.
 Next: the release steps of section 5. Sections 1-4 below were reconciled on 2026-10-20 morning (firmware
 0.2.80, FPGA 0x153A then) and stand as written; the status paragraphs that follow say what changed since.
 
@@ -133,18 +138,18 @@ The announcement point. Gate, in order (details and the tick list in `docs/plans
 
 1. Every epic in sections 1-3 is merged and its bench list is ticked in `docs/hardware-status.md`, or the maintainer has
    explicitly removed the item.
-2. The FPGA bitstream the release depends on, **0x153E** (since 2026-11-04; 0x153D, the gated build fd0be7a2, was
-   benched 2026-10-22 and is now `supported`), is built and pinned, flashed on the maintainer's unit and benched with
-   the firmware that expects it, and `recommended` in `fpga/al3/dist` with its bench record (`tools/bitstreams.py check
-   --release` passes; open, owner at the bench). Users get it
+2. The FPGA bitstream the release depends on, **0x153F** (since 2026-11-07; 0x153D, the gated build fd0be7a2, benched
+   2026-10-22, and 0x153E, benched 2026-11-06, are `supported`), is built and pinned, flashed on the maintainer's unit
+   and benched with the firmware that expects it, and `recommended` in `fpga/al3/dist` with its bench record
+   (`tools/bitstreams.py check --release` passes; done 2026-11-07, abd988a). Users get it
    from `fpga/al3/dist`, attached to the release with `BITSTREAMS.md` (`docs/releasing.md` section 5; the maintainer's
    confirmation of that is a box in `release-checklist.md`).
 3. Version bump to 0.3.0 in `firmware/scope/pc_cmds.h` and `mcp/pyproject.toml`, a curated `## [0.3.0]` section in
    `CHANGELOG.md` (the release notes), `release: v0.3.0` commit, CI green.
 4. A release candidate persisted to the SD card and a 30-minute soak with the MCP server polling
-   (`fnirsi1013d-soak`), plus the long idle check. Done so far on 0x153D (not on 0x153E): fw 0.2.105 c681efa4 persisted
-   2026-10-22 19:52 and a 301 s soak with 0 errors; the 30-minute soak ran on 0.2.102 / 0x153B (2026-10-20) and is repeated on the 0.3.0
-   image.
+   (`fnirsi1013d-soak`), plus the long idle check. Done so far: on 0x153D fw 0.2.105 c681efa4 persisted 2026-10-22 19:52
+   and a 301 s soak with 0 errors; 30-minute soaks on 0.2.102 / 0x153B (2026-10-20, 0 errors) and twice on 0x153E
+   (2026-11-06: 4 link drops of 0.6 s, then 0, cause not found). Nothing yet on 0x153F; repeated on the 0.3.0 image.
 5. Demo material for the announcement: screenshots of the main views (`scope_screenshot`), a shared-control session
    with the MCP chip visible, a short clip.
 6. Tag `v0.3.0`, wait for `release.yml`, then check the attached hashes against a FEL load (`docs/releasing.md`
@@ -170,12 +175,13 @@ Ideas that stay in the repository for later and are not part of the one-splash p
 - CSV export of the on-screen trace, a dot display mode, triggered sweeps slower than 10 ms/div.
 - Invite testers with EF2L45 and EP4CE6 units; those paths are inherited from Atlan4 and untested here.
 
-### A future FPGA after 0x153E (owner, 2026-10-21)
+### A future FPGA after 0x153F (owner, 2026-10-21)
 
-0.3.0 ships on 0x153E (the 0x153D design with IOB encodes; section 6 item 4); a bitstream after it is not scheduled. The owner
+0.3.0 ships on 0x153F (the 0x153D design with IOB encodes, section 6 item 4, and both cores of a chip captured at one
+instant); a bitstream after it is not scheduled. The owner
 wants FPGA headroom kept ("not program the FPGA too full, who knows what we might want to do later"), so a later bitstream
 would combine one feature with the compaction below, measured block by block like `docs/plans/fpga-0x153c.md` section 13
-on the 0x153D source (the 0x153E source adds no logic).
+on the 0x153D source (the 0x153E source adds no logic; 0x153F's capture takes 182 LE out, 7272 LE, 84.2 %).
 
 1. **Trigger on both ADC cores** (the only feature candidate; contract section 3.4): the edge found to 5 ns instead of 10 ns at
    200 MS/s, so repeated captures line up twice as tightly (sharper averaged and phosphor traces at the fastest time bases).
