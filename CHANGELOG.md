@@ -12,6 +12,16 @@ published as pre-releases.
 
 ## [Unreleased]
 
+### Host (`mcp`)
+
+- `scope_self_test_loopback` judges medians over many captures, at 1 V/div, Filter Off: duty and swing at 10 kHz only, T4 by the
+  fold method over 200 captures (d = +1), T5 against the pretrigger word + 1 +- 1, T7 reported as skipped on a build without
+  FORCE; under a minute, and it restores the trigger type, the filter and the RUN state too (30afc1b).
+- `fnirsi1013d-battery`: the `coreorder` group uses the fold method at every divider, 200 MSa/s included, and reads the wiring
+  from the record: on the ladder CH2 is one SKIP, both probes on the post judge both channels; the moving-word metric is gone
+  (f2e0878).
+- Simulator: the Nth edge with an idle time waits for a gap as the FPGA does, so battery step T10 is judged there (05f5d62).
+
 ## [0.3.0] - 2026-11-07
 
 The first tagged release. The firmware (`PC_FW_VERSION`) and the mcp package share the version 0.3.0. The user-facing

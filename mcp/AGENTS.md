@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (mcp-battery, 2026-11-06: fnirsi1013d-battery and the battery's findings; fw-nopat, 2026-10-21: the pattern feature cut, the square kept; mcp-d6, 2026-10-21: protocol 1.27 logger / the generator on P16 / H16 / Bode on P; mcp-c8 / mcp-c8b: protocol 1.26 trigger types / hold-off / peak detect / counter; mcp-soft: decode / mask / CSV / DVM; mcp-gen7: idle port close)
+# mcp/ handoff for agents (mcp-031, 2026-11-07: the loopback self-test over many captures, the fold in the battery, the Nth edge's idle time; mcp-battery, 2026-11-06: fnirsi1013d-battery and the battery's findings; fw-nopat, 2026-10-21: the pattern feature cut, the square kept; mcp-d6, 2026-10-21: protocol 1.27 logger / the generator on P16 / H16 / Bode on P; mcp-c8 / mcp-c8b: protocol 1.26 trigger types / hold-off / peak detect / counter; mcp-soft: decode / mask / CSV / DVM; mcp-gen7: idle port close)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -61,7 +61,7 @@ path. |
 | `sdcard.py` | SD access (`SdCard`: checked reads, verified backups, staged 32-sector writes, compare), `plan_write`, `check_image`, `image_version`. |
 | `sdcli.py` | `fnirsi1013d-sd` info / read / write (`--dry-run`, `--yes` + typed confirmation, backup first). |
 | `soak.py` | `fnirsi1013d-soak`: long timestamped poll, drops, reopen, counters, event log, restart detection. |
-| `battery.py` | mcp-battery: `fnirsi1013d-battery`, the hardware battery (release step, docs/releasing.md 4.6): the MCP server over stdio (`server_command`, `run_battery`), groups `GROUP_FUNCS` (session .. final, optional loopback), one `Battery.step` per tool call with an explicit expectation (`check(result) -> None | failure text`, `error_check` for an expected refusal, `want_image`, `sim_differs` = SKIP on the simulator where its model is known to differ), `Battery.note` for comparisons (host vs device Bode), `core_shift_rms` = core_order.py's measure, `battery.json` / `battery.md` / `server.log`, exit 1 on a FAIL. Conventions: every group runs after `config` (the bench setup: 1 V/div DC, Filter Off, generator 1 kHz, CH1 trigger at `LEVEL_V`), the level is set with every source change, the generator is switched on again after EXT, segment / hold-off runs use short records, a failed capture is followed by STOP. `--sim` = `SIM_ARGS` (dut_in / dut_out RC, `--ext gen`, `--tb-raw-snap`, `--counter-stale-config`). |
+| `battery.py` | mcp-battery: `fnirsi1013d-battery`, the hardware battery (release step, docs/releasing.md 4.6): the MCP server over stdio (`server_command`, `run_battery`), groups `GROUP_FUNCS` (session .. final, optional loopback), one `Battery.step` per tool call with an explicit expectation (`check(result) -> None | failure text`, `error_check` for an expected refusal, `want_image`, `sim_differs` = SKIP on the simulator where its model is known to differ), `Battery.note` for comparisons (host vs device Bode), `g_coreorder` = the fold (`analysis.core_delay_fold`, `core_delay_verdict`; d = +1 at `CORE_ORDER_DIVIDERS`, a channel under `FOLD_MIN_SWING_CODES` is the wiring: CH1 FAIL, CH2 one SKIP), `battery.json` / `battery.md` / `server.log`, exit 1 on a FAIL. Conventions: every group runs after `config` (the bench setup: 1 V/div DC, Filter Off, generator 1 kHz, CH1 trigger at `LEVEL_V`), the level is set with every source change, the generator is switched on again after EXT, segment / hold-off runs use short records, a failed capture is followed by STOP. `--sim` = `SIM_ARGS` (dut_in / dut_out RC, `--ext gen`, `--tb-raw-snap`, `--counter-stale-config`). |
 | `bench.py` | `fnirsi1013d-bench`: wraps `../firmware/scope/host_tests/bench_link.py` (fw-gen2's), plus uptime before/after; `--fft` runs FFT_BENCH (`Scope.fft_bench`) itself. |
 | `vectors.py` | Host vectors in `../docs/protocol-vectors.json` (`--check`, `--merge`). |
 | `units.py` | `parse_quantity`, `fmt_si`. |
@@ -69,6 +69,14 @@ path. |
 | `bode.py` | Host-driven Bode sweep (docs/plans/bode-design.md H1-H3): `plan_point` / `plan_sweep` (M, N, p / q, record, settle; `plan_vectors` = `../docs/bode-plan-vectors.json`), `tone` (rect / Hann), `residual_noise`, `measure_pair` (H, SNR, leakage, half-record check), `markers`, `PointResult` / `SweepResult` (table, CSV, JSON, arrays), `ThruCal`, `BodeRunner` (drives a `Scope`: pre-scan, centring, background, CH2 auto-range with the splice, E_BUSY, restore), `result_caveats`, CLI `fnirsi1013d-bode`. Device sweep (1.20): `device_sweep` (BODE_CTRL, READ_BODE poll, rows -> `SweepResult`), `result_from_device`, `point_from_row`, `device_settle_code` / `device_ch2_code`. |
 
 ## State of each tool / CLI
+
+- **`scope_self_test_loopback`** (mcp-031, bench pending): `_self_test` + `_T4T5` in server.py. Medians over `SELF_TEST_CAPTURES`,
+  `T4_CAPTURES` at 200 MS/s inside `T4_BUDGET_S`; 1 V/div, Filter Off; duty and swing at 10 kHz only; a check with `pass: None`
+  is a skip and does not fail the run. T5 reads 0 on the simulator and 0..2 on the unit (word + 1 is not modelled). Fold thresholds
+  come from the bench's 8 and 30 captures; first run on the unit: `--groups loopback`, CH1 straight on the post.
+- **Battery `coreorder`** (mcp-031, bench pending): the fold on the ladder input was only ever benched at divider 0 (P = 201,
+  2026-11-07 09:52), so a FAIL at another divider on the ladder may be the rounded signal: repeat with both probes on the post
+  before reading it as a fault. `FOLD_MIN_SWING_CODES` 12 is an inference, the ladder input's swing at 499 kHz was not logged.
 
 - **`fnirsi1013d-mcp`** (server): collaborative mode (shared settings, last change wins, host captures are singles
   that leave the scope in STOP, `scope_acquisition_control(action='run')` resumes; long runs pin a settings_seq and
@@ -299,7 +307,7 @@ firmware gains). The firmware formula assumes 128 on the compensated mean. Groun
 ## Tests (`tests/`, 559 with test_report, about 4.5 min)
 
 mcp-battery (2026-11-06): `test_battery` (the battery on `--sim` over most groups, about 26 s: no FAIL, the finding
-steps judged, a FAIL exits 1, `core_shift_rms`), `test_battery_findings` (each finding of the 2026-11-06 battery
+steps judged, a FAIL exits 1, the fold's wirings), `test_battery_findings` (each finding of the 2026-11-06 battery
 against the simulator: GET_TIMEBASE after a geometry snap = `SimConfig.tb_raw_snap` and the FFT / DVM rate,
 `frequency()` without a period, the counter's first gate after a configuration = `SimConfig.counter_stale_config`, the
 loopback self-test's level and wiring hint, `sweep_gen` without polls). Facts settled: `Scope.get_timebase(cached=False)`
