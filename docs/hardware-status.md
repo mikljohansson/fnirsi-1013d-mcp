@@ -2047,3 +2047,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   `make_sd_image.py write` **refused** ("scope (sectors 750..2346) runs into the FAT32 partition ... must start at sector 2347 or
   later"), exit 1. `parted ... 8MiB 100%`, `mkfs.vfat -F 32`, partition at 16384: **written and verified**, boot mode 4, eGON.BT0 at 16,
   eGON.EXE at 750. Next: boot it in the scope.
+- 2026-11-07 14:00-14:11 (owner, lead): **the 16 GB spare card boots** (owner: "Seems to work"). Over USB: fw 0.3.0, build 0xab93c0db,
+  FPGA 0x153F, no mismatch, no calibration on the card (stages power-on, untrained); SD_INFO 30535680 sectors, partition 16384, eGON
+  at 16, 80, 750; battery `session` group 10 of 10 (`tool-run5-sparecard`); SAVE_REPORT wrote `reports/report-00000-00.txt`, 9354 bytes,
+  read back whole on the PC. First evidence on a card this size: 16 GB SDHC works on this unit. Card restored for the microscope:
+  MBR, sector 8192, same size, type 0x0C, FAT32, 32 KiB clusters (768 reserved sectors, was 740, mkfs's alignment; OEM id differs),
+  Windows mounts it healthy, empty. The owner's card back in the scope: fw 0.3.0 boots from it.

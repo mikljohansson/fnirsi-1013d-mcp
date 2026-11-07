@@ -9,8 +9,8 @@ Paperwork pass by rel-gen2 on 2026-10-20 (branch `rel-gen2` from 876700a): the b
 branch's commit; the maintainer's items and the hardware items are left open.
 
 **State 2026-11-07 13:00: v0.3.0 is tagged and published as a pre-release (ab93c0d), not announced.** The boxes still open below were
-not done before the tag (the coordinator read the list after tagging). Before the announcement: the spare-card install, the cold boot of
-the 0.3.0 image, the first-run screen on it, the loopback group, the long-idle check, and the maintainer's items (credits wording,
+not done before the tag (the coordinator read the list after tagging). Before the announcement: the first-run screen and wizard on the 0.3.0 image,
+the loopback group, the long-idle check, and the maintainer's items (credits wording,
 repository description and templates, the capstone licence, bitstreams decision).
 
 ## Content
@@ -128,11 +128,11 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 
 ## SD package and bench
 
-- [ ] SD parts built from the CI image of the release commit with the tools zip, written to a spare card prepared as
+- [x] (2026-11-07 13:50-14:10, a 16 GB card, `docs/hardware-status.md`; the owner saw the boot, the identity came over USB and from the report file) SD parts built from the CI image of the release commit with the tools zip, written to a spare card prepared as
       `docs/guide/install.md` says (FAT32 partition at sector 16384, 8 MiB) with `make_sd_image.py write`; the same
       command on a card partitioned at 2048 refuses and names the start it needs; the scope boots the prepared card: boot menu, PECO preselected, `#VER fw=0.3.0`, the Diagnostics
       identity line shows the release commit.
-- [ ] A persisted release candidate boots from the maintainer's card (partition at 8192; fw 0.2.101+ writes up to the partition).
+- [x] (2026-11-07 14:0x: fw 0.3.0 ac278214 from the maintainer's card after a power cycle.) A persisted release candidate boots from the maintainer's card (partition at 8192; fw 0.2.101+ writes up to the partition).
       Unticked 2026-10-26 (docs-rel153d): the input changed. History: fw 0.2.101 / 0.2.102 persisted and cold-booted
       2026-10-20 19:22-19:29; fw 0.2.105 ba1a1283 persisted 2026-10-22 09:08 and booted from the card; fw 0.2.105 c681efa4
       (07c2bbf) on 0x153D persisted 2026-10-22 19:52, 1597 sectors read back identical (a cold boot of it is not logged).
