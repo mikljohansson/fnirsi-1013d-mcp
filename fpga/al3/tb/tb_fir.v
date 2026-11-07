@@ -271,6 +271,23 @@ module tb;
     end
   endtask
 
+  // Back on the integer-nanosecond grid the stimulus started on (fpga-153f review, README section 20). In simulation the
+  // write clock changes 1 ps after the clk_200MHz edge, so a stimulus process that resumes on it (@(posedge
+  // dut.sample_write_clock), or wait () on a register of the write clock domain such as sampling_half_way) carries that
+  // 1 ps from then on, and every tenth MCU strobe after it (the 13.1 / 17 / 13 pattern) lands on the exact instant of a
+  // later write clock edge. On that instant the dut and the reference can see the write differently (a wire of the
+  // written register, cap_rst, against the register itself, sample_system_reset: tb_seg seed 12345 reset one edge
+  // later than 0x1535; here seed 4242 had a 0x01 = 1 data strobe on such an instant in phase 3, outside the compared
+  // windows), an order the 1 ps delay exists to rule out and the lockstep comparison cannot accept. Called after every
+  // such wait, so the strobes keep the grid where the edge is always 1 ps after the write.
+  task regrid;
+    real fr;
+    begin
+      fr = $realtime - $rtoi($realtime);
+      if (fr > 0.0) #(1.0 - fr);
+    end
+  endtask
+
   task wr_cmd(input [7:0] c);
     begin
       mcu_rws = 1; mcu_dcs = 1; mcu_dout = c;
@@ -621,6 +638,7 @@ module tb;
       ramp_t0 = $realtime; ramp_on = 1;
       ext_val = 1;
       t_e = $realtime;
+      regrid;
       wait_done(400000);
       rd2(8'h14); ta = rd16_d[12:0];
       t_end = t_e + (240.0 - ramp_lo) / slope;
@@ -689,8 +707,14 @@ module tb;
     check(rd16_d == 16'h153F, "cmd 0x06 reads 0x153F");
     check(rd16_r == 16'h1534, "reference cmd 0x06 reads 0x1534");
     ok29 = 1;
-    wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;
-    rd2(8'h29); if (rd16_d !== 16'h830C || rd16_r !== 16'h870C) begin ok29 = 0; $display("0x29 FIR off: %h", rd16_d); end   // 0x153C: the dut's bits 4..2 read 0
+    // fpga-153f review: 0x53 is written with bit 2 clear here. Until 0x153B bit 2 was the core swap, and the 0x1534
+    // reference still decodes it: with K = 3 its swapped prefilter (xl + 3 xe + 3 pl + pe with the cores exchanged)
+    // differs from the dut's on the one edge where pe / pl still hold the unswapped pair, so its never-reset first
+    // integrator kept an offset of 2 (CH1; 4 on CH2) for the rest of the run (seed 4242: made at 64997.53 us, let
+    // through into dec_out once by a comb re-arm in phase 4, 320 mismatches in a 30 ns window). The check that the dut
+    // reads bits 4..2 of 0x53 as 0 is in phase 5, after the last equivalence phase.
+    wr1(8'h56, 8'h00); wr1(8'h53, 8'h03); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;
+    rd2(8'h29); if (rd16_d !== 16'h830C || rd16_r !== 16'h830C) begin ok29 = 0; $display("0x29 FIR off: %h", rd16_d); end
     wr1(8'h56, 8'hFD); #200;                                 // reserved bits 7..2 set; bit 1 (peak detect, 0x153C) clear
     rd2(8'h29); if (rd16_d !== 16'hE30C) begin ok29 = 0; $display("0x29 FIR on, D 14: %h", rd16_d); end
     wr4(8'h0D, 32'd15); #200;
@@ -752,6 +776,7 @@ module tb;
       #500;
       start_capture;
       wait (dut.sampling_half_way === 1'b1);
+      regrid;
       #2000;
       step_val = ~e[0];
       wait_done(20000);
@@ -777,6 +802,7 @@ module tb;
           #((kq + 12) * ((divs[nq] / 2) + 1) * 10 + 500);
           start_capture;
           wait (dut.sampling_half_way === 1'b1);
+          regrid;
           #((kq + 12) * ((divs[nq] / 2) + 1) * 10 + 500);
           step_val = ~step_val;
           wait_done(200000);
@@ -804,6 +830,7 @@ module tb;
         #((nq ? 1000 : 100) / 4 + 0.3);
         ext_val = 1;
         wa_at_edge = dut.sample_write_address;
+        regrid;
         wait_done(200000);
         rd2(8'h14);
         $display("EXT FIR K %0d N %0d: edge at write address %0d, trigger_address %0d", kq, nq ? 200 : 20, wa_at_edge, rd16_d[12:0]);
@@ -864,7 +891,11 @@ module tb;
     // offset is invisible in steady state (the combs cancel a polynomial state offset of degree < K) but shows for one
     // output after a K change between captures, when the comb delay registers still hold the old K's values: a
     // 3-LSB dec_out1 window of 210 ns in phase 4 at the first timing that made it visible. No equivalence phase
-    // follows these runs now.
+    // follows these runs now. The same goes for bit 2, the reference's swap (fpga-153f review): the dut reads 0x53
+    // bits 4..2 back as 0 (0x153C), checked here with the same 0x29 word as the FIR-off read above.
+    wr1(8'h56, 8'h00); wr1(8'h53, 8'h07); wr1(8'h54, 8'h0C); wr4(8'h0D, 32'd14); #200;
+    rd2(8'h29);
+    check(rd16_d == 16'h830C && rd16_r == 16'h870C, "0x29: the dut reads 0x53 bits 4..2 as 0 (the 0x1534 reference keeps bit 2)");
     adc_mode = 0;
     negab = 2'b01; fir_run(2'd3, 1'b0, rec_shift_fir(3, 14), 32'd14, 13'd60);
     negab = 2'b10; fir_run(2'd2, 1'b0, rec_shift_fir(2, 18), 32'd18, 13'd60);

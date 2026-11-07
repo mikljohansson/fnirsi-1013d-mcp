@@ -185,6 +185,22 @@ module tb;
     end
   endtask
 
+  // Back on the integer-nanosecond grid the stimulus started on (fpga-153f review, README section 20). In simulation the
+  // write clock changes 1 ps after the clk_200MHz edge, so a stimulus process that resumes on it (@(posedge
+  // dut.sample_write_clock), or wait () on a register of the write clock domain such as sampling_half_way) carries that
+  // 1 ps from then on, and every tenth MCU strobe after it (the 13.1 / 17 / 13 pattern) lands on the exact instant of a
+  // later write clock edge. On that instant the dut and the reference can see the write differently (a wire of the
+  // written register, cap_rst, against the register itself, sample_system_reset: tb_seg seed 12345 on 0x153F reset one
+  // edge later than 0x1535), an order the 1 ps delay exists to rule out and the lockstep comparison cannot accept.
+  // Called after every such wait, so the strobes keep the grid where the edge is always 1 ps after the write.
+  task regrid;
+    real fr;
+    begin
+      fr = $realtime - $rtoi($realtime);
+      if (fr > 0.0) #(1.0 - fr);
+    end
+  endtask
+
   task wr_cmd(input [7:0] c);
     begin
       mcu_rws = 1; mcu_dcs = 1; mcu_dout = c;
@@ -281,6 +297,7 @@ module tb;
   task wait_half_way;
     begin
       wait (dut.sampling_half_way === 1'b1);
+      regrid;
     end
   endtask
 
@@ -295,6 +312,7 @@ module tb;
       #(after_swc);
       ext_val = new_val;
       wa_at_edge = dut.sample_write_address;
+      regrid;
     end
   endtask
 
@@ -531,6 +549,7 @@ module tb;
     #1000;
     @(posedge dut.sample_write_clock); #101.3;
     ext_val = 1; #3; ext_val = 0;
+    regrid;
     #3000;
     rd1(8'h18);
     check(rd8_d[0] == 1'b0, "3 ns glitch rejected by the majority filter");
@@ -539,6 +558,7 @@ module tb;
     @(posedge dut.sample_write_clock); #101.3;
     wa_at_edge = dut.sample_write_address;
     ext_val = 1; #12; ext_val = 0;
+    regrid;
     wait_done(20000);
     rd2(8'h14);
     check(done && rd16_d[12:0] == wa_at_edge - 13'd1, "12 ns pulse triggers with the right trigger_address");
@@ -553,6 +573,7 @@ module tb;
     @(posedge dut.sample_write_clock); #3000.3;
     wa_at_edge = dut.sample_write_address;
     ext_val = 1; #100; ext_val = 0;
+    regrid;
     wait_done(200000);
     rd2(8'h14);
     $display("100 ns pulse @10us write clock: edge at %0d, trigger_address %0d", wa_at_edge, rd16_d[12:0]);
