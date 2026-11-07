@@ -11,7 +11,7 @@ branch's commit; the maintainer's items and the hardware items are left open.
 ## Content
 
 - [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer.
-      (The roadmap's state line names 0x153E for the release since 2026-11-04; sections 1-4 are still the 2026-10-20 text.)
+      (The roadmap's state line names 0x153F for the release since 2026-11-07; sections 1-4 are still the 2026-10-20 text.)
 - [ ] Maintainer verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows,
       USB long idle, UI steps), or the item named under "Known issues" in the release notes.
 
@@ -23,7 +23,35 @@ Rewritten 2026-10-26 (docs-rel153d) for the release bitstream 0x153D (the gated 
 **Owner decision 2026-11-04 (docs-153e): the release bitstream is 0x153E**, the 0x153D design with the ADC encodes
 driven from PLL outputs through the pin registers (`docs/hardware-status.md` 2026-11-04 10:23-10:38 "enc0" and 11:1x-11:33
 "session end and decisions"). The 0x153D boxes below stay as the record of what 0x153D proved; 0x153D remains attached
-as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). The 0x153E boxes come first.
+as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware).
+
+**2026-11-07 (docs-153f): the release bitstream is 0x153F**, 0x153E with both ADC cores of a chip captured at one instant
+(the core-order fix; `docs/hardware-status.md` 2026-11-06 16:21 onward, `fpga/al3/README.md` section 22). The 0x153E boxes
+below stay as the record of what 0x153E proved; 0x153E was never released and stays attached as `supported`, refused by
+the 0.3.0 firmware. The 0x153F boxes come first.
+
+- [x] 0x153F built by fpga-153f and pinned (2026-11-07, merge 7f4ed8e): committed `fpga/al3/src` (roll ea38475),
+      `tb/run.sh` ALL PASS on seeds 12345 and 4242, every clock closed (clk_200MHz 4.789 ns), raw sha256
+      `e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0` and padded
+      `d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc` in `fpga/al3/dist/BITSTREAMS.md` and
+      `manifest.json`. Proof: `docs/hardware-status.md` 2026-11-07 05:45 and the dist rows.
+- [x] `fpga/al3/dist`: 0x153F `status: recommended` (2026-11-07, abd988a, after the bench), `min_firmware` = the 0.3.0
+      firmware; 0x153E and 0x153D `supported`; `python3 -I tools/bitstreams.py check --release` exits 0 (2026-11-07,
+      docs-153f: "13 bitstreams consistent"). Run again at the release commit.
+- [x] 0x153F flashed on the maintainer's unit (owner at the bench, 2026-11-07 09:43-09:50): SD 700-710 backed up twice,
+      pre-write double read equal (2782e1b6..., the 0x153E image), verified on the first pass, independently read back
+      equal to the padded image's hash d255ca38...; `docs/hardware-status.md` entry of that time.
+- [x] 0x153F benched on the firmware that expects it (2026-11-07, fw 1d36d9b5 of 53da95a loaded over FEL,
+      `docs/hardware-status.md` 09:52-11:33): no mismatch notice, the first-run screen on the 0x153E calibration, the wizard
+      trained stage 3 on both chips (0x06DB), the designed core delay at twelve rates on both channels (8 of 8 each with
+      `core_delay_fold.py`; divider 0 by votes, a shallow minimum), capture self-check 0 flagged of 7562, CH2 code errors 0 %
+      at 2 MSa/s, counter 1000.00 Hz at 20 kSa/s Filter Off read past the flag, `fnirsi1013d-battery` 201 PASS, 0 FAIL, 1 SKIP
+      (the logger group among them). Encode check: 3 captures re-taken of 42926, all recovered, 0 accepted bad.
+- [x] Owner accepted 0x153F for 0.3.0 (2026-11-07, recorded in abd988a and `BITSTREAMS.md`) with the bench list's sweep limit
+      missed: peak over the CH2 offset sweep 80 minutes after power-on A 5.8 %, B 1.0 % against 0x153E's A 5.2 %, B 0.65 %
+      (`docs/hardware-status.md` 10:52-11:33), for the right core order. The release notes list it as a known issue.
+- [ ] 30-minute soak on 0x153F. (0x153E's two: 2026-11-06 14:20 with 4 link drops of 0.6 s, 15:50 with 0; cause not found.)
+      Update the known issue "USB link drops" in the release notes and the announcement with the result.
 
 - [x] 0x153E built by fpga-153e and pinned (2026-11-04, merge 0cd4768): committed `fpga/al3/src` (roll da645d0),
       `tb/run.sh` ALL PASS on seeds 12345 and 4242, every clock closed (clk_200MHz 4.802 ns), raw sha256
@@ -35,7 +63,8 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
 - [x] 0x153E flashed on the maintainer's unit (owner at the bench, 2026-11-06 14:00-14:04): pre-write double read equal
       (aa252fb7...), written (the first pass failed its verify, the second verified), independently read back equal to
       the padded image's hash 2782e1b6...; `docs/hardware-status.md` entry of that time.
-- [ ] 0x153E benched on the firmware that expects it: cold boot with no mismatch notice, encode self-check 0 bad, capture
+- [ ] 0x153E benched on the firmware that expects it (superseded by the 0x153F boxes above; left open for its soak, whose
+      first run had the 4 drops): cold boot with no mismatch notice, encode self-check 0 bad, capture
       self-check 0 flagged, the firmware asks for a calibration and the wizard completes (stages trained), CH2 code
       errors at 2 and 200 MSa/s with the sweep (`fpga/al3/tools`), counter, a logger run, soak. Proof: the hardware-status
       entries; the release notes' `{{0x153E bench}}` line filled from them.
@@ -68,14 +97,15 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
 ## Versions and notes
 
 - [ ] `firmware/scope/pc_cmds.h`: `#define PC_FW_VERSION "0.3.0" ...` (the one quoted literal). Check in the same pass the FPGA
-      version the firmware expects (`PC_FW_FPGA_VERSION` = 0x153E, also the mcp and protocol docs and the simulator) against
+      version the firmware expects (`PC_FW_FPGA_VERSION` = 0x153F, also the mcp and protocol docs and the simulator) against
       `fpga/al3/dist/manifest.json` (the `recommended` row).
 - [ ] `mcp/pyproject.toml`: `version = "0.3.0"`.
 - [ ] `CHANGELOG.md`: `## [Unreleased]` first and empty, `## [0.3.0] - YYYY-MM-DD` below it and non-empty; the obsolete
       "Plan for the first tag" block and "Nothing has been tagged yet" removed; the 0.2.46-0.2.50 sub-sections in order.
       The section text and the steps are ready in `docs/release-notes/changelog-0.3.0-draft.md` (rel-gen2, 517f252;
-      refreshed up to fa8377b by docs-rel153d, 2026-10-26); delete that file in the release commit.
-- [x] `docs/release-notes/0.3.0.md` (re-ticked 2026-11-06: the 0x153E bench lines filled from the bench log): every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact
+      refreshed up to fa8377b by docs-rel153d, 2026-10-26, and up to abd988a by docs-153f, 2026-11-07); delete that file in
+      the release commit.
+- [x] `docs/release-notes/0.3.0.md` (re-ticked 2026-11-07, docs-153f: the 0x153F bench record and known issues from the bench log): every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact
       checked against `docs/hardware-status.md` once more, user-facing wording only (2026-10-20, rel-gen2, c0ea0c1;
       `mkdocs build --strict` passes). Refreshed for 0x153D and fw 0.2.105 by docs-rel153d on 2026-10-26 (the TODO
       resolved with 0x153D's bench record). Re-check the tested-on line after the release-candidate bench.
@@ -110,12 +140,12 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
 - [ ] The long-idle check passes (roadmap section 5 item 4).
 - [ ] The hardware battery passes on the 0.3.0 image (`fnirsi1013d-battery --port <port>`, docs/releasing.md section 4
       step 6): exit 0, or every FAIL a known issue in the release notes; `battery.md` pasted into
-      docs/hardware-status.md. The loopback group with CH1 on the post (`--groups loopback`) passes. Expected to FAIL
-      until the FPGA core-order fix: the `coreorder` group and the Filter Off captures at 20 kSa/s (finding 1 of
-      2026-11-06).
+      docs/hardware-status.md. The loopback group with CH1 on the post (`--groups loopback`) passes. On 0x153F with the
+      bench image (fw 1d36d9b5, 2026-11-07 10:34-10:38): 201 PASS, 0 FAIL, 1 SKIP, the `coreorder` group and the Filter Off
+      steps that failed on 0x153E included; to repeat on the 0.3.0 image.
 - [ ] First-run screen and calibration wizard on the release candidate with the recommended bitstream (the wizard passed
-      on fw 0.2.105 with the gated 0x153D on 2026-10-22 17:0x-17:21 and 18:27-18:29; the first-run screen and the 0.3.0
-      image remain).
+      on fw 0.2.105 with the gated 0x153D on 2026-10-22 17:0x-17:21 and 18:27-18:29, and on 0x153F with the bench image
+      on 2026-11-07 09:52-10:31, the first-run screen included; the 0.3.0 image remains).
 
 ## Dry run
 
@@ -142,7 +172,8 @@ as `supported` (benched good with fw 0.2.105, refused by the 0.3.0 firmware). Th
 - [x] `docs/plans/announcement.md` final draft (2026-10-20, rel-gen2, 203933c): `{{VERSION}}` and `{{RELEASE_URL}}` kept
       for the tag, screenshots, the bitstream note (attached with `BITSTREAMS.md`) and the tested-on line filled; the clip
       and the other maintainer decisions are the checklist at the top of that file. Refreshed for 0x153D, fw 0.2.105 and
-      41 / 39 tools by docs-rel153d (2026-10-27); screenshots pinned to 68b733b.
+      41 / 39 tools by docs-rel153d (2026-10-27); screenshots pinned to 68b733b. Refreshed for 0x153F by docs-153f
+      (2026-11-07).
 
 ## Tag and after
 

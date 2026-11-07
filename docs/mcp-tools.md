@@ -396,10 +396,11 @@ with several, a `.npz` (kind `counter`, `scope_report` plots it) and the `resolu
 the gate (5e-7 relative at 10 ms, 5e-9 at 1 s), the 50 MHz crystal's accuracy (about 1e-5, uncalibrated) on top.
 Auto thresholds (the boot setting, fw-ctrauto): after each gate the firmware centres the band on the gate's raw
 min / max midpoint; a gate counted at thresholds that do not fit it (a new signal or range) is not valid and the next
-one is retuned, so the tool skips one such first gate. CH1 / CH2 counts need the ADCs at full rate (200 MSa/s, any
-filter, Peak; fw 0.2.105 on FPGA 0x153D): with Filter Off at a slower rate the encodes are gated by the divider, the
-counter sees the divided stream, and the result has `gated` true and `valid` false with a caveat saying so (GET_COUNTER
-flags bit 4); the scope's cards then show the record's measurement. Caveats: no valid count (fewer than two edges: raise the gate,
+one is retuned, so the tool skips one such first gate. With Filter Off below 200 MSa/s the encodes are gated by the divider, the counter sees the divided stream, and the
+firmware gives the result `gated` true and `valid` false with a caveat saying so (GET_COUNTER flags bit 4); the scope's
+cards then show the record's measurement. Up to FPGA 0x153E such a count was not reliable; on 0x153F the bench read
+the right count past the flag (999.99 Hz at 2 MSa/s, 1000.00 Hz at 200 and 20 kSa/s on the 1 kHz square, 2026-11-07), but
+the flag stays until the firmware lifts it. Valid counts: 200 MSa/s, any filter, Peak. Caveats: no valid count (fewer than two edges: raise the gate,
 check the source), a signal under the 12-code span auto needs or outside pinned thresholds (says which), vmin / vmax
 include the noise extremes. Wire: request u8 what (0 read / 1 configure), gate, source, level, hysteresis, 3 x 0
 (level 0 / hysteresis 0 = auto; a non-zero level refuses hysteresis > level);
@@ -610,8 +611,8 @@ stops the UI acquisition for it and sets RUN again. A/B switches for the bus rea
 cm, ages, `in_words`) and from 1.16 `calibration_provenance` (which firmware build and FPGA calibrated, which parts it
 wrote, the date with a clock module, power-ons and operating hours since), from 1.24 `capture_stages` (the stored
 FPGA capture stages) and from 1.28 `capture_training` per channel (the last capture stage training since boot: per
-core A / B its quiet stages, the residual metric q and the 0x36 outlier sums at stages 2..5, whether core B used the A
-encode, whether it failed; null when the wizard has not trained that channel since boot), plus the per-unit file.
+core A / B its quiet stages (on FPGA 0x153F the chip's set, the same for both cores), the residual metric q and the 0x36
+outlier sums at stages 2..5, whether core B used the A encode (never on 0x153F), whether it failed; null when the wizard has not trained that channel since boot), plus the per-unit file.
 
 **`read_calibration`** (tier 0). Per channel: offset centres, gain factors per range, core A/B
 compensation, derived volts per code per range. Caveat: "Calibration is done on the scope's UI; these values

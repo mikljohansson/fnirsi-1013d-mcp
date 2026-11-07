@@ -45,7 +45,7 @@ the 8 MiB start. Copy your files back after the card is written.
 ## Steps
 
 1. Download from the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases):
-   `fnirsi_1013d-fpga-al3-0x153e-flash1m.bin` (the FPGA bitstream), `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware),
+   `fnirsi_1013d-fpga-al3-0x153f-flash1m.bin` (the FPGA bitstream), `fnirsi_1013d-fw-X.Y.Z.bin` (the scope firmware),
    `fnirsi_1013d-sdtools-X.Y.Z.zip` (the SD tools) and `SHA256SUMS`. Add the MCP wheel if you want it. Check the files:
 
     ```
@@ -55,7 +55,7 @@ the 8 MiB start. Copy your files back after the card is written.
     On Windows, `Get-FileHash -Algorithm SHA256 <file>` in PowerShell (or `certutil -hashfile <file> SHA256`) prints
     the hash to compare with the file's line in `SHA256SUMS`.
 
-2. Flash the FPGA bitstream, **0x153E**. [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each
+2. Flash the FPGA bitstream, **0x153F**. [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), also attached to each
    release, names the file, the programmer wiring, the backup, the write, the check and the way back. The config flash
    is wired only to the FPGA, so this needs the SPI programmer on the 2x3 header. A wrong pin or 5 V logic can damage
    the board. The FPGA comes before the card: with any other bitstream in it, this firmware only shows a banner.
@@ -86,12 +86,12 @@ the 8 MiB start. Copy your files back after the card is written.
 5. Put the card in the scope and switch it on. Continue with [First run](first-run.md).
 
 !!! note "After a new bitstream, calibrate again"
-    The calibration stores values per ADC core, and the core order can differ between bitstreams; the stored calibration is bound to the bitstream, so the firmware asks for a new one even after a change from 0x153D to 0x153E. Diagnostics shows
+    The calibration stores values per ADC core, and the core order can differ between bitstreams; the stored calibration is bound to the bitstream, so the firmware asks for a new one even after a change from 0x153D or 0x153E to 0x153F. Diagnostics shows
     "FPGA changed since calibration" until you run the [wizard](calibration.md).
 
 ## Which bitstream
 
-This release runs with bitstream 0x153E only. An older or newer bitstream shows a banner that names the one needed
+This release runs with bitstream 0x153F only. An older or newer bitstream shows a banner that names the one needed
 ([First run](first-run.md)). The hashes are in [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md).
 
 ## The MCP server (optional)

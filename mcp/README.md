@@ -549,6 +549,18 @@ One `PASS` / `FAIL` / `SKIP` line per step; `battery.json` (every call, its argu
 did not start. `scope_spectrum` is a SKIP unless the scope shows its Spectrum view; on the simulator a step whose model
 is known to differ from the unit is a SKIP that says so.
 
+## Hardware battery: `fnirsi1013d-battery`
+
+```
+fnirsi1013d-battery --port <port>                    # about 4 minutes; exit status 0 = no FAIL
+fnirsi1013d-battery --port <port> --groups loopback  # the loopback self-test, CH1 straight on the post
+```
+
+Drives the MCP server over stdio as an agent does and judges every step against an explicit expectation, in named
+groups (session, config, rates, filters, acq, trigger, counter, gen, bode, log, data, coreorder, final; loopback on
+request). It writes `battery.json` and a `battery.md` to paste into the bench log. `--sim` runs it on the simulator. The
+bench signal and its place in a release are in `docs/releasing.md` section 4 step 6.
+
 ## Bench link check: `fnirsi1013d-bench`
 
 `fnirsi1013d-bench [--port <port>] [--census 2000] [--n 200]` runs the firmware's

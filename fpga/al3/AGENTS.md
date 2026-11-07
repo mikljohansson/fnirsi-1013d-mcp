@@ -3,6 +3,15 @@
 Anlogic AL3A10LG144C7 FPGA of the maintainer's FNIRSI 1013D (JTAG IDCODE 0x18006C31, config flash Winbond
 W25Q80DV, JEDEC `ef 40 14`). Read `AGENTS.md` at the repo root first; its flashing rules override anything here.
 
+State on 2026-11-07 (docs-153f, after the bench):
+- **0x153F is flashed on the maintainer's unit, benched and `recommended`** (`docs/hardware-status.md` 09:43-11:33, dist
+  abd988a; 0x153E `supported`, never released): verified on the first pass (d255ca38...), wizard stage 3 on both chips
+  (0x06DB), `core_order.py` s = 0 at every divided rate and `core_delay_fold.py` d = +1 (designed) 8 of 8 at twelve rates
+  on both channels, battery 201 PASS, 0 FAIL, 1 SKIP, counter 1000.00 Hz at 20 kSa/s Filter Off read past the GATED flag.
+  **The bench list's sweep limit (step 4) was missed**: 80 minutes after power-on peak A 5.8 %, B 1.0 % against 0x153E's
+  A 5.2 %, B 0.65 %; the owner accepted that for the right core order. README section 22 "Bench". The firmware on the card
+  was still 2bdecac at the end of the log (it shows the notice); the bench image 1d36d9b5 ran over FEL. The entries below
+  are as of their dates.
 State on 2026-11-06 (fpga-153f, branch `fpga-153f`, after the coordinator's bench of the same day):
 - fpga-153f review (2026-11-07, branch `fpga-153f-review` on top of `fpga-153f`): the two residual `tb/run.sh` failures
   (tb_seg 12345, tb_fir 4242) were testbench defects, fixed in `tb/` (the stimulus grid `regrid`, the 0x1534 swap bit);
@@ -188,7 +197,7 @@ State on 2026-11-04 (fpga-153e, branch `fpga-153e`):
 |---|---|
 | `src/` | Atlan4's AL3 TD project with our changes: `zaklad.v` (top `fnirsi_1013D`), `zaklad.adc` (pins), `zaklad.sdc` (clocks), `FPGA.al` (TD project, holds `<UCode>`), `al_ip/` (PLL and sample-memory IP), `FPGA commands.txt` (command table, current). Upstream material, licence unstated, attributed to Atlan4. Unmodified original: git a947e78. |
 | `tb/` | iverilog testbench, `run.sh [seed]`, eighteen steps (18: `tb_square.v`, the fractional square generator, 0x153D; 17: `tb_stream.v`, the streaming logger, 0x153D; 16: `tb_counter.v`, 15: `tb_peak.v`, 14: `tb_trigtypes.v`, 0x153C; the contract step's transcript is `contract_0x153F.txt`; 13: `tb_timeout.v`, records that end on the time-out or the forced stop, 0x153B; 12: `tb_firstrec.v`; 11: `tb_adccap.v`, the ADC capture against an AD9288 pair in the unit's data-align mode (release edge, delay and pairing as parameters): strict core order on the design and the bench's rows on the unchanged 0x153E source, 0x153A / 0x153F; 10: `mcuread.sh`; 7: `tb_trigpos.v`, trigger position determinism with an AD9288 pipeline model; 8: `tb_seqcontract.v`, the firmware's sequencer byte sequences, transcript `contract_0x1538.txt`; 9: `encphase.sh` with `tb_encphase.v`, the encode pins against the write clock after the firmware's arm sequences, with delay-annotated variants; `edge_phase.py`: FIR overshoot / DDS beat / spectrum versus edge phase; `REF_SRC_DIR` for worktrees; the sixth: `tb_seg.v` against our 0x1535, `REF1535_REV`, checked by `seg_model.py`; `mutate_seg.py` runs its 21 mutants), first four: `tb_ext_trigger.v` against Atlan4's 0x1532 (`REF_REV`); `tb_decim.v` against our 0x1533 (`REF1533_REV`), which logs decimated captures; `cic_model.py check` (direct-form reference model incl. the FIR; `cic_model.py table` prints the gain/alias/droop table); `tb_fir.v` against our 0x1534 (`REF1534_REV`), FIR captures checked by `cic_model.py` too. `tb_long.v`: long free-running periodicity/wrap test of the filter modules (step 5). `square_alias.py`: alias bin for a DDS square through the filter models. `fir_design.py` designs the FIR taps. `sim_models.v` holds the behavioural PLL/BRAM. `DUT=<file>` for mutation runs, `ONLY=ext`, `decim`, `fir`, `long` or `seg` for one step; `tb_fir.v` takes `+p1=N` (phase 1 iterations) for quick runs, `tb_seg.v` the same through `SEG_P1`. |
-| `tools/` | Bench and build helpers (README sections 18, 19, 21): `enc_ab.py` (CH2 code-error A/B per image, `--analyse` per phase and per code), `enc_sweep.py` (CH2 offset sweep, the per-core peak = the acceptance measure, `--analyse` per level), `encphase_variant.py` (phase / skew / roll trees from `src/`), `encphase_build.sh` (one roll or image + summary), `capwin_sweep.py`, `core_order.py` (the core order per divider on the unit, section 22: 0x153F must read s = 0 everywhere). Each Python tool but `core_order.py` (positional arguments only) has `--selftest`; run the bench ones with the mcp venv's Python. |
+| `tools/` | Bench and build helpers (README sections 18, 19, 21, 22): `enc_ab.py` (CH2 code-error A/B per image, `--analyse` per phase and per code), `enc_sweep.py` (CH2 offset sweep, the per-core peak = the acceptance measure, `--analyse` per level), `encphase_variant.py` (phase / skew / roll trees from `src/`), `encphase_build.sh` (one roll or image + summary), `capwin_sweep.py`, `core_order.py` (the core order per divider on the unit, section 22: 0x153F must read s = 0 at the divided rates; at divider 0 carry errors can take its metric over), `core_delay_fold.py` (the core delay per divider by equivalent-time folding, section 22: d = +1 designed, both probes on the post; the check for divider 0; port fixed to COM10). `enc_ab.py`, `enc_sweep.py` and `capwin_sweep.py` have `--selftest`; `core_order.py` and `core_delay_fold.py` (positional arguments only) and `encphase_variant.py` have none. Run the bench ones with the mcp venv's Python. |
 | `out/` | Named bitstreams for the bench (gitignored `*.bin`): `FPGA-ext-trigger.bin` (0x1533), `FPGA-decim.bin` (0x1534), `FPGA-fir.bin` (0x1535), `FPGA-seg.bin` (0x1536). |
 | `reference-stock/` | pcprogrammer (pecostm32) clean-room re-implementation of the stock FNIRSI design (0x1432), GPL-3.0. Same pin map. Use it for "what did stock do" questions. |
 | `bitstreams/` | Prebuilt images, gitignored except `README.md` (provenance and sha256). |
@@ -567,7 +576,8 @@ numbers and the testbench in full.
 8. Host tools: `tools/capwin_sweep.py` sweeps the A fields only on 0x153F (it says so); `tools/enc_ab.py` knows the
    image's hashes; `mcp`'s `cap_stages_text` loses " A-clk".
 
-**(b) Coordinator's bench list for the flashed image** (firmware first: the build that expects 0x153F; backups as in the
+**(b) Coordinator's bench list for the flashed image** (run 2026-11-07, result in README section 22 "Bench"; step 4's limit
+was missed and accepted by the owner, step 3 needed `tools/core_delay_fold.py` at divider 0; firmware first: the build that expects 0x153F; backups as in the
 0x153E checklist below, pre-write read = `2782e1b6...d9d8`, write `d255ca38...d5bc`, rollback = 0x153E's image with its
 firmware):
 1. Boot: `#VER` fpga=0x153f, no notice, encode self-check 0 bad, capture self-check 0 flagged.
