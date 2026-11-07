@@ -2067,3 +2067,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   answered E_BUSY detail 3 "calibration measurement running" at once, the step ran on, the owner confirms; keypad half-typed: the
   command was answered in 0.01 s, keypad and menu closed, the generator stayed at 1000 Hz; 40 s of commands while the owner saved
   about 20 pictures: 671 answered, 392 refused E_BUSY detail 4 "file save in progress", none slower than 0.3 s.
+- 2026-11-07 14:42-15:0x (owner, lead): **calibration checks on fw 0.3.0** (warm wizard of 10:2x; lab supply, DMM +1.015 / -1.019 V on CH1, -1.019 /
+  +1.018 V on CH2, drifting by a few mV; 1X probes; 8 captures per cell, Filter Off). Zero / gain from the two polarities, 200 MS/s then 1 MS/s:
+  CH1 5 V/div +88, +41 mV / +0.7, -2.4 %; 2.5 V/div +56, +20 mV / +1.1, +0.5 %; 1 V/div +9, -6 mV / -1.1, -1.1 %; 0.5 V/div +10, +7 mV / -0.2, -0.4 %.
+  CH2 (with +1.018 V) 5 V/div +107, +13 mV / -0.2, +1.5 %; 2.5 V/div +66, +19 mV / +1.4, +1.8 %; 1 V/div +20, +2 mV / -0.4, -0.4 %; 0.5 V/div +15, +3 mV
+  / +0.9, +1.0 %. Gain within 2 % (2.4 % at 5 V/div, where 1 V is six codes); full rate reads high by up to 0.65 code on both channels.
+  Inputs shorted, stable over 6 s (not settling), code and mV, 1 MS/s then 200 MS/s: range 0 CH1 128.02 / 128.06, CH2 128.04 / 128.80 (+133 mV);
+  range 2 CH1 127.01 / 127.31 (-34, -24 mV), CH2 129.18 / 129.43 (+41, +49 mV); range 4 CH1 128.07 / 128.16, CH2 129.24 / 129.54 (+8, +10 mV); range 6
+  CH1 128.09 / 128.17, CH2 128.10 / 128.77. So up to 1.5 codes at the input's zero on CH2 ranges 2 and 4 and -1 code on CH1 range 2, more than the
+  two-polarity zeros on the same ranges (+-20 mV); not understood (inference: the ADC's mid-scale carry at code 128, a quiet input cannot resolve
+  it). October's CH2 range 6 note (+1.0..1.5 codes) reads +0.1 / +0.8. A - B tracker after 60 full-rate captures: d +0.105 / +0.133 codes, e -0.006 /
+  -0.013, 2998 pairs per record: converged.
