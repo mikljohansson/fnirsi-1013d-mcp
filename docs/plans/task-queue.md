@@ -357,6 +357,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100
   steps / s; the loopback self-test's trigger level (+1.65 V against a square that tops at +1.83 V over the probe
   ground) and its need for CH1 straight on the post; docs/mcp-tools.md `delay(CH1->CH2)` against the tool's `delay`.
+- [ ] **scope_self_test_loopback judges from too little** (bench 2026-11-07 14:14, 0.3.1): 7 of 15 checks failed with no fault behind them. 25 % duty at 995 kHz on the post's slow edge (swing 2.1 V, duty 0.29..0.36): use 50 % or a lower frequency; T4 decides from one capture at 2.5 V/div (1000 captures in protocol section 12; over 200 at 1 V/div B first 0 drops, A first 134): many captures at 1 V/div; T5 tolerance +-1 against the simulated word + 1 (measured 1..2); T7 cannot pass on a release build (FORCE is debug-only): SKIP.
 - [ ] **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and
   the probes connected): 4 drops in 17907 GET_STATUS requests, each a bus suspend (no SOFs) followed 129 ms later by a
   host bus reset and a normal enumeration, 0.6 s down, no device restart; three host opens failed the same way at 14:12.

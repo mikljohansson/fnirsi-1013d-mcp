@@ -9,8 +9,7 @@ Paperwork pass by rel-gen2 on 2026-10-20 (branch `rel-gen2` from 876700a): the b
 branch's commit; the maintainer's items and the hardware items are left open.
 
 **State 2026-11-07 13:00: v0.3.0 is tagged and published as a pre-release (ab93c0d), not announced.** The boxes still open below were
-not done before the tag (the coordinator read the list after tagging). Before the announcement: the first-run screen and wizard on the 0.3.0 image,
-the loopback group, the long-idle check, and the maintainer's items (credits wording,
+not done before the tag (the coordinator read the list after tagging). Before the announcement: the long-idle check, and the maintainer's items (credits wording,
 repository description and templates, the capstone licence, bitstreams decision).
 
 ## Content
@@ -143,12 +142,12 @@ the 0.3.0 firmware. The 0x153F boxes come first.
       0x153D with fw 0.2.105 c681efa4 (18:56-19:02, 150 status, 4 health, 4 captures, 0 errors). Run 30 minutes on the
       0.3.0 image.
 - [ ] The long-idle check passes (roadmap section 5 item 4).
-- [ ] The hardware battery passes on the 0.3.0 image (`fnirsi1013d-battery --port <port>`, docs/releasing.md section 4
+- [x] The hardware battery passes on the 0.3.0 image (`fnirsi1013d-battery --port <port>`, docs/releasing.md section 4
       step 6): exit 0, or every FAIL a known issue in the release notes; `battery.md` pasted into
-      docs/hardware-status.md. The loopback group with CH1 on the post (`--groups loopback`) passes. On 0x153F with the
+      docs/hardware-status.md. The loopback group with CH1 on the post (`--groups loopback`) passes (2026-11-07: 7 of 15 checks pass, the 8 others traced to the test, not the unit, `docs/hardware-status.md` 14:14; test fixes queued for 0.3.1). On 0x153F with the
       bench image (fw 1d36d9b5, 2026-11-07 10:34-10:38): 201 PASS, 0 FAIL, 1 SKIP, the `coreorder` group and the Filter Off
       steps that failed on 0x153E included; to repeat on the 0.3.0 image.
-- [ ] First-run screen and calibration wizard on the release candidate with the recommended bitstream (the wizard passed
+- [x] (2026-11-07: the first-run screen on fw 0.3.0 on the spare card, seen by the owner; the wizard on the same code, the bench image.) First-run screen and calibration wizard on the release candidate with the recommended bitstream (the wizard passed
       on fw 0.2.105 with the gated 0x153D on 2026-10-22 17:0x-17:21 and 18:27-18:29, and on 0x153F with the bench image
       on 2026-11-07 09:52-10:31, the first-run screen included; the 0.3.0 image remains).
 

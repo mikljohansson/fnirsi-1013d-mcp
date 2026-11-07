@@ -2053,3 +2053,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   read back whole on the PC. First evidence on a card this size: 16 GB SDHC works on this unit. Card restored for the microscope:
   MBR, sector 8192, same size, type 0x0C, FAT32, 32 KiB clusters (768 reserved sectors, was 740, mkfs's alignment; OEM id differs),
   Windows mounts it healthy, empty. The owner's card back in the scope: fw 0.3.0 boots from it.
+- 2026-11-07 14:14-14:25 (lead, owner present): **loopback group on fw 0.3.0**, CH1 on the post: 7 of 15 checks passed (10 kHz frequency,
+  duty and swing at 2 and 20 MS/s, 995 kHz frequency at 50 MS/s), 8 failed, each traced to the test: duty and swing at 995 kHz 25 % (the
+  post's slow edge: swing 2.1 V); frequency at 200 MS/s 1047 kHz in that capture (over 60 captures median 995009 / 995025 Hz, one
+  outlier of 1066 kHz at 2.5 V/div; the hardware counter 995024.9 Hz); T4 "A before B" from one capture, 2 drops against 0 (over 200
+  captures at 2.5 V/div B first 1325, A first 5630, at 1 V/div 0 and 134; fold best d = +1 at both: **the order is right**); T5 offset
+  2 words against a +-1 limit (over 120 captures 0..2, mostly 1 and 2; simulation word + 1 on 0x153E and 0x153F); T7 needs FORCE, a
+  debug-only command. Test fixes queued for 0.3.1.
