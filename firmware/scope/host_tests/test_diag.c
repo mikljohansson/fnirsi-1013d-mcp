@@ -419,9 +419,9 @@ static void test_bodies(void)
     pc_hw_cap_train *ct = &mock.cap_train[1];
     uint32_t         s;
 
-    ct->flags  = PC_CAPT_RAN | PC_CAPT_REF;
-    ct->set[0] = 0x08;
-    ct->set[1] = 0x38;
+    ct->flags  = PC_CAPT_RAN | PC_CAPT_FAILED;
+    ct->set[0] = 0x18;
+    ct->set[1] = 0x18;
 
     for(s=0;s<4;s++)
     {
@@ -434,7 +434,7 @@ static void test_bodies(void)
     pc_cal_body(0, cal);
     T_EQ(cal[364], 0);                                      //CH1 not trained
     pc_cal_body(1, cal);
-    T_EQ(cal[364], 0x05); T_EQ(cal[365], 0x08); T_EQ(cal[366], 0x38); T_EQ(cal[367], 0);
+    T_EQ(cal[364], 0x03); T_EQ(cal[365], 0x18); T_EQ(cal[366], 0x18); T_EQ(cal[367], 0);
     T_EQ(pc_get_u32(cal + 368), 1000); T_EQ(pc_get_u32(cal + 380), 1003);
     T_EQ(pc_get_u32(cal + 384), 0x01020300u); T_EQ(pc_get_u32(cal + 396), 0x01020303u);
     T_EQ(pc_get_u32(cal + 400), 93); T_EQ(pc_get_u32(cal + 404), 0);
@@ -497,8 +497,8 @@ static void test_report(void)
   has("FNIRSI-1013D-AI diagnostics report\r\n");
   has("Firmware running: " PC_FW_VERSION ", protocol 1.28, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
-  has("FPGA: version word 0x153e, variant 2, ring 8192 words, caps 0x");
-  has("; firmware built for 0x153e\r\n");
+  has("FPGA: version word 0x153f, variant 2, ring 8192 words, caps 0x");
+  has("; firmware built for 0x153f\r\n");
   has("USB serial: 1013D-0001");
   has("CPU: CP15 control 0x0005107d: MMU on, D-cache on, I-cache on");
   has("uptime: 0 h 12 min 34 s (754321 ms)");
@@ -532,7 +532,7 @@ static void test_report(void)
   pc_session_init(&S);
   T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
   has("FPGA: version word 0x1532, variant 2, ring 8192 words, caps 0x");
-  has("; firmware built for 0x153e: MISMATCH, the acquisition does not run\r\n");
+  has("; firmware built for 0x153f: MISMATCH, the acquisition does not run\r\n");
 
   //Event 21 (1.19): reason, re-arms, value, caller
   {

@@ -143,6 +143,33 @@ def build_host_vectors() -> list[dict[str, Any]]:
     v += build_host_vectors_1_26()
     v += build_host_vectors_1_27()
     v += build_host_vectors_153e()
+    v += build_host_vectors_153f()
+    return v
+
+
+def build_host_vectors_153f() -> list[dict[str, Any]]:
+    """FPGA 0x153F (fw-153f, protocol 1.28 unchanged): 0x153E with both cores of a chip captured at one instant (0x63
+    one stage per chip). GET_INFO on the built-for word, GET_INFO of a scope still on 0x153E (the mismatch) and the
+    refusal text every non-basic command gets there."""
+    R = P.FLAG_RESPONSE
+    C = P.Caps
+    caps = int(C.PROG_TRIGGER_POS | C.GENERATOR | C.HOLDOFF | C.EXT_TRIGGER | C.SCREENSHOT | C.ENTER_FEL |
+               C.READ_LAG_UNVERIFIED | C.SHARED_MODE | C.SD_SECTORS | C.DECIM | C.FIR | C.SEQ | C.ENC_CHECK |
+               C.CAPTURE_STAGES | C.TRIG_TYPES | C.PEAK_DETECT | C.COUNTER | C.LOGGER)  # 0xFFEC4F, as 1.27
+    v = []
+    info = P.InfoResp(fpga_version=0x153F, fpga_variant=2, ring_words=8192, caps=caps, gen_clock_hz=200_000_000,
+                      max_total_samples=16382, fw_version=b"0.3.0", fw_build=0x0C8C0128, serial=b"1013D-0001",
+                      proto_minor=28, fw_fpga_version=0x153F)
+    v.append(_vec("host_resp_get_info_153f", _f(P.Cmd.GET_INFO, 13, info.pack(), flags=R).encode(),
+                  "GET_INFO response, protocol 1.28 (80 bytes): FPGA 0x153F = the built-for word at 76, flags 78 = 0; "
+                  "caps 0xFFEC4F as on 0x153D / 0x153E"))
+    bad = P.InfoResp(**{**info.__dict__, "fpga_version": 0x153E, "fpga_flags": P.FPGA_F_MISMATCH})
+    v.append(_vec("host_resp_get_info_153f_on_153e", _f(P.Cmd.GET_INFO, 14, bad.pack(), flags=R).encode(),
+                  "GET_INFO response, protocol 1.28: the FPGA still reports 0x153E (the bitstream before), the "
+                  "firmware is built for 0x153F (76), flags 78 bit 0 FPGA_MISMATCH"))
+    v.append(_vec("host_resp_e_unsupported_fpga_mismatch_153f", _f(P.Cmd.ARM, 15, P.error_payload(
+        P.UNSUP_FPGA_MISMATCH, "FPGA bitstream mismatch: this firmware needs 0x153F"), P.Status.E_UNSUPPORTED,
+        R).encode(), "E_UNSUPPORTED detail 1 with the 0x153F mismatch text (the scope runs another word, e.g. 0x153E)"))
     return v
 
 

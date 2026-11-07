@@ -346,7 +346,7 @@ notes" section of `docs/protocol.md`.
 
 Every firmware version runs on exactly one FPGA bitstream, the project's latest (owner decision 2026-10-20: "every
 firmware version only supports the latest FPGA bitstream ... detect this and show a loud banner"). The constant is
-`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153E since fw-153e, the 0.3.0 release's; 0x153D in fw 0.2.105;
+`PC_FW_FPGA_VERSION` in `pc_cmds.h` (0x153F since fw-153f, the 0.3.0 release's; 0x153E in fw-153e, 0x153D in fw 0.2.105;
 `fpga/al3/dist/manifest.json` "recommended"); the capability word, the ring
 geometry (8192 words, 16382 samples) and every feature decision derive from it, never from the version word the FPGA
 reports. That word is read once at boot (`pc_glue_init`) and compared:
@@ -355,13 +355,13 @@ reports. That word is read once at boot (`pc_glue_init`) and compared:
   capture, enc_heal.c) and the capture stages (0x63 / 0x36, cap_stage.c) stay: 0x153B needs them.
 - **Mismatch** (older or newer word): the scope boots into a full-screen notice instead of the scope
   (`ui_diag.c ud_build_fpga_mismatch`, `ui_diag_view.c ui_fpga_mismatch_pass`): "This firmware needs FPGA bitstream
-  0x153E." / "This scope has 0x153D." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
+  0x153F." / "This scope has 0x153E." / "Flash it as the guide says (docs/guide/prepare.md), or remove the card to run the
   stock firmware.", with three buttons: Diagnostics (the version word, Save report, the log, Enter FEL; Back returns to
   the notice; no Calibrate, DC shift trim or Volts calibration there), Settings and USB drive (the modal screens of the
   main menu; the notice is redrawn after). The acquisition, the Scope, Spectrum and Frequency response views and the
   generator never run; nothing is written to the FPGA's feature registers at boot. Over USB: GET_INFO 76 carries the
   built-for word and 78 bit 0 the mismatch (GET_HEALTH 124 / 126 the same), every command outside the basic set answers
-  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153E", and PING, GET_INFO, GET_STATUS,
+  E_UNSUPPORTED detail 1 "FPGA bitstream mismatch: this firmware needs 0x153F", and PING, GET_INFO, GET_STATUS,
   GET_HEALTH, GET_LINK_STATS, GET_EVENT_LOG, GET_CAL, the SD commands, SAVE_REPORT, READ_SCREEN and ENTER_FEL keep
   working (`F_BASIC` in pc_cmds.c), so a host can read the version word, save the report and load another image.
 
@@ -381,6 +381,9 @@ every build has the same encode timing): the constant and its text only. A calib
 the capture stages' stored value is not applied (power-on 0x08E4, OTHER) and the first-run screen asks for Calibrate
 ("Calibrated on FPGA bitstream 0x153d: calibrate again for 0x153e.", `ud_first_run_due`) until the wizard's Save stamps
 the new word.
+fw-153f for 0x153F (0x153E with both cores of a chip captured at one instant, fpga/al3/README.md section 22): the
+constant and its text, and the capture stages per chip (below, "One stage per chip"). A calibration saved on 0x153E
+loads as above: power-on 0x06DB, OTHER, "Calibrated on FPGA bitstream 0x153e: calibrate again for 0x153f.".
 
 ### Trigger types and hold-off (FPGA 0x153C, fw-c5, protocol 1.26)
 
@@ -407,7 +410,7 @@ unchanged; power-on (every register 0) is 0x153B behaviour.
 - **Host** (`pc_cmds.c`, `docs/protocol.md` row 66): **SET_TRIGGER2 0x0219** (24 bytes: type, polarity, flags, source,
   N, H, level, level2, hold-off, 0; no mask, every field written; the firmware converts nothing) and **GET_TRIGGER**
   52 bytes (12 the hold-off, 28..51 the SET_TRIGGER2 body that reproduces the trigger). Runt / window / range / both
-  cores (planned for a later bitstream, not 0x153E) and out-of-range fields are E_BAD_ARG with the byte offset as detail; nothing is written then. The old
+  cores (planned for a later bitstream, not 0x153F) and out-of-range fields are E_BAD_ARG with the byte offset as detail; nothing is written then. The old
   SET_TRIGGER keeps the edge type's fields, the geometry and the mode, and now accepts its `holdoff` (5 ns units).
   GET_STATUS 48..51 carries 0x37 / 0x34 read at every MAIN poll while a host capture is in flight (6 strobes), GET_CAPTURE_INFO
   96..111 the extension the capture was armed with. Caps bits 2 HOLDOFF and 20 TRIG_TYPES, features bit 8.
@@ -2512,6 +2515,14 @@ CAL_PROBE put the previous 0x63 back. At boot (and after a calibration load) 0x6
 was trained on the running bitstream, else the power-on 0x08E4. After every accepted full-rate capture the firmware reads
 0x36 and flags a core whose count exceeds its chip partner's by more than 8 (GET_HEALTH 104..123, event 23). Bench list:
 firmware/AGENTS.md section 54.
+
+**One stage per chip (fw-153f, FPGA 0x153F).** 0x153F captures both cores of a chip at one instant: 0x63 bits 2:0 (CH1)
+and 8:6 (CH2) are the chip's stage (full rate only), the B fields and bits 13:12 select nothing, power-on 0x06DB. The
+training still measures and scores each core (the 0x36 sums, q and the quiet sets per core, GET_CAL 364..431), but the
+pick, the tie pass, the stored set and the runtime guard run on the chip's set, the stages quiet on both cores
+(`cs_train_run`, `cs_guard`); the result goes into both fields (`cs_with_chip`), so the texts read "CH1 A3 B3". The
+reference-bit retry described below for 0x153A..0x153E is gone; a chip without a common quiet stage fails the channel
+("ADC readout fault near code 128", the note names the cores). firmware/AGENTS.md section 97.
 
 **Band training (fw 0.2.81).** Bench 2026-10-20 on 0x153A (threshold 32 codes since 0.2.80): a bad stage can garble only
 at some codes and in some captures (CH1 A4 on the maintainer's unit: rail samples and jumps only while the samples sit at codes

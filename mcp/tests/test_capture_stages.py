@@ -54,11 +54,11 @@ def test_health_older_layouts_read_zero():
 
 def test_health_capture_words():
     po = P.HealthResp(cap_value=P.CAP_POWER_ON, cap_flags=P.CAPF_HAS).describe_capture()
-    assert po["text"] == "capture stages CH1 A4 B4, CH2 A3 B4 (power-on default); no 200 MSa/s capture read yet"
+    assert po["text"] == "capture stages CH1 A3 B3, CH2 A3 B3 (power-on default); no 200 MSa/s capture read yet"
     assert po["last_counts"] is None
     clean = P.HealthResp(cap_value=P.CAP_POWER_ON, cap_flags=P.CAPF_HAS | P.CAPF_READ | P.CAPF_OTHER,
                          cap_reads=4).describe_capture()
-    assert clean["text"].startswith("capture stages CH1 A4 B4, CH2 A3 B4 (power-on default); capture clean; a value "
+    assert clean["text"].startswith("capture stages CH1 A3 B3, CH2 A3 B3 (power-on default); capture clean; a value "
                                     "stored for another bitstream is not applied")
     assert clean["stored_for_other_bitstream"]
     new = P.HealthResp(cap_value=0x08E3, cap_flags=P.CAPF_HAS).describe_capture()
@@ -88,10 +88,12 @@ def test_health_wire_offsets():
 
 
 def test_stage_texts_and_self_check():
-    assert P.cap_stages_text(P.CAP_POWER_ON) == "CH1 A4 B4, CH2 A3 B4"
-    assert P.cap_stages_text(P.CAP_POWER_ON | 0x2000, 1) == "CH2 A3 B4 A-clk"
-    assert P.cap_stages_text(P.CAP_POWER_ON | 0x1000) == "CH1 A4 B4 A-clk, CH2 A3 B4"
-    assert [P.cap_stage(P.CAP_POWER_ON, k) for k in range(4)] == [4, 4, 3, 4]
+    # fw-153f (FPGA 0x153F): one stage per chip, power-on 0x06DB; bits 13:12 select nothing (no " A-clk")
+    assert P.CAP_POWER_ON == 0x06DB
+    assert P.cap_stages_text(P.CAP_POWER_ON) == "CH1 A3 B3, CH2 A3 B3"
+    assert P.cap_stages_text(P.CAP_POWER_ON | 0x2000, 1) == "CH2 A3 B3"
+    assert P.cap_stages_text(0x08E4) == "CH1 A4 B4, CH2 A3 B4"
+    assert [P.cap_stage(P.CAP_POWER_ON, k) for k in range(4)] == [3, 3, 3, 3]
     assert P.cap_core_names(0x0A) == ["CH1 B", "CH2 B"]
     assert P.cap_excess((0, 0, 37, 2)) == [0, 0, 35, 0]
     assert P.cap_flagged((0, 0, 37, 2)) == 0x04
@@ -126,9 +128,9 @@ def test_get_cal_364():
     assert not old.has_capture and old.describe_capture() is None and old.cap_value == 0
     other = P.CalResp.unpack(P.CalResp(cap_trailer=1, cap_flags=P.CAPF_HAS | P.CAPF_OTHER, cap_stored=0x08DC,
                                        cap_stored_fpga=0x153B, cap_value=P.CAP_POWER_ON).pack())
-    assert "not applied on this bitstream, CH1 A4 B4, CH2 A3 B4 in effect" in other.describe_capture()["text"]
+    assert "not applied on this bitstream, CH1 A3 B3, CH2 A3 B3 in effect" in other.describe_capture()["text"]
     none = P.CalResp.unpack(P.CalResp(cap_flags=P.CAPF_HAS, cap_value=P.CAP_POWER_ON).pack()).describe_capture()
-    assert none["text"] == "no capture stages stored with the calibration; CH1 A4 B4, CH2 A3 B4 in effect (untrained)"
+    assert none["text"] == "no capture stages stored with the calibration; CH1 A3 B3, CH2 A3 B3 in effect (untrained)"
     assert "CRC" in P.CalResp.unpack(P.CalResp(cap_trailer=2).pack()).describe_capture()["text"]
 
 
@@ -138,7 +140,7 @@ def test_event_23_in_words():
     assert P.DeviceEvent(5, 23, 0x10, 0x08DC).describe() == \
         "adc_capture training ended: now CH1 A4 B3, CH2 A3 B4 (0x08DC)"
     assert P.DeviceEvent(5, 23, 0x12, P.CAP_POWER_ON).describe() == \
-        "adc_capture training ended: no clean stage for CH1 B, kept CH1 A4 B4, CH2 A3 B4 (0x08E4)"
+        "adc_capture training ended: no clean stage for CH1 B, kept CH1 A3 B3, CH2 A3 B3 (0x06DB)"
     # fw 0.2.105: the runtime guard moved CH1 A off its flagged stage 4 (a bit 5)
     assert P.DeviceEvent(5, 23, 0x21, 0x08E3).describe() == \
         "adc_capture guard moved CH1 A: now CH1 A3 B4, CH2 A3 B4 (0x08E3)"
@@ -154,6 +156,7 @@ def test_cal_probe_zero_split_zero_since_0_2_79():
 def test_ext_shifts_0x153a():
     cap = P.DECIM_HAS_FIR | P.DECIM_HAS_CAPSTAGES
     assert P.ext_shift_legacy(0, True) == 12 and P.ext_shift_legacy(9, True) == 14
+    assert [P.ext_shift_legacy(d, True) for d in (1, 2, 3, 4)] == [12, 12, 12, 14]  # fw-153f, 0x153F
     assert P.ext_shift_legacy(0) == 4 and P.ext_shift_legacy(9) == 8
     leg = P.decim_config(0, 0, 9, 4000, cap)
     assert leg.cap and leg.ext_shift_at(9) == 14 and leg.ext_shift_at(0) == 12
@@ -266,8 +269,8 @@ def test_tools(sim_factory, tmp_path):
             await c.call("scope_set_timebase", sample_rate="200MS/s")
             await c.call("scope_capture", channels=["CH1"])
             h = await c.call("scope_health")
-            assert h["capture_stages"]["stages"] == "CH1 A4 B4, CH2 A3 B4"
-            assert "ADC capture stages CH1 A4 B4, CH2 A3 B4 (power-on default); capture clean" in h["in_words"]
+            assert h["capture_stages"]["stages"] == "CH1 A3 B3, CH2 A3 B3"
+            assert "ADC capture stages CH1 A3 B3, CH2 A3 B3 (power-on default); capture clean" in h["in_words"]
             st = await c.call("scope_status")
             assert "capture_stages" in st["features"]
             ci = await c.call("scope_calibration_info")

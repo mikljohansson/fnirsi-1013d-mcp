@@ -545,7 +545,7 @@ static void test_stress(void)
   }
 
   ud_build(&pg, UD_PAGE_STATUS, &in, 0);
-  T_TRUE(has_text("FPGA bitstream 0x1532: this firmware needs 0x153e"));
+  T_TRUE(has_text("FPGA bitstream 0x1532: this firmware needs 0x153f"));
   T_EQ(text_colour("FPGA bitstream 0x1532"), UD_C_WARN);
   T_TRUE(has_text("from RAM. No SD card:"));
   T_TRUE(has_text("No PC"));
@@ -929,6 +929,18 @@ static void test_first_run(void)
   T_TRUE(has_text(UD_ICON_WARN "Calibrated on FPGA bitstream 0x153a: calibrate again for 0x153b."));
   health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED;
   T_EQ(ud_first_run_due(&in), 0);
+
+  //fw-153f: the owner's card after the 0x153F flash, calibrated on 0x153E (the provenance's word, the capture stages
+  //stored for 0x153E: OTHER): the prompt names both words
+  healthy(&in);
+  p16(cal[0] + 292 + 28, 0x153E);
+  p16(cal[0] + 360, 0x153E);
+  health[106] = PC_CAPF_HAS | PC_CAPF_OTHER;
+  in.fpga = 0x153F;
+  T_EQ(ud_first_run_due(&in), 1);
+  ud_build_first_run(&pg, &in, 0, 0);
+  check_layout("first run 0x153e to 0x153f", 0);
+  T_TRUE(has_text(UD_ICON_WARN "Calibrated on FPGA bitstream 0x153e: calibrate again for 0x153f."));
 }
 
 //fw-one: the notice shown instead of the scope when the FPGA runs another bitstream than the firmware is built for
@@ -944,7 +956,7 @@ static void test_fpga_mismatch(void)
   ud_build_fpga_mismatch(&pg, &in);
   check_layout("fpga mismatch", 0);
   T_TRUE(has_text("FPGA bitstream"));
-  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153E."));
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153F."));
   T_TRUE(has_text("This scope has 0x1532."));
   T_EQ(text_colour("This firmware needs"), UD_C_WARN);
   T_EQ(text_colour("This scope has"), UD_C_WARN);
@@ -952,7 +964,7 @@ static void test_fpga_mismatch(void)
   T_TRUE(has_text("or remove the card to run the stock firmware."));
   T_TRUE(has_text("Open firmware 0.2.59, protocol 1.16. The scope, the spectrum analyser, the frequency response and the generator do not run"));
   T_TRUE(has_text("Diagnostics shows the version word and saves a report to the card."));
-  T_TRUE(strstr(need, "0x153E") != NULL);                      //the constant the texts quote
+  T_TRUE(strstr(need, "0x153F") != NULL);                      //the constant the texts quote
   T_EQ(pg.nbtn, 3);
   T_EQ(ud_hit(&pg, 30, 410), UD_ID_DIAG);
   T_EQ(ud_hit(&pg, 400, 450), UD_ID_SETTINGS);
@@ -960,17 +972,20 @@ static void test_fpga_mismatch(void)
   T_EQ(ud_hit(&pg, 260, 430), UD_ID_NONE);
 
   //A newer word is a mismatch too (the next bitstream ships with its own firmware)
-  in.fpga = 0x153F;
+  in.fpga = 0x1540;
   ud_build_fpga_mismatch(&pg, &in);
   check_layout("fpga mismatch newer", 0);
-  T_TRUE(has_text("This scope has 0x153F."));
+  T_TRUE(has_text("This scope has 0x1540."));
 
-  //fw-153e: the previous release's bitstream (0x153D) is a mismatch
+  //fw-153e / fw-153f: the bitstreams before (0x153D, 0x153E: the 0x153F flash pending) are a mismatch
   in.fpga = 0x153D;
   ud_build_fpga_mismatch(&pg, &in);
   T_TRUE(has_text("This scope has 0x153D."));
-  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153E."));
-  in.fpga = 0x153F;
+  in.fpga = 0x153E;
+  ud_build_fpga_mismatch(&pg, &in);
+  check_layout("fpga mismatch 0x153e", 0);
+  T_TRUE(has_text("This scope has 0x153E."));
+  T_TRUE(has_text("This firmware needs FPGA bitstream 0x153F."));
 
   //On the Diagnostics pages of a mismatched scope nothing measures: no Calibrate, DC shift trim or Volts calibration;
   //Save report, Clear calibration, the log and FEL stay
@@ -978,7 +993,7 @@ static void test_fpga_mismatch(void)
   check_layout("mismatch status", 0);
   T_EQ(ud_hit(&pg, 20, 430), UD_ID_NONE);
   T_EQ(ud_hit(&pg, 200, 430), UD_ID_REPORT);
-  T_TRUE(has_text("FPGA bitstream 0x153f: this firmware needs 0x153e"));
+  T_TRUE(has_text("FPGA bitstream 0x153e: this firmware needs 0x153f"));
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   check_layout("mismatch cal", 0);
   {

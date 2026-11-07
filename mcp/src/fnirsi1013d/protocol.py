@@ -174,7 +174,7 @@ BODE_LEAVE_CMDS = frozenset({Cmd.SET_CHANNEL, Cmd.SET_TIMEBASE, Cmd.SET_TRIGGER,
 #: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
 #: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
 #: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.
-FW_FPGA_VERSION = 0x153E  # since fw-153e (0.3.0); 0x153D in fw 0.2.105 (protocol 1.27 / 1.28)
+FW_FPGA_VERSION = 0x153F  # since fw-153f (0.3.0; 0x153E in fw-153e); 0x153D in fw 0.2.105 (protocol 1.27 / 1.28)
 #: GET_INFO 78 / GET_HEALTH 126 bit 0: the version word the FPGA reported at boot differs from fw_fpga_version
 FPGA_F_MISMATCH = 0x01
 #: E_UNSUPPORTED detail of every non-basic command on such a scope, with this text
@@ -265,7 +265,7 @@ class Caps(enum.IntFlag):
     #: protocol 1.27 (FPGA 0x153D): the streaming logger (0x69, 0x6A, read 0x38), LOG_START / LOG_READ / LOG_STOP
     LOGGER = 1 << 23
     #: bit 24 reserved (PATTERN_GEN of the 1.27 drafts, cut)
-    #: planned for a later bitstream (not 0x153E): runt and window types, the pulse-width range (SET_TRIGGER2 types
+    #: planned for a later bitstream (not 0x153F): runt and window types, the pulse-width range (SET_TRIGGER2 types
     #: 4 / 5, RANGE)
     TRIG_RUNT_WINDOW = 1 << 26
     #: bit 27 reserved (PATTERN_TRIGGER of the 1.27 drafts, cut)
@@ -2205,9 +2205,10 @@ def ext_shift_legacy(divider: int, cap: bool = False) -> int:
     the edge: the AD9288's 4-encode pipeline is 4 words at every legacy rate, 2 at divider 0 where the EXT
     synchroniser takes most of a 10 ns word (fpga/al3/README.md section 7 finding 4, tb_trigpos model numbers).
     1.24 (fw 0.2.79, ``cap`` = FPGA 0x153A+ capture stages): 12 at divider 0, 14 above (the IOB capture and the stage
-    pick take 4 / 3 words more)."""
+    pick take 4 / 3 words more). fw-153f (FPGA 0x153F, one capture instant per chip): core A one word earlier at
+    dividers 1..3, so 12 at dividers 0..3 and 14 from 4 up (model numbers, not benched)."""
     if cap:
-        return 14 if divider else 12
+        return 14 if divider >= 4 else 12
     return 8 if divider else 4
 
 
@@ -3610,6 +3611,7 @@ class CalResp(Payload):
             q = self.train_q[4 * k:4 * k + 4]
             sums = self.train_sum[4 * k:4 * k + 4]
             cores[name] = {
+                # fw-153f (FPGA 0x153F, one stage per chip): the chip's set, the stages quiet on both cores
                 "quiet_stages": [s for s in range(2, 6) if self.train_set[k] >> s & 1],
                 "q_per_stage": {str(s): q[s - 2] for s in range(2, 6)},
                 "outliers_per_stage": {str(s): sums[s - 2] for s in range(2, 6)},
@@ -3844,15 +3846,17 @@ def enc33_bad_pins(b: int) -> list[str]:
 
 #: protocol 1.24 (fw 0.2.79, row 64): FPGA 0x153A capture stages. GET_HEALTH 106 / GET_CAL 357 flags
 CAPF_HAS = 0x01  # the bitstream has the capture stages (0x153A+)
-CAPF_TRAINED = 0x02  # the stored value for this bitstream is in effect (else the power-on 0x08E4 or an unsaved one)
+CAPF_TRAINED = 0x02  # the stored value for this bitstream is in effect (else the power-on value or an unsaved one)
 CAPF_READ = 0x04  # outlier counts were read after a full-rate capture since boot
 CAPF_FLAGGED = 0x08  # the last read flagged a core
 CAPF_OTHER = 0x10  # a stored value exists for another bitstream (not applied: recalibrate)
 CAPF_REPEAT = 0x20  # fw 0.2.81 (GET_HEALTH 106 only): a core flagged in 3 captures within a minute: recalibrate
 #: fw 0.2.105 (GET_HEALTH 106 only): the runtime guard moved a flagged core to another stage of its trained clean set
 CAPF_MOVED = 0x40
-#: 0x63 at power-on: CH1 A 4, CH1 B 4, CH2 A 3, CH2 B 4, B cores by their own encode
-CAP_POWER_ON = 0x08E4
+#: 0x63 at power-on (FPGA 0x153F): stage 3 on both chips. Since 0x153F both cores of a chip are captured at one instant,
+#: bits 2:0 (CH1) / 8:6 (CH2); the B fields (5:3, 11:9) and bits 13:12 select nothing and the firmware writes the B
+#: field equal to the A field. 0x153A..0x153E: one stage per core, power-on 0x08E4
+CAP_POWER_ON = 0x06DB
 #: the 0x36 order of the cores; flag masks use bit i = core i
 CAP_CORES = ("CH1 A", "CH1 B", "CH2 A", "CH2 B")
 #: self-check: a core is flagged when its outlier count exceeds its chip partner's by more than this
@@ -3860,7 +3864,7 @@ CAP_EXCESS_LIMIT = 8
 #: GET_CAL 364 (protocol 1.28): the channel's last capture stage training
 CAPT_RAN = 0x01
 CAPT_FAILED = 0x02
-CAPT_REF = 0x04
+CAPT_REF = 0x04  # core B measured again with the A encode: 0x153A..0x153E firmware only, never set since fw-153f
 #: GET_CAL 356: the stored value's trailer (sector 708 bytes 488..503)
 CAP_TRAILER_STATES = {0: "none", 1: "valid", 2: "bad"}
 CAP_TRAILER_MAGIC = b"ACAP"
@@ -3874,12 +3878,11 @@ def cap_stage(v: int, core: int) -> int:
 
 
 def cap_stages_text(v: int, ch: int | None = None) -> str:
-    """'CH1 A4 B4, CH2 A3 B4' as the scope writes it (cs_text); ch 0 / 1 gives one channel. ' A-clk' follows a B core
-    timed by its chip's A encode (0x63 bit 12 / 13)."""
+    """'CH1 A3 B3, CH2 A3 B3' as the scope writes it (cs_text); ch 0 / 1 gives one channel. Since FPGA 0x153F the two
+    fields of a chip are equal in every value the firmware writes (one stage per chip); bits 13:12 select nothing."""
     if ch is None:
         return f"{cap_stages_text(v, 0)}, {cap_stages_text(v, 1)}"
-    t = f"CH{ch + 1} A{cap_stage(v, 2 * ch)} B{cap_stage(v, 2 * ch + 1)}"
-    return t + (" A-clk" if v & (0x1000 << ch) else "")
+    return f"CH{ch + 1} A{cap_stage(v, 2 * ch)} B{cap_stage(v, 2 * ch + 1)}"
 
 
 def cap_core_names(mask: int) -> list[str]:

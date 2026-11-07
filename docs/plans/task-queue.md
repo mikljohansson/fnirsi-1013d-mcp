@@ -321,6 +321,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   depends on the word period and the stages, so the fix is in the FPGA: capture core A against the edge its data
   changes on and make the pairing the same at every rate (0x153F; testbench ADC model first). Check first: the model's
   row for the trained A3 B3 after the next wizard run.
+- [ ] **Bench fw-153f on 0x153F** (branch `fw-153f`, 2026-11-07; firmware/AGENTS.md section 97 has the steps): FEL-load
+  on 0x153E (the notice names 0x153F), flash 0x153F (`fpga/al3/AGENTS.md` "0x153F" part (b)), `#VER fpga=0x153f`, the
+  first-run prompt, the wizard trains one stage per chip (expect 0x06DB) and GET_CAL shows it, `core_order.py` s = 0 at
+  every divider on both channels, the CH2 sweep 30 min after power-on, `fnirsi1013d-battery --port COM10`. Then: manifest
+  0x153F `recommended` (`tools/bitstreams.py check --release` fails until then), INTERLEAVE_UNVERIFIED and
+  `COUNTER_F_GATED` decided from the bench, the legacy EXT shift (last commit of the branch, model numbers) checked with
+  an edge on EXT and CH1, and the user-facing docs (install guide, 0.3.0 release notes, roadmap, release checklist) moved
+  from 0x153E to 0x153F.
 - [ ] **Smaller findings of the MCP battery 2026-11-06** (`docs/hardware-status.md` 16:21-16:45): `scope_capture_and_fft`
   / `scope_dvm` once labelled a 200 kSa/s record 1 MSa/s right after the guard's stage move (not reproduced; check the
   settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100

@@ -38,10 +38,10 @@
 #include "cap_stage.h"
 #include <string.h>
 
-//The model's bitstreams the firmware's sequences are run against: the built-for 0x153E (0x153D's registers and
-//behaviour, the encodes from PLL outputs) and its predecessors with the same bus (the firmware runs on 0x153E only;
-//the older models show the faults the order and the dummy strobe answer)
-static const uint16_t versions[] = { 0x1535, 0x1537, 0x1539, 0x153A, 0x153B, 0x153C, 0x153D, 0x153E };
+//The model's bitstreams the firmware's sequences are run against: the built-for 0x153F (0x153D's registers and
+//behaviour; the model has no capture instants, so 0x153E and 0x153F alike) and its predecessors with the same
+//bus (the firmware runs on 0x153F only; the older models show the faults the order and the dummy strobe answer)
+static const uint16_t versions[] = { 0x1535, 0x1537, 0x1539, 0x153A, 0x153B, 0x153C, 0x153D, 0x153E, 0x153F };
 #define NVER (sizeof(versions) / sizeof(versions[0]))
 
 //One lane read against the memory, from a start near the ring end so it wraps
@@ -121,7 +121,7 @@ static void test_readout(void)
 
   //The model has the lag: without the dummy strobe (the 1.00o5 readouts up to fw 0.2.69) the first byte repeats and
   //everything after it is one word late
-  fm_reset(0x153E, 0, 5);
+  fm_reset(0x153F, 0, 5);
   fm_fill(3);
   fpga_write_cmd(0x1F);
   fpga_write_short(40);
@@ -263,7 +263,7 @@ static void test_ready_bound(void)
   fpga_arm_cfg c;
   uint32_t idles = 0;
 
-  fm_reset(0x153E, 0, 9);
+  fm_reset(0x153F, 0, 9);
   fm.ready_never = 1;
   fm.ntrace = 0;
 
@@ -343,7 +343,7 @@ static void test_decim_write(void)
   pc_decim_cfg c, ref;
   int i;
 
-  fm_reset(0x153E, 199, 21);
+  fm_reset(0x153F, 199, 21);
   T_EQ(fpga_bus_wr.held, 0);
 
   //The bench case: the host's raw 4095, then a UI time/div snap (no 0x0D: nothing reaches the bus), then CIC2 + FIR.
@@ -638,7 +638,7 @@ static void test_timeout_records(void)
 //0x1A = 0 alone (fw 0.2.41 .. fw-small) left time_base_cnt <= 0x0E and the capture running.
 static void test_force_deadline(void)
 {
-  static const uint16_t vers[] = { 0x153B, 0x153C, 0x153D, 0x153E };
+  static const uint16_t vers[] = { 0x153B, 0x153C, 0x153D, 0x153E, 0x153F };
   static const uint32_t deadlines[] = { 3 * TO_TOTAL, 8192 + 777, 3 * 8192 + 5 };
   uint32_t v, d;
   int newest;
@@ -880,7 +880,7 @@ static void test_peak(void)
   uint32_t i, n, spikes = 0, dips = 0;
   int ok;
 
-  fm_reset(0x153E, 19, 61);
+  fm_reset(0x153F, 19, 61);
   fm.capture = 1;
   fm.trig_at = -1;
   fm_fill(5);
@@ -1019,7 +1019,7 @@ static void test_gated_ready(void)
   {
     fpga_arm_cfg cfg;
 
-    fm_reset(0x153E, div[d], 31 + d);
+    fm_reset(0x153F, div[d], 31 + d);
     fm.capture = 1;
     fm.trig_at = -1;
     write_0d(div[d]);
@@ -1085,7 +1085,7 @@ static void test_counter_derive(void)
 //and derived but marked gated, so it is not usable (VALID, the cards); EXT is never gated; full rate again: usable
 static void test_counter_gated(void)
 {
-  fm_reset(0x153E, 199, 901);
+  fm_reset(0x153F, 199, 901);
   fpga_counter_boot();
   fpga_counter_config(FPGA_CNT_GATE_100MS, FPGA_CNT_SRC_TRIG, 128, 6);
   fm_cnt_signal(0, 1000, 500, 35, 60, 200);
@@ -1121,7 +1121,7 @@ static void test_counter(void)
   uint64_t t0;
 
   //Divider 199 (2 us write clock) keeps the model fast; the counter's stream is at 5 ns whatever the divider
-  fm_reset(0x153E, 199, 900);
+  fm_reset(0x153F, 199, 900);
   fm.ntrace = 0;
 
   //Boot: 0x62 = 128 / 6, then 0x61 = gate 100 ms, source 0 (5 strobes); the gate runs on CH1 (0x15 = 0)
@@ -1365,7 +1365,7 @@ static void test_counter_auto(void)
   uint32_t n, r;
   uint8_t  lvl, hys;
 
-  fm_reset(0x153E, 199, 902);
+  fm_reset(0x153F, 199, 902);
   fpga_counter_boot();
 
   //Boot: 128 / 6 written, both auto. A 1 MHz square 60..200 on CH1: the first gate at 128 / 6 counts it, but its min /
@@ -1491,7 +1491,7 @@ static void test_counter_auto(void)
 //----------------------------------------------------------------------------------------------------------------------------------
 //The generator (fw-d5, 0x153D; the square only since fw-nopat)
 
-#define GEN_VER  0x153E
+#define GEN_VER  0x153F
 
 //The contract's formulas: P16 within half a unit of 2^16 x 2e11 / f, the back conversion, the split, at many points
 static void test_gen_formulas(void)
@@ -1863,7 +1863,7 @@ static void test_train_capture_cost(void)
   uint64_t     t0, us;
   uint32_t     polls = 0, k;
 
-  fm_reset(0x153E, 0, 31);
+  fm_reset(0x153F, 0, 31);
   fm.strobe_ns = 300;
   fm.capture   = 1;
   fm.trig_at   = -1;
@@ -1894,7 +1894,7 @@ static void test_train_capture_cost(void)
     (void)fpga_read_byte();
 
   us = (fm.t_ps - t0) / 1000000;
-  printf("  training capture on 0x153E: %u us of bus and capture, %u polls\n", (unsigned)us, (unsigned)polls);
+  printf("  training capture on 0x153F: %u us of bus and capture, %u polls\n", (unsigned)us, (unsigned)polls);
 
   //8000 words at 10 ns are 80 us; the rest is the strobes. Under 0.2 ms each (section 86)
   T_TRUE(us >= 80);
@@ -1912,7 +1912,7 @@ static uint32_t train_stale(uint32_t reg0e, uint16_t pre, uint32_t seed)
   fpga_arm_cfg c;
   uint32_t     start, i, l, w, idx, stale = 0;
 
-  to_reset(0x153E, seed);
+  to_reset(0x153F, seed);
   fpga_write_cmd(0x1A);
   fpga_write_byte(0x00);
 
@@ -1979,7 +1979,7 @@ static void test_relay(void)
   uint8_t  trig[4];
   uint32_t i;
 
-  fm_reset(0x153E, 0, 31);
+  fm_reset(0x153F, 0, 31);
 
   //Boot (or a FEL load): nothing known, every register written once
   relay_restore(v);

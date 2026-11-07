@@ -153,20 +153,20 @@ def test_simulator_ui_average_states(sim_factory):
 
 
 def test_simulator_previous_bitstream(sim_factory):
-    # fw-153e: the firmware is built for 0x153E; a scope still on 0x153D (fw 0.2.105's bitstream) is a mismatch
-    assert P.FW_FPGA_VERSION == 0x153E
-    assert P.FPGA_MISMATCH_TEXT == "FPGA bitstream mismatch: this firmware needs 0x153E"
-    srv = sim_factory(fpga_version=0x153D, signal="sine:freq=10kHz,amp=0.25")
+    # fw-153f: the firmware is built for 0x153F; a scope still on 0x153E (the bitstream before) is a mismatch
+    assert P.FW_FPGA_VERSION == 0x153F
+    assert P.FPGA_MISMATCH_TEXT == "FPGA bitstream mismatch: this firmware needs 0x153F"
+    srv = sim_factory(fpga_version=0x153E, signal="sine:freq=10kHz,amp=0.25")
     with Scope.connect(srv.url) as s:
         i = s.info
-        assert (i.fpga_version, i.fw_fpga_version, i.fpga_mismatch) == (0x153D, 0x153E, True)
-        assert "runs 0x153D" in s.profile().mismatch_caveat()
+        assert (i.fpga_version, i.fw_fpga_version, i.fpga_mismatch) == (0x153E, 0x153F, True)
+        assert "runs 0x153E" in s.profile().mismatch_caveat()
         with pytest.raises(DeviceError) as e:
             s.arm()
         assert (e.value.status, e.value.detail, e.value.text) == (P.Status.E_UNSUPPORTED, 1, P.FPGA_MISMATCH_TEXT)
     ok = sim_factory(signal="sine:freq=10kHz,amp=0.25")
     with Scope.connect(ok.url) as s:
-        assert (s.info.fpga_version, s.info.fpga_mismatch) == (0x153E, False)
+        assert (s.info.fpga_version, s.info.fpga_mismatch) == (0x153F, False)
 
 
 def test_simulator_mismatch(sim_factory):

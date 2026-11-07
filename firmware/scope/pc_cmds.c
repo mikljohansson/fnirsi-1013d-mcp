@@ -90,15 +90,16 @@ void pc_test_pattern(uint8_t *dst, uint32_t length, uint8_t pattern)
 //----------------------------------------------------------------------------------------------------------------------------------
 // The bitstream this firmware is built for (P-5.1, PC_FW_FPGA_VERSION). One geometry (constants: PC_FPGA_RING_WORDS,
 // PC_FPGA_MAX_TOTAL, PC_FPGA_VARIANT), one capability word, derived from
-// the constant: AL3A10 0x153E has the programmable geometry and the generator (0x1532), the EXT trigger (0x1533), the
+// the constant: AL3A10 0x153F has the programmable geometry and the generator (0x1532), the EXT trigger (0x1533), the
 // decimation filter with 16-bit samples (0x1534, cmds 0x53-0x55, read 0x29), the CIC compensation FIR (0x1535, 0x56),
 // the sequencer (0x1536, cmds 0x57-0x5D, reads 0x2A-0x32), the encode self-check with the guaranteed core order (0x1538,
 // read 0x33), the per-core capture stages (0x153A, 0x63 / 0x36), the trigger types with the hold-off (0x153C, cmds
 // 0x5E-0x60, 0x66, 0x1B, reads 0x34 / 0x37), peak detect and the counter (0x153C, 0x56 bit 1, 0x61 / 0x62, read 0x35),
 // the streaming logger and the generator as a fractional square (0x153D, 0x69 / 0x6A, read 0x38; 0x6C / 0x6D, read
-// 0x39), the ADC encodes from PLL outputs through the pin registers (0x153E, no register change). No feature is
-// tested against the version word: the word read at boot decides only the mismatch flag; a mismatched scope answers
-// the F_BASIC commands and refuses the rest (pc_dispatch).
+// 0x39), the ADC encodes from PLL outputs through the pin registers (0x153E, no register change), both cores of a
+// chip captured at one instant (0x153F, 0x63 one stage per chip). No feature is tested against the version word: the
+// word read at boot decides only the mismatch flag; a mismatched scope answers the F_BASIC commands and refuses the
+// rest (pc_dispatch).
 
 void pc_variant_init(uint16_t version, pc_variant *v)
 {
@@ -1307,7 +1308,7 @@ static int h_set_trigger(pc_session *s, const uint8_t *req, uint32_t len, uint8_
 // trigger's registers take source, polarity (0x16) and level as SET_TRIGGER writes them; the extension registers are
 // written at once and the hold-off clear is requested for the next arm (pc_hal_trig_ext_write). Response: the
 // GET_TRIGGER body. SET_TRIGGER stays for the edge type's fields, the geometry and the mode. Runt / window / range /
-// both cores (planned for a later bitstream, not 0x153E) are refused: one bitstream per firmware, no reserved
+// both cores (planned for a later bitstream, not 0x153F) are refused: one bitstream per firmware, no reserved
 // behaviour.
 
 static int h_set_trigger2(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
@@ -2717,8 +2718,8 @@ void pc_cal_body(int ch, uint8_t *resp)
   }
 
   //1.28 (fw-capmetric): the channel's last capture stage training since boot (cap_stage.h "Quiet stages"): 364 flags
-  //(PC_CAPT_*), 365 / 366 the quiet sets of core A / B after the tie pass, 367 0, then per core A, B and stage 2..5 the
-  //u32 residual metric q (368, 384) and the u32 0x36 sums (400, 416)
+  //(PC_CAPT_*), 365 / 366 the sets of core A / B after the tie pass (fw-153f: both the chip's, quiet on both cores),
+  //367 0, then per core A, B and stage 2..5 the u32 residual metric q (368, 384) and the u32 0x36 sums (400, 416)
   {
     pc_hw_cap_train ct;
     uint32_t        k, s;
