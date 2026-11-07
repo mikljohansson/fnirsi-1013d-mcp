@@ -15,6 +15,8 @@ published as pre-releases.
 ### Firmware
 
 - The ACQ chip reads "ACQ" / "Roll" in roll mode, the word the rest of the UI uses; it read "Long".
+- GET_TIMEBASE keeps a host's raw divider through a time/div snap: the FPGA's divider, not the UI table's, after a
+  SET_TRIGGER total the UI's time/div does not fit (MCP battery finding 3).
 
 ## [0.3.0] - 2026-11-07
 

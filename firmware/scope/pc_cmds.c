@@ -162,14 +162,17 @@ static void pc_settings_track(pc_session *s)
 {
   uint32_t fp;
 
-  //A raw divider (SET_TIMEBASE mode 1) holds until the UI selects a time base again
+  //A raw divider (SET_TIMEBASE mode 1) holds until the UI selects a time base again, which writes the UI table's divider
+  //to the FPGA. A time/div snap (acq_view_fit, after a SET_TRIGGER total the time/div does not fit) moves the UI's index
+  //and writes no 0x0D: the raw divider still runs (battery finding 3, 2026-11-06)
   if(s->tb_raw)
   {
     pc_hw_timebase tb;
+    uint32_t       held = pc_hal_divider_now();
 
     pc_hal_timebase_read(&tb);
 
-    if((tb.timeperdiv != s->tb_raw_tpd) || (tb.samplerate != s->tb_raw_sr))
+    if((held == tb.divider) && ((held != s->tb_divider) || (tb.timeperdiv != s->tb_raw_tpd) || (tb.samplerate != s->tb_raw_sr)))
       s->tb_raw = 0;
   }
 
@@ -205,8 +208,8 @@ static uint32_t pc_cap_words(const pc_capture *c, uint32_t samples)
 
 //Decimation filter configuration an arm with the current settings and total samples writes (k = 0 without the cap).
 //fw 0.2.87: at the divider the FPGA holds, not the session's raw divider or the UI table: a UI time/div snap writes no
-//0x0D and clears tb_raw (pc_settings_track), and an N (shift) for the UI's rate on a raw 4095 saturated every word
-//(fpga/al3/AGENTS.md "First-record saturation"). tb_raw only decides what GET_TIMEBASE reports.
+//0x0D, and an N (shift) for the UI's rate on a raw 4095 saturated every word (fpga/al3/AGENTS.md "First-record
+//saturation"). tb_raw only decides what GET_TIMEBASE reports.
 static void pc_decim_next(pc_session *s, uint32_t total, pc_decim_cfg *c)
 {
   uint8_t set = pc_hal_decim_setting();
@@ -559,7 +562,7 @@ static uint32_t pc_timebase_body(pc_session *s, uint8_t *p)
   {
     t.timeperdiv = 0xFF;
     t.samplerate = 0xFF;
-    t.divider    = s->tb_divider;
+    t.divider    = pc_hal_divider_now();
   }
 
   //1.9: with the decimation filter on the output period is N x 5 ns, N = 2 * (floor(D / 2) + 1) (equal for odd D)
