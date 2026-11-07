@@ -188,3 +188,17 @@ def test_sweep_needs_no_poll_when_set_gen_says_taken(sim):
         assert st["pending_polls"] == 0, st
     finally:
         s.close()
+
+
+def test_simulator_clock_resolves_the_generator_commit():
+    """The commit is pending for 15 ns. time.monotonic on Windows before Python 3.13 ticks every 15.6 ms, so a SET_GEN
+    answer read pending there (CI, windows-latest py3.12, 2026-11-07): the simulator's default clock is perf_counter."""
+    import inspect
+    import time
+
+    from fnirsi1013d import simulator
+
+    cls = next(c for _, c in inspect.getmembers(simulator, inspect.isclass)
+               if c.__module__ == simulator.__name__ and "clock" in inspect.signature(c.__init__).parameters)
+    assert inspect.signature(cls.__init__).parameters["clock"].default is time.perf_counter
+    assert time.get_clock_info("perf_counter").resolution < 1e-6

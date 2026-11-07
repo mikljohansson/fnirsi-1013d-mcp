@@ -2027,3 +2027,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   0x153F: no notice, no first-run screen, stored stages trained on 0x153F in effect, 0 flagged of 885. **30-minute soak**
   (`backups/encphase/soak_0x153F_20261107b.log`): 17897 requests, **0 failures, 0 drops**, latency median 1.1 ms, p99 3.1 ms.
   The four drops of 2026-11-06 14:20 did not recur in two later soaks; cause not found, listed as a known issue.
+- 2026-11-07 12:31-12:45 (lead): release commit 9bf1ce2, image 727745b0 (`backups/fw-0.3.0_727745b0_9bf1ce2.bin`), FEL-loaded: `#VER`
+  fw=0.3.0, fpga=0x153f; **`fnirsi1013d-battery`: 201 PASS, 0 FAIL, 1 SKIP** (`backups/battery-0.3.0/tool-run3-release/`). Main
+  pushed (121 commits). CI built the same image hash; one job failed, mcp windows-latest py3.12: the simulator's 15 ns
+  generator commit against time.monotonic's 15.6 ms tick there (simulator only). Fixed by the simulator's default clock;
+  the tag goes on that commit, whose image differs from 727745b0 only in the build identity.

@@ -877,7 +877,7 @@ class Deferred:
 class Device:
     """The protocol state machine of the scope firmware plus a model of the FPGA."""
 
-    def __init__(self, cfg: SimConfig | None = None, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, cfg: SimConfig | None = None, clock: Callable[[], float] = time.perf_counter):
         self.cfg = cfg or SimConfig()
         if self.cfg.variant not in VARIANT_NAMES:
             raise ValueError(f"variant {self.cfg.variant!r}: the firmware supports one bitstream, use 'al3' and "
