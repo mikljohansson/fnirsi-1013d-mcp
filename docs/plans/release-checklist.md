@@ -65,7 +65,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 - [x] 0x153E flashed on the maintainer's unit (owner at the bench, 2026-11-06 14:00-14:04): pre-write double read equal
       (aa252fb7...), written (the first pass failed its verify, the second verified), independently read back equal to
       the padded image's hash 2782e1b6...; `docs/hardware-status.md` entry of that time.
-- [ ] 0x153E benched on the firmware that expects it (superseded by the 0x153F boxes above; left open for its soak, whose
+- [x] 0x153E benched on the firmware that expects it (closed 2026-11-07, never released; superseded by the 0x153F boxes above; left open for its soak, whose
       first run had the 4 drops): cold boot with no mismatch notice, encode self-check 0 bad, capture
       self-check 0 flagged, the firmware asks for a calibration and the wizard completes (stages trained), CH2 code
       errors at 2 and 200 MSa/s with the sweep (`fpga/al3/tools`), counter, a logger run, soak. Proof: the hardware-status
@@ -182,5 +182,5 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 - [x] `git tag -a v0.3.0 -m "fnirsi-1013d-mcp 0.3.0"`, `git push origin v0.3.0`, `release.yml` green. (2026-11-07, ab93c0d.)
 - [x] FEL check of the attached image (`docs/releasing.md` section 4): read-back identical, `#VER fw=0.3.0 (2026-11-07, on the rc asset, the same image as the tag's.)`, build hash
       equals `git rev-parse --short=8 v0.3.0`; noted in `docs/hardware-status.md`.
-- [ ] `docs/releasing.md` section 7: the two open boxes ticked.
+- [x] `docs/releasing.md` section 7: the two open boxes ticked (2026-11-07: both shown by the rc1 and v0.3.0 runs of `release.yml`).
 - [ ] Announcement posted once (EEVblog thread, the repository, the subreddits in the draft).

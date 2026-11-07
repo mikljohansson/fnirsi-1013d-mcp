@@ -353,7 +353,7 @@ Found and fixed on the first day:
 
 After the first tag, `v0.3.0`:
 
-- [ ] `release.yml` downloads the `firmware-image` artifact that was uploaded inside the called
+- [x] `release.yml` downloads the `firmware-image` artifact that was uploaded inside the called
       `ci.yml`. The artifact exists on every CI run, about 225 KB zipped.
-- [ ] `gh release create` succeeds with the job-level `contents: write` while the repository default
+- [x] `gh release create` succeeds with the job-level `contents: write` while the repository default
       is read.
