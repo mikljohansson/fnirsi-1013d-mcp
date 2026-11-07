@@ -1943,3 +1943,24 @@ Newest entries at the bottom. Format: date, who, what, result.
   0.1 dB / 0.5 degree below 40 kHz; the sweep step without a poll per step passed. An earlier attempt at 19:22 found the
   scope switched off and printed 199 FAIL lines: the tool now asks scope_info first and stops with one message.
   To revisit once 0x153F is flashed: whether the new period check is too strict on clean data.
+- 2026-11-07 05:45 (lead, overnight, no hardware): **0x153F built, reviewed and merged; ready to flash.** fpga-153f (Fable,
+  8 h): both cores of a chip captured at one instant (`cap_h`, 12.5 ns after each write-clock rising edge; full rate: the
+  pins at R - 2.5 x stage for the chip's stage, 0x63 bits 2:0 / 8:6; divided rates: R + 2.5 ns whatever the stage), the
+  B fields and bits 13:12 dead, power-on 0x06DB; a testbench AD9288 model that reproduces all 23 measured cells on
+  0x153E's RTL and fails strict order there; 0x153F passes it; every clock closed (clk_200MHz 4.789 ns), pads unchanged.
+  Its run.sh left tb_fir 4242 and tb_seg 12345 failing in one window each, called artefacts; an independent review
+  (fpga-153f-review, Fable, 3.5 h) root-caused both as testbench defects: the stimulus had drifted onto the write clock's
+  SIM-only 1 ps instant (4789 coincident strobes; one 0x01 write seen a cycle apart by the design and the 0x1535
+  reference), and tb_fir wrote the 0x1534 reference's core-swap bit (0x53 bit 2) in a compared phase. With the stimulus
+  re-gridded and the bit kept out of the compared phases: **tb/run.sh 18 steps ALL PASS on seeds 12345 (8307 s) and 4242
+  (7558 s), RTL untouched**; the design audit found no fault (trigger / 0x14 / 0x18 invariant, the EXT shift claim
+  rederived). Raw `e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0`, **flash image
+  `d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc`** (`backups/al3_0x153F_e581a67f_padded.bin`,
+  `backups/dist-0x153F/`), manifest `unbenched`, 0x153E `recommended` until the bench. fw-153f (Opus): the firmware, the
+  simulator and the protocol docs expect 0x153F; stages trained per chip (the intersection of both cores' quiet sets),
+  the guard chip-wise, the reference pass gone, EXT legacy shift 12 samples at dividers 0..3 (its own commit 72af746).
+  Merges 7f4ed8e (fpga) and 53da95a (fw); on main: host tests, the three builds, mcp pytest 559, ruff, vectors and
+  `bitstreams.py check` pass; `check --release` fails by design (recommended 0x153E, firmware 0x153F). Bench image
+  `backups/fw-0.2.105_1d36d9b5_53da95a-expects-0x153F.bin` (GCC 10 of 53da95a, sha256
+  1d36d9b52e9b88be7b61c92009ba946c78fca8308d715820eb834796b0dfbcbd). Next: the owner's J2 session per fpga/al3/AGENTS.md
+  "(b) Coordinator's bench list" and firmware/AGENTS.md section 97; then the release docs move from 0x153E to 0x153F.
