@@ -9,7 +9,7 @@
 #include "cap_stage.h"
 
 void     fpga_capture_init(void);                    //pc_glue_init on the built-for bitstream: 0x64 = 8, 0x63 = the stored
-                                                     //value or 0x08E4; until then (a mismatch) nothing touches 0x63
+                                                     //value or CS_PO; until then (a mismatch) nothing touches 0x63
 void     fpga_capture_loaded(const uint8_t *sector); //calibration load: the trailer at sector 708 byte 488 (applied)
 void     fpga_capture_save(uint8_t *sector);         //calibration save: the trailer back (a valid one only)
 void     fpga_capture_write(uint16_t v);             //0x63 = v (after fpga_capture_init only)

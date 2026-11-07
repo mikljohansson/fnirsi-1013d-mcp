@@ -370,11 +370,11 @@ static void test_zero_fail_note(void)
   rc[1] = ACAL_E_READOUT;
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
-  cw_cap_result(&w, 0, CW_C_DONE, 0x08E4, 0);
-  cw_cap_result(&w, 1, CW_C_FAIL, 0x08E4, 0x0C);
+  cw_cap_result(&w, 0, CW_C_DONE, 0x06DB, 0);
+  cw_cap_result(&w, 1, CW_C_FAIL, 0x06DB, 0x0C);
   cw_zero_result(&w, rc, match_ok);
   cw_zero_note(&w, 0, t);
-  T_STR(t, "Capture stages: CH1 A4 B4");
+  T_STR(t, "Capture stages: CH1 A3 B3");
   cw_zero_note(&w, 1, t);
   T_STR(t, "Capture stages: no clean stage for CH2 A, CH2 B");
   T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
@@ -382,7 +382,7 @@ static void test_zero_fail_note(void)
   T_STR(t, "CH2: ADC readout fault near code 128: power-cycle and retry; report it if it persists");
 
   //fw-capmetric2: a training over the noise bound (CS_E_RESID) names the cores the same way, with its own words
-  cw_cap_result(&w, 1, CW_C_NOISY, 0x08E4, 0x0C);
+  cw_cap_result(&w, 1, CW_C_NOISY, 0x06DB, 0x0C);
   cw_zero_note(&w, 1, t);
   T_STR(t, "Capture stages: data too noisy for CH2 A, CH2 B");
   T_TRUE(ui_text_width(&font_2, t) <= RESULT_W);
@@ -392,12 +392,12 @@ static void test_zero_fail_note(void)
   ev(&w, CW_EV_CALIBRATE);
   take(&w);
   cw_cap_result(&w, 0, CW_C_NONE, 0, 0);
-  cw_cap_result(&w, 1, CW_C_DONE, 0x08E4 | 0x2000, 0);
+  cw_cap_result(&w, 1, CW_C_DONE, 0x091B, 0);   //fw-153f: CH2 at stage 4 on both cores (one stage per chip)
   cw_zero_result(&w, rc, match_ok);
   cw_zero_note(&w, 0, t);
   T_STR(t, "");
   cw_zero_note(&w, 1, t);
-  T_STR(t, "Capture stages: CH2 A3 B4 A-clk");
+  T_STR(t, "Capture stages: CH2 A4 B4");
 
   //fw 0.2.81: the band training's result on the owner's unit (CH1 A4 garbles at codes 127..135): 0x08E3
   rc[0] = rc[1] = ACAL_OK;

@@ -1,16 +1,21 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// cap_stage.h - FPGA 0x153A ADC capture stages: training, self-check, the stored value (fw 0.2.79, firmware/AGENTS.md
-// section 54; fpga/al3/README.md "Changes" section 10, docs/protocol.md 5.1). Pure C, no globals, host-buildable
-// (host_tests/test_cap_stage.c); the target glue is cap_hw.c.
+// cap_stage.h - FPGA 0x153A+ ADC capture stages: training, self-check, the stored value (fw 0.2.79, firmware/AGENTS.md
+// sections 54 and 97; fpga/al3/README.md "Changes" sections 10 and 22, docs/protocol.md 5.1). Pure C, no globals,
+// host-buildable (host_tests/test_cap_stage.c); the target glue is cap_hw.c.
 //
-// 0x153A samples every ADC pin in an IOB register on the 200 MHz clock and takes, per core, one of six 2.5 ns stages
-// against the write clock edge that core is encoded on. Write 0x63 (two bytes, high first): bits 2:0 CH1 A, 5:3 CH1 B,
-// 8:6 CH2 A, 11:9 CH2 B stage; bit 12 / 13 = CH1 B / CH2 B timed by the chip's A encode (AD9288 data-align mode).
-// Power-on 0x08E4. Write 0x64: outlier threshold, power-on 8 codes. Read 0x36 (10 bytes): the 0x63 value, then 16-bit
-// outlier counts CH1 A, CH1 B, CH2 A, CH2 B (words whose sample differs from the core's previous word by more than the
-// threshold, counted while the capture writes, cleared by 0x01 = 1). 0x63 is a plain register (zaklad.v cap_sel_x): it
-// keeps its value over sampling resets, so it is written at boot (a FEL load leaves the FPGA as it was) and after a
-// training only.
+// 0x153A samples every ADC pin in an IOB register on the 200 MHz clock and takes one of six 2.5 ns stages against the
+// write clock edge. 0x153A..0x153E took one stage per core; since 0x153F (fpga-153f, README section 22: the AD9288s
+// release both output buses of a chip after the same edge, so per-core instants paired the cores one conversion apart
+// at most dividers) both cores of a chip are captured at one instant, the chip's stage, used at full rate only (divider
+// 0, any filter, peak detect; at the divided rates the instant is fixed). Write 0x63 (two bytes, high first): bits 2:0
+// CH1, 8:6 CH2 stage (both cores of the chip). Bits 5:3 and 11:9 (the old B fields) and 13:12 (the old B reference
+// bits) select nothing; they are stored and read back through 0x36. The firmware writes the chip's stage into the B
+// field too (cs_with_chip), so cs_stage of a B core, the texts "CH1 A3 B3" and the per-core GET_CAL / GET_HEALTH
+// fields read the chip's stage, and bits 15:12 = 0 (CS_MASK). Power-on 0x06DB (stage 3 on both chips). Write 0x64:
+// outlier threshold, power-on 8 codes. Read 0x36 (10 bytes): the 0x63 value, then 16-bit outlier counts CH1 A, CH1 B,
+// CH2 A, CH2 B (still per core: words whose sample differs from the core's previous word by more than the threshold,
+// counted while the capture writes, cleared by 0x01 = 1). 0x63 is a plain register (zaklad.v cap_sel_x): it keeps its
+// value over sampling resets, so it is written at boot (a FEL load leaves the FPGA as it was) and after a training only.
 //
 // Training (the calibration wizard's zero step; fw 0.2.81 band training, fw 0.2.105 denser band and tie pass): the quiet
 // input is parked by the offset PWM at CS_BAND_POINTS codes where many bits flip (the carries since fw-capmetric, below;
@@ -35,46 +40,56 @@
 // stage-independent error (the ADC's own, class b of the sweep) raises every stage's q alike and changes nothing. The
 // tie pass is unchanged (0x36 counts at codes 126, 128, 130).
 //
+// Per chip (fw-153f): cs_pass captures both cores of a trained chip at stage s, the sums, q and the quiet sets stay per
+// core (GET_CAL 364..431), and the chip's set is the intersection quiet[A] & quiet[B]: a stage is usable when both
+// cores are quiet at it. Pick, tie pass, the stored set (both cores hold the chip's set) and the guard run on it. A chip
+// with no common quiet stage fails the training (CS_E_DIRTY; t->bad: the cores without a quiet stage of their own, or
+// both when each has some and none is shared). The reference pass (a B core with no clean stage measured again with
+// its chip's bit 12 / 13) is gone with the B timing it selected.
+//
 // Noise bound (fw-capmetric2): the quiet rule is relative, so data that are wrong alike at every stage (bench
-// 2026-10-22 17:20: the residual read stale ring words, q16 about 43000 per capture on the A cores and 240..265 on the B
-// cores, flat over the stages) passed it. A trained core's best outlier-clean stage (the timing in use: own encode, or the
-// reference pass) must score at most CS_RESID_MAX_Q16 per capture, else the training fails with CS_E_RESID (nothing
-// stored, the wizard says so). For noise of sigma codes rms the median-3 residual gives q16 = 16 E / N of about
-// 12.8 sigma^2 (simulated, 8-bit rounding, sigma >= 1; 5.1 at 0.5): the zero step's full-rate limit, 3 codes rms
-// (ACAL_MAX_NOISE16_FULL), is 115, and 128 is sigma = 3.2. Bench (capwin sweep, 200 MSa/s): 3.8..3.9 at CH1's clean
-// stages, 18..19 at CH2 B's (1.1 codes rms), so a working unit stays 7x below it.
+// 2026-10-22 17:20: the residual read stale ring words, q16 about 43000 per capture on the A cores and 240..265 on the
+// B cores, flat over the stages) passed it. A trained core's best outlier-clean stage must score at most
+// CS_RESID_MAX_Q16 per capture, else the training fails with CS_E_RESID (nothing stored, the wizard says so). For noise
+// of sigma codes rms the median-3 residual gives q16 = 16 E / N of about 12.8 sigma^2 (simulated, 8-bit rounding, sigma
+// >= 1; 5.1 at 0.5): the zero step's full-rate limit, 3 codes rms (ACAL_MAX_NOISE16_FULL), is 115, and 128 is sigma =
+// 3.2. Bench (capwin sweep, 200 MSa/s): 3.8..3.9 at CH1's clean stages, 18..19 at CH2 B's (1.1 codes rms), so a working
+// unit stays 7x below it.
 //
-// Pick (cs_pick, fw 0.2.105): per core, among its clean stages, the one with the highest score: the width of its run of
-// adjacent clean stages, then 3 or 4 before a reserve (2, 5), then the distance to the nearer end of its run. A run of
-// odd width has one centre. A run of even width has two centres with the same score, and the power-on stage is no
-// tie-break any more (0.2.81 took it, and the power-on CH1 A4 was the stage that garbled). "The centre whose outer
-// neighbour is clean too" cannot separate them on a widest run: in a run of 4 both outer neighbours (2, 5) are clean, in
-// a run of 2 both are outside the run (dirty or untried). So evidence decides, the tie pass: every core whose pick is
-// such a tie (cs_tie: the two stages) is captured CS_TIE_REPS more times at each of the two stages at the band's
-// CS_TIE_POINTS centre points (codes 126, 128, 130, where 0x7F / 0x80 flips every bit; the cores without a tie at their
-// pick meanwhile), and a stage that counts there is dirty: the pick is made again on the smaller clean set. When both
-// stay clean the lower stage is taken (the earlier sample; the only stage seen to garble beside clean ones on this
-// design was the upper centre, CH1 A4, on 0x153A and 0x153D: inference from one unit). 2..5 clean -> 3 unless 3 counts
-// in the tie pass; {2,3,5} -> 3, {2,3,4} -> 3, {3,4,5} -> 4, {3,4} -> 3, {4,5} -> 4, {2,5} -> 2.
+// Pick (cs_pick, fw 0.2.105): per chip since 0x153F, among its clean stages, the one with the highest score: the width
+// of its run of adjacent clean stages, then 3 or 4 before a reserve (2, 5), then the distance to the nearer end of its
+// run. A run of odd width has one centre. A run of even width has two centres with the same score, and the power-on
+// stage is no tie-break any more (0.2.81 took it, and the power-on CH1 A4 was the stage that garbled). "The centre
+// whose outer neighbour is clean too" cannot separate them on a widest run: in a run of 4 both outer neighbours (2, 5)
+// are clean, in a run of 2 both are outside the run (dirty or untried). So evidence decides, the tie pass: every chip
+// whose pick is such a tie (cs_tie: the two stages) is captured CS_TIE_REPS more times at each of the two stages at the
+// band's CS_TIE_POINTS centre points (codes 126, 128, 130, where 0x7F / 0x80 flips every bit; the chips without a tie
+// at their pick meanwhile), and a stage that counts there on either core is dirty for the chip: the pick is made again
+// on the smaller clean set. When both stay clean the lower stage is taken (the earlier sample; the only stage seen to
+// garble beside clean ones on this design was the upper centre, CH1 A4, on 0x153A and 0x153D: inference from one unit).
+// 2..5 clean -> 3 unless 3 counts in the tie pass; {2,3,5} -> 3, {2,3,4} -> 3, {3,4,5} -> 4, {3,4} -> 3, {4,5} -> 4,
+// {2,5} -> 2.
 //
-// A B core with no clean stage is measured again with its chip's reference bit set (A-encode timing); a core with no
-// clean stage at all fails the training (fail fast: the wizard says "ADC readout fault near code 128" and nothing is
-// stored). The clean set of the timing in use (cs_train.set, after the tie pass) is stored with the value (cs_ext_*): it
-// bounds the runtime guard.
+// A chip with no common clean stage fails the training (fail fast: the wizard names the cores and nothing is stored).
+// The chip's set (cs_train.set, both cores, after the tie pass) is stored with the value (cs_ext_*): it bounds the
+// runtime guard.
 //
 // Self-check after full-rate captures: a signal moves both cores of a chip alike (they sample the same input 5 ns apart),
-// a core captured inside its transition counts alone. cs_excess = a core's count minus its chip partner's; above
+// a core captured inside its transition counts alone. 0x153F: a chip stage inside a transition both buses share garbles
+// both cores alike, which this rule does not flag (the training's absolute counts and q catch it); one core's own errors
+// beside its clean stage (README section 18) still flag. cs_excess = a core's count minus its chip partner's; above
 // CS_EXCESS_LIMIT the core is flagged (Diagnostics, GET_HEALTH, event 23). Inference, not benched: a large signal near
 // 100 MHz could make the cores' counts differ by itself.
 //
 // Runtime guard (fw 0.2.105, cs_guard; cap_hw.c): every full-rate capture (200 MSa/s, any filter, peak detect) and the
-// counter need all four cores clean, so a stage the quiet training passed but a real signal garbles cannot wait
-// for the next calibration. A core flagged in CS_REPEAT_N captures within CS_REPEAT_MS (cs_watch) while the trained value
-// of this bitstream is in effect and its stored clean set is known is moved, at most once per boot: its stage is removed
-// from the stored clean set and cs_pick chooses again from what is left. So it never leaves the trained set, and the set
-// only shrinks: it cannot oscillate, also not over boots. The new value is written to 0x63, stored in sector 708 at once
-// (MAIN context, fpga_capture_service) and logged (event 23 a = 0x20 | the moved cores, b = the new value). A core with
-// nothing left keeps its stage and asks for Calibrate (REPEAT) as before.
+// counter need all four cores clean, so a stage the quiet training passed but a real signal garbles cannot wait for the
+// next calibration. A core flagged in CS_REPEAT_N captures within CS_REPEAT_MS (cs_watch) while the trained value of
+// this bitstream is in effect and its stored clean set is known moves its chip, at most once per boot: the chip's stage
+// is removed from the stored set (both cores) and cs_pick chooses again from what is left. So it never leaves the
+// trained set, and the set only shrinks: it cannot oscillate, also not over boots. The new value is written to 0x63,
+// stored in sector 708 at once (MAIN context, fpga_capture_service) and logged (event 23 a = 0x20 | the moved cores:
+// both of the chip, b = the new value). A chip with nothing left keeps its stage and asks for Calibrate (REPEAT) as
+// before.
 //
 // Ownership (fw-guardfix, bench 2026-10-22): the self-check reads the 0x63 value the FPGA holds with the counts (0x36's
 // first two bytes). A capture taken at a value the firmware did not write (DEBUG_FPGA: fpga/al3/tools/capwin_sweep.py,
@@ -88,14 +103,13 @@
 
 #include <stdint.h>
 
-#define CS_PO             0x08E4      //0x63 at power-on: CH1 A 4, CH1 B 4, CH2 A 3, CH2 B 4, B by its own encode
+#define CS_PO             0x06DB      //0x63 at power-on (0x153F): stage 3 on both chips, the B fields 3 too
 #define CS_THR_PO         8           //0x64 at power-on (codes)
 #define CS_THR_USE        32          //0x64 as the firmware writes it: CH2's analog noise at range 0 near code 128 is
                                       //about 3 codes rms and saturates the counters at 8; 16..48 all read 0 on a clean
                                       //stage and hundreds on a bad one (bench 2026-10-20 10:14)
-#define CS_REF_CH1B       0x1000      //0x63 bit 12
-#define CS_REF_CH2B       0x2000      //0x63 bit 13
-#define CS_MASK           0x3FFF
+#define CS_MASK           0x0FFF      //0x63 as the firmware writes and compares it (bits 15:12 select nothing, written 0)
+#define CS_TRAILER_MASK   0x3FFF      //the stored trailer's value field (0x153A..0x153E's reference bits: format only)
 #define CS_CORES          4           //0 CH1 A, 1 CH1 B, 2 CH2 A, 3 CH2 B (the 0x36 order)
 #define CS_STAGE_MIN      2           //stages tried: 3 and 4 are the allowed pair, 2 and 5 the reserves
 #define CS_STAGE_MAX      5
@@ -115,11 +129,11 @@
 #define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
 #define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner
 
-//Stage of core (CS_CORES order) in a 0x63 value, and the value with it replaced
+//Stage of core (CS_CORES order) in a 0x63 value, and the value with it replaced (one field); cs_with_chip: both fields
+//of chip ch (0 CH1, 1 CH2), as the firmware writes every value since 0x153F
 uint8_t  cs_stage(uint16_t v, uint32_t core);
 uint16_t cs_with(uint16_t v, uint32_t core, uint8_t stage);
-//The reference bit of a B core (1 CH1 B, 3 CH2 B), 0 for an A core
-uint16_t cs_ref_bit(uint32_t core);
+uint16_t cs_with_chip(uint16_t v, uint32_t ch, uint8_t stage);
 
 //The stage for one core from its clean stages (bit s = stage s summed 0 outliers): the widest run of clean stages, then
 //3 or 4 before a reserve, then the distance to the nearer end of the run, then the lower stage. CS_NONE without a clean
@@ -161,7 +175,7 @@ typedef struct
 } cs_io;
 
 #define CS_OK             0
-#define CS_E_DIRTY        1           //a core has no clean stage (t->bad says which)
+#define CS_E_DIRTY        1           //a chip has no stage clean on both cores (t->bad says which cores)
 #define CS_E_IO           2           //a capture did not complete
 #define CS_E_RESID        3           //fw-capmetric2: a core's best stage is noisier than a quiet input can be (t->bad)
 
@@ -169,24 +183,21 @@ typedef struct
 {
   uint16_t start;                     //0x63 value before the training
   uint16_t value;                     //the result (= start unless CS_OK)
-  uint8_t  cores;                     //cores trained (bit i = core i)
-  uint8_t  clean[CS_CORES];           //bit s: stage s counted 0 outliers with the own-encode timing
-  uint8_t  clean_ref[CS_CORES];       //B cores measured again with the reference bit: bit s clean
-  uint8_t  quiet[CS_CORES];           //fw-capmetric: bit s: stage s quiet (cs_quiet), own-encode timing
-  uint8_t  quiet_ref[CS_CORES];       //the same for the reference pass
-  uint8_t  ref;                       //cores measured in the reference pass
-  uint8_t  bad;                       //cores without a quiet stage (CS_E_DIRTY) or over the noise bound (CS_E_RESID)
+  uint8_t  cores;                     //cores trained (bit i = core i; whole chips: 0x03, 0x0C)
+  uint8_t  clean[CS_CORES];           //bit s: the core counted 0 outliers with its chip at stage s
+  uint8_t  quiet[CS_CORES];           //fw-capmetric: bit s: stage s quiet for the core (cs_quiet)
+  uint8_t  bad;                       //cores of a chip without a common quiet stage (CS_E_DIRTY), over the noise
+                                      //bound (CS_E_RESID)
   uint16_t captures;                  //captures taken
-  uint32_t sum[CS_CORES][CS_STAGES];      //0x36 counts summed over the band, own-encode timing (index s - CS_STAGE_MIN)
-  uint32_t sum_ref[CS_CORES][CS_STAGES];  //the same for the reference pass (its B cores only)
-  uint32_t q[CS_CORES][CS_STAGES];        //fw-capmetric: sum of E / CS_RESID_DIV over the band, own-encode timing
-  uint32_t q_ref[CS_CORES][CS_STAGES];    //the same for the reference pass
-  uint8_t  tie[CS_CORES];             //tie pass: the two stages measured (bits; 0 = no tie)
-  uint32_t tie_sum[CS_CORES][2];      //their counts summed, lower stage first
-  uint8_t  set[CS_CORES];             //the quiet stages of the timing in use after the tie pass (the guard's bound)
+  uint32_t sum[CS_CORES][CS_STAGES];  //0x36 counts summed over the band (index s - CS_STAGE_MIN)
+  uint32_t q[CS_CORES][CS_STAGES];    //fw-capmetric: sum of E / CS_RESID_DIV over the band
+  uint8_t  tie[CS_CORES];             //tie pass: the chip's two stages measured (bits, both cores; 0 = no tie)
+  uint32_t tie_sum[CS_CORES][2];      //their counts summed per core, lower stage first
+  uint8_t  set[CS_CORES];             //the chip's set after the tie pass, the same in both cores (the guard's bound)
 } cs_train;
 
-//Train the cores in mask cores (the parked channel: 0x03 CH1, 0x0C CH2); the others keep their value in start
+//Train the chips of the cores in mask cores (the parked channel: 0x03 CH1, 0x0C CH2; one core names its chip); the
+//other chip keeps its value in start
 int      cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t);
 
 //Self-check: per core the count minus its chip partner's (0 when below); the cores above CS_EXCESS_LIMIT as a mask
@@ -216,13 +227,14 @@ uint16_t cs_sets_pack(const uint8_t set[CS_CORES]);
 uint8_t  cs_sets_core(uint16_t sets, uint32_t core);    //as a cs_pick mask (bit s = stage s)
 uint16_t cs_sets_with(uint16_t sets, uint32_t core, uint8_t set);
 
-//Runtime guard: every core in cores whose stage in *value is in its clean set (in *sets) gets that stage removed from
-//the set and cs_pick's choice from the rest; a core with nothing left is not moved (its set unchanged). Returns the
-//cores moved; *value and *sets updated
+//Runtime guard (per chip since 0x153F): every chip with a core in cores whose stage in *value (core A's field) is in
+//its set (in *sets: both cores' sets in common) gets that stage removed from both cores' sets and cs_pick's choice from
+//the rest written into both fields; a chip with nothing left is not moved (its sets unchanged). Returns the cores moved
+//(both of a moved chip); *value and *sets updated
 uint8_t  cs_guard(uint16_t *value, uint16_t *sets, uint8_t cores);
 
-//Texts (no libc), each returns the pointer to its NUL: "CH1 A4 B4" (ch 0 / 1; "B4 A-clk" with the reference bit),
-//"CH1 A4 B4, CH2 A3 B4", the core name "CH2 A"
+//Texts (no libc), each returns the pointer to its NUL: "CH1 A3 B3" (ch 0 / 1; the two fields as stored, equal in
+//every value the firmware writes since 0x153F), "CH1 A3 B3, CH2 A3 B3", the core name "CH2 A"
 char    *cs_text_ch(char *p, uint16_t v, uint32_t ch);
 char    *cs_text(char *p, uint16_t v);
 char    *cs_core_name(char *p, uint32_t core);

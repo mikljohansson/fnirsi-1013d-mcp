@@ -1,6 +1,6 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// test_cap_stage.c - FPGA 0x153A capture stage training against a mock FPGA that garbles chosen stages, the self-check,
-// the texts and the sector 708 trailer (cap_stage.c, fw 0.2.79)
+// test_cap_stage.c - FPGA 0x153A+ capture stage training against a mock FPGA that garbles chosen stages, the self-check,
+// the texts and the sector 708 trailer (cap_stage.c, fw 0.2.79; one stage per chip since 0x153F, fw-153f)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include <stdio.h>
@@ -9,8 +9,10 @@
 #include "cap_stage.h"
 #include "adc_cal.h"
 
-//Mock FPGA: per core the stages (bit s) that sit in the data transition, with the own-encode and the A-encode timing.
-//A dirty core counts about every word of the capture, a clean one 0; a quiet input moves no core by itself. fw 0.2.81:
+//Mock FPGA 0x153F: per core the stages (bit s) that sit in its data transition. Both cores of a chip are captured at
+//the chip's stage, 0x63 bits 2:0 (CH1) / 8:6 (CH2): the B fields and bits 15:12 select nothing (the mock reads core A's
+//field for both cores). A dirty core counts about every word of the capture, a clean one 0; a quiet input moves no core
+//by itself. fw 0.2.81:
 //a stage at the edge of the transition (edge_stage) garbles only while the input is parked between edge_lo16 and
 //edge_hi16 (1/16 code) and then only in edge_pct % of the captures (deterministic: every capture adds edge_pct to an
 //accumulator, a capture garbles when it reaches 100), as CH1 A4 on the owner's unit (bench 2026-10-20: codes 127..135).
@@ -24,7 +26,6 @@
 typedef struct
 {
   uint8_t  dirty[CS_CORES];
-  uint8_t  dirty_ref[CS_CORES];
   uint8_t  edge_stage[CS_CORES];      //0 = none
   uint32_t edge_lo16[CS_CORES], edge_hi16[CS_CORES];
   uint32_t edge_pct;
@@ -97,16 +98,14 @@ static int mock_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CO
 
   for(k=0;k<CS_CORES;k++)
   {
-    uint8_t s     = cs_stage(v, k);
-    uint8_t dirty = (v & cs_ref_bit(k)) ? m->dirty_ref[k] : m->dirty[k];
+    uint8_t s = cs_stage(v, k & 2);   //the chip's field
 
     if(s > 5)
       s = 5;
 
-    cnt[k] = ((dirty >> s) & 1) ? 7900 : 0;
+    cnt[k] = ((m->dirty[k] >> s) & 1) ? 7900 : 0;
 
-    if(m->edge_stage[k] && (s == m->edge_stage[k]) && !(v & cs_ref_bit(k)) && (m->code16 >= m->edge_lo16[k]) &&
-       (m->code16 <= m->edge_hi16[k]))
+    if(m->edge_stage[k] && (s == m->edge_stage[k]) && (m->code16 >= m->edge_lo16[k]) && (m->code16 <= m->edge_hi16[k]))
     {
       m->edge_tries[k]++;
       m->edge_acc[k] += m->edge_pct;
@@ -122,13 +121,13 @@ static int mock_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CO
     if((resid & (1u << k)) && (s >= CS_STAGE_MIN) && m->e_fix[k][s - CS_STAGE_MIN])
       e[k] = m->e_fix[k][s - CS_STAGE_MIN];
     else if(resid & (1u << k))
-      e[k] = mock_resid(m, !(v & cs_ref_bit(k)) && ((m->mix[k] >> s) & 1));
+      e[k] = mock_resid(m, (m->mix[k] >> s) & 1);
   }
 
   return 0;
 }
 
-//Stages 0 and 1 are always in the transition (README section 10); the reference timing garbles every stage unless set
+//Stages 0 and 1 are always in the transition (README section 10)
 static void mock_init(mock_fpga *m)
 {
   uint32_t k;
@@ -136,23 +135,30 @@ static void mock_init(mock_fpga *m)
   memset(m, 0, sizeof(*m));
 
   for(k=0;k<CS_CORES;k++)
-  {
-    m->dirty[k]     = 0x03;
-    m->dirty_ref[k] = 0xFF;
-  }
+    m->dirty[k] = 0x03;
+}
+
+//A 0x63 value with stage a on CH1 and b on CH2 (both cores), as the firmware writes them since 0x153F
+static uint16_t chips(uint8_t a, uint8_t b)
+{
+  return cs_with_chip(cs_with_chip(0, 0, a), 1, b);
 }
 
 static void test_fields(void)
 {
-  T_EQ(cs_stage(CS_PO, 0), 4);
-  T_EQ(cs_stage(CS_PO, 1), 4);
+  //0x153F: power-on 0x06DB, stage 3 on both chips, the B fields alike
+  T_EQ(CS_PO, 0x06DB);
+  T_EQ(cs_stage(CS_PO, 0), 3);
+  T_EQ(cs_stage(CS_PO, 1), 3);
   T_EQ(cs_stage(CS_PO, 2), 3);
-  T_EQ(cs_stage(CS_PO, 3), 4);
-  T_EQ(cs_with(CS_PO, 2, 4), 0x0924);
+  T_EQ(cs_stage(CS_PO, 3), 3);
+  T_EQ(chips(3, 3), CS_PO);
+  T_EQ(cs_with(CS_PO, 2, 4), 0x071B);
   T_EQ(cs_with(0, 3, 7), 0x0E00);
-  T_EQ(cs_ref_bit(0), 0);
-  T_EQ(cs_ref_bit(1), 0x1000);
-  T_EQ(cs_ref_bit(3), 0x2000);
+  T_EQ(cs_with_chip(CS_PO, 1, 4), 0x091B);
+  T_EQ(cs_with_chip(0, 0, 5), 0x002D);
+  T_EQ(cs_with_chip(0x0FFF, 1, 2), 0x04BF);
+  T_EQ(CS_MASK, 0x0FFF);
 
   //cs_pick (fw 0.2.105): the middle of the widest clean run, 3 or 4 before a reserve, the lower of two equal centres
   //(no power-on tie-break); cs_tie names the two the tie pass measures
@@ -206,8 +212,8 @@ static void test_band_pwm(void)
 }
 
 //fw 0.2.81: the owner's unit (bench 2026-10-20 on 0x153A): CH1 A bad at 4 only at codes 127..135 (band points 127.5
-//and 135.5) in 30 % of the captures, CH1 B bad at 2, CH2 A clean, CH2 B bad at 2. The band training picks CH1 A3 B4,
-//CH2 A3 B4
+//and 135.5) in 30 % of the captures, CH1 B bad at 2, CH2 clean. fw-153f: one stage per chip, the stages quiet on both
+//cores: CH1 {3, 5} gives 3, CH2 2..5 a tie of 3 and 4, both clean in the tie pass: 3
 static void test_band(void)
 {
   mock_fpga m;
@@ -218,13 +224,12 @@ static void test_band(void)
 
   mock_init(&m);
   m.dirty[1]      = 0x07;
-  m.dirty[3]      = 0x07;
   m.edge_stage[0] = 4;
   m.edge_lo16[0]  = 127 * 16;
   m.edge_hi16[0]  = 136 * 16;
   m.edge_pct      = 30;
 
-  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(cs_train_run(&io, chips(4, 4), 0x03, &t), CS_OK);
   T_EQ(t.captures, CS_BAND_POINTS * 4 * CS_BAND_REPS);   //no tie: no tie pass
   T_EQ(m.parks, CS_BAND_POINTS);
   T_EQ(m.edge_tries[0], 2 * CS_BAND_REPS);               //two points
@@ -234,35 +239,35 @@ static void test_band(void)
   T_EQ(t.clean[1], 0x38);
   T_EQ(t.quiet[0], 0x2C);             //noise alone: every clean stage is quiet
   T_EQ(t.quiet[1], 0x38);
-  T_EQ(t.set[0], 0x2C);
+  T_EQ(t.set[0], 0x28);               //the chip's: {2, 3, 5} and {3, 4, 5} in common
+  T_EQ(t.set[1], 0x28);
   T_EQ(t.tie[0], 0);
   T_TRUE(t.sum[0][4 - CS_STAGE_MIN] > 0);
   T_EQ(t.sum[0][3 - CS_STAGE_MIN], 0);
   T_EQ(t.sum[1][2 - CS_STAGE_MIN], (uint32_t)7900 * CS_BAND_POINTS * CS_BAND_REPS);
-  T_EQ(cs_stage(t.value, 0), 3);
-  T_EQ(cs_stage(t.value, 1), 4);
+  T_EQ(t.value, chips(3, 4));         //CH2 as it was
   v = t.value;
 
-  //CH2 A clean at 2..5: a tie of 3 and 4, both clean in the tie pass: 3 (the power-on 3 by coincidence)
   T_EQ(cs_train_run(&io, v, 0x0C, &t), CS_OK);
   T_EQ(t.clean[2], 0x3C);
-  T_EQ(t.clean[3], 0x38);
+  T_EQ(t.clean[3], 0x3C);
   T_EQ(t.tie[2], 0x18);
-  T_EQ(t.tie[3], 0);
+  T_EQ(t.tie[3], 0x18);
   T_EQ(t.tie_sum[2][0], 0);
   T_EQ(t.tie_sum[2][1], 0);
+  T_EQ(t.tie_sum[3][1], 0);
   T_EQ(t.captures, CS_BAND_POINTS * 4 * CS_BAND_REPS + CS_TIE_POINTS * 2 * CS_TIE_REPS);
-  T_EQ(t.value, 0x08E3);
+  T_EQ(t.value, CS_PO);
 
   {
     char s[64];
 
     cs_text(s, t.value);
-    T_STR(s, "CH1 A3 B4, CH2 A3 B4");
+    T_STR(s, "CH1 A3 B3, CH2 A3 B3");
   }
 
   //0.2.79's training (one capture per stage at the parked code) on the same unit: the intermittent stage reads clean
-  //(2..5), but the pick no longer keeps the power-on 4
+  //(2..5) and is picked, the centre of the chip's {3, 4, 5}
   mock_init(&m);
   m.dirty[1]      = 0x07;
   m.edge_stage[0] = 4;
@@ -271,7 +276,8 @@ static void test_band(void)
   m.edge_pct      = 30;
   T_EQ(cs_train_run(&one, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.clean[0], 0x3C);             //A4 not seen
-  T_EQ(cs_stage(t.value, 0), 3);      //but no longer the power-on 4
+  T_EQ(cs_stage(t.value, 0), 4);
+  T_EQ(cs_stage(t.value, 1), 4);
 
   //A park that does not complete, a band without points: fail
   mock_init(&m);
@@ -293,7 +299,8 @@ static void test_band(void)
 //fw 0.2.105, bench 2026-10-22 on 0x153D: CH1 A4 garbles a real signal but only rarely the quiet input (here: 5 % of the
 //captures at codes 126..130). The band's tries there (one point, 127.5) see nothing (2..5 clean), the tie pass's 3 x 16
 //at 4 see it: 3. A mirror unit whose lower centre 3 is the weak one gets 4. The 0.2.81 band (6 points, 2 captures)
-//missed both
+//missed both. fw-153f: the tie is the chip's, measured with both cores at the candidate; a count on either core removes
+//it for both
 static void test_tie(void)
 {
   mock_fpga m;
@@ -313,9 +320,11 @@ static void test_tie(void)
   T_EQ(t.tie[1], 0x18);
   T_EQ(t.tie_sum[0][0], 0);
   T_TRUE(t.tie_sum[0][1] > 0);        //the tie pass: 4 garbled at least once in 3 x 16 tries
+  T_EQ(t.tie_sum[1][1], 0);           //core B clean at 4
   T_EQ(t.set[0], 0x2C);
+  T_EQ(t.set[1], 0x2C);               //4 left the chip's set
   T_EQ(cs_stage(t.value, 0), 3);
-  T_EQ(cs_stage(t.value, 1), 3);      //B: a clean tie, the lower
+  T_EQ(cs_stage(t.value, 1), 3);
   T_EQ(m.parks, CS_BAND_POINTS + CS_TIE_POINTS);
   T_EQ(m.code16, 126 * 16);           //the tie pass runs from 130 down to 126
   T_EQ(m.resid_reads, CS_BAND_POINTS * 4 * CS_BAND_REPS * 2);   //the tie pass reads no data
@@ -331,8 +340,22 @@ static void test_tie(void)
   T_EQ(t.tie_sum[0][1], 0);
   T_EQ(t.set[0], 0x34);
   T_EQ(cs_stage(t.value, 0), 4);
+  T_EQ(cs_stage(t.value, 1), 4);
 
-  //A weak stage the band pass already sees (50 %): no tie for that core, the other core's tie pass runs anyway
+  //The weak stage on core B (its own error beside its clean stage, as core A's on the unit): the chip moves alike
+  mock_init(&m);
+  m.edge_stage[1] = 4;
+  m.edge_lo16[1]  = 126 * 16;
+  m.edge_hi16[1]  = 130 * 16;
+  m.edge_pct      = 5;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.tie_sum[0][1], 0);
+  T_TRUE(t.tie_sum[1][1] > 0);
+  T_EQ(t.set[0], 0x2C);
+  T_EQ(t.set[1], 0x2C);
+  T_EQ(t.value, CS_PO);
+
+  //A weak stage the band pass already sees (50 %): 3 leaves the chip's set, {2, 4, 5} has no tie, no tie pass
   mock_init(&m);
   m.edge_stage[0] = 3;
   m.edge_lo16[0]  = 126 * 16;
@@ -341,7 +364,10 @@ static void test_tie(void)
   m.dirty[0]      = 0x03;
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.set[0], 0x34);               //3 already dirty in the band pass at 50 %: no tie
+  T_EQ(t.set[1], 0x34);
   T_EQ(t.tie[0], 0);
+  T_EQ(t.tie[1], 0);
+  T_EQ(t.captures, CS_BAND_POINTS * 4 * CS_BAND_REPS);
   T_EQ(cs_stage(t.value, 0), 4);
 
   //6 band points of 2 captures without a tie pass on the 5 % unit: 2..5 clean
@@ -409,7 +435,8 @@ static void test_resid(void)
 
 //fw-capmetric: cs_quiet on the bench sweep (fpga/al3/README.md section 18, 2026-10-22 11:23): q16 per stage 2..5 as
 //printed by capwin_sweep.py, times 34 (17 points x 2 captures: q is their sum), and the 0x36 sums of the sweep. The
-//quiet sets {3}, {3, 4, 5}, {3}, {3, 4, 5} give 0x08E3, the trained value, and drop CH1 A5 and CH2 A4
+//quiet sets {3}, {3, 4, 5}, {3}, {3, 4, 5} gave 0x08E3 per core, the trained value then, and drop CH1 A5 and CH2 A4;
+//per chip (fw-153f) they share {3}: 0x06DB
 static void test_quiet(void)
 {
   static const uint32_t q16x10[CS_CORES][CS_STAGES] =
@@ -420,18 +447,25 @@ static void test_quiet(void)
                                                       { 2462, 0, 0, 0 } };
   static const uint8_t quiet[CS_CORES] = { 0x08, 0x38, 0x08, 0x38 };
   uint32_t q[CS_STAGES], sum[CS_STAGES], k, i;
-  uint16_t v = 0;
+  uint16_t v = 0, vc = 0;
+  uint8_t  qs[CS_CORES];
 
   for(k=0;k<CS_CORES;k++)
   {
     for(i=0;i<CS_STAGES;i++)
       q[i] = q16x10[k][i] * 34 / 10;
 
-    T_EQ(cs_quiet(sums[k], q), quiet[k]);
-    v = cs_with(v, k, cs_pick(cs_quiet(sums[k], q)));
+    qs[k] = cs_quiet(sums[k], q);
+    T_EQ(qs[k], quiet[k]);
+    v = cs_with(v, k, cs_pick(qs[k]));
   }
 
   T_EQ(v, 0x08E3);
+
+  for(k=0;k<2;k++)
+    vc = cs_with_chip(vc, k, cs_pick((uint8_t)(qs[2 * k] & qs[2 * k + 1])));
+
+  T_EQ(vc, 0x06DB);
 
   //The outlier rule alone kept CH1 A5 (the sweep's 0x36 sums: {2, 3, 5}) and CH2 A2 ({2, 3})
   for(i=0;i<CS_STAGES;i++)
@@ -463,17 +497,17 @@ static void test_metric(void)
   cs_train  t;
   uint16_t  clean_v;
 
-  //A clean unit with the noise only: CH1 A3 B3 (2..5 quiet, the tie pass keeps both centres), as the outlier rule
+  //A clean unit with the noise only: CH1 3 (2..5 quiet, the tie pass keeps both centres), as the outlier rule
   mock_init(&m);
-  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(cs_train_run(&io, chips(4, 4), 0x03, &t), CS_OK);
   T_EQ(t.quiet[0], 0x3C);
   T_EQ(t.quiet[1], 0x3C);
   T_TRUE(t.q[0][0] > 0);              //the 0.5-code noise is scored
   clean_v = t.value;
-  T_EQ(clean_v, 0x08DB);
+  T_EQ(clean_v, chips(3, 4));
 
   //Class (a): CH1 A mixes codes at its carries at 3 and 5 (3 % of the samples at 8k), invisible to 0x36. The outlier
-  //rule keeps 2..5 (its pick 3, a mixing stage); the quiet rule keeps {2, 4} and picks 4. CH1 B as before
+  //rule keeps 2..5 (its pick 3, a mixing stage); the quiet rule keeps {2, 4} and picks 4 for the chip
   mock_init(&m);
   m.mix[0]  = 0x28;
   m.mix_pct = 3;
@@ -482,9 +516,21 @@ static void test_metric(void)
   T_EQ(cs_pick(t.clean[0]), 3);
   T_TRUE(t.q[0][3 - CS_STAGE_MIN] > 2 * t.q[0][4 - CS_STAGE_MIN]);
   T_EQ(t.quiet[0], 0x14);
+  T_EQ(t.quiet[1], 0x3C);
   T_EQ(t.set[0], 0x14);
+  T_EQ(t.set[1], 0x14);
   T_EQ(cs_stage(t.value, 0), 4);
-  T_EQ(cs_stage(t.value, 1), 3);
+  T_EQ(cs_stage(t.value, 1), 4);
+
+  //fw-153f: the same on core B only: core B's quiet set bounds the chip
+  mock_init(&m);
+  m.mix[1]  = 0x28;
+  m.mix_pct = 3;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
+  T_EQ(t.quiet[0], 0x3C);
+  T_EQ(t.quiet[1], 0x14);
+  T_EQ(t.set[0], 0x14);
+  T_EQ(t.value, chips(4, 3));
 
   //The bench's CH1 A: mixes at 2, 4 and 5, clean at 3 only
   mock_init(&m);
@@ -502,7 +548,7 @@ static void test_metric(void)
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.quiet[0], 0x3C);
   T_EQ(t.quiet[1], 0x3C);
-  T_EQ(t.value, clean_v);
+  T_EQ(t.value, CS_PO);
 
   mock_init(&m);
   m.floor_pct = 9;
@@ -511,17 +557,6 @@ static void test_metric(void)
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
   T_EQ(t.set[0], 0x14);
   T_EQ(cs_stage(t.value, 0), 4);
-
-  //The reference pass scores its B core too: CH2 B dirty with its own encode, clean at 2..5 with the A encode
-  mock_init(&m);
-  m.dirty[3]     = 0xFF;
-  m.dirty_ref[3] = 0x03;
-  T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_OK);
-  T_EQ(t.ref, 0x08);
-  T_EQ(t.quiet[3], 0);
-  T_EQ(t.quiet_ref[3], 0x3C);
-  T_TRUE(t.q_ref[3][0] > 0);
-  T_EQ(t.value & CS_REF_CH2B, CS_REF_CH2B);
 }
 
 //fw-capmetric2: the noise bound (cap_stage.h "Noise bound"). The bench of 2026-10-22 17:20 (0x153D fd0be7a2, fw 0.2.105
@@ -562,6 +597,7 @@ static void test_noise_bound(void)
   T_EQ(t.value, CS_PO);
   T_EQ(t.quiet[0], 0x2C);             //what the relative rule alone kept (the bench's [2, 3, 5])
   T_EQ(t.quiet[1], 0x38);
+  T_EQ(t.set[0], 0x28);               //a common stage exists: the bound decides
 
   //CH2: A with outliers at 4, B none
   mock_init(&m);
@@ -592,16 +628,13 @@ static void test_noise_bound(void)
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_RESID);
   T_EQ(t.bad, 0x01);
 
-  //The reference pass is the timing in use for a B core dirty with its own encode: its q is the one bounded
+  //Per core still: a B core at 300 per capture fails alone
   mock_init(&m);
-  m.dirty[3]     = 0xFF;
-  m.dirty_ref[3] = 0x03;
 
   for(i=0;i<CS_STAGES;i++)
     m.e_fix[3][i] = 300 * CS_RESID_DIV;
 
   T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_E_RESID);
-  T_EQ(t.ref, 0x08);
   T_EQ(t.bad, 0x08);
 
   //A clean unit at 3 codes rms (the zero step's full-rate noise limit) passes: q16 about 115 per capture (cap_stage.h)
@@ -646,74 +679,101 @@ static void test_train(void)
   cs_io     io = { &m, 1, 1, 0, mock_park, mock_measure };
   cs_train  t;
 
-  //All of 2..5 clean, no tie pass: 3 for both (not the power-on 4), four captures, the other channel untouched
+  //All of 2..5 clean, no tie pass: 3 for the chip (not the start's 4), four captures, the other channel untouched
   mock_init(&m);
-  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
-  T_EQ(t.value, 0x08DB);
+  T_EQ(cs_train_run(&io, chips(4, 4), 0x03, &t), CS_OK);
+  T_EQ(t.value, chips(3, 4));
   T_EQ(t.captures, 4);
   T_EQ(m.measures, 4);
   T_EQ(t.clean[0], 0x3C);
+  T_EQ(t.clean[1], 0x3C);
   T_EQ(t.clean[2], 0);                //not trained
-  T_EQ(cs_stage(m.last, 2), 3);       //CH2 kept its stages during CH1's training
+  T_EQ(cs_stage(m.last, 2), 4);       //CH2 kept its stages during CH1's training
   T_EQ(cs_stage(m.last, 3), 4);
+  T_EQ(cs_stage(m.last, 0), 5);       //the last band capture: both CH1 fields at 5
+  T_EQ(cs_stage(m.last, 1), 5);
 
-  //CH2 A garbles at 2 and 3 (window late): 4; CH2 B at 5: 3..4 with 2 clean beside 3: 3
+  //fw-153f, the intersection. CH2 A garbles at 2 and 3 (window late), CH2 B at 5: A {4, 5}, B {2, 3, 4}: 4 for both
   mock_init(&m);
   m.dirty[2] = 0x0F;
   m.dirty[3] = 0x23;
   T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_OK);
-  T_EQ(cs_stage(t.value, 2), 4);
-  T_EQ(cs_stage(t.value, 3), 3);
-  T_EQ(cs_stage(t.value, 0), 4);      //CH1 as it was
-  T_EQ(t.value & (CS_REF_CH1B | CS_REF_CH2B), 0);
+  T_EQ(t.quiet[2], 0x30);
+  T_EQ(t.quiet[3], 0x1C);
+  T_EQ(t.set[2], 0x10);
+  T_EQ(t.set[3], 0x10);
+  T_EQ(t.value, chips(3, 4));         //CH1 as it was
+
+  //The unit's CH1 on 0x153E's scans (core A dirty at 4, core B at 2): {2, 3, 5} and {3, 4, 5} share 3 and 5: 3
+  mock_init(&m);
+  m.dirty[0] = 0x13;
+  m.dirty[1] = 0x07;
+  T_EQ(cs_train_run(&io, chips(4, 4), 0x03, &t), CS_OK);
+  T_EQ(t.set[0], 0x28);
+  T_EQ(t.set[1], 0x28);
+  T_EQ(t.value, chips(3, 4));
 
   //A trained value that is the start of a new training keeps the other channel's result
   {
-    uint16_t v = t.value;
+    uint16_t v = chips(3, 4);
 
     mock_init(&m);
     m.dirty[0] = 0x07;                //CH1 A clean 3..5: 4 (middle)
     T_EQ(cs_train_run(&io, v, 0x03, &t), CS_OK);
-    T_EQ(cs_stage(t.value, 0), 4);
+    T_EQ(t.value, chips(4, 4));
     T_EQ(t.set[0], 0x38);
-    T_EQ(cs_stage(t.value, 2), 4);
-    T_EQ(cs_stage(t.value, 3), 3);
+    T_EQ(t.set[1], 0x38);
   }
 
-  //CH1 B dirty everywhere with its own encode, clean at 3..4 with the A encode (data-align mode): reference bit set
+  //The dead fields: B fields that differ from A and bits 15:12 in the start value (another writer's 0x63, a 0x153E
+  //value with a reference bit) leave the training's value with the B field equal to the chip's stage, bits 15:12 clear
   mock_init(&m);
-  m.dirty[1]     = 0xFF;
-  m.dirty_ref[1] = 0xE7;
-  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_OK);
-  T_EQ(t.captures, 8);
-  T_EQ(t.value & CS_REF_CH1B, CS_REF_CH1B);
-  T_EQ(t.value & CS_REF_CH2B, 0);
-  T_EQ(cs_stage(t.value, 1), 3);      //3, 4 clean with the A encode: a tie, the lower
-  T_EQ(t.clean_ref[1], 0x18);
-  T_EQ(t.set[1], 0x18);               //the reference timing's set
-  T_EQ(t.clean_ref[0], 0);            //A cores are never measured with a reference bit
+  T_EQ(cs_train_run(&io, (uint16_t)(cs_with(cs_with(CS_PO, 1, 5), 3, 2) | 0x3000), 0x0C, &t), CS_OK);
+  T_EQ(t.start, cs_with(cs_with(CS_PO, 1, 5), 3, 2));
+  T_EQ(cs_stage(t.value, 2), 3);
+  T_EQ(cs_stage(t.value, 3), 3);      //CH2 B written with the chip's stage
+  T_EQ(cs_stage(t.value, 1), 5);      //CH1 not trained: as it was
+  T_EQ(t.value & ~CS_MASK, 0);
 
-  //A stale reference bit in the start value is cleared for the trained B core when its own encode is clean
+  //One core names its chip
   mock_init(&m);
-  T_EQ(cs_train_run(&io, CS_PO | CS_REF_CH2B | CS_REF_CH1B, 0x0C, &t), CS_OK);
-  T_EQ(t.value & CS_REF_CH2B, 0);
-  T_EQ(t.value & CS_REF_CH1B, CS_REF_CH1B);  //CH1 not trained: as it was
+  T_EQ(cs_train_run(&io, chips(4, 4), 0x08, &t), CS_OK);
+  T_EQ(t.cores, 0x0C);
+  T_EQ(t.value, chips(4, 3));
 
-  //Fail fast: a bitstream that garbles at every stage fails, nothing changes, the bad cores are named
+  //Fail fast: a bitstream that garbles at every stage fails, nothing changes, the bad cores are named; no second pass
   mock_init(&m);
   m.dirty[2] = 0xFF;
   m.dirty[3] = 0xFF;
   T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_E_DIRTY);
   T_EQ(t.value, CS_PO);
   T_EQ(t.bad, 0x0C);
-  T_EQ(t.captures, 8);                //the B core tried the reference timing too
+  T_EQ(t.captures, 4);
 
-  //An A core with no clean stage: no reference pass for it
+  //One core with no clean stage fails its chip: that core is named (0x153E's reference pass for a B core is gone)
+  mock_init(&m);
+  m.dirty[1] = 0xFF;
+  T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_DIRTY);
+  T_EQ(t.bad, 0x02);
+  T_EQ(t.captures, 4);
+  T_EQ(t.value, CS_PO);
+  T_EQ(t.set[0], 0);
+
   mock_init(&m);
   m.dirty[0] = 0xFF;
   T_EQ(cs_train_run(&io, CS_PO, 0x03, &t), CS_E_DIRTY);
   T_EQ(t.bad, 0x01);
   T_EQ(t.captures, 4);
+
+  //Both cores clean somewhere, at no common stage (A 2, 3; B 4, 5: two buses far apart): both named
+  mock_init(&m);
+  m.dirty[2] = 0x33;
+  m.dirty[3] = 0x0F;
+  T_EQ(cs_train_run(&io, CS_PO, 0x0C, &t), CS_E_DIRTY);
+  T_EQ(t.quiet[2], 0x0C);
+  T_EQ(t.quiet[3], 0x30);
+  T_EQ(t.bad, 0x0C);
+  T_EQ(t.value, CS_PO);
 
   //A capture that does not complete
   mock_init(&m);
@@ -724,36 +784,44 @@ static void test_train(void)
 
 static void test_guard(void)
 {
-  uint8_t  set[CS_CORES] = { 0x3C, 0x38, 0x3C, 0x10 };
-  uint16_t sets = cs_sets_pack(set), v = CS_PO;
+  uint8_t  set[CS_CORES] = { 0x3C, 0x3C, 0x38, 0x38 };
+  uint16_t sets = cs_sets_pack(set), v = chips(4, 3);
   cs_watch w;
 
-  T_EQ(sets, 0x4FEF);
+  T_EQ(sets, 0xEEFF);
   T_EQ(cs_sets_core(sets, 0), 0x3C);
-  T_EQ(cs_sets_core(sets, 1), 0x38);
-  T_EQ(cs_sets_core(sets, 3), 0x10);
-  T_EQ(cs_sets_with(sets, 2, 0x2C), 0x4BEF);
+  T_EQ(cs_sets_core(sets, 2), 0x38);
+  T_EQ(cs_sets_core(sets, 3), 0x38);
+  T_EQ(cs_sets_with(sets, 2, 0x2C), 0xEBFF);
 
-  //The bench case: CH1 A4 flagged, trained 2..5: 4 leaves the set, {2, 3, 5} gives 3
-  T_EQ(cs_guard(&v, &sets, 0x01), 0x01);
-  T_EQ(cs_stage(v, 0), 3);
+  //The bench case: CH1 A4 flagged, the chip trained 2..5: 4 leaves both cores' sets, {2, 3, 5} gives 3 for both
+  T_EQ(cs_guard(&v, &sets, 0x01), 0x03);
+  T_EQ(v, chips(3, 3));
   T_EQ(cs_sets_core(sets, 0), 0x2C);
-  T_EQ(v, 0x08E3);
+  T_EQ(cs_sets_core(sets, 1), 0x2C);
+  T_EQ(cs_sets_core(sets, 2), 0x38);   //CH2 untouched
 
-  //Flagged again (a later boot): 3 leaves, {2, 5}: 2; then 2 leaves: 5; then nothing is left: kept
-  T_EQ(cs_guard(&v, &sets, 0x01), 0x01);
-  T_EQ(cs_stage(v, 0), 2);
-  T_EQ(cs_guard(&v, &sets, 0x01), 0x01);
-  T_EQ(cs_stage(v, 0), 5);
+  //Flagged again (a later boot), now core B: 3 leaves, {2, 5}: 2; then 2 leaves: 5; then nothing is left: kept
+  T_EQ(cs_guard(&v, &sets, 0x02), 0x03);
+  T_EQ(v, chips(2, 3));
+  T_EQ(cs_guard(&v, &sets, 0x03), 0x03);
+  T_EQ(v, chips(5, 3));
   T_EQ(cs_guard(&v, &sets, 0x01), 0);
-  T_EQ(cs_stage(v, 0), 5);
+  T_EQ(v, chips(5, 3));
   T_EQ(cs_sets_core(sets, 0), 0x20);
+  T_EQ(cs_sets_core(sets, 1), 0x20);
 
-  //CH2 B trained at 4 only: nothing to move to; CH1 B with a stage outside its set (not the trained value): kept
-  v = cs_with(CS_PO, 1, 2);
+  //CH2 B flagged at 3 in {3, 4, 5}: {4, 5} gives 4 for the chip
+  T_EQ(cs_guard(&v, &sets, 0x08), 0x0C);
+  T_EQ(v, chips(5, 4));
+  T_EQ(cs_sets_core(sets, 2), 0x30);
+  T_EQ(cs_sets_core(sets, 3), 0x30);
+
+  //A chip stage outside its set (not the trained value): kept, whatever the B field holds
+  v = cs_with(chips(3, 2), 3, 4);
   sets = cs_sets_pack(set);
-  T_EQ(cs_guard(&v, &sets, 0x0A), 0);
-  T_EQ(v, cs_with(CS_PO, 1, 2));
+  T_EQ(cs_guard(&v, &sets, 0x0C), 0);
+  T_EQ(v, cs_with(chips(3, 2), 3, 4));
   T_EQ(sets, cs_sets_pack(set));
 
   //No stored set: no move
@@ -762,13 +830,23 @@ static void test_guard(void)
   T_EQ(cs_guard(&v, &sets, 0x0F), 0);
   T_EQ(v, CS_PO);
 
-  //Two cores at once, the reference bit kept
-  v = (uint16_t)(CS_PO | CS_REF_CH1B);
+  //Both chips at once
+  v = CS_PO;
   sets = cs_sets_pack(set);
-  T_EQ(cs_guard(&v, &sets, 0x05), 0x05);
-  T_EQ(cs_stage(v, 0), 3);
-  T_EQ(cs_stage(v, 2), 4);            //CH2 A at 3 in 2..5: {2, 4, 5} gives 4
-  T_EQ(v & CS_REF_CH1B, CS_REF_CH1B);
+  T_EQ(cs_guard(&v, &sets, 0x05), 0x0F);
+  T_EQ(v, chips(4, 4));               //CH1 3 in 2..5: {2, 4, 5} gives 4; CH2 3 in 3..5: {4, 5} gives 4
+
+  //Sets that differ between the cores (stored by a per-core firmware): the chip moves within their intersection
+  {
+    uint8_t old[CS_CORES] = { 0x3C, 0x38, 0x3C, 0x3C };
+
+    v = CS_PO;
+    sets = cs_sets_pack(old);
+    T_EQ(cs_guard(&v, &sets, 0x01), 0x03);
+    T_EQ(v, chips(4, 3));             //{3, 4, 5} without 3
+    T_EQ(cs_sets_core(sets, 0), 0x30);
+    T_EQ(cs_sets_core(sets, 1), 0x30);
+  }
 
   //The watch forgets a moved core (its next repeat counts from the new stage)
   cs_watch_clear(&w);
@@ -810,9 +888,11 @@ static void test_texts(void)
   char t[64];
 
   cs_text(t, CS_PO);
-  T_STR(t, "CH1 A4 B4, CH2 A3 B4");
-  cs_text_ch(t, CS_PO | CS_REF_CH2B, 1);
-  T_STR(t, "CH2 A3 B4 A-clk");
+  T_STR(t, "CH1 A3 B3, CH2 A3 B3");
+  cs_text_ch(t, CS_PO | 0x2000, 1);   //0x153F: bit 13 selects nothing, no " A-clk"
+  T_STR(t, "CH2 A3 B3");
+  cs_text(t, cs_with(chips(4, 3), 3, 5));
+  T_STR(t, "CH1 A4 B4, CH2 A3 B5");   //the fields as another writer left them
   cs_core_name(t, 2);
   T_STR(t, "CH2 A");
   cs_core_name(t, 1);
@@ -839,6 +919,14 @@ static void test_trailer(void)
   b[8] ^= 1;
   T_EQ(cs_trailer_unpack(b, &v, &f), CS_T_BAD);
   T_EQ(v, 0);
+
+  //A value with a 0x153A..0x153E reference bit stays a valid trailer (its word decides whether it applies); bit 14 not
+  cs_trailer_pack(0x2924, 0x153E, b);
+  T_EQ(cs_trailer_unpack(b, &v, &f), CS_T_VALID);
+  T_EQ(v, 0x2924);
+  T_EQ(f, 0x153E);
+  b[9] |= 0x40;
+  T_EQ(cs_trailer_unpack(b, &v, &f), CS_T_BAD);
 
   memset(b, 0, sizeof(b));
   T_EQ(cs_trailer_unpack(b, &v, &f), CS_T_NONE);

@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------------------------------------------------------
-// cap_stage.c - FPGA 0x153A capture stage training, self-check and stored value (cap_stage.h)
+// cap_stage.c - FPGA 0x153A+ capture stage training (per chip since 0x153F), self-check and stored value (cap_stage.h)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "cap_stage.h"
@@ -15,9 +15,9 @@ uint16_t cs_with(uint16_t v, uint32_t core, uint8_t stage)
   return (uint16_t)((v & ~(7u << (3 * core))) | ((uint32_t)(stage & 7) << (3 * core)));
 }
 
-uint16_t cs_ref_bit(uint32_t core)
+uint16_t cs_with_chip(uint16_t v, uint32_t ch, uint8_t stage)
 {
-  return (core == 1) ? CS_REF_CH1B : ((core == 3) ? CS_REF_CH2B : 0);
+  return cs_with(cs_with(v, 2 * (ch & 1), stage), 2 * (ch & 1) + 1, stage);
 }
 
 #define CLEAN(c, s)  (((c) >> (s)) & 1)
@@ -147,11 +147,10 @@ uint8_t cs_quiet(const uint32_t sum[CS_STAGES], const uint32_t q[CS_STAGES])
   return quiet;
 }
 
-//One pass over the band: at every point, every core in mask at stage s (with ref set as given), s = CS_STAGE_MIN..MAX,
-//io->reps captures each; the 0x36 counts and E / CS_RESID_DIV summed per core and stage; clean = the stages with sum 0,
-//quiet = cs_quiet
-static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, uint32_t sum[CS_CORES][CS_STAGES],
-                   uint32_t q[CS_CORES][CS_STAGES], uint8_t clean[CS_CORES], uint8_t quiet[CS_CORES])
+//One pass over the band: at every point, every core in mask (whole chips) at stage s, s = CS_STAGE_MIN..MAX, io->reps
+//captures each; the 0x36 counts and E / CS_RESID_DIV summed per core and stage (t->sum, t->q); t->clean = the stages
+//with sum 0, t->quiet = cs_quiet, both per core
+static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask)
 {
   uint16_t cnt[CS_CORES], v;
   uint32_t e[CS_CORES], k, p, r;
@@ -183,8 +182,8 @@ static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, ui
         for(k=0;k<CS_CORES;k++)
           if(mask & (1u << k))
           {
-            sum[k][s - CS_STAGE_MIN] += cnt[k];
-            q[k][s - CS_STAGE_MIN]   += e[k] / CS_RESID_DIV;
+            t->sum[k][s - CS_STAGE_MIN] += cnt[k];
+            t->q[k][s - CS_STAGE_MIN]   += e[k] / CS_RESID_DIV;
           }
       }
     }
@@ -194,10 +193,10 @@ static int cs_pass(const cs_io *io, cs_train *t, uint16_t base, uint8_t mask, ui
     if(mask & (1u << k))
     {
       for(s=CS_STAGE_MIN;s<=CS_STAGE_MAX;s++)
-        if(sum[k][s - CS_STAGE_MIN] == 0)
-          clean[k] |= (uint8_t)(1u << s);
+        if(t->sum[k][s - CS_STAGE_MIN] == 0)
+          t->clean[k] |= (uint8_t)(1u << s);
 
-      quiet[k] = cs_quiet(sum[k], q[k]);
+      t->quiet[k] = cs_quiet(t->sum[k], t->q[k]);
     }
 
   return CS_OK;
@@ -262,15 +261,16 @@ static int cs_tie_pass(const cs_io *io, cs_train *t, uint16_t v)
     }
   }
 
+  //0x153F: a count on either core of the chip removes the candidate for the chip (both cores sample at that instant)
   for(k=0;k<CS_CORES;k++)
   {
     if(!t->tie[k])
       continue;
 
-    if(t->tie_sum[k][0])
+    if(t->tie_sum[k][0] || t->tie_sum[k ^ 1][0])
       t->set[k] &= (uint8_t)~(1u << cs_low(t->tie[k]));
 
-    if(t->tie_sum[k][1])
+    if(t->tie_sum[k][1] || t->tie_sum[k ^ 1][1])
       t->set[k] &= (uint8_t)~(1u << cs_high(t->tie[k]));
   }
 
@@ -279,96 +279,73 @@ static int cs_tie_pass(const cs_io *io, cs_train *t, uint16_t v)
 
 int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
 {
-  uint16_t v, base;
-  uint32_t k;
-  uint8_t  refmask = 0, ties = 0;
+  uint16_t v;
+  uint32_t k, ch, a;
+  uint8_t  ties = 0, chip, pick;
   int      rc;
 
   for(k=0;k<sizeof(*t);k++)
     ((uint8_t *)t)[k] = 0;
 
+  //0x153F: whole chips (a core named trains its chip partner too)
+  cores      = (uint8_t)(((cores & 0x03) ? 0x03 : 0) | ((cores & 0x0C) ? 0x0C : 0));
   start      = (uint16_t)(start & CS_MASK);
   t->start   = start;
   t->value   = start;
-  t->cores   = (uint8_t)(cores & 0x0F);
+  t->cores   = cores;
 
   //No band, no captures: nothing would be measured (fail fast, not "all clean")
   if(!io->points || !io->reps)
     return CS_E_IO;
 
-  //Own-encode timing for the trained B cores first
-  base = start;
-
-  for(k=0;k<CS_CORES;k++)
-    if(t->cores & (1u << k))
-      base = (uint16_t)(base & ~cs_ref_bit(k));
-
-  rc = cs_pass(io, t, base, t->cores, t->sum, t->q, t->clean, t->quiet);
+  rc = cs_pass(io, t, start, t->cores);
 
   if(rc != CS_OK)
     return rc;
 
-  //fw-capmetric: the pick runs on the quiet set (a core has a quiet stage exactly when it has a clean one)
-  for(k=0;k<CS_CORES;k++)
+  //fw-capmetric: the pick runs on the quiet sets; 0x153F: on the chip's, the stages quiet on both cores
+  v = start;
+
+  for(ch=0;ch<2;ch++)
   {
-    if(!(t->cores & (1u << k)))
+    a = 2 * ch;
+
+    if(!(t->cores & (1u << a)))
       continue;
 
-    t->set[k] = t->quiet[k];
+    chip          = (uint8_t)(t->quiet[a] & t->quiet[a + 1]);
+    t->set[a]     = chip;
+    t->set[a + 1] = chip;
+    pick          = cs_pick(chip);
 
-    if((cs_pick(t->quiet[k]) == CS_NONE) && cs_ref_bit(k))
-      refmask |= (uint8_t)(1u << k);
-  }
+    //No common quiet stage: the cores without one of their own, or both when each has some but none is shared
+    if(pick == CS_NONE)
+    {
+      if(!t->quiet[a])
+        t->bad |= (uint8_t)(1u << a);
 
-  v = base;
+      if(!t->quiet[a + 1])
+        t->bad |= (uint8_t)(1u << (a + 1));
 
-  //B cores with no clean stage: again with their chip's reference bit (data-align mode)
-  if(refmask)
-  {
-    uint16_t rbase = base;
-
-    for(k=0;k<CS_CORES;k++)
-      if(refmask & (1u << k))
-        rbase = (uint16_t)(rbase | cs_ref_bit(k));
-
-    t->ref = refmask;
-    rc = cs_pass(io, t, rbase, refmask, t->sum_ref, t->q_ref, t->clean_ref, t->quiet_ref);
-
-    if(rc != CS_OK)
-      return rc;
-
-    for(k=0;k<CS_CORES;k++)
-      if((refmask & (1u << k)) && (cs_pick(t->quiet_ref[k]) != CS_NONE))
-      {
-        t->set[k] = t->quiet_ref[k];
-        v = (uint16_t)(v | cs_ref_bit(k));
-      }
-  }
-
-  for(k=0;k<CS_CORES;k++)
-  {
-    if(!(t->cores & (1u << k)))
-      continue;
-
-    if(cs_pick(t->set[k]) == CS_NONE)
-      t->bad |= (uint8_t)(1u << k);
+      if(!(t->bad & (3u << a)))
+        t->bad |= (uint8_t)(3u << a);
+    }
     else
     {
-      v = cs_with(v, k, cs_pick(t->set[k]));
-      t->tie[k] = cs_tie(t->set[k]);
-      ties |= t->tie[k];
+      v = cs_with_chip(v, ch, pick);
+      t->tie[a]     = cs_tie(chip);
+      t->tie[a + 1] = t->tie[a];
+      ties |= t->tie[a];
     }
   }
 
   if(t->bad)
     return CS_E_DIRTY;
 
-  //fw-capmetric2: the noise bound (cap_stage.h "Noise bound") on the best outlier-clean stage of the timing in use; the
+  //fw-capmetric2: the noise bound (cap_stage.h "Noise bound") on every trained core's best outlier-clean stage; the
   //quiet rule is relative and passes data that are wrong alike at every stage
   for(k=0;k<CS_CORES;k++)
-    if((t->cores & (1u << k)) &&
-       (cs_q_best((v & cs_ref_bit(k)) ? t->sum_ref[k] : t->sum[k], (v & cs_ref_bit(k)) ? t->q_ref[k] : t->q[k]) >
-        CS_RESID_MAX_Q16 * io->points * io->reps))
+    if((t->cores & (1u << k)) && (cs_q_best(t->sum[k], t->q[k]) > CS_RESID_MAX_Q16 * io->points * io->reps))
       t->bad |= (uint8_t)(1u << k);
 
   if(t->bad)
@@ -382,15 +359,19 @@ int cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t)
     if(rc != CS_OK)
       return rc;
 
-    for(k=0;k<CS_CORES;k++)
+    for(ch=0;ch<2;ch++)
     {
-      if(!t->tie[k])
+      a = 2 * ch;
+
+      if(!t->tie[a])
         continue;
 
-      if(cs_pick(t->set[k]) == CS_NONE)
-        t->bad |= (uint8_t)(1u << k);
+      pick = cs_pick(t->set[a]);
+
+      if(pick == CS_NONE)
+        t->bad |= (uint8_t)(3u << a);
       else
-        v = cs_with(v, k, cs_pick(t->set[k]));
+        v = cs_with_chip(v, ch, pick);
     }
 
     if(t->bad)
@@ -511,16 +492,19 @@ uint16_t cs_sets_with(uint16_t sets, uint32_t core, uint8_t set)
 
 uint8_t cs_guard(uint16_t *value, uint16_t *sets, uint8_t cores)
 {
-  uint32_t k;
+  uint32_t ch, a;
   uint8_t  moved = 0, cur, set, s;
 
-  for(k=0;k<CS_CORES;k++)
+  //0x153F: per chip. A flagged core moves its chip: the chip's stage (core A's field) leaves the set both cores share
+  for(ch=0;ch<2;ch++)
   {
-    if(!(cores & (1u << k)))
+    a = 2 * ch;
+
+    if(!(cores & (3u << a)))
       continue;
 
-    cur = cs_stage(*value, k);
-    set = cs_sets_core(*sets, k);
+    cur = cs_stage(*value, a);
+    set = (uint8_t)(cs_sets_core(*sets, a) & cs_sets_core(*sets, a + 1));
 
     //A stage outside the stored set (or no set): not the trained value, nothing to move within
     if(!CLEAN(set, cur))
@@ -532,9 +516,9 @@ uint8_t cs_guard(uint16_t *value, uint16_t *sets, uint8_t cores)
     if(s == CS_NONE)
       continue;
 
-    *value = cs_with(*value, k, s);
-    *sets  = cs_sets_with(*sets, k, set);
-    moved |= (uint8_t)(1u << k);
+    *value = cs_with_chip(*value, ch, s);
+    *sets  = cs_sets_with(cs_sets_with(*sets, a, set), a + 1, set);
+    moved |= (uint8_t)(3u << a);
   }
 
   return moved;
@@ -562,10 +546,6 @@ char *cs_text_ch(char *p, uint16_t v, uint32_t ch)
   p = cs_str(p, " B");
   *p++ = (char)('0' + cs_stage(v, 2 * ch + 1));
   *p = 0;
-
-  if(v & cs_ref_bit(2 * ch + 1))
-    p = cs_str(p, " A-clk");
-
   return p;
 }
 
@@ -597,7 +577,7 @@ void cs_trailer_pack(uint16_t v, uint16_t fpga, uint8_t *out)
   p = cs_put16(p, CS_TRAILER_MAGIC >> 16);
   p = cs_put16(p, 1);
   p = cs_put16(p, CS_TRAILER_BYTES);
-  p = cs_put16(p, v & CS_MASK);
+  p = cs_put16(p, v & CS_TRAILER_MASK);
   p = cs_put16(p, fpga);
   crc = acal_crc32(out, 12);
   p = cs_put16(p, crc & 0xFFFF);
@@ -613,7 +593,7 @@ int cs_trailer_unpack(const uint8_t *in, uint16_t *v, uint16_t *fpga)
     return CS_T_NONE;
 
   if((cs_get16(in + 4) != 1) || (cs_get16(in + 6) != CS_TRAILER_BYTES) ||
-     ((cs_get16(in + 12) | (cs_get16(in + 14) << 16)) != acal_crc32(in, 12)) || (cs_get16(in + 8) & ~CS_MASK))
+     ((cs_get16(in + 12) | (cs_get16(in + 14) << 16)) != acal_crc32(in, 12)) || (cs_get16(in + 8) & ~CS_TRAILER_MASK))
     return CS_T_BAD;
 
   *v    = (uint16_t)cs_get16(in + 8);

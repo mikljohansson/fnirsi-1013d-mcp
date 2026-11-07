@@ -2718,8 +2718,8 @@ void pc_cal_body(int ch, uint8_t *resp)
   }
 
   //1.28 (fw-capmetric): the channel's last capture stage training since boot (cap_stage.h "Quiet stages"): 364 flags
-  //(PC_CAPT_*), 365 / 366 the quiet sets of core A / B after the tie pass, 367 0, then per core A, B and stage 2..5 the
-  //u32 residual metric q (368, 384) and the u32 0x36 sums (400, 416)
+  //(PC_CAPT_*), 365 / 366 the sets of core A / B after the tie pass (fw-153f: both the chip's, quiet on both cores),
+  //367 0, then per core A, B and stage 2..5 the u32 residual metric q (368, 384) and the u32 0x36 sums (400, 416)
   {
     pc_hw_cap_train ct;
     uint32_t        k, s;

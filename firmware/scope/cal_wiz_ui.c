@@ -402,8 +402,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     int      cs_rc;
 
     //fw-capmetric: the band training takes about 1.5 s per channel (17 points x 60 ms settling, 136 captures with two
-    //2048-word core reads each, the tie pass 3 x 60 ms and 96 captures; about 1.3 s more with the reference pass): say
-    //so
+    //2048-word core reads each, the tie pass 3 x 60 ms and 96 captures): say so
     if(wiz_progress(ch, CW_PR_TRAIN))
       return CW_RC_CANCELLED;
 

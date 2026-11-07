@@ -419,9 +419,9 @@ static void test_bodies(void)
     pc_hw_cap_train *ct = &mock.cap_train[1];
     uint32_t         s;
 
-    ct->flags  = PC_CAPT_RAN | PC_CAPT_REF;
-    ct->set[0] = 0x08;
-    ct->set[1] = 0x38;
+    ct->flags  = PC_CAPT_RAN | PC_CAPT_FAILED;
+    ct->set[0] = 0x18;
+    ct->set[1] = 0x18;
 
     for(s=0;s<4;s++)
     {
@@ -434,7 +434,7 @@ static void test_bodies(void)
     pc_cal_body(0, cal);
     T_EQ(cal[364], 0);                                      //CH1 not trained
     pc_cal_body(1, cal);
-    T_EQ(cal[364], 0x05); T_EQ(cal[365], 0x08); T_EQ(cal[366], 0x38); T_EQ(cal[367], 0);
+    T_EQ(cal[364], 0x03); T_EQ(cal[365], 0x18); T_EQ(cal[366], 0x18); T_EQ(cal[367], 0);
     T_EQ(pc_get_u32(cal + 368), 1000); T_EQ(pc_get_u32(cal + 380), 1003);
     T_EQ(pc_get_u32(cal + 384), 0x01020300u); T_EQ(pc_get_u32(cal + 396), 0x01020303u);
     T_EQ(pc_get_u32(cal + 400), 93); T_EQ(pc_get_u32(cal + 404), 0);

@@ -1,9 +1,9 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // cap_hw.c - the target side of FPGA 0x153A's capture stages (cap_stage.h, fw 0.2.79): the 0x63 value at boot (the trained
-// one stored with the calibration when it was trained on this bitstream, else the power-on 0x08E4), the 0x36 read after
+// one stored with the calibration when it was trained on this bitstream, else the power-on 0x06DB), the 0x36 read after
 // every accepted full-rate capture (self-check, GET_HEALTH, event 23; never after a gated one: fpga_capture_check), the wizard's training and the stored value
 // (sector 708 bytes 488..503, through pc_diag.c's calibration load / save hooks). fw 0.2.105: the trained clean sets
-// (bytes 504..511) and the runtime guard (cap_stage.h "Runtime guard").
+// (bytes 504..511) and the runtime guard (cap_stage.h "Runtime guard"). fw-153f: one stage per chip (0x153F).
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "types.h"
@@ -72,7 +72,7 @@ static uint16 cap_read(uint16_t cnt[CS_CORES])
 }
 
 //Boot (pc_glue_init) and after a calibration load: the stored value when it was trained on the built-for bitstream
-//(PC_FW_FPGA_VERSION), else 0x08E4.
+//(PC_FW_FPGA_VERSION), else the power-on CS_PO.
 //Always written: a FEL load leaves the FPGA with whatever the previous firmware wrote
 static void cap_apply(void)
 {
@@ -268,7 +268,7 @@ void pc_hal_cap_train(uint8_t ch, pc_hw_cap_train *t)
 }
 
 //1.28 (fw-capmetric): what GET_CAL reports of a channel's training (cores 2 ch, 2 ch + 1; the wizard trains one
-//channel at a time: 0x03 or 0x0C)
+//channel at a time: 0x03 or 0x0C). fw-153f: q and the sums per core, the set the chip's (both cores alike)
 static void cap_train_note(const cs_train *t, int rc)
 {
   pc_hw_cap_train *n;
@@ -276,18 +276,16 @@ static void cap_train_note(const cs_train *t, int rc)
 
   c = (t->cores & 0x03) ? 0 : 2;
   n = &cap_train[c / 2];
-  n->flags = (uint8)(PC_CAPT_RAN | ((rc != CS_OK) ? PC_CAPT_FAILED : 0) | ((t->ref & (1u << (c + 1))) ? PC_CAPT_REF : 0));
+  n->flags = (uint8)(PC_CAPT_RAN | ((rc != CS_OK) ? PC_CAPT_FAILED : 0));
 
   for(k=0;k<2;k++)
   {
-    int ref = (n->flags & PC_CAPT_REF) && k;
-
     n->set[k] = t->set[c + k];
 
     for(s=0;s<CS_STAGES;s++)
     {
-      n->q[k][s]   = ref ? t->q_ref[c + k][s] : t->q[c + k][s];
-      n->sum[k][s] = ref ? t->sum_ref[c + k][s] : t->sum[c + k][s];
+      n->q[k][s]   = t->q[c + k][s];
+      n->sum[k][s] = t->sum[c + k][s];
     }
   }
 }
