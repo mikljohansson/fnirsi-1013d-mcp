@@ -497,8 +497,8 @@ static void test_report(void)
   has("FNIRSI-1013D-AI diagnostics report\r\n");
   has("Firmware running: " PC_FW_VERSION ", protocol 1.28, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
-  has("FPGA: version word 0x153e, variant 2, ring 8192 words, caps 0x");
-  has("; firmware built for 0x153e\r\n");
+  has("FPGA: version word 0x153f, variant 2, ring 8192 words, caps 0x");
+  has("; firmware built for 0x153f\r\n");
   has("USB serial: 1013D-0001");
   has("CPU: CP15 control 0x0005107d: MMU on, D-cache on, I-cache on");
   has("uptime: 0 h 12 min 34 s (754321 ms)");
@@ -532,7 +532,7 @@ static void test_report(void)
   pc_session_init(&S);
   T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
   has("FPGA: version word 0x1532, variant 2, ring 8192 words, caps 0x");
-  has("; firmware built for 0x153e: MISMATCH, the acquisition does not run\r\n");
+  has("; firmware built for 0x153f: MISMATCH, the acquisition does not run\r\n");
 
   //Event 21 (1.19): reason, re-arms, value, caller
   {

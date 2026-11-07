@@ -290,9 +290,10 @@ static void test_repeat_ignores_foreign_value(void)
   T_EQ(fm.reg63, 0x08E3);
 }
 
-//fw-153e: a card trained on the previous bitstream (0x153D, the release before 0x153E): the stored value is not applied
-//(power-on 0x08E4, OTHER: Diagnostics asks for Calibrate), the guard and the repeat watch's store do nothing, the card
-//is not written; the wizard's commit binds the new value to the built-for word and the next save stores that
+//fw-153e / fw-153f: a card trained on the previous bitstream (0x153E, the release before 0x153F): the stored value is
+//not applied (the power-on value, OTHER: Diagnostics asks for Calibrate), the guard and the repeat watch's store do
+//nothing, the card is not written; the wizard's commit binds the new value to the built-for word and the next save
+//stores that
 static void test_stored_for_previous_bitstream(void)
 {
   uint16_t v, f;
@@ -300,15 +301,15 @@ static void test_stored_for_previous_bitstream(void)
   uint8_t  sec[512];
   pc_hw_cap c;
 
-  T_TRUE(PC_FW_FPGA_VERSION != 0x153D);
-  boot_on(0x08E3, 0xFFFF, 0x153D);
+  T_TRUE(PC_FW_FPGA_VERSION != 0x153E);
+  boot_on(0x08E3, 0xFFFF, 0x153E);
   pc_hal_cap_state(&c);
   T_EQ(fm.reg63, CS_PO);
   T_EQ(fm.reg64, CS_THR_USE);
   T_EQ(c.value, CS_PO);
   T_EQ(c.trailer, CS_T_VALID);
   T_EQ(c.stored, 0x08E3);
-  T_EQ(c.stored_fpga, 0x153D);
+  T_EQ(c.stored_fpga, 0x153E);
   T_TRUE(c.flags & PC_CAPF_HAS);
   T_TRUE(c.flags & PC_CAPF_OTHER);
   T_FALSE(c.flags & PC_CAPF_TRAINED);
@@ -323,11 +324,11 @@ static void test_stored_for_previous_bitstream(void)
   T_EQ(fm.reg63, CS_PO);
   T_EQ(sd_writes, 0);
 
-  //A save without a new training keeps the card's trailer as it was (0x153D's value, still not applied)
+  //A save without a new training keeps the card's trailer as it was (0x153E's value, still not applied)
   memset(sec, 0, sizeof(sec));
   fpga_capture_save(sec);
   T_EQ(cs_trailer_unpack(sec + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
-  T_EQ(v, 0x08E3); T_EQ(f, 0x153D);
+  T_EQ(v, 0x08E3); T_EQ(f, 0x153E);
 
   //The wizard's value, committed at its Save: trained on the built-for bitstream, OTHER and REPEAT gone
   fpga_capture_write(0x06DB);

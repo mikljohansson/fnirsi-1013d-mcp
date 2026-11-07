@@ -4,7 +4,7 @@
 // (host_tests/test_enc_heal.c, test_session.c); the target glue (UI and calibration conversions, counters, event 21, the
 // 0x33 read) is enc_heal_hw.c, the host ARM path is pc_acq_service in pc_cmds.c.
 //
-// The built-for bitstream (0x153E, PC_FW_FPGA_VERSION; since 0x153E the encode pins are driven from PLL outputs through
+// The built-for bitstream (0x153F, PC_FW_FPGA_VERSION; since 0x153E the encode pins are driven from PLL outputs through
 // their pin registers, the same timing in every build) derives the ADC encodes statelessly from the write clock and
 // checks them itself: FPGA read 0x33 (since 0x1538). The encodes run at 200 MSa/s at divider 0, with any filter and with
 // peak detect; Filter Off at a divided rate gates them with the divider (fw-gated). The FPGA compares the encode flops

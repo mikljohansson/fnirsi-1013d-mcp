@@ -305,7 +305,7 @@ static void test_stream(void)
 
   //100 ms/div: D 49999, 4 words per column (2 ms)
   T_EQ(roll_plan(8, &div, &wpc), 0);
-  fm_reset(0x153E, div, 77);
+  fm_reset(0x153F, div, 77);
   fm.capture = 1;
 
   m.level = 0;
