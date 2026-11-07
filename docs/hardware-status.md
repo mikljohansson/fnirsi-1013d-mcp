@@ -2060,3 +2060,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   captures at 2.5 V/div B first 1325, A first 5630, at 1 V/div 0 and 134; fold best d = +1 at both: **the order is right**); T5 offset
   2 words against a +-1 limit (over 120 captures 0..2, mostly 1 and 2; simulation word + 1 on 0x153E and 0x153F); T7 needs FORCE, a
   debug-only command. Test fixes queued for 0.3.1.
+- 2026-11-07 14:30-14:41 (owner, lead): screen checks on fw 0.3.0. Owner's verdicts: generator, trigger and acquisition menus OK; measurement
+  cards and the time/div overview OK; phosphor works; roll mode at 100 ms/div with the 1 Hz square scrolls, time/div taps step
+  it (the ACQ cards are grey there, as the guide says; the chip's "Long" label queued). The idle check was stopped at 19 minutes
+  to free the port (not a failure; still open). **Host commands during modal screens:** calibration wizard mid-measurement: SET_TRIGGER
+  answered E_BUSY detail 3 "calibration measurement running" at once, the step ran on, the owner confirms; keypad half-typed: the
+  command was answered in 0.01 s, keypad and menu closed, the generator stayed at 1000 Hz; 40 s of commands while the owner saved
+  about 20 pictures: 671 answered, 392 refused E_BUSY detail 4 "file save in progress", none slower than 0.3 s.
