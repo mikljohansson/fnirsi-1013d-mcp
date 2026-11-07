@@ -2040,3 +2040,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   tag `v0.3.0` on ab93c0d, release workflow passed; https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.0
   (a pre-release, as every tag below 1.0.0), SHA256SUMS 25 of 25, the same image and flash image hashes (d255ca38...). The
   unit: 0x153F, fw 0.3.0 from the card, warm calibration of 10:2x. The announcement is the owner's to post.
+- 2026-11-07 13:50-13:57 (lead, owner's request): **install guide on a spare card**, the owner's 16 GB microSD from a microscope (15634268160
+  bytes, was MBR, FAT32 at sector 8192, 32 KiB clusters, 740 reserved sectors; the owner needs no contents back, a FAT32 format
+  afterwards; layout saved in `backups/microscope-sd/`). From the published v0.3.0 assets as the guide says: SHA256SUMS OK, the SD zip's
+  `make_release_sd_package.py build` against the real download, scope part = ac278214. In WSL through usbipd: partition at sector 2048:
+  `make_sd_image.py write` **refused** ("scope (sectors 750..2346) runs into the FAT32 partition ... must start at sector 2347 or
+  later"), exit 1. `parted ... 8MiB 100%`, `mkfs.vfat -F 32`, partition at 16384: **written and verified**, boot mode 4, eGON.BT0 at 16,
+  eGON.EXE at 750. Next: boot it in the scope.
