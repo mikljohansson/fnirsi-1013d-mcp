@@ -2032,3 +2032,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   pushed (121 commits). CI built the same image hash; one job failed, mcp windows-latest py3.12: the simulator's 15 ns
   generator commit against time.monotonic's 15.6 ms tick there (simulator only). Fixed by the simulator's default clock;
   the tag goes on that commit, whose image differs from 727745b0 only in the build identity.
+- 2026-11-07 12:46-13:00 (lead): **v0.3.0 released.** CI green on ab93c0d, all nine jobs. Dry run `v0.3.0-rc1`: every job passed, 26
+  assets, `sha256sum -c SHA256SUMS` 25 of 25. The published image itself on the unit (the FEL hash check, before the real tag):
+  `fnirsi_1013d-fw-0.3.0.bin` ac27821429c977b3fb7d1f831e8866311b8f35d11589a59a14329908d9c9a58d loaded over FEL, `#VER` fw=0.3.0,
+  fpga=0x153f, **`fnirsi1013d-battery` 201 PASS, 0 FAIL, 1 SKIP** (`backups/battery-0.3.0/tool-run4-published/`), persisted to the
+  card 12:54 (backup `backups/sdcard/sd_750-2347_20261107-125417.bin`, sector 750 verified, checksum 0x26488417). rc removed,
+  tag `v0.3.0` on ab93c0d, release workflow passed; https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.0
+  (a pre-release, as every tag below 1.0.0), SHA256SUMS 25 of 25, the same image and flash image hashes (d255ca38...). The
+  unit: 0x153F, fw 0.3.0 from the card, warm calibration of 10:2x. The announcement is the owner's to post.

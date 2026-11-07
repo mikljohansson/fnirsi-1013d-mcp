@@ -8,6 +8,11 @@ afterwards (a new firmware commit invalidates every box from "Versions" down).
 Paperwork pass by rel-gen2 on 2026-10-20 (branch `rel-gen2` from 876700a): the boxes below that it ticked name that
 branch's commit; the maintainer's items and the hardware items are left open.
 
+**State 2026-11-07 13:00: v0.3.0 is tagged and published as a pre-release (ab93c0d), not announced.** The boxes still open below were
+not done before the tag (the coordinator read the list after tagging). Before the announcement: the spare-card install, the cold boot of
+the 0.3.0 image, the first-run screen on it, the loopback group, the long-idle check, and the maintainer's items (credits wording,
+repository description and templates, the capstone licence, bitstreams decision).
+
 ## Content
 
 - [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer.
@@ -50,7 +55,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 - [x] Owner accepted 0x153F for 0.3.0 (2026-11-07, recorded in abd988a and `BITSTREAMS.md`) with the bench list's sweep limit
       missed: peak over the CH2 offset sweep 80 minutes after power-on A 5.8 %, B 1.0 % against 0x153E's A 5.2 %, B 0.65 %
       (`docs/hardware-status.md` 10:52-11:33), for the right core order. The release notes list it as a known issue.
-- [ ] 30-minute soak on 0x153F. (0x153E's two: 2026-11-06 14:20 with 4 link drops of 0.6 s, 15:50 with 0; cause not found.)
+- [x] 30-minute soak on 0x153F. (0x153E's two: 2026-11-06 14:20 with 4 link drops of 0.6 s, 15:50 with 0; cause not found.) (2026-11-07 11:59-12:30, fw 1d36d9b5 from the card: 17897 requests, 0 drops.)
       Update the known issue "USB link drops" in the release notes and the announcement with the result.
 
 - [x] 0x153E built by fpga-153e and pinned (2026-11-04, merge 0cd4768): committed `fpga/al3/src` (roll da645d0),
@@ -96,11 +101,11 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 
 ## Versions and notes
 
-- [ ] `firmware/scope/pc_cmds.h`: `#define PC_FW_VERSION "0.3.0" ...` (the one quoted literal). Check in the same pass the FPGA
+- [x] `firmware/scope/pc_cmds.h`: `#define PC_FW_VERSION "0.3.0" ...` (the one quoted literal). Check in the same pass the FPGA
       version the firmware expects (`PC_FW_FPGA_VERSION` = 0x153F, also the mcp and protocol docs and the simulator) against
       `fpga/al3/dist/manifest.json` (the `recommended` row).
-- [ ] `mcp/pyproject.toml`: `version = "0.3.0"`.
-- [ ] `CHANGELOG.md`: `## [Unreleased]` first and empty, `## [0.3.0] - YYYY-MM-DD` below it and non-empty; the obsolete
+- [x] `mcp/pyproject.toml`: `version = "0.3.0"`.
+- [x] `CHANGELOG.md`: `## [Unreleased]` first and empty, `## [0.3.0] - YYYY-MM-DD` below it and non-empty; the obsolete
       "Plan for the first tag" block and "Nothing has been tagged yet" removed; the 0.2.46-0.2.50 sub-sections in order.
       Applied in the release commit (2026-11-07); the draft was `docs/release-notes/changelog-0.3.0-draft.md` (rel-gen2, 517f252;
       refreshed up to fa8377b by docs-rel153d, 2026-10-26, and up to abd988a by docs-153f, 2026-11-07); delete that file in
@@ -109,16 +114,16 @@ the 0.3.0 firmware. The 0x153F boxes come first.
       checked against `docs/hardware-status.md` once more, user-facing wording only (2026-10-20, rel-gen2, c0ea0c1;
       `mkdocs build --strict` passes). Refreshed for 0x153D and fw 0.2.105 by docs-rel153d on 2026-10-26 (the TODO
       resolved with 0x153D's bench record). Re-check the tested-on line after the release-candidate bench.
-- [ ] `python .github/scripts/release_meta.py --tag v0.3.0 --notes notes.md` exits 0; `notes.md` read as a visitor would.
+- [x] `python .github/scripts/release_meta.py --tag v0.3.0 --notes notes.md` exits 0; `notes.md` read as a visitor would.
       Dry-run 2026-10-20 (rel-gen2) on a scratch tree with both versions at 0.3.0 and the draft CHANGELOG section applied:
       `--tag v0.3.0`, `--tag v0.3.0-rc1` and `--check-changelog` exit 0. Run it on the release commit itself.
 
 ## Build and CI
 
-- [ ] `release: v0.3.0` commit on main, CI green: firmware (GCC 10, GCC 13, PC_DEBUG, host tests), mcp on Linux and
+- [x] `release: v0.3.0` commit on main, CI green: firmware (GCC 10, GCC 13, PC_DEBUG, host tests), mcp on Linux and (9bf1ce2 failed one job, mcp windows py3.12, a simulator clock; ab93c0d, the tagged commit, green.)
       Windows, **wheel** on Linux and Windows, protocol vectors, CHANGELOG structure, bitstream check.
-- [ ] Local `make gcc10` sha256 of that commit equals the sha256 the CI firmware job prints (reproducibility).
-- [ ] `python tools/make_release_sd_package.py build --scope <image> --parts parts` run against the real Atlan4 download
+- [x] Local `make gcc10` sha256 of that commit equals the sha256 the CI firmware job prints (reproducibility). (9bf1ce2: 727745b0 both; the tagged ab93c0d: ac278214 from CI, the same image run on the unit.)
+- [x] `python tools/make_release_sd_package.py build --scope <image> --parts parts` run against the real Atlan4 download (2026-11-07: not by hand; release.yml's publish job ran the zip's tools against the real download on rc1 and v0.3.0.)
       the day before the tag (F7).
 
 ## SD package and bench
@@ -132,7 +137,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
       2026-10-20 19:22-19:29; fw 0.2.105 ba1a1283 persisted 2026-10-22 09:08 and booted from the card; fw 0.2.105 c681efa4
       (07c2bbf) on 0x153D persisted 2026-10-22 19:52, 1597 sectors read back identical (a cold boot of it is not logged).
       To do for the 0.3.0 image.
-- [ ] 30-minute soak with the host polling passes. Unticked 2026-10-26 (docs-rel153d): the 30-minute run (2026-10-20
+- [x] 30-minute soak with the host polling passes. Unticked 2026-10-26 (docs-rel153d): the 30-minute run (2026-10-20 (Ticked 2026-11-07 on fw 1d36d9b5, the same code as 0.3.0 but the version literal, see above.)
       21:26-21:56, 899 status polls, 15 health reads, 15 captures, 0 errors) was on fw 0.2.102 / 0x153B. On 0x153D only
       shorter runs exist: 5 minutes on the first 0x153D build (2026-10-22 10:16-10:22, 0 errors) and 301 s on the gated
       0x153D with fw 0.2.105 c681efa4 (18:56-19:02, 150 status, 4 health, 4 captures, 0 errors). Run 30 minutes on the
@@ -149,11 +154,11 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 
 ## Dry run
 
-- [ ] `v0.3.0-rc1` tag pushed on the release commit; `release.yml` green (check, ci, publish).
-- [ ] The rc release page checked: notes, the assets (`fw.bin`, `sdtools.zip`, wheel, sdist, the bitstreams and their
+- [x] `v0.3.0-rc1` tag pushed on the release commit; `release.yml` green (check, ci, publish). (ab93c0d.)
+- [x] The rc release page checked: notes, the assets (`fw.bin`, `sdtools.zip`, wheel, sdist, the bitstreams and their
       `-flash1m` images, `BITSTREAMS.md`, `SHA256SUMS`), marked pre-release; `sha256sum -c SHA256SUMS` on a download. The
       notes' screenshots are raw URLs pinned to commit 68b733b (on origin/main), so they show on the rc page too.
-- [ ] The rc release and tag deleted.
+- [x] The rc release and tag deleted.
 
 ## Presentation
 
