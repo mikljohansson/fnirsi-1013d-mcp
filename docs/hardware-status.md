@@ -2016,3 +2016,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   higher. Mean over the sweep at 80 minutes: 0x153F A 3.05, B 0.41 %; 0x153E A 2.6, B 0.27 %. The two days are one unit, one
   run each: the spread between sweeps here is 0.1 .. 0.5 points. Divider 99 stays 0 / 0. Owner's decision pending; 0x153F not
   marked recommended, the card still holds fw 2bdecac (a power cycle shows the notice).
+- 2026-11-07 11:4x-11:48 (owner, lead): **0x153F accepted by the owner for 0.3.0** ("Accept it", on the warm-up series above,
+  the sweep limit waived for the right core order). `fpga/al3/dist`: 0x153F `recommended`, 0x153E `supported` (abd988a);
+  `tools/bitstreams.py check --release` passes. 11:45: fw 1d36d9b5 persisted to the card (backup
+  `backups/sdcard/sd_750-2349_20261107-114540.bin`, 1597 sectors compared identical, checksum 0xA3DBE007). 11:45:46: a
+  30-minute soak started and **ended at 11:47:41 invalid**: at 11:46:41 GET_STATUS got no answer, the next write failed
+  with error 22 and COM10 left Windows and did not return within 60 s (505 requests before it, no counter moved). The
+  scope stayed off USB. Unlike the drops of 2026-11-06 (back in 0.6 s). Cause not known yet: asked the owner.
