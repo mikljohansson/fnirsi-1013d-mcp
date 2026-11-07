@@ -23,6 +23,45 @@ def stats(v: np.ndarray) -> dict[str, float]:
     }
 
 
+#: the delays ``core_delay_fold`` tries, in record samples: +1 designed, -1 A first, +3 core B one conversion late
+CORE_DELAYS = tuple(range(-3, 6))
+
+
+def core_delay_fold(raw_a: np.ndarray, raw_b: np.ndarray, divider: int, period: int,
+                    delays: Sequence[int] = CORE_DELAYS) -> dict[int, float]:
+    """fpga/al3/tools/core_delay_fold.py's measure, for a periodic signal of ``period`` clocks of 5 ns (prime against
+    2 (divider + 1), so a core's samples cover every phase). In clocks B[k] = f(2 (D + 1) k), A[k] = f(2 (D + 1) k +
+    d (D + 1)): each core folded on the period, the RMS difference of the folds for each delay d, lowest at the real
+    delay. Any periodic waveform works, a sharper one gives a deeper minimum. Divider 0's is shallow (2026-11-07: 1.1 /
+    1.1 / 1.2 at d = 0 / +1 / +2 on the post), so read it through ``core_delay_verdict`` over several records."""
+    a = np.asarray(raw_a, np.float64)
+    b = np.asarray(raw_b, np.float64)
+    step = divider + 1
+    k = np.arange(len(a)) * 2 * step
+
+    def fold(x: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        ph = t % period
+        return np.bincount(ph, weights=x, minlength=period), np.bincount(ph, minlength=period)
+    sb, nb = fold(b - b.mean(), k)
+    out = {}
+    for d in delays:
+        sa, na = fold(a - a.mean(), k + d * step)
+        ok = (nb > 0) & (na > 0)
+        r = sb[ok] / nb[ok] - sa[ok] / na[ok]
+        out[d] = float(np.sqrt(np.mean((r - r.mean()) ** 2)))
+    return out
+
+
+def core_delay_verdict(records: Sequence[dict[int, float]]) -> tuple[int, dict[int, int], dict[int, float]]:
+    """``core_delay_fold`` over several records: (the delay with the lowest mean RMS, each record's vote, the means)."""
+    mean = {d: float(np.mean([r[d] for r in records])) for d in records[0]}
+    votes: dict[int, int] = {}
+    for r in records:
+        w = min(r, key=lambda d: r[d])
+        votes[w] = votes.get(w, 0) + 1
+    return min(mean, key=lambda d: mean[d]), dict(sorted(votes.items())), mean
+
+
 def crossings(v: np.ndarray, level: float, edge: str = "rising", hysteresis: float = 0.0) -> np.ndarray:
     """Fractional sample indices where v crosses level (linear interpolation). With hysteresis the signal must
     have been beyond level -/+ hysteresis since the previous crossing."""

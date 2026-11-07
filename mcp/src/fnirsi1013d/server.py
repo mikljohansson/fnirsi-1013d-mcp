@@ -32,7 +32,7 @@ import time
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, TypeVar
+from typing import Annotated, Any, Callable, Iterator, Literal, TypeVar
 
 import anyio
 import numpy as np
@@ -4073,11 +4073,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         confirm_token: Annotated[str | None, Field(description="token from the confirmation response")] = None,
     ) -> dict[str, Any]:
         """Self-test with the calibration pin connected to CH1 by the probe (ask the user to connect it first and
-        to disconnect anything else from the pin). Runs the generator at 10 kHz / 50 % and 1 MHz / 25 %,
-        captures at several rates, checks frequency, duty and levels, and runs the protocol bench tests that need
-        a known signal: T4 (A/B interleave order), T5 (trigger_addr alignment) and T7 (FORCE). Returns pass/fail
-        per check. Restores the previous channel/timebase/trigger/generator settings. Use after every firmware or
-        bitstream change. Needs a confirmation token (drives the calibration pin)."""
+        to disconnect anything else from the pin). Runs the generator at 10 kHz and 995 kHz, 50 %, at 1 V/div, Filter
+        Off, and judges medians over several captures: frequency at every rate, duty and swing at 10 kHz, and the
+        protocol bench tests that need a known signal over about 200 captures at 200 MS/s: T4 (A/B interleave order,
+        fold method d = +1), T5 (trigger_addr alignment, +1 +- 1 words). T7 (FORCE) is reported as skipped
+        (`pass` null) on a release build. Takes under a minute. Returns pass / fail per check. Restores the previous
+        channel, timebase, trigger, filter, generator and run state. Use after every firmware or bitstream change.
+        Needs a confirmation token (drives the calibration pin)."""
         args: dict[str, Any] = {}
 
         def go() -> dict[str, Any]:
@@ -4085,7 +4087,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if not s.profile().has_generator:
                 raise ToolError("scope_self_test_loopback needs the programmable generator (Atlan4 bitstream)")
             req = sess.confirm("scope_self_test_loopback", args, confirm_token,
-                               "calibration pin will output 3.3 V square waves (10 kHz/50 %, 1 MHz/25 %) into CH1; "
+                               "calibration pin will output 3.3 V square waves (10 kHz and 995 kHz, 50 %) into CH1; "
                                "CH1 settings are changed during the test and restored afterwards")
             if req is not None:
                 return req
@@ -4373,19 +4375,100 @@ def _slice_capture(cap: Capture, a: int, n: int) -> Capture:
     return replace(cap, start_sample=a, channels=chans)
 
 
+#: the calibration post's square against the probe ground: about -1.24 .. +1.86 V (VRF1, CAL_OUTPUT_NOTE), mid +0.31 V
+CAL_OUTPUT_MID_V = 0.31
+#: the self-test's smallest core-A swing (5..95 %) that counts as the post's square (1 V/div: about 3.1 V = 77 codes, and
+#: 2.1 V = 52 codes at 995 kHz, where the post's slow edge does not settle)
+SELF_TEST_MIN_SWING_CODES = 20
+#: the self-test's fast square: an odd period of 201 clocks of 5 ns (995.02 kHz)
+T4_PERIOD = 201
+T4_HZ = P.BASE_CLOCK_HZ / T4_PERIOD
+#: captures per rate: the checks read the median, one noisy capture read 1047 kHz on 995 kHz (bench 2026-11-07 14:14)
+SELF_TEST_CAPTURES = 5
+#: captures for T4 / T5 at 200 MS/s (protocol section 12 asks 1000; the bench's 200 of 3000 samples decided, these hold
+#: 8000) and the time they may take: the tool stays under a minute on a slow link with what it got by then
+T4_CAPTURES = 200
+T4_BUDGET_S = 30.0
+T4_MIN_CAPTURES = 20
+T7_SKIP_REASON = ("FORCE exists only in PC_DEBUG builds (docs/protocol.md row 18), a release build has no such command: "
+                  "not a fault; run T7 on a debug image")
+
+
 def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
-    """Loopback checks with the calibration pin on CH1 (docs/mcp-tools.md 4.4)."""
+    """Loopback checks with the calibration pin on CH1 (docs/mcp-tools.md 4.4). Each check reads several captures;
+    duty and swing are judged at 10 kHz only: at 995 kHz the post's slow edge does not settle (swing 2.1 V, duty 0.29
+    .. 0.36 at 25 %, bench 2026-11-07 14:14), so that square serves the frequency, T4 and T5."""
     saved_ch = s.get_channel(0, cached=False)
     saved_tb = s.get_timebase(cached=False)
     saved_tr = s.get_trigger(cached=False)
     saved_gen = s.get_gen()
+    has_decim = s.profile().has(P.Caps.DECIM)
+    saved_decim = s.get_decim() if has_decim else None
+    was_run = bool(s.shared and s.status().run_state == P.RunState.RUN)
+    typed = saved_tr.trigger2 is not None and (saved_tr.trigger2.type != P.TRIG_EDGE or saved_tr.trigger2.holdoff != 0)
     checks: list[dict[str, Any]] = []
 
     def check(name: str, passed: bool, **detail: Any) -> None:
         checks.append({"check": name, "pass": bool(passed), **{k: _r6(v) if isinstance(v, float) else v
                                                                for k, v in detail.items()}})
+
+    def skip(name: str, reason: str) -> None:
+        checks.append({"check": name, "pass": None, "skipped": True, "reason": reason})
+
+    def series(n: int, budget_s: float) -> Iterator[Capture]:
+        """Up to ``n`` triggered captures within ``budget_s``; three misses in a row end it."""
+        t_end, misses, got = time.monotonic() + budget_s, 0, 0
+        while got < n and misses < 3 and time.monotonic() < t_end:
+            c = s.capture(["CH1"], 1.0, keep_raw=True)
+            if c is None:
+                misses += 1
+                continue
+            misses = 0
+            got += 1
+            yield c
+
+    def run_rate(f_hz: float, duty: float, fs: float, mid: int, wiring: str) -> bool:
+        """The checks of one rate; False when nothing triggered."""
+        fast = f_hz == T4_HZ and fs == 200e6
+        t4 = _T4T5(s, T4_PERIOD) if fast else None
+        fm, dm, vpp, lows, highs = [], [], [], [], []
+        for cap in series(T4_CAPTURES if fast else SELF_TEST_CAPTURES, T4_BUDGET_S if fast else 5.0):
+            v = cap.channels["CH1"].volts
+            fr = A.frequency(v, cap.dt)
+            fm.append(fr["frequency"] or 0.0)
+            dm.append(fr["duty"] or 0.0)
+            lo, hi = (float(x) for x in np.percentile(v, [5, 95]))  # the two levels, not noise or ringing
+            lows.append(lo)
+            highs.append(hi)
+            vpp.append(hi - lo)
+            if t4 is not None:
+                t4.add(cap)
+        if not fm:
+            check(f"capture {fmt_si(f_hz, 'Hz')} at {fmt_si(fs, 'S/s')}", False,
+                  reason=f"no trigger at code {mid}: {wiring}")
+            return False
+        f_med = float(np.median(fm))
+        check(f"frequency {fmt_si(f_hz, 'Hz')} at {fmt_si(fs, 'S/s')}", abs(f_med - f_hz) / f_hz < 0.02, measured=f_med,
+              expected=f_hz, captures=len(fm), lowest=float(min(fm)), highest=float(max(fm)))
+        if f_hz != T4_HZ:
+            d_med = float(np.median(dm))
+            check(f"duty {duty * 100:.0f} % at {fmt_si(fs, 'S/s')}", abs(d_med - duty) < 0.03, measured=d_med,
+                  expected=duty, captures=len(dm))
+            # the calibration output's DC level is not 0 V at the probe (T8): check the swing only
+            v_med = float(np.median(vpp))
+            check(f"swing at {fmt_si(fs, 'S/s')}", 2.6 <= v_med <= 3.7, vpp=v_med, low=float(np.median(lows)),
+                  high=float(np.median(highs)), captures=len(vpp),
+                  expected="~3.1..3.3 Vpp (DC level not checked: the output is not ground-referenced)")
+        if t4 is not None:
+            t4.judge(check)
+        return True
+
     try:
-        s.set_channel(0, enable=True, range_index=1, coupling=0, dcoffset=0, probe_index=1)  # 2.5 V/div at 1x
+        if has_decim:
+            s.set_decim(0)  # T4 / T5 read the raw cores
+        if typed:
+            s.set_trigger2(type="edge", holdoff=0)
+        s.set_channel(0, enable=True, range_index=2, coupling=0, dcoffset=0, probe_index=1)  # 1 V/div at 1x
         cfg = s.get_channel(0)
         # the post's square against the probe ground spans about -1.24 .. +1.86 V (CAL_OUTPUT_NOTE): its mid is
         # +0.31 V, the level used until a capture has measured the swing
@@ -4398,44 +4481,31 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
                   "ground): a filter or ladder in between slows the edges and moves the levels")
         # T4 needs edges between the two cores of a word: the generator's edges lie on the ADC's 5 ns grid since
         # 0x153D, so an even period (1 MHz = 200 clocks) puts every edge at the same core; P = 201 clocks alternates
-        for f_hz, duty, rates in ((10e3, 0.5, (2e6, 20e6)), (T4_HZ, 0.25, (50e6, 200e6))):
+        wired = True
+        for f_hz, duty, rates in ((10e3, 0.5, (2e6, 20e6)), (T4_HZ, 0.5, (50e6, 200e6))):
             s.set_gen(enable=True, freq_hz=f_hz, duty=duty)
             for i, fs in enumerate(rates):
-                n = max(0, int(P.BASE_CLOCK_HZ // fs) - 1)
-                s.set_timebase(divider=n)
+                s.set_timebase(divider=max(0, int(P.BASE_CLOCK_HZ // fs) - 1))
                 if i == 0:  # the level from the measured swing: an auto capture, core A's 5 / 95 % codes
                     s.set_trigger(mode=0)
                     probe = s.capture(["CH1"], 1.0, keep_raw=True)
                     s.set_trigger(mode=1)
+                    swing = 0.0
                     if probe is not None and probe.channels["CH1"].raw_a is not None:
                         a_lo, a_hi = (float(x) for x in np.percentile(probe.channels["CH1"].raw_a, [5, 95]))
-                        if a_hi - a_lo >= SELF_TEST_MIN_SWING_CODES:
+                        swing = a_hi - a_lo
+                        if swing >= SELF_TEST_MIN_SWING_CODES:
                             mid = int(round((a_lo + a_hi) / 2))
                             s.set_trigger(level=mid)
-                        else:
-                            check(f"swing {fmt_si(f_hz, 'Hz')} on CH1", False, codes=a_hi - a_lo, reason=wiring)
-                cap = s.capture(["CH1"], 1.0, keep_raw=True)
-                if cap is None:
-                    check(f"capture {fmt_si(f_hz, 'Hz')} at {fmt_si(fs, 'S/s')}", False,
-                          reason=f"no trigger at code {mid}: {wiring}")
-                    continue
-                v = cap.channels["CH1"].volts
-                fr = A.frequency(v, cap.dt)
-                st = A.stats(v)
-                fm = fr["frequency"] or 0.0
-                check(f"frequency {fmt_si(f_hz, 'Hz')} at {fmt_si(fs, 'S/s')}", abs(fm - f_hz) / f_hz < 0.02,
-                      measured=fm, expected=f_hz)
-                if fs / f_hz >= 20:
-                    dm = fr["duty"] or 0.0
-                    check(f"duty {duty * 100:.0f} % at {fmt_si(fs, 'S/s')}", abs(dm - duty) < 0.03, measured=dm,
-                          expected=duty)
-                # the calibration output's DC level is not 0 V at the probe (T8): check the swing only
-                lo, hi = (float(x) for x in np.percentile(v, [5, 95]))  # the two levels, not noise or ringing
-                vpp = hi - lo
-                check(f"swing at {fmt_si(fs, 'S/s')}", 2.6 <= vpp <= 3.7, vpp=vpp, low=lo, high=hi,
-                      expected="~3.1..3.3 Vpp (DC level not checked: the output is not ground-referenced)")
-                if f_hz == T4_HZ and fs == 200e6:
-                    _t4_t5(s, cap, check)
+                    if swing < SELF_TEST_MIN_SWING_CODES:
+                        check(f"swing {fmt_si(f_hz, 'Hz')} on CH1", False, codes=swing, reason=wiring)
+                        wired = False
+                        break
+                if not run_rate(f_hz, duty, fs, mid, wiring):
+                    wired = False
+                    break
+            if not wired:  # nothing more to learn: every further capture would wait out its time-out
+                break
         # T7: FORCE in normal mode with no signal
         s.set_gen(enable=False)
         if prof.has(P.Caps.FORCE_TRIGGER):
@@ -4448,7 +4518,7 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
             check("T7 FORCE completes a normal-mode capture without signal", st.acq_state == P.AcqState.DONE,
                   elapsed_ms=dt_ms)
         else:
-            check("T7 FORCE", False, reason="FORCE_TRIGGER capability not set; run the bench test manually")
+            skip("T7 FORCE", T7_SKIP_REASON)
     finally:
         try:
             s.restore_gen(saved_gen)
@@ -4461,54 +4531,85 @@ def _self_test(s: Scope, notes: list[str]) -> dict[str, Any]:
         if s.profile().programmable:
             kw.update(pretrigger_samples=saved_tr.pretrigger_samples, total_samples=saved_tr.total_samples)
         s.set_trigger(**kw)
-    passed = all(c["pass"] for c in checks)
-    return {"ok": True, "passed": passed, "n_checks": len(checks), "n_failed": sum(not c["pass"] for c in checks),
-            "checks": checks, "caveats": notes + [CAL_OUTPUT_NOTE, "Requires the calibration pin connected to CH1 with the probe at 1x; "
-                                                  "failures without that connection are expected."]}
+        if typed:
+            t2 = saved_tr.trigger2
+            s.set_trigger2(type=t2.type, polarity=t2.polarity, n=t2.n, h=t2.h, holdoff=t2.holdoff,
+                           longer=bool(t2.flags & P.TRIG2_F_LONGER))
+        if saved_decim is not None:
+            s.set_decim(saved_decim.filter, saved_decim.flags)
+        if was_run:
+            s.set_acq_state(True)
+    failed = sum(c["pass"] is False for c in checks)
+    return {"ok": True, "passed": failed == 0, "n_checks": len(checks), "n_failed": failed,
+            "n_skipped": sum(c["pass"] is None for c in checks), "checks": checks,
+            "caveats": notes + [CAL_OUTPUT_NOTE, "Requires the calibration pin connected to CH1 with the probe at 1x; "
+                                "failures without that connection are expected."]}
 
 
-#: the calibration post's square against the probe ground: about -1.24 .. +1.86 V (VRF1, CAL_OUTPUT_NOTE), mid +0.31 V
-CAL_OUTPUT_MID_V = 0.31
-#: the self-test's smallest core-A swing (5..95 %) that counts as the post's square (2.5 V/div: about 3.1 V = 63 codes)
-SELF_TEST_MIN_SWING_CODES = 20
-#: the self-test's fast square: an odd period of 201 clocks of 5 ns (995.02 kHz)
-T4_HZ = P.BASE_CLOCK_HZ / 201
+class _T4T5:
+    """T4 and T5 over many captures of the 995 kHz square at 200 MS/s; one capture decides neither (2026-11-07 14:14).
 
+    T4, which core comes first: the fold method (``A.core_delay_fold``, fpga/al3/tools/core_delay_fold.py) by the mean
+    RMS over the captures with the captures' votes behind it: d = +1 is B first as designed, -1 A first, +3 the late
+    core B of 0x153E. Non-monotonic steps at the crossings ("drops", at 1 V/div 0 B first against 134 A first over 200
+    captures) are reported as support: at 2.5 V/div they ran 1325 against 5630 and a single capture read 2 against 0.
+    T5: the word of core A's crossing nearest the trigger against pretrigger_words. The testbench puts the step's core A
+    word at the pretrigger word + 1 (fpga/al3/README.md section 22), the unit read 0..2: the median must lie in +1 +- 1."""
 
-def _t4_t5(s: Scope, cap: Capture, check: Callable[..., None]) -> None:
-    """T4: which core comes first in time (edges must be monotonic); T5: trigger_addr vs the crossing."""
-    ch = cap.channels["CH1"]
-    a, b = ch.raw_a, ch.raw_b
-    if a is None or b is None:
-        return
-    cal = s.get_cal(0)
-    a = np.clip(a.astype(np.int16) + cal.adc_a_comp, 0, 255).astype(float)
-    b = np.clip(b.astype(np.int16) + cal.adc_b_comp, 0, 255).astype(float)
-    mid = 0.5 * (np.percentile(a, 2) + np.percentile(a, 98))
+    def __init__(self, s: Scope, period: int):
+        self.period = period
+        self.order = s.info.interleave_order
+        self.cal = s.get_cal(0)
+        self.level = s.get_trigger().level + self.cal.adc_a_comp
+        self.rms: list[dict[int, float]] = []
+        self.drops = [0, 0]  # B first, A first
+        self.offsets: list[int] = []
 
-    def score(stream: np.ndarray) -> int:
-        """Count non-monotonic steps in the 3-sample neighbourhood of each crossing."""
-        bad = 0
-        for x in A.crossings(stream, mid, "rising"):
-            i = int(x)
-            seg = stream[max(0, i - 2): i + 4]
-            bad += int(np.sum(np.diff(seg) < -3))
-        return bad
-    s_b = score(np.ravel(np.column_stack([b, a])))
-    s_a = score(np.ravel(np.column_stack([a, b])))
-    order = s.info.interleave_order
-    measured = 0 if s_b <= s_a else 1
-    check("T4 interleave order (rising edges monotonic)", measured == order,
-          firmware_order="B before A" if order == 0 else "A before B",
-          measured_order="B before A" if measured == 0 else "A before B", nonmonotonic_b_first=s_b,
-          nonmonotonic_a_first=s_a)
-    # T5: crossing of core A nearest to the trigger word
-    pre_w = cap.pretrigger_samples // 2
-    xa = A.crossings(a, s.get_trigger().level + cal.adc_a_comp, "rising")
-    if xa.size:
-        k = xa[np.argmin(np.abs(xa - pre_w))]
-        offset = (int(math.floor(k)) + 1) - pre_w
-        check("T5 trigger_addr alignment (crossing word - pretrigger_words)", abs(offset) <= 1, offset_words=offset)
+    def add(self, cap: Capture) -> None:
+        ch = cap.channels["CH1"]
+        if ch.raw_a is None or ch.raw_b is None:
+            return
+        self.rms.append(A.core_delay_fold(ch.raw_a, ch.raw_b, 0, self.period))
+        a = np.clip(ch.raw_a.astype(np.int16) + self.cal.adc_a_comp, 0, 255).astype(float)
+        b = np.clip(ch.raw_b.astype(np.int16) + self.cal.adc_b_comp, 0, 255).astype(float)
+        mid = 0.5 * (np.percentile(a, 2) + np.percentile(a, 98))
+
+        def drops(stream: np.ndarray) -> int:
+            """Non-monotonic steps in the 3-sample neighbourhood of each crossing."""
+            bad = 0
+            for x in A.crossings(stream, mid, "rising"):
+                i = int(x)
+                bad += int(np.sum(np.diff(stream[max(0, i - 2): i + 4]) < -3))
+            return bad
+        self.drops[0] += drops(np.ravel(np.column_stack([b, a])))
+        self.drops[1] += drops(np.ravel(np.column_stack([a, b])))
+        pre_w = cap.pretrigger_samples // 2
+        xa = A.crossings(a, self.level, "rising")
+        if xa.size:
+            self.offsets.append(int(math.floor(xa[np.argmin(np.abs(xa - pre_w))])) + 1 - pre_w)
+
+    def judge(self, check: Callable[..., None]) -> None:
+        n = len(self.rms)
+        if n < T4_MIN_CAPTURES:
+            check("T4 interleave order (fold, d)", False, captures=n,
+                  reason=f"{n} captures with raw cores, {T4_MIN_CAPTURES} needed")
+            return
+        best, votes, mean = A.core_delay_verdict(self.rms)
+        want = 1 if self.order == 0 else -1
+        names = {1: "B before A", -1: "A before B"}
+        support = (self.drops[0] <= self.drops[1]) == (best == 1)
+        check("T4 interleave order (fold, d)", best == want and votes.get(want, 0) * 2 > n,
+              firmware_order=names[want], measured_order=names.get(best, f"neither (d = {best:+d})"), d=best,
+              expected_d=want, captures=n, votes=votes, rms_by_d={k: _r6(v) for k, v in mean.items()},
+              drops_b_first=self.drops[0], drops_a_first=self.drops[1], drops_agree=support)
+        if not self.offsets:
+            check("T5 trigger_addr alignment (crossing word - pretrigger_words)", False, reason="no crossing near the trigger")
+            return
+        med = float(np.median(self.offsets))
+        vals, cnt = np.unique(self.offsets, return_counts=True)
+        check("T5 trigger_addr alignment (crossing word - pretrigger_words)", abs(med - 1) <= 1, offset_words=med,
+              expected="+1 +- 1 words, the median", captures=len(self.offsets),
+              counts={int(v): int(c) for v, c in zip(vals, cnt)})
 
 
 def _png_from_rgb565(fb: np.ndarray) -> bytes:

@@ -160,6 +160,7 @@ async def test_self_test_triggers_on_the_post_seen_against_the_probe_ground(sim_
         caps = [x for x in r["checks"] if x["check"].startswith("capture")]
         assert not caps, caps  # every capture triggered
         assert all(x["pass"] for x in r["checks"] if x["check"].startswith("frequency")), r["checks"]
+        assert any(x["check"].startswith("T5") and x["pass"] for x in r["checks"]), r["checks"]
 
 
 async def test_self_test_without_the_post_says_how_to_wire_it(sim_factory, tmp_path):
@@ -169,6 +170,7 @@ async def test_self_test_without_the_post_says_how_to_wire_it(sim_factory, tmp_p
         assert not r["passed"]
         bad = [x for x in r["checks"] if not x["pass"] and "calibration post directly" in x.get("reason", "")]
         assert bad, r["checks"]
+        assert not any(x["check"].startswith(("frequency", "T4")) for x in r["checks"])  # it stops at the first capture
 
 
 # ---- finding 4b: scope_sweep's pace ------------------------------------------------------------------------------

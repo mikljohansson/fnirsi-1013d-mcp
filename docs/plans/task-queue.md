@@ -216,7 +216,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **FPGA 0x1536 firmware + MCP support** (fw 0.2.58 / protocol 1.17 and mcp-gen5 4699593; bench pending, see the '1.17 on the unit' item; 0x1536 itself was superseded by 0x1537 flashed 10-19 16:31)
 - [x] **Calibration v4: background interleave-mismatch tracking** (fw-cal3, fw 0.2.50 / protocol 1.14: A - B tracker, full-class class probe, GET_CAL 288 bytes, diagnostics lines; built and host-tested, bench list firmware/README.md 6.5; the one-time gain step stays, design section 6)
 - [x] **Calibration wizard (owner approved 10-19)** (fw-cal3, fw 0.2.50: built and host-tested, bench list firmware/README.md 6.4)
-- [~] **USB: device lost after a long idle on 0.2.48** (0.2.49 merged; reopen soak 3 x 30 min idle 10-19 11:34-13:04 clean, counters 36/37 stayed 1/0) (fw-usb2 10-19: 0.2.49 merged with the suspend watch, inferred resume that acts,
+- [x] **USB: device lost after a long idle on 0.2.48** (closed: the 2 h closed-port run on fw 0.3.0 passed, hardware-status 2026-11-07 14:54-16:54) (0.2.49 merged; reopen soak 3 x 30 min idle 10-19 11:34-13:04 clean, counters 36/37 stayed 1/0) (fw-usb2 10-19: 0.2.49 merged with the suspend watch, inferred resume that acts,
   soft reconnect after a retry storm or 15 min suspended, counters 60-61, event type 20, protocol 1.14; bench plan firmware/AGENTS.md
   section 27; Windows selective suspend on this laptop: AC disabled, DC enabled) (10-19 10:20): port closed from about 08:40 to 10:20, device vanished from the bus
   (no 1209, no re-enumeration), GET_LINK_STATS after replug: suspends (36) = 17, resumes (37) = 0, no restart. The host suspended the idle
@@ -255,11 +255,11 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Battery follow-ups** (mcp-battery, 2026-11-06). (1) **Done, fw-031 101e056, bench section 98.** Firmware: GET_TIMEBASE should report the divider the FPGA
   holds (`pc_hal_divider_now`) while a host's raw divider runs, not drop it when acq_view_fit snaps the UI's time/div
   after a SET_TRIGGER total (finding 3; the host now corrects it from GET_DECIM, `Scope._held_timebase`). The spectrum
-  view's "raw divider labelled with the UI rate" (protocol row 45) is the same root. (2) Simulator: the Nth edge with
-  an idle time counts from the arm, the unit waits for an idle gap first (battery T10 on the unit: no trigger; the
-  simulator fires); check the RTL (`tb_trigtypes.v`) and align `TrigQual`. (3) On the unit: `scope_sweep` with
+  view's "raw divider labelled with the UI rate" (protocol row 45) is the same root. (2) Done 05f5d62: `TrigQual` is
+  `tb_trigtypes.v`'s model, T10 is judged on the simulator. (3) On the unit: `scope_sweep` with
   `steps=200, rate=100` in RUN and in STOP (`stats.achieved_steps_per_s`, `pending_polls`, `pending_sleeps`) to put the
-  per-step cost without the poll into docs/mcp-tools.md. (4) scope_mask_test fails a record's first sample when an
+  per-step cost without the poll into docs/mcp-tools.md (RUN read in the battery of 2026-11-07 12:5x, G5: 58.4 steps / s, 0
+  polls, 0 sleeps; STOP still to read). (4) scope_mask_test fails a record's first sample when an
   edge sits on it (the time tolerance cannot widen before the record): seen in the simulator, the battery avoids it.
 
 - [x] **fnirsi1013d-bode crashes on a flat CH1 record** (merged 10-20 11:40, bench pending)
@@ -272,13 +272,20 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector); the PNG plot is done (scope_report, mcp-gen6).
 - [~] **1.19 / 1.20 on the unit, host side** (scope_health on 0x1539 10-19 21:12 and scope_cal_probe 20:25 done) (mcp-gen6 hand-off, mcp/AGENTS.md open item 0a): scope_health encode_check
   on 0x1538; scope_bode_sweep(where='device') on the divider and the RC next to where='host' (within 0.05 dB / 0.3 deg).
-  Remains: device vs host Frequency response sweep on the RC and the divider, blocked by the A-core fault until 0x153A (now flashed 10-20 10:03).
+  Remains: device vs host Frequency response sweep on the divider. The RC is done: battery B2c on fw 0.3.0 (2026-11-07,
+  `backups/battery-0.3.0/tool-run4-published/`), 17 points below 40 kHz, worst 0.035 dB / 0.07 deg.
 - [x] **CAL_PROBE (1.21) host decoder** (mcp-gen6, b3b9c51)
-- [ ] **1.17 on the unit, host side** (mcp-gen5, after the owner's 0x1536 flash and firmware/AGENTS.md section 35 checks 7-9): run
+- [x] **1.17 on the unit, host side** (battery on fw 0.3.0, 2026-11-07, `tool-run4-published`: 8 segments 1.000 / 3.000 ms apart with
+  min = max, every segment triggered; `hardware=true` against host averaging, 16 records, record means 0.29910 / 0.29912 V on CH1 and
+  0.33411 / 0.33371 V on CH2, within 0.01 code. Not run: the 10 kHz / 100 us case and N = 1 against READ_RAW. The follow-up is the
+  next item) (mcp-gen5, after the owner's 0x1536 flash and firmware/AGENTS.md section 35 checks 7-9): run
   `scope_capture_segments` (10 kHz generator: intervals 100 us +- 10 ns, every segment crossing at the pretrigger point) and
   `scope_averaged_capture(hardware=true)` against host averaging of the same signal (means within 0.1 code, N = 1 equal to READ_RAW);
   then make `hardware` default to auto when the record fits, add it to `scope_decay_fit`, and drop the "not yet verified" caveats.
-- [ ] **Version bump to 0.3.0** in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
+- [ ] **Hardware averaging by default** (from the item above): `hardware` auto when the record fits, the same in `scope_decay_fit`,
+  and the two "not yet verified" caveats in server.py dropped, with the 0.3.0 release notes' "Not benched" wording for segments
+  and hardware averaging updated.
+- [x] **Version bump to 0.3.0** (released: tag v0.3.0 on ab93c0d, hardware-status 2026-11-07 12:46-13:00) in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
   (mcp-gen3 item 4) when the owner gives the go for v0.3.0.
 - [x] **Alias residual model check** (fpga-gen4)
 
@@ -343,7 +350,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   sweep's peak on core B rose from 0.65 to 1.0 % (mean 0.27 to 0.41 %, 80 minutes after power-on; core A 5.2 to 5.8 %,
   `docs/hardware-status.md` 10:52-11:33). Revisit whether a chip can keep the pairing with an instant better for core B
   at 200 MSa/s (README section 22, "its limit at 200 MSa/s"). Accepted by the owner for 0.3.0.
-- [ ] **200 MSa/s pairing check in the battery**: the `coreorder` group uses core_order's moving-word metric, which carry errors
+- [x] **200 MSa/s pairing check in the battery** (f2e0878: the fold at every divider, d = +1 by mean RMS and votes; simulator only so
+  far, its first run on the unit is the check) : the `coreorder` group uses core_order's moving-word metric, which carry errors
   take over at divider 0 when a level sits at a carry (CH2 voted +1 over 1571 words on 2026-11-07, not an edge). Use
   `fpga/al3/tools/core_delay_fold.py` in place of core_order at divider 0: generator at 200 MHz / 401, both probes on the
   post, d = +1 expected. Its port is fixed to COM10 today, and divider 0's minimum is shallow, so judge by votes.
@@ -352,14 +360,16 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   notes name it under "Not benched". INTERLEAVE_UNVERIFIED on 0x153F was not decided on the bench either.
 - [ ] **Encode check re-takes on 0x153F** (to watch): 3 captures re-taken of 42926 during the battery's rate changes, all
   recovered, 0 accepted bad; 0x153E had 1 of 97304 in a run with fewer rate changes per capture, so not like for like.
-- [ ] **Smaller findings of the MCP battery 2026-11-06** (`docs/hardware-status.md` 16:21-16:45): `scope_capture_and_fft`
+- [x] **Smaller findings of the MCP battery 2026-11-06** (2922bf9: each fixed with a simulator test; the battery judges them since and
+  passed on fw 0.3.0, 2026-11-07: A6 / A8 the rate, `frequency_reason`, the sweep at 58 of 100 steps / s; its STOP reading is in "Battery
+  follow-ups"; the loopback's wiring reason and level, the `delay` name) (`docs/hardware-status.md` 16:21-16:45): `scope_capture_and_fft`
   / `scope_dvm` once labelled a 200 kSa/s record 1 MSa/s right after the guard's stage move (not reproduced; check the
   settings the guard path touches); the capture summary's frequency on a flat noisy trace; `scope_sweep` at 29 of 100
   steps / s; the loopback self-test's trigger level (+1.65 V against a square that tops at +1.83 V over the probe
   ground) and its need for CH1 straight on the post; docs/mcp-tools.md `delay(CH1->CH2)` against the tool's `delay`.
 - [x] **ACQ chip says "Long" in roll mode** (fw-031 f737cee, bench firmware/AGENTS.md section 98) (owner 2026-11-07, 0.3.1): `menu.c:2024` draws "Long" (1.00o5's wording) while the CTRL page calls the mode Roll; the chip should read "ACQ Roll". Check the ACQ menu's "Long mode" / "Short mode" box at `menu.c:5076` and `:5182` in the same pass, and `docs/guide/screens.md:16`.
 - [ ] **Zero at the shorted input against the two-polarity zero** (bench 2026-11-07, `docs/hardware-status.md` 14:42): up to 1.5 codes on CH2 ranges 2 and 4, -1 code on CH1 range 2, where +-1 V gives +-20 mV. Check the code 128 carry as the cause (a slow ramp or dither across 128); full rate reads up to 0.65 code high on both channels.
-- [ ] **scope_self_test_loopback judges from too little** (bench 2026-11-07 14:14, 0.3.1): 7 of 15 checks failed with no fault behind them. 25 % duty at 995 kHz on the post's slow edge (swing 2.1 V, duty 0.29..0.36): use 50 % or a lower frequency; T4 decides from one capture at 2.5 V/div (1000 captures in protocol section 12; over 200 at 1 V/div B first 0 drops, A first 134): many captures at 1 V/div; T5 tolerance +-1 against the simulated word + 1 (measured 1..2); T7 cannot pass on a release build (FORCE is debug-only): SKIP.
+- [x] **scope_self_test_loopback judges from too little** (30afc1b; simulator only so far, `--groups loopback` on the unit is the check) (bench 2026-11-07 14:14, 0.3.1): 7 of 15 checks failed with no fault behind them. 25 % duty at 995 kHz on the post's slow edge (swing 2.1 V, duty 0.29..0.36): use 50 % or a lower frequency; T4 decides from one capture at 2.5 V/div (1000 captures in protocol section 12; over 200 at 1 V/div B first 0 drops, A first 134): many captures at 1 V/div; T5 tolerance +-1 against the simulated word + 1 (measured 1..2); T7 cannot pass on a release build (FORCE is debug-only): SKIP.
 - [ ] **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and
   the probes connected): 4 drops in 17907 GET_STATUS requests, each a bus suspend (no SOFs) followed 129 ms later by a
   host bus reset and a normal enumeration, 0.6 s down, no device restart; three host opens failed the same way at 14:12.
@@ -377,7 +387,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   461a70c the 1 ps SIM write clock delay with the references', 639a7de + e2f1bdd tb_peak's latency check). The enc0 tb_peak
   failure that queued it was a checker ambiguity (11 and 12 both fit at N = 200), not a race; the race class is the
   October div20 one, deterministic now (six compiles per testbench, one log). fpga-encphase needs the same commits.
-- [ ] **Flash and bench 0x153C** (fpga-c4, built 10-21: `dist/al3-0x153C.bin` `2580b090...c7f2`, flash image `07393bf5...1f77`,
+- [x] **Flash and bench 0x153C** (superseded: 0x153C was flashed and benched 10-21, then 0x153D, 0x153E; 0x153F is `recommended`, abd988a, 2026-11-07) (fpga-c4, built 10-21: `dist/al3-0x153C.bin` `2580b090...c7f2`, flash image `07393bf5...1f77`,
   unbenched; fw 0.2.104+ is built for it). Checklist: fpga/al3/AGENTS.md "0x153C built, fpga-c4"; bench checks: contract
   9.2 items 1-7 (README section 15). Then dist `recommended`, 0x153B `supported`.
 - [x] **0x153C follow-ups outside the FPGA** (fw-cruft, branch `fw-cruft`, firmware/AGENTS.md section 77: the 0x0F writes
@@ -392,6 +402,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [ ] 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)
+  (2026-11-07 14:30: owner, acquisition menu OK on 0.3.0; Max hold and the overrange warning have no verdict in the log.)
 
 ## After 0.3.0
 
@@ -400,20 +411,23 @@ calibration rework (v3 gains, the wizard, the gated / full-rate classes back in 
 training); the latest calibration and noise data (hardware-status 10-22 18:27-18:33) supersede them unless a
 symptom reappears. The phosphor capture loop is a design study, not a fix.
 
-- [ ] **CH2 range-5 zero drift check** (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
+- [x] **CH2 range-5 zero drift check** (superseded: this section's note of 10-26; ranges 4 and 6 read shorted on 2026-11-07 14:42, range 5 not, and what they show is the item "Zero at the shorted input", owner: accepted) (fw-cal hypothesis): CH2 raw at ranges 4/5 vs the stored zeros now; re-calibrate after 10 minutes
   warm-up and re-measure range 6 immediately and 10 minutes later. If it drifts, document a warm-up recommendation (Atlan: 5 min).
-- [ ] **Calibration v2 bench** (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
+- [x] **Calibration v2 bench** (superseded: v2 gave way to v3 in 0.2.45 and the wizard; the v3 volts check is 2026-11-07 14:42, gain within 2 % on four ranges) (when fw-cal delivers): shorted inputs, per-core means equal within 0.3 codes after
   correction at full-rate and gated rates, T8-style PWM sweep, Nyquist spur gone in legacy mode, volts at 1.000 V /
   0.010 V match the host model within 1 %; owner reruns base calibration.
   (check: CHANGELOG 0.2.45 says calibration v2 is superseded by v3; hardware-status 10-19 10:26 shows v3 zeros exact at 0 V, but the PWM sweep and the 1.000 V / 0.010 V volts points are not recorded.)
-- [ ] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (10-18 late): channel offset with the cores
+- [x] **CH2 reads +1.0..1.5 codes at range 6 with shorted input right after calibration** (re-read 2026-11-07 14:42: 128.10 / 128.77 codes, +0.1 / +0.8; what is left is the item "Zero at the shorted input") (10-18 late): channel offset with the cores
   agreeing; see docs/hardware-status.md late evening and the overnight log. Decide after the log: PWM/relay drift at hw range 5 vs probe.
 - [ ] **Phosphor fast capture loop** (design study, fw-phosphor section 24): the view draws one record per pass (about 30 wfm/s);
   a capture loop that reads several records per pass would raise the waveform rate. Measure pass_ms in the view first.
   Remains: the capture loop itself; the design note docs/plans/phosphor-fast-capture.md landed with fw 0.2.58 and the scope-view pass is 15 ms median with the MMU (hardware-status 10-19 08:10).
 - [ ] **Gain-per-range check** (fw-cal2 assumption 1, README 6.3 step 7): gains measured on one range are applied to all six; bench
   CH1 at ranges 1/2/3 with the generator static on the post; if spans disagree beyond 0.3 %, store gains per range (80 bytes free).
-- [ ] **Overnight zero step at 03:48** (docs/hardware-status.md 04:00): after 4.4 h flat, CH2 core A moved -1.7 codes (B unchanged) and CH1
+  Data of 2026-11-07 14:42 (lab supply +-1 V, not the post): gain errors at 1 MS/s CH1 -2.4, +0.5, -1.1, -0.4 %, CH2 +1.5, +1.8, -0.4,
+  +1.0 % at 5, 2.5, 1, 0.5 V/div: within 2 %, but the spread is over the 0.3 % limit even without 5 V/div (six codes per volt). Open: decide
+  whether the limit stands (gains per range) or 2 % is accepted.
+- [x] **Overnight zero step at 03:48** (superseded: this section's note of 10-26, one observation on 0.2.44; the v4 tracker follows the A - B split, converged 2026-11-07 14:42; no later overnight run, so not re-observed) (docs/hardware-status.md 04:00): after 4.4 h flat, CH2 core A moved -1.7 codes (B unchanged) and CH1
   both cores +0.5 within one 10-minute interval, persisting. Morning: battery/charger state, recalibrate on 0.2.48, re-check the CH2 A/B
   split; if per-core zeros move with temperature or supply, consider a periodic zero re-check (needs an input-independent method) or a
   warm-up note in the calibration procedure.

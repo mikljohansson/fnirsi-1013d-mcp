@@ -4,12 +4,13 @@ exactly as an agent does, through named groups of tool calls, and judges every s
     fnirsi1013d-battery --port COM10                    # the unit, every default group (about 4 minutes)
     fnirsi1013d-battery --port COM10 --groups acq,gen   # some groups
     fnirsi1013d-battery --port COM10 --groups loopback  # the loopback self-test (CH1 straight on the post)
+    fnirsi1013d-battery --port COM10 --groups coreorder # both probes on the post: the pairing of CH1 and CH2
     fnirsi1013d-battery --sim                           # the in-process simulator (an RC on the generator)
     fnirsi1013d-battery --list                          # the groups and their steps' expectations
 
 Bench (BENCH below): the generator's 1 kHz square on the calibration post into an RC ladder, CH1 on the ladder input,
-CH2 on its second node, both probes x1. The battery sets the channels to 1 V/div DC, Filter Off and the generator to
-1 kHz itself; it ends with the scope in RUN at 1 MSa/s, Filter Off, the generator at 1 kHz. The scope's serial port is
+CH2 on its second node, both probes x1 (the coreorder group then judges CH1 and skips CH2: nothing of 499 kHz reaches
+the second node). The battery sets the channels to 1 V/div DC, Filter Off and the generator to 1 kHz itself; it ends with the scope in RUN at 1 MSa/s, Filter Off, the generator at 1 kHz. The scope's serial port is
 exclusive: close every other client first.
 
 Output: one PASS / FAIL / SKIP line per step on stdout, ``battery.json`` (every call: arguments, verdict, detail,
@@ -36,6 +37,8 @@ from typing import Any, Callable
 import anyio
 import numpy as np
 
+from . import analysis as A
+
 BENCH = ("the generator's 1 kHz square on the calibration post into an RC ladder; CH1 on the ladder input, CH2 on its "
          "second node, both 1 V/div DC")
 #: --sim: an RC on the generator (dut_in / dut_out, fc about 3.7 kHz like the bench ladder's -3 dB point), EXT the pin,
@@ -48,8 +51,13 @@ F_GEN = 1000.0
 DEFAULT_GROUPS = ("session", "config", "rates", "filters", "acq", "trigger", "counter", "gen", "bode", "log", "data",
                   "coreorder", "final")
 OPTIONAL_GROUPS = ("loopback",)
-#: core order: the dividers of the 2026-11-06 measurement (docs/hardware-status.md 17:22) and captures per divider
-CORE_ORDER_DIVIDERS = (0, 1, 2, 3, 4, 5, 6, 7, 9, 19, 999)
+#: core pairing: the dividers of the 2026-11-07 fold measurement (docs/hardware-status.md 10:2x-10:31), the generator's
+#: period in clocks (prime: a core's samples cover every phase at any divider) and the smallest core-A swing (5..95 %) that
+#: counts as a signal to fold at 1 V/div (the post about 77 codes; a quiet input 3..6, the ladder's second node no more)
+CORE_ORDER_DIVIDERS = (0, 1, 2, 3, 4, 5, 6, 7, 9, 19, 99, 999)
+FOLD_PERIOD = 401
+FOLD_HZ = 200e6 / FOLD_PERIOD
+FOLD_MIN_SWING_CODES = 12
 CAPTURE_TOOLS = {"scope_capture", "scope_averaged_capture", "scope_capture_segments", "scope_capture_and_fft",
                  "scope_decay_fit", "scope_dvm", "scope_mask_test"}
 
@@ -519,13 +527,11 @@ async def g_trigger(b: Battery) -> None:
         ("T11", dict(type="timeout", polarity="high", width="300us"), True, "high for 300 us: fires"),
         ("T12", dict(type="timeout", polarity="high", width="800us"), False, "never high for 800 us: no trigger"),
     ]
-    sim_nth = "the simulator's Nth edge with an idle time counts from the arm; the unit waits for an idle gap"
     for label, kw, fires, why in typed:
         await b.step(f"{label}a", "scope_set_trigger", dict(source="CH1", level=LEVEL_V, mode="normal", hold_off=0,
                                                             pretrigger_fraction=0.5, total_samples=3000, **kw),
                      check=ok_true)
         await b.step(f"{label}b", "scope_capture", cap if fires else none, expect=why,
-                     sim_differs=sim_nth if label == "T10" else None,
                      check=ok if fires else untriggered)
     # hold-off: short records (80 samples = 0.4 ms) so the interval is the hold-off's, not the record's
     for label, hold, want in (("T13", 0, 1e-3), ("T14", "2.5ms", 3e-3)):
@@ -756,89 +762,92 @@ async def g_data(b: Battery) -> None:
     await b.step("D12", "scope_screenshot", expect="an image", want_image=True)
 
 
-def core_shift_rms(a: np.ndarray, bb: np.ndarray, lo: int = 4, hi: int = 70) -> tuple[dict[int, float] | None, int]:
-    """fpga/al3/tools/core_order.py's measure: on the words where core A moves lo..hi codes, the RMS of
-    B[k+s] - (A[k-1] + A[k]) / 2 (the mean A - B offset removed) for s = -1..2; s = 0 is the designed order (B half a
-    word before A), s = +1 core B one conversion late."""
-    A = np.asarray(a, np.float64)
-    B = np.asarray(bb, np.float64)
-    dA = np.abs(np.diff(A))
-    idx = np.where((dA >= lo) & (dA <= hi))[0] + 1
-    idx = idx[(idx >= 3) & (idx < len(A) - 3)]
-    if len(idx) < 2:
-        return None, int(len(idx))
-    out = {}
-    for s in (-1, 0, 1, 2):
-        r = B[idx + s] - (A[idx - 1] + A[idx]) / 2
-        out[s] = float(np.sqrt(np.mean((r - np.mean(B - A)) ** 2)))
-    return out, int(len(idx))
-
-
 async def g_coreorder(b: Battery, n: int = 12) -> None:
-    """The per-divider core order (docs/plans/core-order-gated.md): Filter Off, raw per-core records of CH1's rising
-    edge, the shift s of core B that makes the edge smooth. Expected s = 0 at every divider: FPGA 0x153F captures both
-    cores of a chip at one instant (0x153E read +1 at most dividers, so this group FAILs there with the measured row)."""
+    """The pairing of the cores at every divider, 200 MSa/s included: the fold method (fpga/al3/tools/core_delay_fold.py,
+    ``analysis.core_delay_fold``), the generator at 200 MHz / 401, Filter Off, raw per-core records. d = +1 expected (0x153F;
+    0x153E read +3 at most rates, so this group FAILs there with the measured row). Wiring: both probes on the post is the
+    sharp signal; on the bench ladder CH1 (its input) is judged on the rounded signal, the minimum shallower, and CH2 (the
+    second node, nothing left of 499 kHz) is a SKIP with the reason."""
     await b.step("O0", "scope_set_decimation", {"filter": "off"}, check=equals("applied.effective", "off"))
-    await b.step("O0t", "scope_set_trigger", dict(source="CH1", type="edge", edge="rising", level_code=115,
-                                                  mode="normal", hold_off=0, pretrigger_fraction=0.5,
+    await b.step("O0t", "scope_set_trigger", dict(source="CH1", type="edge", edge="rising", level_code=128,
+                                                  mode="auto", hold_off=0, pretrigger_fraction=0.5,
                                                   total_samples=3000), check=ok_true)
-    row = {}
-    for d in CORE_ORDER_DIVIDERS:
-        await b.step(f"O{d}a", "scope_set_timebase", {"divider": d}, check=equals("applied.divider", d))
-        votes: dict[int, int] = {}
-        acc: dict[int, list[float]] = {k: [] for k in (-1, 0, 1, 2)}
-        t0 = time.monotonic()
-        for _ in range(n):
-            ok, res, err, _img = await b.raw("scope_capture", {"channels": ["CH1"], "raw": True, "timeout_s": 3.0})
-            if not ok or get(res, "trigger") != "fired" or not get(res, "file"):
-                await b.raw("scope_acquisition_control", {"action": "stop"})
-                continue
-            with np.load(get(res, "file")) as z:
-                if "CH1_raw_a" not in z:
-                    continue
-                m, _nw = core_shift_rms(z["CH1_raw_a"], z["CH1_raw_b"])
-            if m is None:
-                continue
-            w = min(m, key=lambda k: m[k])
-            votes[w] = votes.get(w, 0) + 1
-            for k in m:
-                acc[k].append(m[k])
-        rate = 200e6 / (d + 1)
-        st = Step(b.group, f"O{d}b", "scope_capture", {"channels": ["CH1"], "raw": True, "captures": n},
-                  f"divider {d}: core B in the designed order (s = 0)", seconds=round(time.monotonic() - t0, 3))
-        if not votes:
-            st.status, st.detail = "FAIL", "no usable edge in the captures"
-        else:
-            win = max(votes, key=lambda k: votes[k])
-            row[d] = win
-            rms = " / ".join(f"{np.mean(acc[k]):.2f}" if acc[k] else "-" for k in (-1, 0, 1, 2))
-            st.status = "PASS" if win == 0 and votes[win] == sum(votes.values()) else "FAIL"
-            st.detail = f"{rate / 1e6:.4g} MSa/s: s = {win:+d} (votes {dict(sorted(votes.items()))}, RMS s=-1/0/1/2 {rms})"
-            if st.status == "FAIL" and b.sim and d > 0:
-                st.status = "SKIP"
-                st.detail = ("simulator differs from the unit (its edges are steps within one sample at divided rates: "
-                             "no slope orders the cores): " + st.detail)
-        st.result = {"votes": votes, "rms": {k: (float(np.mean(v)) if v else None) for k, v in acc.items()}}
-        b.run.steps.append(st)
-        b.echo(f"{st.status:4s} [{st.label}] core order ({st.seconds:.2f} s): {st.detail}")
-    b.run.facts["core_order"] = row
-    text = ", ".join(f"{d}: {s:+d}" for d, s in row.items())
+    await b.step("O0g", "scope_generator", {"enabled": True, "frequency": FOLD_HZ, "duty_percent": 50},
+                 expect=f"the generator at 200 MHz / {FOLD_PERIOD}, 50 %",
+                 check=approx("applied.frequency_exact_hz", FOLD_HZ, 1e-9))
+
+    async def record(chans: list[str]) -> dict[str, tuple[np.ndarray, np.ndarray]] | None:
+        """One raw record: any record serves, the fold needs no trigger."""
+        ok, res, _err, _img = await b.raw("scope_capture", {"channels": chans, "raw": True, "timeout_s": 3.0})
+        if not ok or not get(res, "file"):
+            await b.raw("scope_acquisition_control", {"action": "stop"})
+            return None
+        with np.load(get(res, "file")) as z:
+            if any(f"{c}_raw_a" not in z for c in chans):
+                return None
+            return {c: (z[f"{c}_raw_a"], z[f"{c}_raw_b"]) for c in chans}
+
+    await b.step("O0a", "scope_set_timebase", {"divider": 0}, check=equals("applied.divider", 0))
+    first = await record(["CH1", "CH2"])
+    swing = {c: float(np.subtract(*np.percentile(v[0], [95, 5]))) for c, v in first.items()} if first else {}
+    chans = [c for c, w in swing.items() if w >= FOLD_MIN_SWING_CODES]
+    b.note("O0s", "PASS" if "CH1" in chans else "FAIL", f"CH1 carries the {FOLD_HZ / 1e3:.0f} kHz square",
+           f"swing {swing.get('CH1', 0):.0f} codes (at least {FOLD_MIN_SWING_CODES}): CH1 on the post or the ladder input")
+    if "CH2" not in chans:
+        b.note("O0c", "SKIP", f"CH2 carries the {FOLD_HZ / 1e3:.0f} kHz square",
+               f"swing {swing.get('CH2', 0):.0f} codes: CH2 not judged, on the ladder's second node nothing of it is left. "
+               "Both probes on the post for both channels: fnirsi1013d-battery --port <port> --groups coreorder")
+    rows: dict[str, dict[int, int]] = {c: {} for c in chans}
+    if "CH1" in chans:
+        for d in CORE_ORDER_DIVIDERS:
+            await b.step(f"O{d}a", "scope_set_timebase", {"divider": d}, check=equals("applied.divider", d))
+            recs: dict[str, list[dict[int, float]]] = {c: [] for c in chans}
+            t0 = time.monotonic()
+            for _ in range(n):
+                got = await record(chans)
+                for c, (ra, rb) in (got or {}).items():
+                    recs[c].append(A.core_delay_fold(ra, rb, d, FOLD_PERIOD))
+            secs = round(time.monotonic() - t0, 3)
+            for c, tag in zip(chans, "bc"):
+                st = Step(b.group, f"O{d}{tag}", "scope_capture", {"channels": chans, "raw": True, "captures": n},
+                          f"divider {d}, {c}: the designed pairing (d = +1)", seconds=secs)
+                if not recs[c]:
+                    st.status, st.detail = "FAIL", "no record with raw cores"
+                else:
+                    best, votes, mean = A.core_delay_verdict(recs[c])
+                    rows[c][d] = best
+                    rms = " / ".join(f"{mean[k]:.2f}" for k in (0, 1, 2, 3))
+                    st.status = "PASS" if best == 1 and votes.get(1, 0) * 2 > len(recs[c]) else "FAIL"
+                    st.detail = (f"{200 / (d + 1):.4g} MSa/s: d = {best:+d} (votes {votes}, RMS d = 0 / +1 / +2 / +3 {rms})")
+                    st.result = {"votes": votes, "rms": mean}
+                b.run.steps.append(st)
+                b.echo(f"{st.status:4s} [{st.label}] core delay ({st.seconds:.2f} s): {st.detail}")
+    b.run.facts["core_order"] = rows
+    text = "; ".join(f"{c} " + ", ".join(f"{d}: {v:+d}" for d, v in r.items()) for c, r in rows.items())
     fails = [x for x in b.run.steps if x.group == b.group and x.label.startswith("O") and x.status == "FAIL"]
-    b.note("O", "PASS" if row and len(row) == len(CORE_ORDER_DIVIDERS) and not fails else "FAIL",
-           "s = 0 at every divider", f"measured row (divider: s) {text or 'none'}")
+    b.note("O", "PASS" if rows.get("CH1") and len(rows["CH1"]) == len(CORE_ORDER_DIVIDERS) and not fails else "FAIL",
+           "d = +1 at every divider", f"measured row (divider: d) {text or 'none'}")
+    await gen_1k(b, "Ozg")
     await b.step("Oz", "scope_set_timebase", {"sample_rate": "200kS/s"}, check=ok_true)
     await trig_ch1(b, "Ozt")
 
 
 async def g_loopback(b: Battery) -> None:
-    """Needs CH1 straight on the calibration post (no ladder): the self-test's levels and edges are the post's."""
+    """Needs CH1 straight on the calibration post (no ladder): the self-test's levels and edges are the post's. T7 is
+    a skip on a release build (FORCE is debug-only), every other check must pass, T4 and T5 among them."""
     def passed(res: Any) -> str | None:
-        if get(res, "passed"):
-            return None
-        bad = [f"{c['check']}: {c.get('reason') or c.get('measured')}" for c in get(res, "checks", []) if not c["pass"]]
-        return "; ".join(bad)[:500]
-    await b.step("X1", "scope_self_test_loopback", expect="every check passes (CH1 straight on the post)",
-                 check=passed)
+        checks = get(res, "checks", [])
+        bad = [f"{c['check']}: {c.get('reason') or c.get('measured') or c.get('measured_order') or c.get('offset_words')}"
+               for c in checks if c["pass"] is False]
+        if bad:
+            return "; ".join(bad)[:500]
+        ran = " ".join(c["check"] for c in checks if c["pass"] is True)
+        if "T4" not in ran or "T5" not in ran:
+            return "T4 or T5 did not run"
+        return None
+    await b.step("X1", "scope_self_test_loopback",
+                 expect="every check passes, T4 d = +1, T5 +1 +- 1 words; T7 skipped on a release build (CH1 straight "
+                        "on the post)", check=passed)
     await gen_1k(b, "X2")
 
 
@@ -886,7 +895,8 @@ def markdown(run: Run, meta: dict[str, Any]) -> str:
             lines.append(f"- {s.status} [{s.label}] {s.tool}: expected {s.expect}; {s.detail}")
     if "core_order" in run.facts:
         row = run.facts["core_order"]
-        lines += ["", "Core order (divider: s): " + ", ".join(f"{d}: {v:+d}" for d, v in row.items())]
+        lines += ["", "Core delay (divider: d): " + "; ".join(
+            f"{c} " + ", ".join(f"{d}: {v:+d}" for d, v in r.items()) for c, r in row.items())]
     if run.facts.get("sweep_rate") is not None:
         lines.append(f"scope_sweep reached {run.facts['sweep_rate']:.1f} steps / s (100 asked).")
     return "\n".join(lines) + "\n"

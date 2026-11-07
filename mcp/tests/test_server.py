@@ -11,8 +11,10 @@ import numpy as np
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 
+from fnirsi1013d import analysis as A
 from fnirsi1013d import protocol as P
 from fnirsi1013d.server import ServerConfig, build_server
+from fnirsi1013d.simulator import Device, SimConfig
 
 pytestmark = pytest.mark.anyio
 
@@ -498,19 +500,76 @@ async def test_self_test_loopback(sim_factory, tmp_path):
         assert r["confirmation_required"]
         r = await c.call("scope_self_test_loopback", confirm_token=r["token"])
         failed = [x for x in r["checks"] if not x["pass"]]
-        assert r["passed"], failed
+        assert r["passed"] and not failed, failed
         names = " ".join(x["check"] for x in r["checks"])
         assert "T4" in names and "T5" in names and "T7" in names
+        assert not any("duty" in x["check"] and "995" in x["check"] for x in r["checks"])  # the post's edge: 10 kHz only
+        t4 = next(x for x in r["checks"] if x["check"].startswith("T4"))
+        assert t4["d"] == 1 and t4["captures"] >= 20 and t4["votes"]["1"] * 2 > t4["captures"]
         assert srv.device.settings.gen.enable == 0  # restored
+
+
+async def test_self_test_restores_every_setting(sim_factory, tmp_path):
+    srv = sim_factory(signal="gen", noise_lsb=1.0)
+    async with client_for(srv, tmp_path) as c:
+        await c.call("scope_set_channel", channel="CH1", range_index=3, coupling="AC")
+        await c.call("scope_set_timebase", sample_rate="1MS/s")
+        await c.call("scope_set_decimation", filter="cic2")
+        await c.call("scope_set_trigger", source="CH1", type="nth_edge", polarity="falling", n=3, idle="40us",
+                     hold_off="1ms", mode="auto", level_code=120, pretrigger_fraction=0.25, total_samples=4000)
+        tok = (await c.call("scope_generator", enabled=True, frequency="5kHz", duty_percent=30))["token"]
+        await c.call("scope_generator", enabled=True, frequency="5kHz", duty_percent=30, confirm_token=tok)
+        await c.call("scope_acquisition_control", action="run")
+        d = srv.device
+        before = repr((d.settings.channels, d.settings.divider, d.settings.trigger, d.settings.gen, d.settings.decim))
+        r = await _self_test(c)
+        assert r["checks"]
+        assert repr((d.settings.channels, d.settings.divider, d.settings.trigger, d.settings.gen,
+                     d.settings.decim)) == before
+        assert (await c.call("scope_status"))["run_state"] == "RUN"
+
+
+async def test_self_test_skips_t7_without_force(sim_factory, tmp_path):
+    """A release build has no FORCE: T7 is a skip with the reason, and the run still passes."""
+    caps = Device(SimConfig()).caps & ~P.Caps.FORCE_TRIGGER
+    srv = sim_factory(signal="gen", noise_lsb=1.0, caps_override=caps)
+    async with client_for(srv, tmp_path) as c:
+        r = await _self_test(c)
+        t7 = next(x for x in r["checks"] if x["check"].startswith("T7"))
+        assert t7["pass"] is None and t7["skipped"] and "PC_DEBUG" in t7["reason"]
+        assert r["passed"] and r["n_failed"] == 0 and r["n_skipped"] == 1
+
+
+async def test_self_test_median_outvotes_a_noisy_capture(sim_factory, tmp_path, monkeypatch):
+    """One capture read 1047 kHz on 995 kHz on the bench: a stray reading must not fail the frequency check."""
+    real, calls = A.frequency, []
+
+    def noisy(v, dt, *a, **k):
+        out = dict(real(v, dt, *a, **k))
+        calls.append(1)
+        if len(calls) % 7 == 3:
+            out["frequency"] = 1.05 * (out["frequency"] or 0.0)
+        return out
+    monkeypatch.setattr(A, "frequency", noisy)
+    srv = sim_factory(signal="gen", noise_lsb=1.0)
+    async with client_for(srv, tmp_path) as c:
+        r = await _self_test(c)
+        freq = [x for x in r["checks"] if x["check"].startswith("frequency")]
+        assert len(freq) == 4 and all(x["pass"] for x in freq), freq
+        assert any(x["highest"] > 1.03 * x["expected"] for x in freq)
+
+
+async def _self_test(c):
+    tok = (await c.call("scope_self_test_loopback"))["token"]
+    return await c.call("scope_self_test_loopback", confirm_token=tok)
 
 
 async def test_self_test_detects_wrong_interleave(sim_factory, tmp_path):
     srv = sim_factory(signal="gen", noise_lsb=0.5, true_order="a_first")
     async with client_for(srv, tmp_path) as c:
-        tok = (await c.call("scope_self_test_loopback"))["token"]
-        r = await c.call("scope_self_test_loopback", confirm_token=tok)
+        r = await _self_test(c)
         t4 = next(x for x in r["checks"] if x["check"].startswith("T4"))
-        assert not t4["pass"] and t4["measured_order"] == "A before B"
+        assert not t4["pass"] and t4["measured_order"] == "A before B" and t4["d"] == -1
 
 
 async def test_raw_fpga_and_enter_fel(client):

@@ -169,7 +169,8 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 - **Trigger on a pulse width or the Nth edge** (`scope_set_trigger`): `type='pulse_width'` with `polarity`
   (`positive` / `negative` pulse), `width` in seconds and `longer=true` for pulses longer than it (default shorter);
   the trigger sits on the pulse's trailing edge. `type='nth_edge'` with `polarity` (`rising` / `falling`), `n` and
-  `idle` (seconds; after that long without an edge the count restarts, so `n` counts within a burst; 0 = from the
+  `idle` (seconds; after that long without an edge the count restarts, so `n` counts within a burst, and nothing counts
+  before the first such gap; 0 = from the
   arm). `type='timeout'` with `polarity` (`high` / `low`) and `width`: the level held that long with no edge.
   `type='edge'` is the plain trigger. Widths and idle times are rounded to one trigger-stream sample: one memory word
   on CH1 / CH2 (2 / fs legacy, 1 / fs with a filter or peak detect), 5 ns on EXT; the result's `applied.type` shows the

@@ -256,7 +256,7 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 | `scope_log` | 1 | protocol 1.27 (caps LOGGER): stream CH1 / CH2 to `<data_dir>/<date>/<time>_log/` (raw files + `log.json`) at a rate within the tiers (500 kS/s 1 ch 8-bit, 250 kS/s 1 ch 16-bit or 2 ch 8-bit, 125 kS/s 2 ch 16-bit), `bits` 8 / 16, `filter` auto / off / peak, `duration` or until `scope_log_stop`; returns at once (a background pump); the scope's acquisition tools answer "logging: LOG_STOP first" meanwhile |
 | `scope_log_status` | 0 | the session's log: state, samples, seconds, bytes, USB rate, gaps, lost samples, the scope's loop time |
 | `scope_log_stop` | 1 | LOG_STOP, drain, the summary `.npz` (kind `log`) for `scope_report`, the Filter given back; totals and caveats (gaps, early end at the scope) |
-| `scope_self_test_loopback` | 3 | generator into CH1: frequency, duty, swing (the output is not ground-referenced), bench tests T4, T5, T7; token |
+| `scope_self_test_loopback` | 3 | generator into CH1, medians over many captures: frequency, duty and swing at 10 kHz (the output is not ground-referenced), bench tests T4 (fold method), T5, T7 (skipped on a release build); under a minute; token |
 | `scope_bode_sweep` | 3 | frequency response CH2 / CH1 of a passive DUT on the calibration post: stepped clean-edge tones, coherent 16-bit records, single-bin DFT; magnitude, phase, markers, thru calibration, CH2 auto-ranging; `where='device'` (fw >= 0.2.66) lets the scope run it and show the plot; token (below) |
 | `scope_report` | 0 | a saved result (`.npz` / Bode `.json`, or `latest`) as a PNG plot (matplotlib, extra `plot`) and a self-contained HTML page (plot, table, caveats, command) under `<home>/reports/<date>/`; touches no scope (below) |
 | `scope_decode` | 0 / 1 with `capture=true` | UART (auto-baud, parity, framing), SPI (CPOL / CPHA, word size, no chip select) or I2C (START, address, R/W, ACKs, data, STOP) frames from a saved capture, the last capture, the scope's latest capture or a fresh one; frames with times, errors and a preview; says when the sample rate is too low |
@@ -531,9 +531,11 @@ The release-time test of everything an agent uses: it starts the MCP server over
 --max-tier 3`), calls the tools in named groups as an agent would and judges each step against an explicit expectation
 (the trigger fires or must not, 1 kHz within a tolerance, sample counts, the FFT / DVM rate, segment and hold-off
 intervals, every counter reading valid, logger totals with 0 gaps, UART 0x55 frames, host against device Bode, the
-per-divider core order). Bench: the generator's 1 kHz square on the calibration post into an RC ladder, CH1 on the
-ladder input, CH2 on its second node (the tool sets 1 V/div DC, Filter Off and the generator itself). Close every other
-client of the port first.
+pairing of the cores at every divider, 200 MSa/s included). Bench: the generator's 1 kHz square on the calibration post
+into an RC ladder, CH1 on the ladder input, CH2 on its second node (the tool sets 1 V/div DC, Filter Off and the generator
+itself). Close every other client of the port first. The `coreorder` group sets the generator to 200 MHz / 401 and folds
+each core on the period (d = +1 expected): on this wiring it judges CH1 on the rounded signal and skips CH2, whose node
+holds nothing at 499 kHz; both probes on the post judge both channels on the sharp signal (`--groups coreorder`).
 
 ```bash
 fnirsi1013d-battery --port <port>                     # every default group, about 4 minutes
@@ -554,6 +556,7 @@ is known to differ from the unit is a SKIP that says so.
 ```
 fnirsi1013d-battery --port <port>                    # about 4 minutes; exit status 0 = no FAIL
 fnirsi1013d-battery --port <port> --groups loopback  # the loopback self-test, CH1 straight on the post
+fnirsi1013d-battery --port <port> --groups coreorder # both probes on the post: the pairing on both channels
 ```
 
 Drives the MCP server over stdio as an agent does and judges every step against an explicit expectation, in named
