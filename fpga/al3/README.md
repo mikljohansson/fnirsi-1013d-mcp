@@ -3367,6 +3367,196 @@ measurement of this image. Acceptance: the sweep peak per core (`tools/enc_sweep
 A 6.94 % / B 0.66 %, and a divider-0 capture with both A cores moving (the 0x33 self-check reads the fabric copies, so a
 frozen pin, as on enc+250, is invisible to it).
 
+### 22. 0x153F: both cores of a chip captured at one instant, paired at every rate (fpga-153f, 2026-11-06)
+
+**The fault** (bench 2026-11-06, `docs/hardware-status.md` 16:21-16:45 finding 1, 17:22-17:30, 17:59-18:03). With Filter
+Off the two ADC cores of a channel were not paired as designed. Design and protocol 7.3: ring word k holds B[k] and A[k]
+with A sampled half a word period after B (host trace B[k], A[k], B[k+1], ..). Measured with `tools/core_order.py` (CH1,
+a 40-code step in 200 ns, raw per-core records; s = the shift of core B that makes the edge smooth, 0 = designed, +1 =
+core B one conversion late), three runs per row, on 0x153E:
+
+| divider (T = 10 (D + 1) ns) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 9 | 19 | 99 | 999 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| stages CH1 A4 B3 | 0 | +1 | 0 | 0 | 0 | +1 | +1 | +1 | +1 | +1 | | +1 |
+| stages CH1 A3 B3 (the trained value) | +1 | +1 | 0 | 0 | +1 | +1 | +1 | +1 | +1 | +1 | +1 | +1 |
+
+(Divider 99 from the 2026-11-04 records: +1 on 0x153C, 0x153D, enc0, enc-250 and 0x153E, both channels.) The screen's
+Filter Off trace zigzags on every edge, a 1 kHz square reads 2006 Hz at 20 kSa/s, and at 200 MSa/s the order depended on
+which clean stage the training or the runtime guard had picked. `docs/plans/core-order-gated.md` has the first analysis;
+its section 2.2 ("the ADC alone decides it, one conversion late at every rate") is superseded by the rows above.
+
+**The model** (inference about the chip; it reproduces all 23 cells). The AD9288s behave as in a data-align mode: both
+output buses of a chip change after the same edge, the write clock's rising edge R (= the B encode's rising edge), a
+delay D after it at the FPGA's capture registers, whatever the rate; and one such release carries the designed pair, the
+B sample and the A sample taken half a word after it. 0x153A..0x153E captured core B at R - cB and core A at
+F - cA = R + T/2 - cA (c = 5 + 2.5 x stage ns), each against its own encode edge as the datasheet's normal operation
+would need. Core B then holds the release nB = ceil((cB + D) / T) periods back and core A that of
+nA = ceil((cA + T/2 + D) / T) back, and s = 1 + (nB - 1) - (nA - 1). The two rows bound D for core A to (10, 12.5] ns
+and for core B to (7.5, 17.5) ns. On the unit core A is dirty at stage 4 and core B at stage 2: the same instant modulo
+10 ns, as two buses that change together would be, so core B's D is core A's within a stage step (inference).
+
+Against the datasheet (rev. C, `D:\src\FNIRSI-1013D-1014D-Hack\IC's\AD9288.pdf`, Fig. 2 to 4, "User-selectable options"):
+- Fig. 3 (normal operation, two clocks: each core's outputs after its own encode) gives s = 0 in every cell: what the
+  capture of 0x153A assumed and the old testbench models did.
+- Fig. 4 (data align, S1 = S2 = 1 as pecostm32's schematic notes: "data from both channels available on rising edge of
+  Clock A", B delayed half a cycle, B sample N - 1 beside A sample N) has **the unit's pair** (B half a word before A)
+  but leaves on the A encode. Simulated with the same delay it gives 0 0 1 1 0 0 .. 0, not the bench rows.
+- The unit: Fig. 4's pair, released after the **B** encode's rising edge (the A encode's falling edge). In encode
+  cycles from the sampling edge to the release: core A k + 1/2, core B k + 1, against Fig. 4's 4 and 4 1/2. The bench
+  fixes the pairing and the edge only; k is not measured (the model takes 4: A 4.5, B 5 cycles, each at least the
+  datasheet's four pipeline delays). Whether the board's chips are AD9288s that do this or a pin-compatible part is not
+  known; nothing here depends on it.
+- With the datasheet's tV 2 / tPD 6 ns taken from the B encode's pad (6.97 ns after R, 0.3 ns of board) the transition
+  lies 9.3 .. 13.3 ns after R: the bench's 10 .. 12.5 ns sits inside it.
+
+**The model's acceptance** (`tb/tb_adccap.v`, the run.sh step 11's second run, on the unchanged 0x153E source da645d0).
+Rule 2 (both buses after the B encode, plB 5 / plA 4), D = 11.25 ns on both cores, transition 1.5 ns wide:
+
+```
+dividers                    0   1   2   3   4   5   6   7   8   9  19  99 999
+bench  A4 B3                0   1   0   0   0   1   1   1   .   1   1   .   1
+model  A4 B3 (rule 2)       0   1   0   0   0   1   1   1   1   1   1   1   1
+bench  A3 B3                1   1   0   0   1   1   1   1   .   1   1   1   1
+model  A3 B3 (rule 2)       1   1   0   0   1   1   1   1   1   1   1   1   1
+core A: the rows are the bench's for D_A = 10.12 .. 12.37 ns (D_B 11.25, w 0.2; bench: 10 .. 12.5)
+core B: the rows are the bench's for D_B = 7.87 .. 17.37 ns (D_A 11.25, w 0.2; bench: 7.5 .. 17.5)
+model  A4 B3 (rule 1, the datasheet's Fig. 4: release on the A encode)    0   0   1   1   0   0   0   0   0   0   0
+model  A4 B3 (rule 0, the datasheet's Fig. 3: each core on its own encode)    0   0   0   0   0   0   0   0   0   0   0
+STRICT ORDER: FAIL (20 cells; expected to fail on 0x3e)
+```
+
+Every measured cell is reproduced (the sweeps step 0.25 and 0.5 ns with a 0.2 ns transition, so the bounds read 0.1 ns
+inside the bench's), and the strict check fails in 20 of 26 clean cells on that RTL.
+
+**The fix** (`src/zaklad.v` "ADC data capture"). Both cores of a chip are captured at the same instant, so they hold the
+same release whatever D, the rate or the stage is, and a release holds the designed pair: no word offset and no table.
+- The IOB DDR registers and their chain (one stage longer: `adc_e1` / `adc_e2`) give the pins in 2.5 ns steps. One
+  register `cap_h` (32 bits, both chips) loads on the rising clk_200MHz edge 12.5 ns after every R (`cap_st`, two
+  clocks behind `swc_rose`); `adc*_w` takes it on the next rising write clock edge, 7.5 ns later or more (wire paths).
+- **Full rate** (divider 0, any filter, peak detect; T = 10 ns): the pins at R - 2.5 k ns, k = the chip's stage from
+  0x63 (bits 2:0 CH1, 8:6 CH2; 2..5). These are core A's instants and latency of 0x153A..0x153E, so a trained A stage
+  keeps its meaning, and the trigger position, the EXT shift and the filters' latency at full rate do not move. The
+  buses are stable for about 6 of the 10 ns, so the stage is still trained at a quiet input, now per chip: a stage is
+  usable when both cores are clean at it. Whichever such stage is picked, both cores hold one release: stages on either
+  side of the transition differ by a whole word in both cores, never in the pairing.
+- **Divided rates** (K = 0, divider >= 1; T >= 20 ns, one encode per word): the pins at R + 2.5 ns, whatever the stage.
+  At that instant the previous R's release changed the pins T - D + 2.5 ns ago and this R's will change them D - 2.5 ns
+  later: with the unit's D of about 11 ns that is 11 ns and 9 ns at T = 20 ns and more room at every slower rate; clean
+  for any D between 4.5 and 20.5 ns with a transition 4 ns wide. Nothing is trained, no rate sits on a borderline (the
+  A3 row's divider 4 was 0.5 ns from flipping), and the runtime guard has nothing to move there.
+- 0x63 keeps its layout. Bits 5:3 and 11:9 (the B cores' own stages) and 13:12 (B from the A-encode path, `sBf` /
+  `bf_m`) select nothing any more; they are stored and read back through 0x36. Stages outside 2..5 alias by their low
+  two bits (6 as 2, 7 as 3, 0 as 4, 1 as 5). Power-on 0x06DB (stage 3 on both chips, the unit's trained value on
+  0x153E).
+- Gone: `sA`, `sB`, `sBf`, `a_m`, `b_m`, `bf_m` and their 6:1 picks (368 registers); new: 64 chain registers, `cap_h`,
+  `cap_st`, `cap_full` (the rate class, from `sample_rate_divider_eff == 0`). -239 registers, -182 LE.
+
+What it rests on, and its limit at 200 MSa/s. At the divided rates the pairing needs nothing but "one release holds the
+designed pair" and a D inside 4.5 .. 20.5 ns. At divider 0 it also needs the two buses of a chip to change together:
+when their transitions lie more than a transition width apart, a stage between them is clean on both cores and takes
+core A after its transition and core B before its own (or the reverse), one release apart. No capture scheme can avoid
+that at a 10 ns period with a quiet-input training, which cannot see the conversion index (a B bus 5 ns after the A bus
+and one 5 ns before it look the same); the bound 7.5 .. 17.5 ns for core B alone is wider than a period. The testbench
+maps it (phase 4, w = 1.5 ns, rows D_A 9.1 .. 14.1, columns D_B 7.1 .. 18.1 in 1 ns steps, the stages that are clean on
+both cores but not s = 0):
+
+```
+  D_A   9.1:     .    .    .    .    4    4    4   34   34  234  234  234
+  D_A  10.1:     .    .    .    .    .    .    .    3    3   23   23   23
+  D_A  11.1:     4    4    4    .    .    .    .    3    3   23   23   23
+  D_A  12.1:     4    4    4    .    .    .    .    .    .    2    2    2
+  D_A  13.1:     4    4    4    .    .    .    .    .    .    2    2    2
+  D_A  14.1:    34   34   34    3    3    .    .    .    .    2    2    2
+```
+
+So with D_A at the unit's 11 ns every clean stage pairs right for D_B from 10 to 13 ns, and none of the 58 mispaired
+cells has |D_A - D_B| <= w. The unit's stage scans (both buses dirty at the same instant) put it in the middle of that
+band; `tools/core_order.py` at divider 0, at the trained stage and after a retrain, is the bench check of it.
+
+**What else changes.** Core A's latency is 0x153E's at divider 0 (same stage) and at every divider from 5 up (from 4 up
+at stage 3); at dividers 1, 2 and 3 0x153E held core A one release back (nA = 2), so there core A is one word (two
+samples) earlier now, like the slow rates. `tb_trigpos.v` with the same model on both designs (seed 12345, stage 3,
+EXT edge to the core A sample of the trigger word, ns; and the EXT crossing minus the trigger point in samples):
+
+| divider | 0 | 1 | 2 | 3 | 4 | 5 | 9 | 199 |
+|---|---|---|---|---|---|---|---|---|
+| 0x153E ns | 72 .. 80 | 149 .. 160 | 231 .. 259 | 325 .. 356 | 357 .. 387 | 433 .. 468 | 733 .. 818 | 15218 .. 16961 |
+| 0x153F ns | 76 .. 79 | 131 .. 145 | 206 .. 230 | 280 .. 304 | 352 .. 400 | 429 .. 483 | 729 .. 814 | 15133 .. 16790 |
+| 0x153E samples | 17 .. 19 | 17 .. 18 | 17 .. 19 | 18 .. 19 | 17 .. 18 | 17 .. 18 | 17 .. 19 | 18 .. 19 |
+| 0x153F samples | 17 | 15 .. 16 | 15 .. 17 | 15 .. 17 | 16 .. 18 | 16 .. 18 | 16 .. 18 | 17 .. 18 |
+
+(Six runs per cell at random phases; the sample counts also lose the one sample of the late core B.) The ADC trigger
+position (0x14 / 0x18: the trigger compares the stored core A stream) is unchanged: the step's core A word is the
+pretrigger word + 1 in every CH1 case on both designs (counted in time-ordered samples +2 .. 3 on 0x153F, +3 .. 4 on
+0x153E: the late core B's one sample). The filtered cases (K = 1..3, FIR, N 4 .. 400) give the same trigger offsets on
+both designs; their outputs come a few ns earlier (about 5 ns at N = 4: core B, half the samples, is 10 ns newer), far
+below a sample. The decimator, peak detect, the counter and
+the logger read `adc*_w` as before and now see the designed pair at every rate: the polyphase prefilter's weights are
+right at full rate with the trained stage, and the hardware counter's pair (core B earlier, core A later) is right at
+the divided rates too, which is the likely cause of its Filter Off miscount at D > 0 (section 17's bench, the firmware's
+`COUNTER_F_GATED`); that needs its own bench before the firmware lifts the gate. The absolute EXT numbers follow the
+model's pipeline depth, which no measurement fixes yet (an external edge on EXT and CH1 would).
+
+**Testbench.**
+- `tb_adccap.v`: the AD9288 model takes the release rule (0 own encode, 1 the A encode, 2 the B encode), the pipeline
+  depth per core, and D and the transition width per core as the bench states them (`set_d`); delays are transport
+  delays (tPD may exceed a period). Predictions come from the model (`margin`, `rel_idx`, `s_pred`) and the design's
+  capture instants (`t_cap`, by version byte). Every capture: garbage exactly where predicted, the 0x36 counters equal
+  to the stream's outliers, s equal to the prediction, consecutive samples in consecutive words. On 0x153E and older it
+  runs the acceptance above. On 0x153F the strict check, s = 0 wherever both cores are clean: phase 1 the nominal D at
+  dividers 0..9, 19, 99, 999 and stages 2..5; phase 2 every divided rate over D_A 9..14 x D_B 7..18 ns in 1 ns steps
+  at w 1.5 and 4 ns with the stage walking 2..5 (clean and paired in all of them, 2.4 ns or more to a transition);
+  phase 3 divider 0 with D_A = D_B over 7..18 ns and with D_B within +-w of D_A over 9..14 ns, every stage; phase 4 the
+  map above (not failures: s must equal the prediction and no cell may lie within |D_A - D_B| <= w); then a stage inside
+  the transition (all garbage, counters > 0), the dead 0x63 bits, the power-on value at every rate. 35952 checks,
+  4137 clean cells outside phase 4, all s = 0.
+- `run.sh` step 11 runs it twice: the design under test must print `STRICT ORDER: PASS`, and the unchanged 0x153E
+  source (`REF153E_REV`, default da645d0; `REF_SRC_DIR/da645d0.v` in a worktree) must pass the acceptance and print
+  `STRICT ORDER: FAIL`.
+- `tb_trigpos.v`: the same release rule (10 ns after the B encode pin, A `pl`, B `pl + 1` samples back), the tag
+  mirror of the new pipeline, the order check strict (core B half a word before core A in every word of every legacy
+  record; it used to accept either sign), and legacy CH1 / EXT cases at dividers 1 to 5 (37 cases, 1252 checks).
+- `tb_counter.v`, `tb_peak.v`, `tb_trigtypes.v`, `tb_seqcontract.v`, `tb_square.v`: their short model releases both
+  buses after the B encode too. `contract_0x153F.txt` differs from 0x153E's in the version byte and in 68 read lines
+  of the two READ_SEQ lane read-outs (the averaged step's data); no command or write line changed.
+- `tb/capture_margins.py` (the build summary) reports the new instants against the datasheet's window after the B
+  encode and fails a build whose divided-rate instant has under 1 ns.
+
+**Build** (TD 4.6.8 SP1, `build.sh`; **the pinned source: commit ea38475**): `dist/al3-0x153F.bin` sha256
+`e581a67fcf9d8a21ba01b212212ec17d92c9f1d98e5c3ad082cd79f8d930ece0`, the 1 MiB flash image
+`d255ca3824786d80d507c94e7c21b2497e035c98753b5db1d2f395ab5052d5bc` (pinned as `backups/al3_0x153F_e581a67f.bin` and
+`..._padded.bin`); a rebuild of the committed source in a fresh work dir (`tools/encphase_build.sh ~/f153f/b final`)
+gives the same bytes. **6401 LUT (74.1 %) / 5673 reg (65.7 %) / 7272 LE (84.2 %)**, all block RAM, `#ireg 33`,
+`#oreg 15`. Every clock 0 errors: `clk_200MHz` **4.789 ns** (+0.211), `sample_write_clock` 9.616, `i_mcu_clk` 23.250,
+`clkc[2]` 3.731, `clkc[3]` 4.189 ns; `clkc[0]` the SDC artefact (40 setup errors, as in every build since 0x1534).
+
+| Item | 0x153F (q10) | 0x153E (i2) |
+|---|---|---|
+| Encode pads 1A / 1B / 2A / 2B (ns after the core's write clock edge) | 7.34 / 6.97 / 7.34 / 6.97 | 7.34 / 6.97 / 7.34 / 6.97 |
+| `enc_cur` -> ODDR D, worst setup / hold | +0.811 / +2.501 | +0.860 / +2.654 |
+| fabric copies -> `enc_ok` (0x33 self-check), setup | +0.582 | +0.481 |
+| chain -> `cap_h` (the stage pick), setup / hold | +1.806 / +0.288 | - |
+| `cap_h` -> `adc*_w`, setup as TD times it (a 2 ns relation; 7.5 ns in operation) | +2.304 | (`sA` / `sB`: the same 2 ns relation, 288 paths) |
+| Capture against the datasheet window after the B encode (tV 2, tPD 6, 0.3 ns board): divided rates at T = 20 ns | 9.12 ns after the last transition, 6.65 ns before the next | - |
+| the same, full rate | stages 2 and 5 clean (1.62 / 4.15, 4.12 / 1.65), 3 and 4 inside the worst-case band | - |
+| LE / clk_200MHz | 7272 / 4.789 ns | 7454 / 4.802 ns |
+
+(Slacks from `tb/capture_report.sh`'s re-timing of the placed design, TT corner.) The full-rate row says what the unit
+shows: the transition's worst-case band covers stages 3 and 4, the unit's own transition ends before stage 3 and the
+training finds that.
+
+**Rolls.** The capture change re-rolls the placement (the unmoved source missed `clk_200MHz` by 0.131 ns in the square
+generator). 16 builds of single section moves (`tools/encphase_build.sh <root> <name> --move "//S" "//A"`, four in
+parallel, about 7 minutes a batch), 15 distinct placements (moving "ADC encode outputs" changes nothing), closed every
+clock in 2: **q10, the trigger hold-off before "Capture of the trigger address" (4.789 ns, kept)**, and the streaming
+logger before "Trigger types" (4.929 ns). `cap_full` is declared beside `swc_rose` so that "Sample write clock" and
+the capture block may both move.
+
+**Tests.** `tb/run.sh` (18 steps, `REF_SRC_DIR` with `da645d0.v` added) on seeds 12345 and 4242 (2026-11-06/07, snapshots of the committed `src` + `tb`): **16 of the 18 steps PASS on both seeds, every check** (12345 / 4242: ext 39; decim 106 / 108 + cic_model 1868 / 1882 samples; long 8; trigpos 1252 (37 cases); contract 42 and the transcript = `contract_0x153F.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 35952 strict + 6298 acceptance, STRICT ORDER PASS on the design and FAIL on da645d0; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102). The two equivalence steps against the old references each have one seed with a one-word transient: **fir** seed 12345 PASS (166 checks + cic_model 1570 samples, with the +37.5 ns formula of 80af605; the first run's 12 failures were the old +42.5), seed 4242 167 checks, 1 failed: phase 4 ("FIR off again identical to 0x1534"), 320 of 84.5 M compared samples in one 30 ns window at a stopped capture, the CIC outputs 1 .. 3 LSB apart; the traced run shows the two decimators' first integrators 2 apart over the whole window with identical inputs (`pa` / `pb` equal at every edge), an offset from the single-instance phases that a comb re-arm lets through once. **seg** seed 4242 PASS (55 + seg_model 22 runs), seed 12345 55 checks, 1 failed: phase 4 ("modes off again identical to 0x1535"), 10 samples in one 10 ns window: a 0x01 = 1 write in the same simulation time step as the write clock edge (the testbench's MCU process had synchronised to a write clock edge, so its strobes carry the edge's 1 ps offset, README section 20); the reference resets on `sample_system_reset`, a register already updated, the design on `cap_rst`, a wire of it whose update event ran after the design's write-clock blocks in that step (`ssr 1 cap_rst 0` in the trace), so the design resets one edge later in the simulation only, and the rest of the record is equal (seg_model: 22 runs, 0 failures on the same log). Both repeat exactly with the hold-off block at its old place (the move is not the cause) and both are simulation-ordering artefacts of the equivalence testbenches, not differences of the design; the fix belongs in the testbenches (step the MCU process off the edge after every `@(posedge dut.sample_write_clock)` / `wait` on a write-clock signal, and re-arm the references' decimators with the design's), left for the simulation agent; the traces, the run logs and the trace scripts are in the main checkout's `backups/fpga-153f-sim/` (`segtrace_12345.log`, `firtrace_4242.log`).
+
+**Bench.** Not flashed (status `unbenched`). The firmware contract and the bench list are in AGENTS.md "0x153F, the
+paired capture, fpga-153f".
+
 ## Device facts from the datasheet
 
 Source: Anlogic "AL3 series FPGA datasheet" DS001 v1.3 (Sept 2017, Chinese, maintainer's download `AL3A10LG144.pdf`, 84 pages).
