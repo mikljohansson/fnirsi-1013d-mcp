@@ -23,8 +23,8 @@ has been flashed from this folder.
 | `TD_SETUP.md` | Replayable install and build steps with hashes. |
 | `license/` | Personal `Anlogic.lic`, gitignored. |
 
-`src/FPGA.al` was written by TD 4.6.116866 and sets no effort options. I found no licence file in Atlan4's tree, so treat
-`src/` as upstream material that stays attributed to him.
+`src/FPGA.al` was written by TD 4.6.116866 and sets no effort options. Atlan4's repository carries GPL-3.0 at its top level and no
+separate licence in the FPGA folder; the owner takes `src/` as GPL-3.0 (2026-11-07), attributed to him.
 
 ## Toolchain survey
 

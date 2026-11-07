@@ -95,7 +95,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 - [ ] Not repeated on the gated 0x153D: the logger tiers and roll mode (benched on the first, full-rate 0x153D build
       2026-10-22 08:47-09:02, whose logger logic the gated build keeps) and the device Bode sweep (09:16-09:49, same
       build). Re-run on the release candidate, or accept the inference.
-- [ ] Maintainer decision recorded: bitstreams are committed under `fpga/al3/dist/` and attached to releases
+- [x] Maintainer decision recorded (2026-11-07: accepted; Atlan4's FPGA source taken as GPL-3.0 from his repository's top-level licence): bitstreams are committed under `fpga/al3/dist/` and attached to releases
       (`docs/releasing.md` section 5).
 
 ## Versions and notes
