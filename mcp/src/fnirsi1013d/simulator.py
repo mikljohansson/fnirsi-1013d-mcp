@@ -2,8 +2,9 @@
 
 It models what the host can observe through docs/protocol.md:
 
-- One FPGA bitstream (section 5.1, protocol 1.25): the firmware is built for AL3 ``P.FW_FPGA_VERSION`` (0x153E
-  since fw-153e: 0x153D's registers with the encodes from the PLL; 0x153D since protocol 1.27): 8192-word ring,
+- One FPGA bitstream (section 5.1, protocol 1.25): the firmware is built for AL3 ``P.FW_FPGA_VERSION`` (0x153F
+  since fw-153f: 0x153D's registers, the encodes from the PLL, one capture stage per chip; 0x153D since protocol
+  1.27): 8192-word ring,
   16382 samples per channel, programmable pre-trigger/total, the generator, EXT trigger, decimation filter with
   16-bit samples, CIC compensation FIR, sequencer, the per-capture encode check (GET_HEALTH 88..103, event 21;
   hooks ``Device.enc_bad_next`` / ``enc_unrecovered_next``), the ADC capture stages (GET_HEALTH 104..123, GET_CAL
@@ -1962,7 +1963,7 @@ class Device:
 
     def cap_boot(self) -> None:
         """fw 0.2.79 at boot: 0x63 = the stored value when it was trained on this bitstream (the word the FPGA
-        reports), else 0x08E4."""
+        reports), else the power-on P.CAP_POWER_ON."""
         self.cap_flags = P.CAPF_HAS
         self.cap_value = P.CAP_POWER_ON
         if self.cap_stored is not None:

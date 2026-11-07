@@ -776,8 +776,8 @@ def core_shift_rms(a: np.ndarray, bb: np.ndarray, lo: int = 4, hi: int = 70) -> 
 
 async def g_coreorder(b: Battery, n: int = 12) -> None:
     """The per-divider core order (docs/plans/core-order-gated.md): Filter Off, raw per-core records of CH1's rising
-    edge, the shift s of core B that makes the edge smooth. Expected s = 0 at every divider; FPGA 0x153E reads +1 at
-    most dividers (an FPGA change is in progress), so this group FAILs there with the measured row."""
+    edge, the shift s of core B that makes the edge smooth. Expected s = 0 at every divider: FPGA 0x153F captures both
+    cores of a chip at one instant (0x153E read +1 at most dividers, so this group FAILs there with the measured row)."""
     await b.step("O0", "scope_set_decimation", {"filter": "off"}, check=equals("applied.effective", "off"))
     await b.step("O0t", "scope_set_trigger", dict(source="CH1", type="edge", edge="rising", level_code=115,
                                                   mode="normal", hold_off=0, pretrigger_fraction=0.5,
