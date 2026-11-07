@@ -200,7 +200,7 @@ available remotely in protocol v1."
 | `width` | float s | pulse_width: the width compared with (the trigger is the trailing edge); timeout: the held time. Converted to samples of the trigger stream in effect (one memory word on CH1 / CH2: 2 / fs legacy, 1 / fs filtered or peak; 5 ns on EXT), rounded to the nearest, clamped to 1 .. 16777215 with a caveat; the firmware converts nothing |
 | `longer` | bool | pulse_width: pulses longer than `width` (default shorter) |
 | `n` | int 1..65535 | nth_edge: the edge to trigger on |
-| `idle` | float s | nth_edge: the count restarts after this long without any edge (0 = count from the arm); same conversion as `width`, 0 .. 16777215 samples |
+| `idle` | float s | nth_edge: the count restarts after this long without any edge, and nothing counts before the first such gap, so a signal that never rests never fires (0 = count from the arm); same conversion as `width`, 0 .. 16777215 samples |
 | `hold_off` | float s | caps HOLDOFF: from a record's trigger no trigger is accepted until it has elapsed, across re-arms and segments; 5 ns steps up to 21.47 s, rounded; 0 = off. Every SET_TRIGGER2 the tool sends also clears a hold-off still running at the next capture (the firmware writes 0x66) |
 
 Returns applied values, including the level actually reachable (codes are about 3.4 mV apart at 100 mV/div),

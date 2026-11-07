@@ -671,11 +671,13 @@ class TrigQual:
     the far side of the level), or the qualifying sample for the timeout type.
 
     Pulse width: a pulse of w samples on the pulse side (polarity 0 high) that began after the arm fires on its
-    trailing edge when w < N (shorter) or w > N (longer). Nth edge: the Nth edge in the counted direction since the arm;
-    with H > 0 the count restarts after more than H samples without any edge. Timeout: the sample that makes a run of
-    the held level (polarity 0 high) N + 1 samples long, counted from the edge into it or from the arm."""
+    trailing edge when w < N (shorter) or w > N (longer). Nth edge: H = 0, the Nth edge in the counted direction since
+    the arm; H > 0, the Nth edge of a burst: nothing counts until the level has held for H samples, the first edge after
+    such a gap is edge 1, and a burst that reached its Nth edge before ``arm`` waits for the next gap (``_nth``; the
+    FPGA runs this from the capture's reset, through the pretrigger fill). Timeout: the sample that makes a run of the
+    held level (polarity 0 high) N + 1 samples long, counted from the edge into it or from the arm."""
 
-    def __init__(self, tr: "TriggerState", level: int):
+    def __init__(self, tr: "TriggerState", level: int, arm: int = 0):
         self.type = tr.ttype
         self.pol = tr.edge
         self.longer = bool(tr.longer)
@@ -685,8 +687,11 @@ class TrigQual:
         self.pos = 0  # absolute index of the next sample fed
         self.side: bool | None = None  # the previous sample at or above the level
         self.pulse_start: int | None = None  # pulse width: where the current pulse began (None: off side / before the arm)
-        self.rem = self.n  # Nth edge: edges still to count
-        self.last_edge: int | None = None  # Nth edge: the last edge of either direction (or the arm)
+        self.arm = arm  # Nth edge: the first sample that can be the trigger
+        self.cnt = 0  # Nth edge: edges counted in this burst
+        self.past = False  # Nth edge: this burst's Nth edge has gone by (before the arm)
+        self.cv = self.h == 0  # Nth edge: counting (H > 0: not before the first gap)
+        self.last_edge = 0  # Nth edge: the last transition of either direction
         self.run_start: int | None = None  # timeout: where the current run of the held level began
 
     def feed(self, a: np.ndarray, prev: int | None, pos: int) -> int:
@@ -696,7 +701,8 @@ class TrigQual:
         if self.side is None:  # the arm
             self.pos = pos
             self.side = bool(prev >= self.level) if prev is not None else bool(s[0])
-            self.last_edge = pos
+            # the reset's previous sample counts as the post-detect side: a first sample on the other side is a transition
+            self.last_edge = pos if bool(s[0]) != (self.pol == 0) else pos - 1
             held = self.pol == 0
             if self.type == P.TRIG_TIMEOUT and self.side == held:
                 self.run_start = pos
@@ -727,18 +733,27 @@ class TrigQual:
         return -1
 
     def _nth(self, s: np.ndarray, edges: np.ndarray) -> int:
+        """``tb_trigtypes.v``'s model at the edges. The fire decision is taken one sample before the count's, so a level
+        held exactly H samples restarts the count without firing on that edge."""
         counted = self.pol == 0
+        n1 = self.n - 1
         for e in edges:
             e = int(e)
             ea = self.pos + e
-            if self.h and self.last_edge is not None and ea - self.last_edge > self.h:
-                self.rem = self.n
+            run = ea - self.last_edge
+            gap, gap_fire = self.h > 0 and run >= self.h, self.h > 0 and run > self.h
             self.last_edge = ea
-            if bool(s[e]) == counted:
-                self.rem -= 1
-                if self.rem == 0:
-                    self.rem = self.n
-                    return e
+            if bool(s[e]) != counted:
+                if gap:
+                    self.cnt, self.past, self.cv = 0, False, True
+                continue
+            if ea >= self.arm and (n1 == 0 if gap_fire else self.cv and self.cnt == n1 and not self.past):
+                return e
+            if gap:
+                self.cnt, self.past, self.cv = 1, n1 == 0, True
+            elif self.cv and not self.past:
+                self.past = self.cnt == n1
+                self.cnt += 1
         return -1
 
     def _timeout(self, s: np.ndarray, edges: np.ndarray) -> int:
@@ -1465,16 +1480,23 @@ class Device:
         return legacy_stream, tr
 
     def _search_trigger(self, stream: Callable[[int, int], np.ndarray], k_from: int, limit: int, tr: TriggerState,
-                        hold_from: int = 0) -> int:
+                        hold_from: int = 0, lead: int = 0) -> int:
         """Word index of the trigger sample at or after max(k_from, hold_from) and before k_from + limit, or -1: the
         edge compare (``_find_trigger``) or the 1.26 qualifier (``TrigQual``), both seeing the sample before the start
-        as ``prev``. ``hold_from`` (1.26): the trigger hold-off masks the compare until that word."""
+        as ``prev``. ``hold_from`` (1.26): the trigger hold-off masks the compare until that word. ``lead``: the words of
+        the pretrigger fill before ``k_from``, which an Nth edge with an idle time watches (a gap or a burst may begin
+        there); every other trigger starts at the arm."""
         start = max(k_from, hold_from)
         if start >= k_from + limit:
             return -1
-        prev = int(stream(start - 1, 1)[0])
-        qual = TrigQual(tr, tr.level) if tr.ttype in (P.TRIG_PULSE_WIDTH, P.TRIG_NTH_EDGE, P.TRIG_TIMEOUT) else None
+        qual = TrigQual(tr, tr.level, arm=start) if tr.ttype in (P.TRIG_PULSE_WIDTH, P.TRIG_NTH_EDGE, P.TRIG_TIMEOUT) \
+            else None
         k = start
+        prev: int | None = None
+        if tr.ttype == P.TRIG_NTH_EDGE and tr.h and lead:
+            k = start - lead
+        else:
+            prev = int(stream(start - 1, 1)[0])
         step = 2048  # most captures trigger within a period: start small, then widen
         while k < k_from + limit:
             n = min(step, k_from + limit - k)
@@ -1556,7 +1578,7 @@ class Device:
         # from the arm, as if the re-arm followed the DONE at once)
         hold_from = math.ceil(self.holdoff_left_s / wp - 1e-9) if self.holdoff_left_s > 0 else 0
         if not forced:
-            kt = self._search_trigger(trig_samples, Pw, limit, tr, hold_from)
+            kt = self._search_trigger(trig_samples, Pw, limit, tr, hold_from, lead=Pw)
         res: dict = {"t0": t0, "dt": dt, "divider": settings.divider, "Pw": Pw, "Tw": Tw,
                      "settings": settings.copy(), "seq": self.settings_seq, "decim": dec, "wp": wp,
                      "samples": (settings.trigger.pretrigger_samples, settings.trigger.total_samples)}

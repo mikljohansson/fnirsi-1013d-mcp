@@ -146,8 +146,10 @@ def test_qualifier_reference_model(chunks):
     assert _fire(TriggerState(ttype=1, edge=1, n=100), chunks) == 150  # negative pulse 70..149 (80 low) shorter than 100
     assert _fire(TriggerState(ttype=2, edge=0, n=3), chunks) == 250  # third rising edge
     assert _fire(TriggerState(ttype=2, edge=1, n=2), chunks) == 170  # second falling edge
-    assert _fire(TriggerState(ttype=2, edge=0, n=2, h=90), chunks) == 150  # the 80-sample gaps are not idle (< 90)
+    assert _fire(TriggerState(ttype=2, edge=0, n=2, h=90), chunks) == -1  # no gap of 90: nothing ever counts (battery T10)
     assert _fire(TriggerState(ttype=2, edge=0, n=2, h=70), chunks) == 500  # the 80 gaps restart the count; 450 + 500 don't
+    assert _fire(TriggerState(ttype=2, edge=0, n=1, h=40), chunks) == 50  # the first edge after 50 low samples from the arm
+    assert _fire(TriggerState(ttype=2, edge=0, n=1, h=70), chunks) == 150  # the first edge after an 80-sample gap
     assert _fire(TriggerState(ttype=3, edge=0, n=40), chunks) == 540  # held high 41 samples: only the long pulse
     assert _fire(TriggerState(ttype=3, edge=1, n=70), chunks) == 140  # held low: the gap 70..149 (the first is 50 long)
     assert _fire(TriggerState(ttype=3, edge=1, n=40), chunks) == 40  # from the arm: samples 0..40 low
@@ -280,8 +282,9 @@ def test_pulse_width_nth_edge_timeout_captures(sim_factory):
 
 
 def test_nth_edge_idle_restarts_the_count(sim_factory):
-    """A 1 kHz gate 200 us wide: 1 rising edge per ms. Nth edge 2 with an idle time shorter than the gap never fires;
-    with a longer idle time it fires on the second edge."""
+    """A 1 kHz gate 200 us wide: 1 rising edge per ms. Nth edge 2 with an idle time shorter than the gap never fires:
+    every edge is the first of a burst. With an idle time longer than the gap nothing counts at all (the FPGA waits for
+    a gap first; bench 2026-11-06, battery T10). N = 1 fires on the first edge after a gap."""
     s, _ = _scope(sim_factory, signal="gate:period=1ms,width=200us,high=3,low=0")
     try:
         s.set_channel(0, range_index=1)
@@ -289,11 +292,28 @@ def test_nth_edge_idle_restarts_the_count(sim_factory):
         s.set_trigger(source=0, edge=0, level=140, mode=1, pretrigger_samples=200, total_samples=4000)
         s.set_trigger2(type="nth_edge", polarity="rising", n=2, h=300)  # idle 300 words = 600 us < the 800 us gap
         assert s.capture(["CH1"], timeout_s=0.5) is None
-        s.set_trigger2(h=450)  # 900 us > the gap: the count runs through
+        s.set_trigger2(h=450)  # 900 us > the gap: no gap, so no count
+        assert s.capture(["CH1"], timeout_s=0.5) is None
+        s.set_trigger2(n=1, h=300)
         cap = s.capture(["CH1"], timeout_s=2)
         assert cap is not None and cap.triggered
     finally:
         s.close()
+
+
+def test_nth_edge_burst_running_across_the_arm():
+    """tb_trigtypes' "Nth N=4 H=20 early": bursts of 6 pulses count from their own start, also before the arm; a burst
+    whose Nth edge came before the arm is passed by, the trigger is the Nth edge of the next one."""
+    a = np.zeros(400, np.uint8)
+    starts = [50 + 6 * i for i in range(6)] + [130 + 6 * i for i in range(6)]  # rising edges, 3 high 3 low; 47 idle
+    for r in starts:
+        a[r:r + 3] = 200
+
+    def fire(arm):
+        return TrigQual(TriggerState(ttype=2, edge=0, n=4, h=20), 128, arm=arm).feed(a, None, 0)
+    assert fire(0) == starts[3]
+    assert fire(starts[3]) == starts[3]
+    assert fire(starts[3] + 1) == starts[9]  # the Nth edge has gone by: the next burst's
 
 
 def test_holdoff_skips_pulses_in_segments_and_across_arms(sim_factory):

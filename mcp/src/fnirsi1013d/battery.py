@@ -519,13 +519,11 @@ async def g_trigger(b: Battery) -> None:
         ("T11", dict(type="timeout", polarity="high", width="300us"), True, "high for 300 us: fires"),
         ("T12", dict(type="timeout", polarity="high", width="800us"), False, "never high for 800 us: no trigger"),
     ]
-    sim_nth = "the simulator's Nth edge with an idle time counts from the arm; the unit waits for an idle gap"
     for label, kw, fires, why in typed:
         await b.step(f"{label}a", "scope_set_trigger", dict(source="CH1", level=LEVEL_V, mode="normal", hold_off=0,
                                                             pretrigger_fraction=0.5, total_samples=3000, **kw),
                      check=ok_true)
         await b.step(f"{label}b", "scope_capture", cap if fires else none, expect=why,
-                     sim_differs=sim_nth if label == "T10" else None,
                      check=ok if fires else untriggered)
     # hold-off: short records (80 samples = 0.4 ms) so the interval is the hold-off's, not the record's
     for label, hold, want in (("T13", 0, 1e-3), ("T14", "2.5ms", 3e-3)):

@@ -25,6 +25,7 @@ def test_battery_on_the_simulator(tmp_path, capsys):
     # the findings of 2026-11-06 are judged: the FFT / DVM rate, the counter's first reading, the frequency summary
     assert labels["A6"]["status"] == "PASS" and labels["A8"]["status"] == "PASS"
     assert labels["R0b"]["status"] == "PASS" and labels["G2a"]["status"] == "PASS"
+    assert labels["T10b"]["status"] == "PASS"  # the Nth edge with an idle time waits for a gap, as on the unit
     assert labels["A17"]["status"] == "SKIP"  # scope_spectrum needs the Spectrum view
     assert "PASS [S1] scope_info" in out
     md = (tmp_path / "battery.md").read_text()
