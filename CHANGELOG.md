@@ -294,6 +294,22 @@ sections 74 to 79.
   naming 0x153E, the word the planning documents had given those features (ceda9a0). `tools/bitstreams.py check
   --release` requires the recommended bitstream to be the firmware's `PC_FW_FPGA_VERSION` (23266f0).
 
+**Built for FPGA 0x153F (fw-153f).**
+
+- **FPGA bitstream 0x153F: both ADC cores of a channel are sampled at the same instant, so Filter Off records hold
+  the samples in the right order at every sample rate; the firmware runs with 0x153F only and asks for a calibration
+  after the flash** (bench 2026-11-06 on 0x153E: core B one conversion late at most dividers, the trace zigzagging on
+  every edge, a 1 kHz square counted as 2 kHz at 20 kSa/s). `PC_FW_FPGA_VERSION` 0x153F (protocol 1.28 unchanged); a
+  scope still on 0x153E shows the mismatch notice; a calibration saved on 0x153E asks "Calibrated on FPGA bitstream
+  0x153e: calibrate again for 0x153f." (c3099d5).
+- **The capture-stage training picks one stage per chip**: 0x153F has one capture instant per chip (0x63 bits 2:0 /
+  8:6; the B fields and the reference bits select nothing; power-on 0x06DB). The wizard still scores both cores and
+  takes a stage that is quiet on both; the tie pass and the runtime guard act per chip, the B reference pass is gone, and
+  a chip with no stage quiet on both cores fails the calibration with the cores named. Diagnostics and GET_CAL show
+  "CH1 A3 B3" (the B field is written equal to the A field). Stored format and wire layouts unchanged (b935a88). mcp:
+  the built-for word, the power-on value, no " A-clk" (7cf2029). protocol.md 5.1, 7.3, rows 64 / 68 and three host
+  vectors (0684ef1). Not benched; `tools/bitstreams.py check --release` fails until the bench marks 0x153F recommended.
+
 #### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, flash image `04e3328b...d0e7`, status

@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-153f (2026-11-07): fw 0.2.105, protocol 1.28 unchanged: built for FPGA 0x153F (both cores of a chip captured at one instant), the capture-stage training, tie pass and guard per chip (the stages quiet on both cores), the reference pass gone, power-on 0x06DB; the legacy EXT shift 12 at dividers 1..3 in its own last commit; not benched; section 97.**
 **Branch fw-legacy2 (2026-10-27): fw 0.2.105, protocol 1.28 unchanged: the last multi-bitstream code (capture-stage version argument, the pre-0x153A Bode reason 8 rule, the per-variant geometry fields and ring arguments, stale comments); behaviour on 0x153D unchanged; section 93.**
 **Branch fw-capmetric (2026-10-22): fw 0.2.105, protocol 1.28 (row 68): the capture-stage training parks at the carries 63.5..191.5 and keeps only the quiet stages (0 outliers and the 3-sample-median residual within 25 % + 4 of the core's best); GET_CAL 432 bytes with the last training; section 92.**
 **Branch fw-guardfix (2026-10-22): fw 0.2.105, protocol 1.27 unchanged: the capture-stage guard, the repeat watch and REPEAT act only on captures taken at the 0x63 value the firmware wrote (0x36's first word; a DEBUG_FPGA sweep no longer gets a core moved and stored); section 90.**
@@ -7309,3 +7310,95 @@ moved: run the wizard (it trains the stages and clears REPEAT), then `scope_bode
 
 **Not fixed here**: the stored value of a moved unit is not put back by the firmware; the guard still has no way to
 tell a moved core from a trained one after its store.
+
+## 97. fw-153f: built for FPGA 0x153F, capture stages per chip (fw 0.2.105 unchanged until the 0.3.0 bump, protocol 1.28 unchanged)
+
+Branch `fw-153f` from main 823cacf. Brief (coordinator, 2026-11-07): the firmware side of fpga-153f's 0x153F (branch
+`fpga-153f`, not merged, reviewed in parallel), contract `fpga/al3/AGENTS.md` "0x153F, the paired capture, fpga-153f"
+part (a) and `fpga/al3/README.md` section 22. Commits c3099d5 (the constant, host tests), b935a88 (stages per chip),
+7cf2029 (mcp), 0684ef1 (protocol 5.1 / 7.3 / rows 64, 68, three host vectors, firmware/README.md), then the CHANGELOG /
+this section / the queue, and **last, on its own, the legacy EXT shift** (the reviewer may revise it; revert that one
+commit if so). `PC_FW_VERSION` not bumped. **Nothing benched, nothing flashed.**
+
+**The constant** (c3099d5): `PC_FW_FPGA_VERSION` / `_TEXT` 0x153F (pc_cmds.h; every derived place as section 95 lists);
+0x153E is now a mismatch. The first-run prompt needed no code: fw-153e's `ud_first_run_due` / `ud_cal_foreign` compare
+the provenance's word (and the stored stages' word, OTHER) with the running one, so the owner's card calibrated on 0x153E
+opens the first-run screen with "Calibrated on FPGA bitstream 0x153e: calibrate again for 0x153f." until the wizard's
+Save. Host tests: the model resets on 0x153F (fpga_model treats every word >= 0x153D alike and models no capture
+instants, so nothing else there), 0x153E in test_session's mismatch words, test_ui_diag's notice on 0x153E / 0x1540 and
+the 0x153E -> 0x153F first-run text, test_cap_hw's previous-bitstream case on 0x153E.
+
+**Stages per chip** (b935a88, cap_stage.c / .h, cap_hw.c; contract item 2 and 3):
+- 0x63: bits 2:0 CH1, 8:6 CH2 = the chip's stage (full rate only). The firmware writes every value with the B field equal
+  to the A field (`cs_with_chip`) and bits 15:12 = 0 (`CS_MASK` 0x0FFF; the self-check compares 0x36's first word & 0x0FFF,
+  so a DEBUG_FPGA write that sets the dead high bits still counts as the firmware's value). Power-on `CS_PO` 0x06DB.
+  **Decision on the texts**: kept as the contract says, "CH1 A3 B3" (cs_text unchanged but for " A-clk"), so Diagnostics
+  ("ADC capture stages CH1 A3 B3, CH2 A3 B3 (trained): ..."), the wizard's note ("Capture stages: CH1 A3 B3"), the report,
+  GET_CAL 358 / 362, GET_HEALTH 104 and mcp's `cap_stages_text` stay true and unchanged in form. A value written by
+  someone else (capwin_sweep, an old trailer) shows both fields as stored.
+- Training (`cs_train_run`): a core mask names whole chips (0x01 trains 0x03); `cs_pass` as before (both cores of the chip
+  at stage s); clean / quiet / sum / q stay per core; the chip's set = `quiet[A] & quiet[B]` goes into `set[]` of both
+  cores; `cs_pick` of it into both fields; `cs_tie` of it for both cores, and the tie pass (unchanged loop: it already
+  set both fields) removes a candidate whose count is non-zero on either core; the noise bound stays per core (each
+  core's best outlier-clean stage). A chip without a common quiet stage: CS_E_DIRTY, `bad` = the cores without a quiet
+  stage of their own, or both when each has some and none is shared (the wizard's "Capture stages: no clean stage for
+  CH2 A, CH2 B" and "ADC readout fault near code 128"). Gone: the reference pass, `cs_ref_bit`, `CS_REF_CH1B / 2B`,
+  `clean_ref`, `quiet_ref`, `sum_ref`, `q_ref`, `cs_train.ref`, " A-clk", `PC_CAPT_REF` (GET_CAL 364 bit 2 is never
+  set; mcp still decodes it for an older firmware's answer).
+- Guard (`cs_guard`): per chip; a flagged core's chip moves within the intersection of its two cores' stored sets (equal
+  for any set this firmware stored; an older per-core store is intersected), the new pick goes into both fields and both
+  cores' sets, and the return value / event 23 a bits 3:0 name both cores of the chip (so `cap_moved` and the repeat
+  watch's forget cover the chip: once per boot per chip). The self-check (`cs_excess`) is unchanged (contract item 4).
+- Stored format unchanged (sector 708 bytes 488..511): the trailer's value field keeps the 0x3FFF mask
+  (`CS_TRAILER_MASK`), so a 0x153E value with a reference bit is still a valid trailer, OTHER on 0x153F, not applied; the
+  sets hold the chip's set in both cores' nibbles. GET_CAL / GET_HEALTH layouts unchanged; protocol.md rows 64 and 68 say
+  what the per-core fields mean now.
+- Host tests: test_cap_stage 354 checks (mock 0x153F: both cores at the chip's field; the intersection, the unit's 0x153E
+  scans A dirty 4 / B dirty 2 giving 3, disjoint sets, one core without a quiet stage, the dead B fields and bits 15:12 of
+  the start value, one core naming its chip, the tie on core A and on core B, core B's class (a) mix bounding the chip,
+  the bench sweep's quiet sets giving 0x06DB per chip, the guard per chip incl. old per-core sets, the trailer with a
+  reference bit), test_cap_hw 138 (the guard moving CH1 as a chip and storing both sets, once per boot, the dead bits in
+  the FPGA's copy, GET_CAL's chip set and a failed training, a 0x153E trailer with bit 13 OTHER), test_cal_wizard,
+  test_diag (GET_CAL 364..366 layout).
+
+**mcp** (7cf2029): `FW_FPGA_VERSION` 0x153F (the simulator's default, the mismatch text), `CAP_POWER_ON` 0x06DB,
+`cap_stages_text` without " A-clk", the battery's core-order group expects s = 0 on 0x153F. The simulator models no
+stage training (only the counts hook), so nothing else changed there.
+
+**Not mapped to code** (contract items 6..8): 7.3 / INTERLEAVE_UNVERIFIED and `COUNTER_F_GATED` stay as they are until
+the bench list (contract (b) steps 3 and 6) passes, as the contract says; `tools/capwin_sweep.py` / `enc_ab.py` are the
+FPGA agent's. User-facing docs still say 0x153E (docs/guide/install.md "runs with bitstream 0x153E only",
+docs/release-notes/0.3.0.md, docs/plans/roadmap.md, release-checklist): left for the release docs pass after the bench.
+**`tools/bitstreams.py check --release` fails on main after this merge until the bench marks 0x153F `recommended`** (by
+design: the release check wants the manifest's recommended word = `PC_FW_FPGA_VERSION`; CI runs only the plain `check`,
+which passes).
+
+**Checks** (before the EXT commit): host tests green (`make test`, check_vectors 168, check_retired_regs), GCC 10, GCC 13
+and PC_DEBUG builds 0 warnings: gcc10 817,664 bytes (sha256 prefix f5c654d2 at 0684ef1 + uncommitted docs; the commit
+gives another hash), GCC 13 840,704, PC_DEBUG 841,216; mcp pytest 559 passed, ruff (CI selection) clean,
+`fnirsi1013d.vectors --check` ok.
+
+**Bench (coordinator / owner; back up SD 700-710 first; FEL loads only until the 0x153F flash)**
+1. On 0x153E, FEL-load this branch's `make gcc10`: the notice "This firmware needs FPGA bitstream 0x153F." / "This scope
+   has 0x153E."; Diagnostics, Settings, USB drive answer and return; `#VER` ends `fpga=0x153e`, GET_INFO 76 = 0x153F,
+   78 = 1; `scope_capture` fails with E_UNSUPPORTED detail 1 "... needs 0x153F".
+2. Flash 0x153F per `fpga/al3/AGENTS.md` "0x153F" part (b) (backup, pre-write read, `d255ca38...d5bc`), cold boot,
+   FEL-load: `#VER ...,proto=1.28,fpga=0x153f`, no notice, Diagnostics encode check 0 bad, capture self-check 0 flagged.
+3. The first-run screen: "Calibrated on FPGA bitstream 0x153e: calibrate again for 0x153f."; GET_CAL 357 HAS | OTHER,
+   360 = 0x153E, 362 = 0x06DB; Diagnostics "ADC capture stages CH1 A3 B3, CH2 A3 B3 (trained on 0x153e: calibrate)".
+4. Calibrate now (5 min warm, inputs open): the wizard trains one stage per chip; expected 0x06DB (stage 3 on both chips).
+   `scope_calibration_info`: `capture_training` per channel with A's and B's q / sums and the same `quiet_stages` for
+   both cores (the chip's set); log both cores' own quiet sets from the q / sums if the chip's set looks small. A chip
+   without a common stage (the wizard fails "ADC readout fault", note "no clean stage for CHn A, CHn B") is a stop.
+   Save; GET_CAL 357 HAS | TRAINED, 358 = 362, 360 = 0x153F; power cycle: no first-run screen.
+5. `python fpga/al3/tools/core_order.py 0,1,2,3,4,5,6,7,9,19,99,999 12 CH1 COM10` and the same for CH2 (probe on the
+   ladder's input): **s = 0 at every divider on both channels**; wizard again, both runs again. Any +-1 at a divided rate
+   contradicts the model (report the row); +-1 at divider 0 only = the chip's buses do not change together there.
+6. CH2 offset sweep **30 minutes or more after power-on** (log the time since boot): `fpga/al3/tools/enc_sweep.py --image
+   0x153F --image-sha256 d255ca38...d5bc --out backups/sweep_0x153F_1.npz`, twice; no worse than 0x153E's warm A 5.2 % /
+   B 0.65 %; divider 99 `enc_ab.py` 0 / 0.
+7. Filter Off captures at 200 kSa/s .. 20 MSa/s (fw-capgate): GET_HEALTH `captures_flagged` constant, 0x63 constant;
+   the counter at 200 MSa/s 1 kHz valid; the logger; the EXT shift if a second source is at hand (next commit).
+8. The battery: `fnirsi1013d-battery --port COM10` (the core-order group must now PASS), then the 30-minute soak.
+Regression signs: the notice on 0x153F (the constant), different A and B fields after a training (cs_with_chip not
+used), a guard move of one field only, TRAINED on the first 0x153F boot (a 0x153E trailer applied).
