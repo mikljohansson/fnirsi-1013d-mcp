@@ -531,9 +531,11 @@ The release-time test of everything an agent uses: it starts the MCP server over
 --max-tier 3`), calls the tools in named groups as an agent would and judges each step against an explicit expectation
 (the trigger fires or must not, 1 kHz within a tolerance, sample counts, the FFT / DVM rate, segment and hold-off
 intervals, every counter reading valid, logger totals with 0 gaps, UART 0x55 frames, host against device Bode, the
-per-divider core order). Bench: the generator's 1 kHz square on the calibration post into an RC ladder, CH1 on the
-ladder input, CH2 on its second node (the tool sets 1 V/div DC, Filter Off and the generator itself). Close every other
-client of the port first.
+pairing of the cores at every divider, 200 MSa/s included). Bench: the generator's 1 kHz square on the calibration post
+into an RC ladder, CH1 on the ladder input, CH2 on its second node (the tool sets 1 V/div DC, Filter Off and the generator
+itself). Close every other client of the port first. The `coreorder` group sets the generator to 200 MHz / 401 and folds
+each core on the period (d = +1 expected): on this wiring it judges CH1 on the rounded signal and skips CH2, whose node
+holds nothing at 499 kHz; both probes on the post judge both channels on the sharp signal (`--groups coreorder`).
 
 ```bash
 fnirsi1013d-battery --port <port>                     # every default group, about 4 minutes
@@ -554,6 +556,7 @@ is known to differ from the unit is a SKIP that says so.
 ```
 fnirsi1013d-battery --port <port>                    # about 4 minutes; exit status 0 = no FAIL
 fnirsi1013d-battery --port <port> --groups loopback  # the loopback self-test, CH1 straight on the post
+fnirsi1013d-battery --port <port> --groups coreorder # both probes on the post: the pairing on both channels
 ```
 
 Drives the MCP server over stdio as an agent does and judges every step against an explicit expectation, in named

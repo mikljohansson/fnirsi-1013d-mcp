@@ -243,7 +243,9 @@ This is done once per release, on the bench, by the maintainer or with the maint
    MCP server over stdio as an agent does and judges every step; exit status 0 = no FAIL. A FAIL that the release
    accepts must be a known issue in `docs/release-notes/X.Y.Z.md`. Paste its `battery.md` into
    `docs/hardware-status.md` and keep `battery.json` with the bench record. The loopback self-test is a separate group
-   with CH1 straight on the post: `fnirsi1013d-battery --port <port> --groups loopback`.
+   with CH1 straight on the post: `fnirsi1013d-battery --port <port> --groups loopback` (T7 reads skipped on a release
+   image). On the ladder the `coreorder` group judges CH1 and skips CH2; with both probes on the post
+   `fnirsi1013d-battery --port <port> --groups coreorder` judges both channels.
 
 ## 5. GPL and Atlan4's binary-only parts
 
