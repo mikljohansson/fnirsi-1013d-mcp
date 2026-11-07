@@ -2067,7 +2067,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   answered E_BUSY detail 3 "calibration measurement running" at once, the step ran on, the owner confirms; keypad half-typed: the
   command was answered in 0.01 s, keypad and menu closed, the generator stayed at 1000 Hz; 40 s of commands while the owner saved
   about 20 pictures: 671 answered, 392 refused E_BUSY detail 4 "file save in progress", none slower than 0.3 s.
-- 2026-11-07 14:42-15:0x (owner, lead): **calibration checks on fw 0.3.0** (warm wizard of 10:2x; lab supply, DMM +1.015 / -1.019 V on CH1, -1.019 /
+- 2026-11-07 14:42-14:53 (owner, lead): **calibration checks on fw 0.3.0** (warm wizard of 10:2x; lab supply, DMM +1.015 / -1.019 V on CH1, -1.019 /
   +1.018 V on CH2, drifting by a few mV; 1X probes; 8 captures per cell, Filter Off). Zero / gain from the two polarities, 200 MS/s then 1 MS/s:
   CH1 5 V/div +88, +41 mV / +0.7, -2.4 %; 2.5 V/div +56, +20 mV / +1.1, +0.5 %; 1 V/div +9, -6 mV / -1.1, -1.1 %; 0.5 V/div +10, +7 mV / -0.2, -0.4 %.
   CH2 (with +1.018 V) 5 V/div +107, +13 mV / -0.2, +1.5 %; 2.5 V/div +66, +19 mV / +1.4, +1.8 %; 1 V/div +20, +2 mV / -0.4, -0.4 %; 0.5 V/div +15, +3 mV
@@ -2078,3 +2078,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   two-polarity zeros on the same ranges (+-20 mV); not understood (inference: the ADC's mid-scale carry at code 128, a quiet input cannot resolve
   it). October's CH2 range 6 note (+1.0..1.5 codes) reads +0.1 / +0.8. A - B tracker after 60 full-rate captures: d +0.105 / +0.133 codes, e -0.006 /
   -0.013, 2998 pairs per record: converged.
+- 2026-11-07 14:54-16:54 (lead): **long-idle check on fw 0.3.0** (`backups/encphase/longidle_0.3.0_20261107b.log`): 60 s of polls, the port closed for
+  2 h, then the scope answers: 598 requests, 0 failures, 0 drops, no restart, `#VER` fine afterwards; 3 bus resets and suspends during the
+  closed port, recovered by themselves. An earlier firmware lost USB here. Owner: zero offsets at the shorted input accepted, not a
+  known issue in the notes; no overnight run. **Every release check is closed; the announcement is the owner's.**

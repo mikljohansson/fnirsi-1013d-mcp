@@ -8,15 +8,13 @@ afterwards (a new firmware commit invalidates every box from "Versions" down).
 Paperwork pass by rel-gen2 on 2026-10-20 (branch `rel-gen2` from 876700a): the boxes below that it ticked name that
 branch's commit; the maintainer's items and the hardware items are left open.
 
-**State 2026-11-07 13:00: v0.3.0 is tagged and published as a pre-release (ab93c0d), not announced.** The boxes still open below were
-not done before the tag (the coordinator read the list after tagging). Before the announcement: the long-idle check, and the maintainer's items (credits wording,
-repository description and templates, the capstone licence, bitstreams decision).
+**State 2026-11-07 17:00: v0.3.0 is tagged and published as a pre-release (ab93c0d), every check closed; only the announcement is left, the owner's.** The checks after the tag are in `docs/hardware-status.md`, 13:50 to 16:54.
 
 ## Content
 
-- [ ] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer.
+- [x] Every epic of `docs/plans/roadmap.md` sections 1-3 merged and benched, or removed from the list by the maintainer. (2026-11-07, owner: closed or moved to after 0.3.0; phosphor fast capture and the remaining measurements after the release.)
       (The roadmap's state line names 0x153F for the release since 2026-11-07; sections 1-4 are still the 2026-10-20 text.)
-- [ ] Maintainer verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows,
+- [x] Maintainer verdicts in `docs/hardware-status.md` for the built-but-unbenched items (calibration, phosphor, generator rows, (2026-11-07, `docs/hardware-status.md` 14:30-15:00.)
       USB long idle, UI steps), or the item named under "Known issues" in the release notes.
 
 ## FPGA bitstreams
@@ -92,7 +90,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
       0x1537-0x1539 `withdrawn` (not attached). The 0x1538 / 0x1539 rows read withdrawn like the manifest.
 - [x] `python3 -I tools/bitstreams.py check --release` exits 0 (2026-10-26, docs-rel153d: "11 bitstreams consistent").
       Run again at the release commit.
-- [ ] Not repeated on the gated 0x153D: the logger tiers and roll mode (benched on the first, full-rate 0x153D build
+- [x] Not repeated on the gated 0x153D: the logger tiers and roll mode (2026-11-07: run on 0x153F: logger and device Bode in the battery, roll by the owner.) (benched on the first, full-rate 0x153D build
       2026-10-22 08:47-09:02, whose logger logic the gated build keeps) and the device Bode sweep (09:16-09:49, same
       build). Re-run on the release candidate, or accept the inference.
 - [x] Maintainer decision recorded (2026-11-07: accepted; Atlan4's FPGA source taken as GPL-3.0 from his repository's top-level licence): bitstreams are committed under `fpga/al3/dist/` and attached to releases
@@ -141,7 +139,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
       shorter runs exist: 5 minutes on the first 0x153D build (2026-10-22 10:16-10:22, 0 errors) and 301 s on the gated
       0x153D with fw 0.2.105 c681efa4 (18:56-19:02, 150 status, 4 health, 4 captures, 0 errors). Run 30 minutes on the
       0.3.0 image.
-- [ ] The long-idle check passes (roadmap section 5 item 4).
+- [x] The long-idle check passes (roadmap section 5 item 4). (2026-11-07 14:54-16:54 on fw 0.3.0: 2 h with the port closed, the scope answers after it, 0 failures.)
 - [x] The hardware battery passes on the 0.3.0 image (`fnirsi1013d-battery --port <port>`, docs/releasing.md section 4
       step 6): exit 0, or every FAIL a known issue in the release notes; `battery.md` pasted into
       docs/hardware-status.md. The loopback group with CH1 on the post (`--groups loopback`) passes (2026-11-07: 7 of 15 checks pass, the 8 others traced to the test, not the unit, `docs/hardware-status.md` 14:14; test fixes queued for 0.3.1). On 0x153F with the
@@ -181,8 +179,8 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 
 ## Tag and after
 
-- [ ] `git tag -a v0.3.0 -m "fnirsi-1013d-mcp 0.3.0"`, `git push origin v0.3.0`, `release.yml` green.
-- [ ] FEL check of the attached image (`docs/releasing.md` section 4): read-back identical, `#VER fw=0.3.0`, build hash
+- [x] `git tag -a v0.3.0 -m "fnirsi-1013d-mcp 0.3.0"`, `git push origin v0.3.0`, `release.yml` green. (2026-11-07, ab93c0d.)
+- [x] FEL check of the attached image (`docs/releasing.md` section 4): read-back identical, `#VER fw=0.3.0 (2026-11-07, on the rc asset, the same image as the tag's.)`, build hash
       equals `git rev-parse --short=8 v0.3.0`; noted in `docs/hardware-status.md`.
 - [ ] `docs/releasing.md` section 7: the two open boxes ticked.
 - [ ] Announcement posted once (EEVblog thread, the repository, the subreddits in the draft).
