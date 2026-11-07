@@ -1,8 +1,9 @@
 # CHANGELOG 0.3.0 section, draft
 
 Draft of the `## [0.3.0]` section of `CHANGELOG.md`, prepared by rel-gen2 on 2026-10-20 from the 0.1.0-0.2.102
-development entries and refreshed by docs-rel153d on 2026-10-26 for everything merged up to fa8377b (0.2.103-0.2.105,
-FPGA 0x153C and 0x153D, the mcp host changes, the docs). The coordinator applies it in the release commit and then
+development entries, refreshed by docs-rel153d on 2026-10-26 for everything merged up to fa8377b (0.2.103-0.2.105,
+FPGA 0x153C and 0x153D, the mcp host changes, the docs) and by docs-153f on 2026-11-07 up to abd988a (FPGA 0x153E and
+0x153F, fw-capgate, fw-153f, the hardware battery). The coordinator applies it in the release commit and then
 deletes this file. How to apply:
 
 1. Keep `## [Unreleased]` at the top, empty (no text under it). Remove the "Nothing has been tagged yet" paragraph
@@ -16,7 +17,7 @@ deletes this file. How to apply:
    (`docs/releasing.md` section 2 step 5).
 
 Commit hashes are the ones the development entries cite, or the merge commit where an entry cites none; every one
-resolves in the repository (checked 2026-10-20 and again 2026-10-26).
+resolves in the repository (checked 2026-10-20, 2026-10-26 and 2026-11-07).
 
 ---
 
@@ -45,7 +46,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
 - External trigger on the calibration pin (0.2.9, bebf901) and its pipeline offsets per bitstream (0.2.72, 7833312;
   0.2.79, 381dd8a).
 - One firmware, one bitstream (owner 2026-10-20): the firmware runs only on the bitstream it is built for (0x153B in
-  0.2.103, 0x153C in 0.2.104, 0x153D in 0.2.105, 0x153E in 0.3.0) and shows a full-screen notice with Diagnostics, Settings and USB
+  0.2.103, 0x153C in 0.2.104, 0x153D in 0.2.105, 0x153F in 0.3.0) and shows a full-screen notice with Diagnostics, Settings and USB
   drive
   on any other; the stock, Atlan4, EF2 and EP4 paths and the per-bitstream workarounds are gone (0.2.103, 1f13767;
   5c0ea67, fb3a28a); the notice answers its buttons after Diagnostics (f08b5b1). The firmware stops writing the
@@ -74,9 +75,15 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   5879193). In 0.2.105: no power-on tie-break, the trained clean set stored and a runtime guard for a repeatedly
   flagged core (76fbaa2, bfbb7ed); the training scores the captured data, not only the outlier counters (protocol
   1.28, b9eae5a, 8921016, 2f11674) and reads its own record (4ba6cf5, a0e0156); the two clock classes kept after a
-  single-class trial (9c7f59d).
+  single-class trial (9c7f59d). For 0x153F the wizard trains one capture stage per chip, the set both cores share, and
+  the runtime guard moves a chip, not a core (fw-153f, merge 53da95a); the stored format and GET_CAL's layout stay.
 - Full-rate capture checks against garbled ADC cores: every 200 MSa/s capture checked and re-taken when garbled (0.2.62,
-  9e7e53d), the 0x153A capture self-check and a repeated-flag warning (0.2.79, 0.2.81).
+  9e7e53d), the 0x153A capture self-check and a repeated-flag warning (0.2.79, 0.2.81). The self-check runs after
+  full-rate captures only: on Filter Off captures at the divided rates a real edge flagged a core and the guard moved
+  the trained stages, which ended the device Bode sweep with reason 8 (fw-capgate, 2bdecac).
+- Filter Off sample order: the firmware expects 0x153F, which holds the designed core order at every rate; the legacy
+  EXT shift is 12 samples at dividers 0..3 on it, from the model, not benched (fw-153f, merge 53da95a, 72af746). The
+  counter's GATED mark with Filter Off stays, although the count read right on the bench of 2026-11-07.
 - Diagnostics (Menu > Diagnostics): identity, FPGA line, verdict tiles, calibration provenance, event log, a report on
   the card; GET_HEALTH and the stored restart record (0.2.52, b830434; 0.2.59, f95dbee); Restarts counts only crashes
   (0.2.100, 5879193).
@@ -117,8 +124,16 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   full-rate encodes was replaced after the 2026-10-22 A/B; flashed 2026-10-22 17:01, accepted by the owner 18:56,
   benched good; supported (the firmware 0.3.0 refuses it).
 - 0x153E (source 754e39b, roll da645d0, merge 0cd4768): the 0x153D design with the ADC encodes driven from the PLL outputs through the pin (IOB)
-  registers, so every build has the same encode timing; no other logic change; the release's bitstream, recommended.
-  The encode-phase experiments around it (-250 / +250 ps images, bench 2026-11-04) are parked.
+  registers, so every build has the same encode timing; no other logic change; benched 2026-11-06, recommended until
+  2026-11-07, now supported; never released, no released firmware runs it. The encode-phase experiments around it
+  (-250 / +250 ps images, bench 2026-11-04) are parked.
+- 0x153F (roll ea38475, merge 7f4ed8e, dist abd988a): the core-order fix, 0x153E with both ADC cores of a chip captured
+  at one instant, so with Filter Off the samples are in the right order at every rate (0x153A to 0x153E took each core
+  against its own encode edge and stored core B one conversion late at most rates on the unit); one capture stage per
+  chip. Benched 2026-11-07: the designed core delay at twelve rates on both channels, the counter 1000.00 Hz at 20 kSa/s
+  Filter Off, battery 201 passed, 0 failed, 1 skipped; CH2 sweep peak at 200 MSa/s, 80 minutes after power-on, A 5.8 %,
+  B 1.0 %, a little above 0x153E's A 5.2 %, B 0.65 %, accepted by the owner for the right core order; the release's
+  bitstream, recommended.
 - Released images committed under `fpga/al3/dist` with `manifest.json`, `BITSTREAMS.md` and the CI check
   `tools/bitstreams.py` (375adb7); releases attach every image that is not withdrawn.
 
@@ -140,6 +155,12 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   (516b76a, b3b9c51).
 - `fnirsi1013d-flash` (FEL load, persist after a backup, restore; 136eb1b, 9e79583) and its refusal texts for the card
   rule (a7c5727); `fnirsi1013d-sd`, `fnirsi1013d-bench`, `fnirsi1013d-soak`, `fnirsi1013d-bode`.
+- `fnirsi1013d-battery`, the hardware battery: the MCP server over stdio as an agent runs it, every step judged, in
+  named groups, also on the simulator; a release step (merge 3f659ce; ef59c5e, ce557ee).
+- The host findings of the 2026-11-06 battery (2922bf9, merge 3f659ce): the capture's time step and the FFT and DVM
+  checked against the divider the FPGA holds; no frequency from a trace without a real swing, a whole period and
+  regular crossings (`frequency_reason`); `scope_sweep` without a poll per step; the loopback self-test's level from the
+  measured swing; `scope_counter` skips the first gate after a configuration.
 - Works installed from the wheel with data under `~/.fnirsi1013d` (8ea8886), tested by the CI `wheel` job (0e1d36b);
   frees the serial port after 30 s idle (275e273).
 - Agent measurement guide and the Claude Code skill `fnirsi-scope` (dc7f4b1).
@@ -154,7 +175,7 @@ firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-statu
   partition start (1563daf).
 - README for the hobbyist visitor, the agent install runbook and the Claude Code skill `fnirsi-install`, a Prepare and
   back up page (50827b1, 3b15377, 2063e88; merges 28fde67, ac4c6a5, 42bf65b, a075dbf); the docs for one firmware
-  with one bitstream and 0x153E as the release's (003924d, 991b2da; eda30b2).
+  with one bitstream, 0x153E as the release's (003924d, 991b2da; eda30b2), then 0x153F.
 - SPI flash tools for the FT2232D (71774ff, 108df11, fee75d9); protocol specification, hardware preparation guide and
   roadmap (9d32933, 1bd4179, a947e78).
 
