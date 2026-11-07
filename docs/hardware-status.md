@@ -2023,3 +2023,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   30-minute soak started and **ended at 11:47:41 invalid**: at 11:46:41 GET_STATUS got no answer, the next write failed
   with error 22 and COM10 left Windows and did not return within 60 s (505 requests before it, no counter moved). The
   scope stayed off USB. Unlike the drops of 2026-11-06 (back in 0.6 s). Cause not known yet: asked the owner.
+- 2026-11-07 11:59-12:30 (lead): the owner had simply powered the scope off at 11:46 (no fault). Card boot of fw 1d36d9b5 on
+  0x153F: no notice, no first-run screen, stored stages trained on 0x153F in effect, 0 flagged of 885. **30-minute soak**
+  (`backups/encphase/soak_0x153F_20261107b.log`): 17897 requests, **0 failures, 0 drops**, latency median 1.1 ms, p99 3.1 ms.
+  The four drops of 2026-11-06 14:20 did not recur in two later soaks; cause not found, listed as a known issue.

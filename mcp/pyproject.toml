@@ -1,6 +1,6 @@
 [project]
 name = "fnirsi1013d"
-version = "0.1.0"
+version = "0.3.0"
 description = "Host library, device simulator and MCP server for the FNIRSI 1013D open-firmware USB protocol"
 readme = "README.md"
 license = "GPL-3.0-or-later"

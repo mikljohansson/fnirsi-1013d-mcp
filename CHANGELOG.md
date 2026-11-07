@@ -12,27 +12,176 @@ published as pre-releases.
 
 ## [Unreleased]
 
-Nothing has been tagged yet. Every firmware version below is a development build. It was FEL-loaded
-on the owner's unit (AL3A10 FPGA, bitstream 0x1532) and benched as recorded in
-`docs/hardware-status.md`. Image hashes in that log come from local builds. A release image is built
-by CI from the tag commit and has its own hash.
+## [0.3.0] - 2026-11-07
 
-### Plan for the first tag (v0.3.0)
+The first tagged release. The firmware (`PC_FW_VERSION`) and the mcp package share the version 0.3.0. The user-facing
+release notes are `docs/release-notes/0.3.0.md`; the build-by-build history follows under "Development history". Every
+firmware build was benched on one unit, the owner's AL3A10 (`docs/hardware-status.md`).
 
-- Land the rest of the current firmware queue (`docs/plans/roadmap.md` item 0). As of 0.2.7, the fix for
-  request corruption under RX back-pressure is still open. That version added counters for it.
-- Bench every item, persist the firmware to the card, and run a 30-minute soak with the MCP server polling.
-- Set `PC_FW_VERSION` to `0.3.0`, set the mcp package version from `0.1.0` to `0.3.0`, and move the
-  entries below into a `## [0.3.0]` section.
-- Tag `v0.3.0`. Load the attached scope image over FEL and check its sha256 against `SHA256SUMS`
-  (`docs/releasing.md`, section 4).
+### Firmware (`firmware/scope`, from Atlan4 v1.00o5)
 
-### Firmware (scope application, `firmware/scope`, base Atlan4 v1.00o5)
+- USB control protocol 1.28 over USB CDC: framed, CRC-checked requests with shared test vectors (0.1.0, 9ffd7ba);
+  shared control with the touch screen, no remote lock-out, the MCP chip in the top bar (0.2.0, d77298f). Link fixes:
+  the FIFO layout (0.1.1, 5a8432b; 0.1.6, 697e1f6), the first request after opening the port (0.2.11, 1594918), the USB
+  PHY tuning that never reached the PHY on the F1C100s (0.2.25, 85a113d), recovery after a long idle with an inferred
+  resume and a soft reconnect (0.2.49, c20b657). Event log, link counters and a restart record for diagnosing the link
+  (0.2.12-0.2.24).
+- SD card: sector commands for persisting an image from the PC (0.2.2, 0d4d9bb); the write window ends at the FAT32
+  partition, capped at sector 16384, and cards need the partition at 8 MiB or later (0.2.101, f2c53e7, f758b51).
+- Spectrum analyser view (0.2.28, e6a7c4c): fixed-point FFT up to 4096 points with ARM assembly hot loops (0.2.31,
+  0930c72), waterfall and density views (0.2.32, 83aa5b5), averaging and max hold (0.2.40, e595a0f), the 16-bit
+  filtered records (0.2.34, 1a9a773), span-driven sample rate and pans that keep it (0.2.77, 52c1c76; 0.2.82, 9294f9e).
+- MMU on with D-cache and write buffer: the 4096-point FFT from 10.96 to 2.72 ms (0.2.48, 8cdefda).
+- FPGA decimation filters (boxcar, CIC2, CIC3; 0.2.30, b770356) and the compensation FIR (0.2.44, 2e0cd10), the Filter
+  kept per mode with CIC2 in the Scope and CIC2+FIR in the Spectrum (0.2.64, 5818b5b).
+- External trigger on the calibration pin (0.2.9, bebf901) and its pipeline offsets per bitstream (0.2.72, 7833312;
+  0.2.79, 381dd8a).
+- A stored settings record is validated at boot (whole record and field ranges); a bad or half-written one loads the
+  defaults with the stored calibration kept, shows a notice, and nothing is saved before the boot has loaded: the
+  power-off save could store a half-loaded record (bench 2026-11-04; fw-settings0, 896e21e). The last
+  multi-bitstream code is gone (capture stages on every build, fixed ring geometry; fw-legacy2, 116898d).
+- One firmware, one bitstream (owner 2026-10-20): the firmware runs only on the bitstream it is built for (0x153B in
+  0.2.103, 0x153C in 0.2.104, 0x153D in 0.2.105, 0x153F in 0.3.0) and shows a full-screen notice with Diagnostics, Settings and USB
+  drive
+  on any other; the stock, Atlan4, EF2 and EP4 paths and the per-bitstream workarounds are gone (0.2.103, 1f13767;
+  5c0ea67, fb3a28a); the notice answers its buttons after Diagnostics (f08b5b1). The firmware stops writing the
+  registers 0x153C removed (43e2b0a, b10bc96, 19618eb).
+- Trigger types on 0x153C and later: pulse width, Nth edge after an idle time and timeout on CH1, CH2 or EXT, and the
+  trigger hold-off; SET_TRIGGER2, protocol 1.26 (0.2.104, c432354); the trigger menu's Type row (ae449b8) with larger
+  - / + keys (06a7d24).
+- Peak detect (0.2.104, ba6ce49): the ACQ Sample row and the peak bars (7098449, 4a93304, acc1884, 09dac96); Vmax,
+  Vmin and Vpp read the peaks (0.2.105, 7c3ced0).
+- Hardware counter (0.2.104, 4639122) feeding the Freq, Period, Width and Duty cards; level and hysteresis follow the
+  signal (0.2.105, 241e4d1, 540e75b); with Filter Off at the divided rates its gates are marked GATED and the cards
+  keep the record's measurement (0.2.105, ed6c283).
+- Streaming logger over USB at 500 / 250 / 125 kS/s, protocol 1.27 (0.2.105, 2101a2c, ff3a1cb), and roll mode drawn
+  from it, both channels (8e1458d, 827506f, 532f8af).
+- The generator as a fractional square on the 200 MHz clock, glitch-free changes, the Frequency response on its
+  period grid (0.2.105, 30fe638, 4743591, 4f12433, 5e5545f; c7a05e3, 78fc734, 990922e).
+- ACQ menu: five-column grids (43e513a), Filter Off / Hi-Res / Anti-alias with Hi-Res and Anti-alias as the defaults
+  (e5ad32d, 178af30), a sample rate tapped in STOP applies at the next RUN (c4025cf); USB drive screen with Back in
+  the header (c2694f3) (all 0.2.105).
+- Front-end relays written only on a change; a host setting, capture or RUN closes the Frequency response view first
+  (0.2.105, 4ca4ea0, 7b797bd). The forced stop ends a capture at the auto-mode deadline (53551d4).
+- Calibration: per-core zeros in two clock classes (v2, 0.2.43), per-core gains (v3, 0.2.45, c8f17bf), background
+  tracking of the full-rate mismatch and common mode (v4, 0.2.50, 7cfc7f7, 93087b2), the four-screen wizard and the
+  first-run screen (0.2.59, 95f440e, 5e8a5db), capture-stage training over a band of codes on 0x153A and later (0.2.79,
+  381dd8a; 0.2.81, 3e5a2a1), noise limits of the open-input condition shared by the wizard and Diagnostics (0.2.100,
+  5879193). In 0.2.105: no power-on tie-break, the trained clean set stored and a runtime guard for a repeatedly
+  flagged core (76fbaa2, bfbb7ed); the training scores the captured data, not only the outlier counters (protocol
+  1.28, b9eae5a, 8921016, 2f11674) and reads its own record (4ba6cf5, a0e0156); the two clock classes kept after a
+  single-class trial (9c7f59d). For 0x153F the wizard trains one capture stage per chip, the set both cores share, and
+  the runtime guard moves a chip, not a core (fw-153f, merge 53da95a); the stored format and GET_CAL's layout stay.
+- Full-rate capture checks against garbled ADC cores: every 200 MSa/s capture checked and re-taken when garbled (0.2.62,
+  9e7e53d), the 0x153A capture self-check and a repeated-flag warning (0.2.79, 0.2.81). The self-check runs after
+  full-rate captures only: on Filter Off captures at the divided rates a real edge flagged a core and the guard moved
+  the trained stages, which ended the device Bode sweep with reason 8 (fw-capgate, 2bdecac).
+- Filter Off sample order: the firmware expects 0x153F, which holds the designed core order at every rate; the legacy
+  EXT shift is 12 samples at dividers 0..3 on it, from the model, not benched (fw-153f, merge 53da95a, 72af746). The
+  counter's GATED mark with Filter Off stays, although the count read right on the bench of 2026-11-07.
+- Diagnostics (Menu > Diagnostics): identity, FPGA line, verdict tiles, calibration provenance, event log, a report on
+  the card; GET_HEALTH and the stored restart record (0.2.52, b830434; 0.2.59, f95dbee); Restarts counts only crashes
+  (0.2.100, 5879193).
+- Digital phosphor view (0.2.46, 15f15e0), also in X-Y (0.2.56, a41ca39).
+- Frequency response mode, the on-device Bode plot (0.2.66; redesigned 0.2.69, 5d262b7): AUTO SET that fails fast and
+  ends in STOP (0.2.84, 9079725, 071c206; 0.2.86, a119035), range plans reused by repeated sweeps (0.2.87, 53447c4), CH2
+  range Auto / Constant (0.2.93, d51979d; 0.2.94, 39213e7), points below the floor grey with a note (0.2.99, a590c1f).
+- UX makeover: main menu, cards and chips (0.2.51), touch handles (0.2.54, 4bec0ff), Settings screen (0.2.55,
+  66a3a70), CTRL page and fold-outs (0.2.56, a41ca39), polish batches (0.2.63, 0.2.68), Measurements v2 (0.2.65,
+  8749ffe), slider-track overviews and tap to jump (0.2.73-0.2.74, a5c875e, de8f49c), time/div-driven sample rate
+  (0.2.76, da24d91). Menus no longer offer what the hardware cannot do (0.2.6, 68f7868; removed in code 0.2.47,
+  55960cf).
+- Host requests close an open menu instead of answering E_BUSY (0.2.78, 0493025); read-only requests and READ_SCREEN
+  are answered inside it (0.2.94, ce78bc9); screenshots over USB (0.2.70, 350823e).
+- Capture correctness: auto trigger mode in the firmware (0.2.41, 0fd6a9c); the FPGA bus contract (one word late,
+  record start, arm order; 0.2.72, 5f38d23); clipping judged per record (0.2.83, 51ab2a4); decimated records no longer
+  saturated after a configuration change (0.2.88, 61af5dd, 1299f7a); auto-mode records no longer spliced on 0x1532-0x153A
+  and a "may be spliced" flag (0.2.97, 49d99bf, dc35b9f; 0.2.98, d1f4e6b).
+- ACQ Average is one behaviour, a true mean of N records within a 40 ms budget per pass (0.2.103, 1f13767).
+- Reproducible images: the same commit gives the same sha256 in any checkout and in CI; the `PC_PROTOCOL=0` build and
+  the byte-identical check against v1.00o5 removed (0.2.47, 473bd0b, 57d0d26, 8770209, 0f84761).
+
+### FPGA (`fpga/al3`, AL3A10 only)
+
+- Headless Anlogic TD flow that rebuilds Atlan4's 0x1532 byte for byte (e790a7d, 42c79dc).
+- 0x1533 external trigger (526c969), 0x1534 decimation filters (6d4c8ad), 0x1535 compensation FIR (e2aec2e), 0x1536
+  segmented capture and hardware averaging (27c0c75, unbenched).
+- 0x1537, 0x1538 and 0x1539 (c15981e, ce943bf, b4bd8b0): encode phase, encode check and MCU readout fixes, each
+  superseded on the bench and withdrawn.
+- 0x153A (f735fae): ADC data captured in IOB registers at a trainable stage per core, with a capture self-check;
+  supported.
+- 0x153B (c173ed5): records that end on the auto time-out are the newest words, the time-out no longer cuts a triggered
+  record; benched 2026-10-20 20:40-20:49, recommended until 2026-10-22, now supported.
+- 0x153C (bd24bdf; merges da4dc6e, f629cec, 50cbc71, 6229ac3): trigger types with hold-off, peak detect, the hardware
+  counter with min / max, the stock design's unused registers removed; benched 2026-10-21 on fw 0.2.104; supported.
+- 0x153D (e3a23c2; merges 63872af, f83f80f): the streaming logger and the fractional square generator in place of the
+  DDS, the ADC encodes as on 0x153C; the pulse pattern generator was cut (it did not fit), and a first build with
+  full-rate encodes was replaced after the 2026-10-22 A/B; flashed 2026-10-22 17:01, accepted by the owner 18:56,
+  benched good; supported (the firmware 0.3.0 refuses it).
+- 0x153E (source 754e39b, roll da645d0, merge 0cd4768): the 0x153D design with the ADC encodes driven from the PLL outputs through the pin (IOB)
+  registers, so every build has the same encode timing; no other logic change; benched 2026-11-06, recommended until
+  2026-11-07, now supported; never released, no released firmware runs it. The encode-phase experiments around it
+  (-250 / +250 ps images, bench 2026-11-04) are parked.
+- 0x153F (roll ea38475, merge 7f4ed8e, dist abd988a): the core-order fix, 0x153E with both ADC cores of a chip captured
+  at one instant, so with Filter Off the samples are in the right order at every rate (0x153A to 0x153E took each core
+  against its own encode edge and stored core B one conversion late at most rates on the unit); one capture stage per
+  chip. Benched 2026-11-07: the designed core delay at twelve rates on both channels, the counter 1000.00 Hz at 20 kSa/s
+  Filter Off, battery 201 passed, 0 failed, 1 skipped; CH2 sweep peak at 200 MSa/s, 80 minutes after power-on, A 5.8 %,
+  B 1.0 %, a little above 0x153E's A 5.2 %, B 0.65 %, accepted by the owner for the right core order; the release's
+  bitstream, recommended.
+- Released images committed under `fpga/al3/dist` with `manifest.json`, `BITSTREAMS.md` and the CI check
+  `tools/bitstreams.py` (375adb7); releases attach every image that is not withdrawn.
+
+### MCP server and host tools (`mcp/`)
+
+- Protocol client, serial and TCP transport, a device simulator and a FastMCP server (0d8b40f, 8c80c1e, a60d35a): 41
+  tools with safety tiers (39 by default; raw FPGA and FEL only when enabled), confirmation tokens for the generator
+  and the calibration pin, an audit log.
+- Measurement tools: averaged capture, FFT, decay fit, measurements, segmented capture and hardware averaging (4699593),
+  the scope's spectrum (7f364a8), host and device Bode sweeps (f0940ee, 363f676, d3a16bb, 0a8e94d), reports as PNG and
+  HTML (1a3c0aa), the volts model with the scope's per-core calibration (62da1e0, 5f6bc0d).
+- Host data tools: `scope_decode` (UART, SPI, I2C), `scope_mask_test`, `scope_export_csv`, `scope_dvm` (64f23f4,
+  19d6eea, 14503d6).
+- The 0x153C and 0x153D generations on the host: trigger types, peak detect and `scope_counter` (merge bcb269b;
+  7360b62, 717ca16, 6fbd0ff), the counter's auto thresholds (f7fa203); the square generator, Bode on the 5 ns period
+  grid, `scope_log` / `scope_log_status` / `scope_log_stop` and `scope_sweep` (3fea867, 1c5715f, 2f940e9); the
+  retired registers and READ_LIVE gone (1777a67, eea44e1); two calibration classes and `capture_training` (a8cf41c).
+- Diagnostics readers (`scope_health`, `scope_sd_info`, `scope_save_report`, b830434, 8614032) and `scope_cal_probe`
+  (516b76a, b3b9c51).
+- `fnirsi1013d-flash` (FEL load, persist after a backup, restore; 136eb1b, 9e79583) and its refusal texts for the card
+  rule (a7c5727); `fnirsi1013d-sd`, `fnirsi1013d-bench`, `fnirsi1013d-soak`, `fnirsi1013d-bode`.
+- `fnirsi1013d-battery`, the hardware battery: the MCP server over stdio as an agent runs it, every step judged, in
+  named groups, also on the simulator; a release step (merge 3f659ce; ef59c5e, ce557ee).
+- The host findings of the 2026-11-06 battery (2922bf9, merge 3f659ce): the capture's time step and the FFT and DVM
+  checked against the divider the FPGA holds; no frequency from a trace without a real swing, a whole period and
+  regular crossings (`frequency_reason`); `scope_sweep` without a poll per step; the loopback self-test's level from the
+  measured swing; `scope_counter` skips the first gate after a configuration.
+- Works installed from the wheel with data under `~/.fnirsi1013d` (8ea8886), tested by the CI `wheel` job (0e1d36b);
+  frees the serial port after 30 s idle (275e273).
+- Agent measurement guide and the Claude Code skill `fnirsi-scope` (dc7f4b1).
+
+### Documentation and tooling
+
+- Documentation site from `docs/` with MkDocs Material, published to GitHub Pages (9704316, 41d0e2d): install, first
+  run, calibration, the screens, the generator, the agent guide, six engineering articles, screenshots taken on the unit
+  by `tools/screenshots.py` (d20d753).
+- CI and release workflows (573f9b6), release notes from `docs/release-notes/`, bitstream assets and `-rcN` dry runs
+  (bd16d02); SD packages built on the user's machine from Atlan4's download (7659ed6); `make_sd_image.py` enforces the
+  partition start (1563daf).
+- README for the hobbyist visitor, the agent install runbook and the Claude Code skill `fnirsi-install`, a Prepare and
+  back up page (50827b1, 3b15377, 2063e88; merges 28fde67, ac4c6a5, 42bf65b, a075dbf); the docs for one firmware
+  with one bitstream, 0x153E as the release's (003924d, 991b2da; eda30b2), then 0x153F.
+- SPI flash tools for the FT2232D (71774ff, 108df11, fee75d9); protocol specification, hardware preparation guide and
+  roadmap (9d32933, 1bd4179, a947e78).
+
+### Development history
+
+#### Firmware (scope application, `firmware/scope`, base Atlan4 v1.00o5)
 
 Up to 0.2.46 a `PC_PROTOCOL=0` build was byte-identical to Atlan4's v1.00o5 image (`make check-reference`,
 CI logs up to 2026-10-18). The owner dropped that rule; 0.2.47 removed the switch and the check.
 
-#### 0.2.105 - 2026-10-21 (protocol 1.28, rows 67 and 68): built for FPGA 0x153D
+##### 0.2.105 - 2026-10-21 (protocol 1.28, rows 67 and 68): built for FPGA 0x153D
 
 One firmware for bitstream 0x153D (`PC_FW_FPGA_VERSION` 0x153D; any other word shows the mismatch notice): the streaming
 logger, the generator as a fractional square, roll mode on the logger stream, three small fixes and what 0x153C dropped.
@@ -313,7 +462,7 @@ sections 74 to 79.
   trigger point is 12 samples there (was 14), as at 200 MSa/s; 0x153F takes core A one word earlier at those rates
   (fpga-153f's contract). Model numbers, not benched. mcp `ext_shift_legacy` follows.
 
-#### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
+##### FPGA bitstream 0x153D - 2026-10-21 (fpga-d3; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153D bitstream (`fpga/al3/dist/al3-0x153D.bin`, sha256 `0e2cdbce...150e`, flash image `04e3328b...d0e7`, status
   unbenched, min firmware 0.2.105 as a placeholder: the coordinator numbers the firmware built for it): the streaming
@@ -338,7 +487,7 @@ sections 74 to 79.
   (ebf3645 reverts 646c453 and its testbench changes); roll h1 (e3a23c2) closes every clock at 4.983 ns with the encode
   pads on 0x153C's; `dist/al3-0x153D.bin` `fd0be7a2...e96a` (padded `aa252fb7...63cc`), unbenched; README section 17.
 
-#### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
+##### FPGA bitstream 0x153C - 2026-10-21 (fpga-c4; fpga/al3/dist, built, simulated, not flashed)
 
 - The 0x153C bitstream (`fpga/al3/dist/al3-0x153C.bin`, sha256 `2580b090...c7f2`, status unbenched, min firmware 0.2.104):
   the trigger types (pulse width, Nth edge, timeout on CH1 / CH2 / EXT) and the trigger hold-off (fpga-c1, README section
@@ -350,7 +499,7 @@ sections 74 to 79.
   `tb/contract_0x153C.txt` with the firmware's 0.2.104 sequences (ddb10ed); README section 15 has the build, the tests and
   the bench checks. Not flashed: the owner flashes from dist per `fpga/al3/AGENTS.md` "0x153C built, fpga-c4".
 
-#### 0.2.104 - 2026-10-21 (protocol 1.26, row 66): built for FPGA 0x153C
+##### 0.2.104 - 2026-10-21 (protocol 1.26, row 66): built for FPGA 0x153C
 
 One firmware for bitstream 0x153C: trigger types (pulse width, Nth edge, timeout) with hold-off, peak detect, the
 hardware counter, and the two device rows (Type in the trigger menu, Sample in ACQ). Merged from fw-c5, fw-c6, fw-c7,
@@ -449,7 +598,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
 - Host tests: `test_fpga_bus` test_trig_ext (every type's arm sequence, the 0x66 one-shot, the hold-off across re-arms on
   the bus model), `test_session` test_trigger2; nine 1.26 vectors in `docs/protocol-vectors.json` (115 total).
 
-#### 0.2.103 - 2026-10-21 (protocol 1.25, row 65)
+##### 0.2.103 - 2026-10-21 (protocol 1.25, row 65)
 
 - One supported FPGA bitstream (owner 2026-10-20 21:52): the firmware runs on `PC_FW_FPGA_VERSION` (0x153B) only; the
   capability word, the geometry and every feature decision come from that constant, the version word is read once at
@@ -478,12 +627,12 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   test_info covers the fixed caps and the mismatch on six other words, test_ui_diag the notice screen, test_seq the
   planner for both paths.
 
-#### 0.2.102 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.102 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Diagnostics: the Firmware tile's OK case reads just "Running 0.2.102"; "the image the card starts" was clutter (owner
   2026-10-20 19:24).
 
-#### 0.2.101 - 2026-10-20 (protocol 1.24, unchanged; rows 40 and 55 updated)
+##### 0.2.101 - 2026-10-20 (protocol 1.24, unchanged; rows 40 and 55 updated)
 
 - SD write window: writes end at the card's FAT32 partition, capped at sector 16384 (8 MiB; was 2048), so the image at
   sector 750 may grow to about 7.6 MiB (f2c53e7). Up to 0.2.100 the window stopped at 2048 whatever the partition said,
@@ -496,7 +645,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
 - Cards for this firmware have their FAT32 partition at sector 16384 (8 MiB) or later; the install guide's "sector 2048
   or later" could not hold the image (f758b51).
 
-#### 0.2.100 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.100 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Diagnostics, Restarts tile: only a crash counts (owner 2026-10-20 18:12; 5879193). A deliberate restart (a firmware
   load over FEL, Enter FEL, an update, a self-restart: exception type 0) is normal and reads OK "No crashes." with the
@@ -519,7 +668,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
 - Version 0.2.100: the first three-digit patch. Nothing assumed two digits; `build_id.c` now refuses a version longer
   than the 15 characters its field holds (53f37e1).
 
-#### 0.2.99 - 2026-10-20 (protocol 1.24, unchanged; row 60's invalid flag bits gain bit 4)
+##### 0.2.99 - 2026-10-20 (protocol 1.24, unchanged; row 60's invalid flag bits gain bit 4)
 
 - Frequency response: points where CH2 is under 3 codes (ch2_small) are grey, in magnitude and phase, and the
   markers and cards (Level, -3dB, Peak, Q, the phase crossings) leave them out like the other flagged points; the
@@ -534,7 +683,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   valid points only), and a sweep with such points on 100 mV/div gets the same sentence as its first caveat
   (`scope_bode_sweep`, `fnirsi1013d-bode`; 41cf0e5).
 
-#### 0.2.98 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.98 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: 0.2.97 counted about half of the engine's captures as time-outs and retook others as maybe
   spliced (bench: 33..40 captures, 10..22 time-outs, 8..15 other retakes per sweep, 2.4..3.6 s instead of 25, 0, 0,
@@ -543,7 +692,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   0.2.96 did again, with 0.2.97's contiguous time-out records kept; the UI applies the 0.2.97 rules to its auto mode
   only. Host captures unchanged (d1f4e6b).
 
-#### 0.2.97 - 2026-10-20 (protocol 1.24, unchanged; GET_CAPTURE_INFO flags bit 6)
+##### 0.2.97 - 2026-10-20 (protocol 1.24, unchanged; GET_CAPTURE_INFO flags bit 6)
 
 - Auto-mode records on FPGA 0x1532..0x153A are no longer spliced (fpga/al3/README.md section 11; 49d99bf, 13f88b1,
   cd1df51). Since 0.2.41 the auto mode armed normal and forced the stop at its own deadline, after the ring had wrapped
@@ -561,7 +710,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   the FPGA's time-out that the stop may have cut it. The Frequency response engine takes such a record again. mcp:
   `Capture.maybe_spliced`, a capture caveat and the `.npz` metadata (dc35b9f).
 
-#### FPGA bitstream 0x153B-pre - 2026-10-20 (fpga-gen11; fpga/al3/dist, not flashed)
+##### FPGA bitstream 0x153B-pre - 2026-10-20 (fpga-gen11; fpga/al3/dist, not flashed)
 
 - Records that end on the auto time-out or on the firmware's forced stop are no longer spliced (fpga/al3/README.md
   "Changes" section 11). Up to 0x153A the FPGA reported the trigger address `pretrigger` on a time-out, so the firmware
@@ -575,19 +724,19 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   after the stop, so 0x18 describes the record. Cycle-identical to 0x153A otherwise. Firmware notes for 0x1532..0x153A
   (the forced stop cannot be made exact there) are in the same README section.
 
-#### 0.2.96 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.96 - 2026-10-20 (protocol 1.24, unchanged)
 
 - A host command that changes something now closes Diagnostics (as Back does) before it runs, as it closes a menu
   (e8750f5). Before, Diagnostics stayed open and the command drew the view under it into the Diagnostics screen
   (bench 2026-10-20 15:25: the Spectrum's waterfall and later the Frequency response inside the Diagnostics frame
   in the screenshots). READ_SCREEN, the GET_* reads, READ_BODE and the status requests leave Diagnostics open.
 
-#### 0.2.95 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.95 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: the Sweep fold-out's CH2 range row reads just "Constant", without the V/div, which the CH2 button
   shows (owner 2026-10-20 14:51).
 
-#### 0.2.94 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 58 bytes)
+##### 0.2.94 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 58 bytes)
 
 - Frequency response: the Sweep fold-out's CH2 range reads Auto or Constant, not Hold (owner 2026-10-20 14:16;
   39213e7, 96eb3e5). Constant is the V/div of the CH2 menu, the channel's own setting, which the CH2 button
@@ -606,7 +755,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   dialog or screen, which stays open; state-changing commands still close it as since 0.2.78 (ce78bc9;
   docs/protocol.md row 63). A screenshot of Settings now shows Settings.
 
-#### 0.2.93 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 50 bytes)
+##### 0.2.93 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 50 bytes)
 
 - Frequency response: AUTO SET chooses CH2 range Hold when the response inside the span it found fits one range,
   and Auto otherwise (owner 2026-10-20 13:33; d51979d, 0842b95). Hold is chosen when the CH2 levels measured in that
@@ -619,13 +768,13 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   BODE_CTRL's answer grows to 50 bytes, with the planned count in bytes 48..49 (mcp `BodeCtrlResp.planned_switches`,
   docs/protocol.md row 60). On the bench RC a RUN sweep should read 2 planned, 0 unplanned.
 
-#### 0.2.92 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.92 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: in the Overlaid display variant the slider track shows AUTO SET's overview as both curves, the
   magnitude in cyan over the phase in pink, each fitted to the track's height (e0ab998; owner 2026-10-20 13:35, draw
   order 13:36). Magnitude only and Phase only show that one curve, as before. Flagged points are grey for both curves.
 
-#### 0.2.91 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 48 bytes)
+##### 0.2.91 - 2026-10-20 (protocol 1.24; BODE_CTRL answer 48 bytes)
 
 - Frequency response: one bad record no longer moves a channel to a coarser range (3b363b2). CH2 steps up only when a
   second record on the same range clips too. In the check after the pre-scan, a clip on an off-centre record moves the
@@ -639,7 +788,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   captures, how many ended on the time-out, and how many were taken again for leak or another reason; mcp
   `BodeCtrlResp`, docs/protocol.md row 60.
 
-#### 0.2.90 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.90 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: one bad record at the start of a sweep no longer leaves a channel on too coarse a range for the
   whole sweep (802cc4a). Bench 2026-10-20 13:10: CH1 ran on 2.5 V/div with ch1_low on most points, or CH2 on 2.5 V/div
@@ -648,7 +797,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
 - A range plan where CH1 is below 20 codes under 2 MHz, while a more sensitive range was still free, is not kept; the
   next sweep ranges again.
 
-#### 0.2.89 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.89 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: the sweep's captures trigger on CH1 rising at mid-scale, as the host tool's do (1d4c268).
   Before, the sweep used the Scope view's trigger level. When that level was off the signal, a capture could start on
@@ -660,7 +809,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   sweep; up to 0.2.88 it stepped one range per sweep, so ten RUN sweeps read 6, 6, ..., 1, 1 switches on the bench. An
   incoherent record is taken once more.
 
-#### 0.2.88 - 2026-10-20 (protocol 1.24, unchanged; GET_DECIM divider = the FPGA's)
+##### 0.2.88 - 2026-10-20 (protocol 1.24, unchanged; GET_DECIM divider = the FPGA's)
 
 - Decimated captures no longer come back as a whole record of 0xFFFF after a configuration change (fpga-gen10's
   "First-record saturation", bench 2026-10-20 10:52 .. 12:08). The arm computed N and the decimator shift from the UI's
@@ -672,7 +821,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   GET_LINK_STATS 65 counts them with the filter writes (1299f7a). The Bode engine rewrites 0x0D when the FPGA holds
   another divider than its own record (2ba6566).
 
-#### 0.2.87 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.87 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: repeated sweeps reuse the range plan, so the relays stay quiet on an unchanging circuit (owner
   2026-10-20 11:51 / 11:52; 53447c4). Every sweep at the same span, points, Settle and CH2 mode (RUN, Single sweep,
@@ -687,7 +836,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   without a CH1 tone. After a range change the front end now gets the host's settling time (100 ms; 50 ms up to
   0.2.86). The bench sweep of 12:05 had flagged unsettled / incoherent points exactly after the CH2 range changes.
 
-#### 0.2.86 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.86 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response: AUTO SET never ends in RUN (owner 2026-10-20 11:47; a119035). After the overview and its finer passes
   it runs one sweep at the found span, Settle and CH2 range and returns to STOP with the chart and the cards standing;
@@ -699,7 +848,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   span keeps from the previous sweep until it overwrites them. The Sweep card and the cards' "sweeping" state use the
   same count.
 
-#### 0.2.85 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.85 - 2026-10-20 (protocol 1.24, unchanged)
 
 - ACQ menu: switching the Filter back to Off brings the memory depths above 6000 back at once (e125cf2). A filter hides
   them (the 16-bit record halves the memory); since 0.2.64 they stayed hidden after Off until something else redrew
@@ -712,7 +861,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
 - Spectrum MEASURES: new Capture card, the time one record takes (memory depth / fs, e.g. "15.00us", "1.500s"), on by
   default after RBW (c449a5c). Its place in the row is kept in settings word 217; older settings put it last.
 
-#### 0.2.84 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.84 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Frequency response, AUTO SET never loops (owner 2026-10-20 11:23, after an RC AUTO SET on 0.2.83 ran 41 sweeps with
   the relays clicking; 9079725, 071c206). `bode_auto_span` drops an absurd point (more than 20 dB from both valid
@@ -735,7 +884,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   ranged coarser than 0.5 V/div (the pre-scan artefact of hardware-status 2026-10-20 11:16), the DUT-loads text only at
   0.5 V/div or finer at or below 2 MHz, "CH1 level low above 2 MHz: the x1 probe rolls off" above.
 
-#### 0.2.83 - 2026-10-20 (protocol 1.24, unchanged; reason 8 text)
+##### 0.2.83 - 2026-10-20 (protocol 1.24, unchanged; reason 8 text)
 
 - Frequency response: AUTO SET and device sweeps no longer end in the pre-scan with "ADC readout fault" on a clean
   readout (51ab2a4). The engine took its clip flag from the readout's `ADoverload`, which stays set from any earlier
@@ -749,7 +898,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
 - Host captures, READ_TRACE's per-channel overload bits and GET_STATUS bits 6-7 report the latest readout of the
   channel instead of any readout since the Scope view last cleared the flag (51ab2a4).
 
-#### 0.2.82 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.82 - 2026-10-20 (protocol 1.24, unchanged)
 
 - The "Host command: menu closed" note is gone (owner 2026-10-20 10:31: not wanted): a host request still closes the
   scope's menus, fold-outs and dialogs by their cancel paths, now silently; the yield counters (GET_LINK_STATS 68-69)
@@ -760,7 +909,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   0.2.80: the rate changing mid-scroll felt janky). Entering the view keeps a panned cell while the rate is unchanged.
   test_spec_zoom covers pans from every starting cell, the clamp at both ends and a zoom after a pan (9294f9e).
 
-#### 0.2.81 - 2026-10-20 (protocol 1.24, GET_HEALTH byte 106 bit 5 added)
+##### 0.2.81 - 2026-10-20 (protocol 1.24, GET_HEALTH byte 106 bit 5 added)
 
 - Capture-stage training over a band of codes (3e5a2a1): the wizard's zero step parks the quiet input at codes 120, 124,
   .. 140 by the offset PWM and takes two 8000-word captures per stage 2..5 at each point; the 0x36 counts are summed per
@@ -773,14 +922,14 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   the Diagnostics Calibration verdict turns amber with "run Calibrate", the Calibration page line and the report say
   so, and event 23 is logged once per core instead of whenever the flagged set changes. Cleared by a saved training.
 
-#### 0.2.80 - 2026-10-20 (protocol 1.24, unchanged)
+##### 0.2.80 - 2026-10-20 (protocol 1.24, unchanged)
 
 - Capture-stage training and self-check: the FPGA outlier threshold (0x64) is written as 32 codes instead of the power-on 8.
   Bench 2026-10-20 on 0x153A: CH2's analog noise at 5 V/div near code 128 is about 3 codes rms, which saturated the 0x36
   counters at 8 on every stage and made CH2's training fail; 16..48 read 0 on a clean stage set and hundreds on a bad one
   (CS_THR_USE, cap_stage.h).
 
-#### 0.2.79 - 2026-10-20 (protocol 1.24, docs/protocol.md section 14 row 64)
+##### 0.2.79 - 2026-10-20 (protocol 1.24, docs/protocol.md section 14 row 64)
 
 - FPGA 0x153A capture stages (firmware/AGENTS.md section 54, docs/protocol.md section 5.1): detected as caps bit 19
   CAPTURE_STAGES and features bit 7 on 0x153A..0x153F. At boot 0x64 = 8 and 0x63 = the value stored with the
@@ -800,7 +949,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   flagged, event 23 in words; the simulator's `al3c` variant models 0x153A (f519c17). Vector `resp_get_health_1_24`
   (1d67d8a); docs/protocol.md row 64 (4da103a), firmware/README.md 6.4 (0a3f764).
 
-#### 0.2.78 - 2026-10-19 (protocol 1.23, docs/protocol.md section 14 row 63)
+##### 0.2.78 - 2026-10-19 (protocol 1.23, docs/protocol.md section 14 row 63)
 
 - Host commands leave the scope's menus (owner 23:27; docs/ui-guidelines.md section 4, docs/protocol.md section 14
   row 63): a request that needs the main loop while a menu, fold-out, dialog or screen is open no longer gets E_BUSY.
@@ -814,7 +963,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   caveats that a menu was closed, and E_BUSY messages give the scope's reason. The simulator yields the same way
   (0f63317).
 
-#### 0.2.77 - 2026-10-19 (protocol 1.22, unchanged)
+##### 0.2.77 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum zoom: span drives the sample rate (docs/ui-guidelines.md section 2, owner 2026-10-19 23:09). The span steps
   through 1-2-5 values (1 Hz .. 20 MHz, then the whole 0 .. 25 MHz axis) about the centre; a drag or the slider pans
@@ -826,7 +975,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   zoom further"). AUTO SET picks a ladder cell from 0 Hz. The Span and Center cards show the cell; the FFT length row
   reads "(record)" when the record limits it (52c1c76, ladder and tests 3ec9e17, rule 4a85e8a).
 
-#### 0.2.76 - 2026-10-19 (protocol 1.22, unchanged)
+##### 0.2.76 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Scope slider: a still tap in the track outside the window now jumps the window there, as in the Spectrum. 0.2.73 ran
   the jump only once the finger had moved past the dead band, so a tap did nothing; the jump now happens at touch-down
@@ -840,13 +989,13 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   further" at its limit). A tap no longer enters or leaves roll mode. The host's SET_TIMEBASE by UI index is unchanged
   (da24d91, rule 4eab9cc).
 
-#### 0.2.75 - 2026-10-19 (protocol 1.22, unchanged)
+##### 0.2.75 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Spectrum: the colour legends of the Waterfall and Density variants are gone (owner, 2026-10-19 22:28: the blue ->
   red -> white scale is understood and nobody measures from those views). The warning line stays where it was and the
   rest of both variants is unchanged (6a85fb4).
 
-#### 0.2.74 - 2026-10-19 (protocol 1.22, unchanged)
+##### 0.2.74 - 2026-10-19 (protocol 1.22, unchanged)
 
 - Slider track geometry, owner decision 7 (docs/plans/slider-overview.md section 2 and 10 F item 7, after looking at
   0.2.73 on the unit): the window is a box again, 1 px white lines on all four sides with a 1 px black margin around
@@ -855,7 +1004,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   inside its lines (y 454..469, 16 rows). Same in the Scope, the Spectrum and the Frequency response; tap to jump, the
   drags and the hit areas are unchanged (de8f49c, mockups 9e8ffdd).
 
-#### 0.2.73 - 2026-10-19 (protocol 1.21, unchanged)
+##### 0.2.73 - 2026-10-19 (protocol 1.21, unchanged)
 
 - Slider track overview (docs/plans/slider-overview.md, owner decisions 10-19 21:20 and 21:36): the slider row under
   the plot keeps only its top line; the track is the whole row, x 2..727 and y 453..471, in the Scope, the Spectrum and
@@ -874,7 +1023,7 @@ ui-type and ui-sample on 2026-10-21; numbered at the merge.
   drag: the Scope scrolls, the Spectrum pans, the Frequency response sweeps the new span. The cards and the band above
   them keep their taps (b3fa8d2).
 
-#### 0.2.72 - 2026-10-19 (protocol 1.22, docs/protocol.md section 14 row 62)
+##### 0.2.72 - 2026-10-19 (protocol 1.22, docs/protocol.md section 14 row 62)
 
 FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
 - Every FPGA readout makes the dummy strobe after the 0x1F pointer write (`fpga_bus.c`). The scope trace, the spectrum,
@@ -893,7 +1042,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
 - The ADC core order counts as verified (GET_INFO caps bit 12 clear) only on 0x1538+ that report it at boot; a bitstream
   reporting another convention is flagged and checked by its data (267c1be).
 
-#### 0.2.71 - 2026-10-19 (protocol 1.21, unchanged; READ_BODE reason 8)
+##### 0.2.71 - 2026-10-19 (protocol 1.21, unchanged; READ_BODE reason 8)
 
 - Frequency response: a single sweep shows RUN on the chip (never WAIT, whatever the trigger mode) and STOP on the
   button, its cards read "sweeping" until its table is complete, and STOP ends any sweep after the capture in progress
@@ -918,13 +1067,13 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
 - Frequency response: Move fast sets the cursor drag step; MEASURES changes show at once; before the first sweep the
   READ_BODE header's settings fields are the settings in effect, the ones the estimate describes (4d6c0e6).
 
-#### 0.2.70 - 2026-10-19 (protocol 1.21, unchanged)
+##### 0.2.70 - 2026-10-19 (protocol 1.21, unchanged)
 
 - READ_SCREEN (0x0401) is built: the SCREENSHOT capability is set and `scope_screenshot` returns the panel's 800 x 480
   RGB565 framebuffer (`maindisplaybuffer`) in 12 requests of 40 rows; E_BAD_ARG for rows outside 0..480, E_OVERFLOW
   above 41 rows, E_BUSY while a menu is open. Bench pending: T9, the pixel format against the screen (350823e).
 
-#### 0.2.69 - 2026-10-19 (protocol 1.21, unchanged; provisional number)
+##### 0.2.69 - 2026-10-19 (protocol 1.21, unchanged; provisional number)
 
 - Frequency response mode (the on-device Bode plot) redesigned per docs/plans/bode-ui.md and the owner's final decisions
   (firmware/README.md "Frequency response"). The main menu row reads "Frequency" / "response" with a low-pass response
@@ -945,7 +1094,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
   per division and a wobbling edge). 200 MSa/s reaches 50 ns/div; 20, 10 and 5 ns/div snap to 50 ns/div with the notice,
   also for a host SET_TIMEBASE (070e250).
 
-#### 0.2.68 - 2026-10-19 (protocol 1.20, unchanged; provisional number)
+##### 0.2.68 - 2026-10-19 (protocol 1.20, unchanged; provisional number)
 
 - UI polish batch 2 (firmware/README.md "Screens: UI polish batch 2"). RUN/STOP follows the host (95c1033): the top bar
   chip and the right bar button take one run state that includes a host acquisition in progress, and every pass redraws
@@ -964,7 +1113,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
   analyser; eight rows at 52 px. The generator menu's "Bode plot" row is gone. Grey on bitstreams without the filter
   and DDS.
 
-#### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61)
+##### 0.2.67 - 2026-10-19 (protocol 1.21 provisional, docs/protocol.md section 14 row 61)
 
 - Fixed: the calibration wizard's Zero level step failed every time on FPGA 0x1538 ("CH1: too much noise, range 1 at
   200 MSa/s: core B 7.2 codes", "CH2: the input is not at 0 V"). Cause (bench with CAL_PROBE and a READ_RAW offset
@@ -988,7 +1137,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
 - Fixed: the wizard's measurement batch writes a raw host divider (SET_TIMEBASE raw) and the time base back
   afterwards, as the class probe does (789da66).
 
-#### 0.2.66 - 2026-10-19 (protocol 1.20, docs/protocol.md section 14 row 60)
+##### 0.2.66 - 2026-10-19 (protocol 1.20, docs/protocol.md section 14 row 60)
 
 - Added: a Bode plot on the scope. The generator menu has a fourth row, "Bode plot": it opens a mode that sweeps the
   calibration post's square from Start to Stop and plots H = CH2 / CH1 as magnitude and phase over a log frequency axis,
@@ -1010,7 +1159,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
   simulator's RC (within 0.002 dB / 0.002 deg); `host_tests/test_bode_sweep.c` runs the engine on a DUT model (RC,
   divider, wiring B saturation, Hold, STOP, thru). Two new request vectors (`req_bode_ctrl`, `req_read_bode`).
 
-#### 0.2.65 - 2026-10-19 (protocol 1.19, unchanged)
+##### 0.2.65 - 2026-10-19 (protocol 1.19, unchanged)
 
 - Measurements v2 (8749ffe; firmware/README.md "Screens: Measurements v2"). MEASURES now opens a list per mode: the
   Scope's twelve measurements per channel, and in the Spectrum analyser (where the slot was empty) Peak, Level, THD and
@@ -1026,7 +1175,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
 - A card source hook (`ui_ms_set_source`) lets a future FPGA frequency / period counter feed the Freq and Period cards
   without UI changes. Nothing uses it yet.
 
-#### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
+##### 0.2.64 - 2026-10-19 (protocol 1.18 unchanged; provisional number)
 
 - Fixed: after a sample-rate change in the ACQ menu the old time/div stayed although drawn grey, so the trace was cut
   off, zeros showed past the record end, the slider scrolled before the trace and the shape changed (owner, 1 kHz
@@ -1046,7 +1195,7 @@ FPGA bus contract fixes (fw-bus, firmware/AGENTS.md section 48; not benched).
   avoid the slider row and the measurement cards (b620113).
 - Changed: the spectrum's pan honours Move slow; CTRL fold-out rows act on release (f690e42).
 
-#### 0.2.63 - 2026-10-19 (protocol 1.19, unchanged)
+##### 0.2.63 - 2026-10-19 (protocol 1.19, unchanged)
 
 UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "Screens: UI polish batch 1"):
 
@@ -1070,7 +1219,7 @@ UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "
 - Changed: RUN/STOP shows the state, green RUN or amber Stopped, and follows a host start or stop; it stayed green
   when the PC stopped the acquisition (b1fe1fc).
 
-#### 0.2.62 - 2026-10-19 (protocol 1.19, docs/protocol.md section 14 row 58)
+##### 0.2.62 - 2026-10-19 (protocol 1.19, docs/protocol.md section 14 row 58)
 
 - Fixed: on FPGA 0x1537 CH2 core A was garbled in about 40 % of 200 MSa/s captures, with no register write in
   between, and 0.2.61's check (after rate writes only) missed it. Every 200 MSa/s capture is now checked before
@@ -1087,7 +1236,7 @@ UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "
   0x1538 "encode check OK" or the failing pins; 0x1532..0x1536 now say "fixed in 0x1538" (9e7e53d).
 - Changed: the READ_RAW / READ_TRACE interleave order is fixed at core B first (`interleave_order` 0) (9e7e53d).
 
-#### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
+##### 0.2.61 - 2026-10-19 (protocol 1.18, docs/protocol.md section 14 row 57)
 
 - Fixed: after a sample-rate change the FPGA can garble one ADC core's 200 MSa/s data. This happens randomly on AL3
   0x1532..0x1536 and on CH2 core A on 0x1537 (fpga/al3/README.md "Findings" item 3). The wizard failed "too much
@@ -1100,7 +1249,7 @@ UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "
   caller).
 - Changed: Diagnostics shows the FPGA line of AL3 0x1532..0x1536 in amber: "ADC capture timing race, fixed in 0x1537".
 
-#### 0.2.60 - 2026-10-19 (protocol 1.17 unchanged)
+##### 0.2.60 - 2026-10-19 (protocol 1.17 unchanged)
 
 - Changed: the Zero level instruction asks to disconnect everything, including anything on the calibration post.
 - Known issue: on FPGA 0x1535 the Zero level step can fail with about 20 codes of noise on one ADC core per channel at
@@ -1110,7 +1259,7 @@ UI polish batch 1, from the owner's walk-through of 0.2.59 (firmware/README.md "
   measured values, e.g. "CH1: too much noise, range 6 at 2 MSa/s: core B 3.3 codes, 1.1 per capture". "Per capture" is
   the noise inside one capture. The difference from the total is what moved between captures (27556e8).
 
-#### 0.2.59 - 2026-10-19 (protocol 1.17 unchanged)
+##### 0.2.59 - 2026-10-19 (protocol 1.17 unchanged)
 
 UX makeover step 4 (`docs/plans/ux-makeover.md` sections 6-6c; `firmware/README.md` section 5 "Screens: Diagnostics,
 calibration wizard, first run" and 6.4).
@@ -1136,7 +1285,7 @@ calibration wizard, first run" and 6.4).
   it) and the Settings screen's DC shift trim row (0.2.55) to the Diagnostics pages (Calibrate, Volts calibration, DC
   shift trim); Dev mode is the Developer page's Debug overlay.
 
-#### 0.2.58 - 2026-10-19 (protocol 1.17, docs/protocol.md section 14 row 56)
+##### 0.2.58 - 2026-10-19 (protocol 1.17, docs/protocol.md section 14 row 56)
 
 Support for the AL3 bitstream 0x1536 (segmented capture and hardware averaging, fpga-gen5; not flashed yet).
 Built on 0.2.55 / protocol 1.16 and numbered 0.2.58 by the coordinator (0.2.56 is fw-ui2, 0.2.59 fw-ui4); the
@@ -1156,7 +1305,7 @@ capture and hardware averaging". Nothing is benched.
 - Changed: on 0x1536 the arm writes 0x0B / 0x0C and the sequencer registers before the sampling reset, so the
   write-clock side loads them at every rate (65abebf).
 
-#### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged)
+##### 0.2.56 - 2026-10-19 (protocol 1.16, unchanged)
 
 The second step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 2; rules in `docs/ui-guidelines.md`;
 README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards").
@@ -1187,7 +1336,7 @@ README section 5 "Screens: CTRL page, fold-outs, chips, warnings, spectrum cards
 - Settings sector: word 210 bit 3 holds the Phosphor switch, word 211 (0xC700) Grid and the spectrum's Display
   variant.
 
-#### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged)
+##### 0.2.55 - 2026-10-19 (protocol 1.16, unchanged)
 
 Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section 5 "Settings").
 
@@ -1207,7 +1356,7 @@ Step 3 of the UX makeover (`docs/plans/ux-makeover.md` section 5; README section
 - Changed: "Confirm to delete?" became the confirmation dialog: "Delete from the SD card?", Cancel left and Delete
   right in red, 160 x 44 px buttons 16 px apart (was NO / YES, 74 x 50 px, 11 px apart) (24743a7).
 
-#### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged)
+##### 0.2.54 - 2026-10-19 (protocol 1.16, unchanged)
 
 Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 8, 9, 10 and part of 19).
 
@@ -1226,7 +1375,7 @@ Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 
   unlimited addition) and loaded settings were not range-checked; both are limited to the drag range 6..396 now, so a
   channel can always be grabbed and the first drag no longer jumps (d94f09a).
 
-#### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
+##### 0.2.52 - 2026-10-19 (protocol 1.16, docs/protocol.md section 14 row 55)
 
 - Added: GET_HEALTH (0x000A, answered in every context, also while a menu is open) reports the USB link state now
   (configured, suspended, not configured = no PC, high speed, port open), the CP15 control word (MMU and caches), the
@@ -1245,7 +1394,7 @@ Touch fix batch 1 (`docs/plans/touch-review.md` section c1; defects 1, 3, 4, 5, 
   call the same function (b830434).
 - Added: PC_DEBUG builds restart from RAM on GET_HEALTH flag 0x80, to bench the stored restart record (c8f874b).
 
-#### 0.2.51 - 2026-10-19 (protocol 1.15, unchanged)
+##### 0.2.51 - 2026-10-19 (protocol 1.15, unchanged)
 
 The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 plus the measurement cards; rules in
 `docs/ui-guidelines.md`; README section 5 "Screens").
@@ -1269,7 +1418,7 @@ The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 
   "no period" instead of "xxx" for timing values without three crossings. A new unit shows Freq, Vpp and Vavg on each
   channel (2f1ab97; formatting and fit host-tested in test_ui, 33cc330).
 
-#### 0.2.50 - 2026-10-19 (protocol 1.15; the fw-cal3 branch numbered it 1.14 / row 53, the merge renumbered it)
+##### 0.2.50 - 2026-10-19 (protocol 1.15; the fw-cal3 branch numbered it 1.14 / row 53, the merge renumbered it)
 
 - Added: calibration v4, background tracking of the full-rate interleave mismatch. Every 8-bit 200 MSa/s record of a
   calibrated channel (UI or host) feeds a per-channel fit of core A - B = d + e x + q x^2 from neighbouring sample
@@ -1292,7 +1441,38 @@ The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 
   what changed and shows the one success message. The trigger mode is restored after the calibration (it was left
   in Auto) and the channels' offsets are no longer zeroed. firmware/README.md section 6.4 (48e5737).
 
-#### 0.2.47 - 2026-10-19 (protocol 1.13, unchanged)
+##### 0.2.49 - 2026-10-19 (protocol 1.14)
+
+- Fixed: the scope no longer stays lost to the PC after a long idle. On 2026-10-19 (0.2.48) the host suspended the
+  device 17 times over 1 h 40 min with the port closed, the device never saw a RESUME interrupt (it has not on any
+  build), and the host finally stopped listing it until the cable was replugged. A suspend watch in the 1 ms timer
+  interrupt (`pc_usbw.c`, host test `test_usbw`) now treats SOFs, an EP0 setup or an EP2 OUT packet while suspended
+  as a resume (0.2.44 only logged the SOF case, from the main loop), and re-enumerates a device the host abandoned:
+  D+ pull-up off for 1 s and on again (soft reconnect), after a host's retry storm went quiet for 10 s (doubling
+  back-off) or 15 min into a suspend, once per enumeration and doubling up to 8 h until an application opens the
+  port again (c20b657, 46d9817, 46f3db2, e77785c).
+- Added: GET_LINK_STATS counters 60-61 (n = 62): resumes inferred without a RESUME interrupt, soft reconnects;
+  event type 20 (soft disconnect: reason, back-off level, suspends, seconds suspended); type 3 a bits 6-5 = what
+  ended an inferred resume. Protocol 1.14, section 14 row 53 (3b50641); mcp decodes them (f3763cc).
+- Changed: the CDC interrupt handler handles SUSPEND before RESUME when both are pending (46d9817).
+- Fixed (docs): the USB selective suspend powercfg GUID in docs/agent-measurement-guide.md and the fnirsi-scope
+  skill was wrong (53bb50f7e206 instead of 53bb8f07e226), so the documented command never changed the setting
+  (46e473f).
+
+##### 0.2.48 - 2026-10-19 (protocol 1.13)
+
+- Changed: the default acquisition Filter (new settings sectors and the DEFAULT button) is CIC2+FIR instead of CIC2, after the
+  0x1535 alias bench (78-83 dB rejection with the FIR); on bitstreams without the FIR the setting acts as CIC2 (coordinator, pc_decim.h).
+
+- Changed: the MMU is on, so the D-cache and the write buffer finally take effect (the C bit was set since 1.00o5 but
+  does nothing with the MMU off). Flat 1:1 map: DDR and SRAM A write-back, the scanned framebuffer write-through,
+  peripherals, boot ROM and the restart record strongly ordered. Caches are cleaned and switched off at every restart
+  and before ENTER_FEL. `make gcc10-nommu` builds the same code with the MMU off (version suffix `-nommu`) for the A/B
+  (8cdefda; table builder and host test d486c21; design docs/plans/mmu-dcache.md 6e36a89).
+- Added: GET_LINK_STATS counters 58-59 (n = 60): fault status (DFSR / IFSR) and fault address (FAR) of the abort
+  that caused the last restart (52fe65a).
+
+##### 0.2.47 - 2026-10-19 (protocol 1.13, unchanged)
 
 - Fixed: reproducible image. The same commit built in two directories (or main and a worktree) gave different
   images: WSL's git cannot read a worktree's Windows gitdir, so the hash was 00000000 and the build time the wall
@@ -1312,38 +1492,7 @@ The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 
   download in CI (`tools/make_release_sd_package.py build` makes SD packages) (0f84761), and the calibration v2
   `adc_cal` section of docs/protocol-vectors.json (f09e381).
 
-#### 0.2.48 - 2026-10-19 (protocol 1.13)
-
-- Changed: the default acquisition Filter (new settings sectors and the DEFAULT button) is CIC2+FIR instead of CIC2, after the
-  0x1535 alias bench (78-83 dB rejection with the FIR); on bitstreams without the FIR the setting acts as CIC2 (coordinator, pc_decim.h).
-
-- Changed: the MMU is on, so the D-cache and the write buffer finally take effect (the C bit was set since 1.00o5 but
-  does nothing with the MMU off). Flat 1:1 map: DDR and SRAM A write-back, the scanned framebuffer write-through,
-  peripherals, boot ROM and the restart record strongly ordered. Caches are cleaned and switched off at every restart
-  and before ENTER_FEL. `make gcc10-nommu` builds the same code with the MMU off (version suffix `-nommu`) for the A/B
-  (8cdefda; table builder and host test d486c21; design docs/plans/mmu-dcache.md 6e36a89).
-- Added: GET_LINK_STATS counters 58-59 (n = 60): fault status (DFSR / IFSR) and fault address (FAR) of the abort
-  that caused the last restart (52fe65a).
-
-#### 0.2.49 - 2026-10-19 (protocol 1.14)
-
-- Fixed: the scope no longer stays lost to the PC after a long idle. On 2026-10-19 (0.2.48) the host suspended the
-  device 17 times over 1 h 40 min with the port closed, the device never saw a RESUME interrupt (it has not on any
-  build), and the host finally stopped listing it until the cable was replugged. A suspend watch in the 1 ms timer
-  interrupt (`pc_usbw.c`, host test `test_usbw`) now treats SOFs, an EP0 setup or an EP2 OUT packet while suspended
-  as a resume (0.2.44 only logged the SOF case, from the main loop), and re-enumerates a device the host abandoned:
-  D+ pull-up off for 1 s and on again (soft reconnect), after a host's retry storm went quiet for 10 s (doubling
-  back-off) or 15 min into a suspend, once per enumeration and doubling up to 8 h until an application opens the
-  port again (c20b657, 46d9817, 46f3db2, e77785c).
-- Added: GET_LINK_STATS counters 60-61 (n = 62): resumes inferred without a RESUME interrupt, soft reconnects;
-  event type 20 (soft disconnect: reason, back-off level, suspends, seconds suspended); type 3 a bits 6-5 = what
-  ended an inferred resume. Protocol 1.14, section 14 row 53 (3b50641); mcp decodes them (f3763cc).
-- Changed: the CDC interrupt handler handles SUSPEND before RESUME when both are pending (46d9817).
-- Fixed (docs): the USB selective suspend powercfg GUID in docs/agent-measurement-guide.md and the fnirsi-scope
-  skill was wrong (53bb50f7e206 instead of 53bb8f07e226), so the documented command never changed the setting
-  (46e473f).
-
-#### 0.2.46 - 2026-10-19 (protocol 1.13)
+##### 0.2.46 - 2026-10-19 (protocol 1.13)
 
 - Added: digital phosphor view (main menu row 7 "Phosphor display"): the CH1 / CH2 traces are drawn from per-pixel
   hit counts of the recent records, graded by hit rate, in the normal scope view (grid, cursors, measurements and
@@ -1353,7 +1502,7 @@ The first step of the UX makeover (`docs/plans/ux-makeover.md` section 7 step 1 
 - Added: GET_STATUS byte 43 `display_mode` = 4 while the phosphor view is on; protocol 1.13, section 14 row 52
   (8be5f3a).
 
-#### 0.2.45 - 2026-10-19
+##### 0.2.45 - 2026-10-19
 
 - Added: calibration data v3 with a gain per ADC core and clock class (c8f17bf). The base calibration
   now has a second step: with both probes on the calibration post, the generator holds the post low
@@ -1375,7 +1524,7 @@ ladder, sections 9, 11, 18-22) and `docs/protocol.md` section 14. Dates are the 
 bump in the repository's local time (UTC+2); every bump below falls on 2026-10-18 in UTC as well. Where only
 a handoff says something and no commit was found, the bullet says so.
 
-#### 0.2.44 - 2026-10-18 (protocol 1.11)
+##### 0.2.44 - 2026-10-18 (protocol 1.11)
 
 - Added: support for FPGA bitstream 0x1535, the CIC compensation FIR (2e0cd10; protocol 1.11, section 14
   row 49). Caps bit 16, FPGA write 0x56, SET_DECIM flags bit 3 and GET_DECIM report the FIR. The acquisition
@@ -1405,7 +1554,7 @@ a handoff says something and no commit was found, the bullet says so.
 - Bench: not benched as a whole at the time of the bump (firmware/AGENTS.md section 22). Loaded over FEL
   later that evening, census clean with inputs shorted (docs/hardware-status.md).
 
-#### 0.2.43 - 2026-10-18 (protocol 1.10)
+##### 0.2.43 - 2026-10-18 (protocol 1.10)
 
 - Added: calibration data v2, the first per-core model (branch fw-cal, merged in b27c1ee; version bump
   80ab45d). The base calibration measures, per channel, hardware range and ADC core (A and B), the raw zero
@@ -1426,7 +1575,7 @@ a handoff says something and no commit was found, the bullet says so.
   10 kSa/s, so the zero model holds for legacy and filtered captures (d562be9, 2b8d7ab). A residual A/B
   difference that grows with the signal pointed at a per-core gain, which became v3 (81ee613).
 
-#### 0.2.42 - 2026-10-18
+##### 0.2.42 - 2026-10-18
 
 - Changed: the spectrum view's Auto is a fixed procedure, independent of the current state (cebb982). It
   probes at 50 MSa/s with averaging, triggers at 50 % on the analysed channel, searches the period 10x slower
@@ -1437,7 +1586,7 @@ a handoff says something and no commit was found, the bullet says so.
 - Bench: loaded (f71fc3b). The owner's verdicts on Auto and the warnings were still open at the 0.2.44
   handoff (firmware/AGENTS.md section 20).
 
-#### 0.2.41 - 2026-10-18
+##### 0.2.41 - 2026-10-18
 
 - Added: auto trigger mode in the firmware (0fd6a9c; protocol section 7.5). The FPGA's auto time-out counts
   samples and its trigger flag keeps watching after the stop, so at fast rates auto records came back flat
@@ -1448,7 +1597,7 @@ a handoff says something and no commit was found, the bullet says so.
   steps the rate down when the span is at most fs/16 (0fd6a9c).
 - Bench: the 0.2.40 problem case (2 of 6 flat "triggered" records at 10 MS/s) was fixed and verified (39eee13).
 
-#### 0.2.40 - 2026-10-18
+##### 0.2.40 - 2026-10-18
 
 - Added: spectrum Average field: Off, 4, 16, 64 captures or Max hold, default 4 (e595a0f). It is an exponential
   dB average applied before drawing and in READ_SPECTRUM (flags bits 4-6), restarted when a bin's meaning
@@ -1457,7 +1606,7 @@ a handoff says something and no commit was found, the bullet says so.
   (overrange, no anti-alias filter, stopped) are centred over the plot only while they apply. The acquisition
   menu shows only the "Roll mode" label, coloured by state (e595a0f).
 
-#### 0.2.39 - 2026-10-18
+##### 0.2.39 - 2026-10-18
 
 - Changed: in the spectrum view the span drives the time base (11b1729). Zooming out past the whole axis
   steps the time base to the next faster rate, up to fs/2 = 25 MHz. Zooming in past 64 bins steps to the next
@@ -1467,24 +1616,24 @@ a handoff says something and no commit was found, the bullet says so.
   208 and 209. The display mode itself does not persist (11b1729).
 - Changed: with the decimation filter on, the header shows a short "CIC3" tag instead of the N text (11b1729).
 
-#### 0.2.38 - 2026-10-18
+##### 0.2.38 - 2026-10-18
 
 - Added: the pass time (the last main-loop pass before the menu opened) is shown under the acquisition menu's
   Memory header, so the cost of a memory depth is visible where it is chosen (6ce82d9).
 
-#### 0.2.37 - 2026-10-18
+##### 0.2.37 - 2026-10-18
 
 - Changed: the dB conversion of the spectrum view is ARM assembly, 3 uncached accesses per bin instead of
   about 9, byte-identical to the C path under qemu (0f3e743). The handoff gives 4096 points as 10.96 ms run
   plus 1.44 ms dB in DDR and 2048 points as 2.30 ms in SRAM (firmware/AGENTS.md section 20; commit not
   identified).
 
-#### 0.2.36 - 2026-10-18
+##### 0.2.36 - 2026-10-18
 
 - Changed: the spectrum axis is capped at 25 MHz (or fs/2), since the front end rolls off near 30 MHz (owner,
   8e1a946). READ_SPECTRUM still returns every bin.
 
-#### 0.2.35 - 2026-10-18
+##### 0.2.35 - 2026-10-18
 
 - Changed: spectrum gestures on the plot. A short tap left or right of centre zooms the span out or in, and a
   drag pans the start frequency, with the scope view's thresholds (36149d1). The Span and Start fields give
@@ -1493,27 +1642,27 @@ a handoff says something and no commit was found, the bullet says so.
   draw time, with an intensity ramp (black, dark blue, red, yellow, white) and a rare / frequent legend. No
   fading pass sweeps the screen any more, which removes the visible band (36149d1).
 
-#### 0.2.34 - 2026-10-18
+##### 0.2.34 - 2026-10-18
 
 - Changed: with the 0x1534 decimation filter on, the spectrum view transforms the filter's 16-bit records
   (`fx_fft_run_u16`, host-tested to N = 8192) at the rate 200 MHz / N and names the filter instead of the
   aliasing warning (1a9a773). READ_SPECTRUM flags bit 1 and bits 2-3 say which record and filter order.
   On 0x1533 and earlier it behaves as 0.2.33.
 
-#### 0.2.33 - 2026-10-18
+##### 0.2.33 - 2026-10-18
 
 - Changed: the spectrum view runs FFTs up to 2048 points from on-chip SRAM A at 0x1000, the same space
   FFT_BENCH borrows (d125a41). On 0.2.31, 2048 points took 2.3 ms in SRAM against 4.9 ms in DDR.
 - Bench: the waterfall of 0.2.32 was accepted on this build (e396c3b).
 
-#### 0.2.32 - 2026-10-18
+##### 0.2.32 - 2026-10-18
 
 - Added: a View field in the spectrum screen switches between Spectrum, Waterfall and Density (83aa5b5).
   Waterfall draws one RGB565 row per new capture, newest at the top, with a legend and time span. Density
   counts hits along each spectrum line. Histories clear when the axes change and say so in STOP.
   GET_STATUS byte 43 `display_mode` reports 2 or 3. The trace area is cleared with memset bursts.
 
-#### 0.2.31 - 2026-10-18
+##### 0.2.31 - 2026-10-18
 
 - Changed: the FFT hot loops (load and first stage, stages, split) are ARM assembly with everything in
   registers and LDRD/STRD/STM pairs, from a per-plan twiddle table (0930c72). Each has a C twin, and
@@ -1522,7 +1671,7 @@ a handoff says something and no commit was found, the bullet says so.
   times faster, 4096 points in 10.9 ms (81ff205, firmware/AGENTS.md section 8).
 - Bench: clean on FPGA 0x1533, and the owner accepted the spectrum view (f6d4b26).
 
-#### 0.2.30 - 2026-10-18 (protocol 1.9)
+##### 0.2.30 - 2026-10-18 (protocol 1.9)
 
 Version 0.2.29 was never set in a commit: the version string went from 0.2.28 to 0.2.30 when the decimation
 branch merged (a45e500). Protocol 1.8 has no row in `docs/protocol.md` section 14 and no commit that set it
@@ -1541,7 +1690,7 @@ was found (commit not identified).
 - Bench: merged unbenched (180d152). The bitstream was flashed later that evening, and the decimation bench
   (spur gone, alias rejection, noise) ran on 0.2.34 (1eb9800, fbab588, 7eaac49).
 
-#### 0.2.28 - 2026-10-18 (protocol 1.7)
+##### 0.2.28 - 2026-10-18 (protocol 1.7)
 
 - Added: the on-scope spectrum view, main menu row 6 "Spectrum analyzer", hidden in roll mode (e6a7c4c;
   number formatting in bed2dd4). It switches the trace area to the spectrum of each new capture, UI or host:
@@ -1553,7 +1702,7 @@ was found (commit not identified).
 - Bench: the owner confirmed it works, with harmonics within 0.4 dB of theory (99f3ccb, firmware/AGENTS.md
   section 8).
 
-#### 0.2.27 - 2026-10-18 (protocol 1.6)
+##### 0.2.27 - 2026-10-18 (protocol 1.6)
 
 - Added: FFT_BENCH 0x0F02 (efc5170; protocol 1.6, section 14 row 44). It times the on-scope FFT on the
   CH1 trace buffer for N = 1024 to 16384 in DDR and in SRAM A. The fixed-point FFT core `fx_fft.c` came in
@@ -1561,12 +1710,12 @@ was found (commit not identified).
   section 8).
 - Bench: clean, and the 0.2.26 channel menus were accepted (7e056a6).
 
-#### 0.2.26 - 2026-10-18
+##### 0.2.26 - 2026-10-18
 
 - Changed: the channel menu's dead FFT switch is hidden, and Invert, Coupling and V/A move up one row
   (bf0651b). 1.00o5's "Open FFT" stored a flag and drew nothing.
 
-#### 0.2.25 - 2026-10-18
+##### 0.2.25 - 2026-10-18
 
 - Fixed: the USB PHY tuning writes now reach the PHY (85a113d). 1.00o5 wrote the RES45 calibration, TX
   amplitude and disconnect threshold to 0x01C13410, the PHYCTL offset of later Allwinner chips. On the
@@ -1579,7 +1728,7 @@ was found (commit not identified).
   requests with no failure, drop or restart (02cd58b). 0.2.25 stayed on the SD card for the rest of the
   evening.
 
-#### 0.2.24 - 2026-10-18
+##### 0.2.24 - 2026-10-18
 
 - Added: GET_EVENT_LOG appends a 16-entry ring of bus-level events (types 1-4, 7, 8, 12, 13, 15-18), so EP0
   setups and DTR edges cannot evict them (7e5a2e3; section 14 row 42). After four bench runs the 128-entry
@@ -1587,7 +1736,7 @@ was found (commit not identified).
 - Changed: an EP0 setup identical to the last logged one is logged at most once per second, since pyserial
   repeats GET_LINE_CODING about five times per open. Counter 39 still counts all (7e5a2e3).
 
-#### 0.2.23 - 2026-10-18
+##### 0.2.23 - 2026-10-18
 
 - Added: after every TX abort the firmware logs the EP2 IN state: event type 17 (POWER, TXCSR) and type 18
   (EP2 TX interrupt enabled / ZLP pending, frame number) (25e90fc; row 42). They tell "host stopped taking IN
@@ -1595,14 +1744,14 @@ was found (commit not identified).
 - Bench: replug test clean (400 x 64 KiB) (e031838). A cold boot with the cable in caught one TX abort with
   the new diagnostics (72fc79e).
 
-#### 0.2.22 - 2026-10-18
+##### 0.2.22 - 2026-10-18
 
 - Changed: `usb_device_init` asserts the USB OTG bus reset and the PHY reset for 1 ms before 1.00o5 releases
   them, and logs the controller state it found as five event type 16 entries (7b6d855; section 14 row 43).
   Up to 0.2.21 the resets were only released, so an SD boot configured whatever the bootloader left.
 - Bench: FEL bench clean (1b2850d). The cold-boot failure was not fixed yet (cure in 0.2.25).
 
-#### 0.2.21 - 2026-10-18
+##### 0.2.21 - 2026-10-18
 
 - Removed: the USB timer-tick fallback (1a893a9). The 0.2.20 bench and a 30-minute soak showed counter 47 = 0
   and counter 57 = 2176: 1.00o5's interrupt dispatcher never lost a USB interrupt, and the fallback had only
@@ -1613,7 +1762,7 @@ was found (commit not identified).
 - Bench: on FPGA 0x1533, the FEL load was clean over 4 passes, but a cold boot from the card lost EP2 IN
   within two minutes (d69552c, b74974e). The cause was found in 0.2.25.
 
-#### 0.2.20 - 2026-10-18
+##### 0.2.20 - 2026-10-18
 
 - Changed: the tick fallback serves only an endpoint state seen on two consecutive ticks, skips any tick at
   which the USB interrupt is pending, and counts those ticks as races in GET_LINK_STATS counter 57, so
@@ -1622,7 +1771,7 @@ was found (commit not identified).
   races with the real ISR (ac9a5da, e9c9bb1). The 30-minute soak was clean and 0.2.20 was persisted to the
   card (d7cf366).
 
-#### 0.2.19 - 2026-10-18
+##### 0.2.19 - 2026-10-18
 
 - Added: the restart record. `_reset` stores LR, SP and CPSR at 0x81A00000, and the undefined, SWI, prefetch
   abort, data abort, reserved and FIQ vectors store their type and registers and then restart instead of
@@ -1634,21 +1783,21 @@ was found (commit not identified).
 - Bench: the A/B pair ran 8 clean passes and a capture soak (04322c3). The 0.2.19 soak was clean (ac9a5da).
   The 0.2.16 restart was not reproduced (handoff, firmware/AGENTS.md section 9).
 
-#### 0.2.18 - 2026-10-18
+##### 0.2.18 - 2026-10-18
 
 - Changed: the event-log reset snapshot is re-armed only when GET_EVENT_LOG is sent with request flag bit 0
   (50c9802). Before, every read re-armed it, so a host that reads the log at session open threw the
   evidence away. Other flag bits answer E_BAD_ARG.
 - Bench: built and host-tested, not benched alone.
 
-#### 0.2.17 - 2026-10-18
+##### 0.2.17 - 2026-10-18
 
 - Changed: quiet boot. Without `scope.bmp` on the card the boot no longer shows a "Failed to open file" box
   for 700 ms; it probes for the file silently and goes on (0c13045). With the file it behaves as 1.00o5.
 - Added: GET_LINK_STATS counter 48 = milliseconds spent in that step + 1, so n = 49 (0c13045).
 - Bench: owner verdict pending at the time (firmware/AGENTS.md section 8).
 
-#### 0.2.16 - 2026-10-18
+##### 0.2.16 - 2026-10-18
 
 - Fixed: the USB tick fallback ran the whole CDC handler for the SOF flag, 300-500 times a second (079f648).
   The SOF flag latches every frame with its interrupt disabled. The 1.00o5 handler is split into an entry and
@@ -1657,7 +1806,7 @@ was found (commit not identified).
   device restarted itself once (uptime reset, version unchanged), so the lead went back to 0.2.11 (558b347).
   No reproduction is recorded.
 
-#### 0.2.15 - 2026-10-18
+##### 0.2.15 - 2026-10-18
 
 - Changed: the event log ignores SOF for counter 47 and event type 14, logs type 14 at most once per 100 ms,
   grows to 128 entries and appends a frozen snapshot of the 16 events before the first bus reset
@@ -1665,7 +1814,7 @@ was found (commit not identified).
   1000 a second and lost everything before the reset.
 - Bench: superseded by 0.2.16 before it was benched, not pinned.
 
-#### 0.2.14 - 2026-10-18
+##### 0.2.14 - 2026-10-18
 
 - Changed: the tick fallback serves latched USB flags only after two consecutive ticks without a real USB
   interrupt (d6a6b37). On 0.2.12 the tick had won the dispatch against the real IRQ during traffic, so
@@ -1676,7 +1825,7 @@ was found (commit not identified).
 - Bench: counter 47 = 11.8k in 2 minutes because SOF defeats the gate, and 1 in 100 64 KiB responses lost
   (c0614c4). Fixed in 0.2.16.
 
-#### 0.2.13 - 2026-10-18
+##### 0.2.13 - 2026-10-18
 
 - Changed: System settings without a DS3231 hide the Time & Date row, and the box is one 59 px row shorter
   (7ebda04). The 0.2.6 mask for that row is gone.
@@ -1685,7 +1834,7 @@ was found (commit not identified).
   steps away. Off the charger the 1.00o5 drop-only rule applies to the average.
 - Bench: not benched alone, owner verdicts pending at the time (firmware/AGENTS.md section 8).
 
-#### 0.2.12 - 2026-10-18 (protocol 1.5)
+##### 0.2.12 - 2026-10-18 (protocol 1.5)
 
 - Added: GET_EVENT_LOG 0x0009, the last 64 USB and link events with millisecond timestamps (bus resets,
   suspends, resumes, disconnects, EP0 setups, SET_CONFIGURATION, CLEAR_FEATURE, DTR, RX stall and release,
@@ -1697,7 +1846,7 @@ was found (commit not identified).
 - Bench: counter 47 = 46,033 in 3 minutes (a race with the real ISR) and 2 drops in the soak (2140216,
   c0614c4). The "restart" first attributed to this build was withdrawn by the lead (e9c9bb1).
 
-#### 0.2.11 - 2026-10-18
+##### 0.2.11 - 2026-10-18
 
 - Fixed: a request sent right after the port is opened is no longer dropped without an answer (1594918).
   The DTR 0 to 1 edge was handled only in the main poll, after the 1 ms timer poll had parsed the host's first
@@ -1707,7 +1856,7 @@ was found (commit not identified).
   in 5.7 s (01fd27f). One USB drop was seen during 10 Hz status polling (57e8018). A clean 30-minute baseline
   soak followed (8a946e6).
 
-#### 0.2.10 - 2026-10-18
+##### 0.2.10 - 2026-10-18
 
 - Fixed: the MCP chip no longer flickers now and then while the main loop runs (6d4adfe). It is rendered
   once into a 38x17 pixel array and drawn as one blit of final pixel values, and the clock slot is cleared
@@ -1716,7 +1865,7 @@ was found (commit not identified).
   base is on, because Atlan's label named the mode a tap switches to and looked dead (6d4adfe).
 - Bench: loaded (ba884cd).
 
-#### 0.2.9 - 2026-10-18 (protocol 1.4)
+##### 0.2.9 - 2026-10-18 (protocol 1.4)
 
 - Added: external trigger on the calibration pin for FPGA bitstream 0x1533 (bebf901; protocol 1.4, section 14
   row 41; bitstream and testbench 526c969, 4601dec). SET_TRIGGER source 2 = EXT, caps bit 3, and GET_STATUS
@@ -1728,7 +1877,7 @@ was found (commit not identified).
 - Bench: loaded before the 0x1533 bitstream existed on the unit (b143db3). The 0x1533 bitstream was flashed later
   that day (76ea6b0) and EXT worked in a loopback test (b45734c).
 
-#### 0.2.8 - 2026-10-18
+##### 0.2.8 - 2026-10-18
 
 - Changed: the generator menu is compacted to three rows (Power, Freq, Duty) and the trigger menu to five,
   removing the gaps that the 0.2.6 masks left (0ff64c6). The menu heights, screen save and restore and
@@ -1736,7 +1885,7 @@ was found (commit not identified).
 - Bench: loaded; the first request after the FEL load timed out, which was the dropped-request bug fixed in
   0.2.11 (b143db3, 1594918).
 
-#### 0.2.7 - 2026-10-18
+##### 0.2.7 - 2026-10-18
 
 - Changed: SD_STAGE is served from the 1 ms timer poll instead of one request per UI pass (d88e9ea).
   On 0.2.3 a 64 KiB stage took about 5.8 s.
@@ -1748,7 +1897,7 @@ was found (commit not identified).
 - Changed: the diagnostics temperature is shown only when a DS3231 answered at boot (d88e9ea).
 - Docs: the 1.5 s startup gap is the boot splash (0aea00f).
 
-#### 0.2.6 - 2026-10-18
+##### 0.2.6 - 2026-10-18
 
 - Changed: the UI hides what the hardware cannot do (68f7868). This covers the generator Wave, Ampl,
   Offset and Phase rows (there is no DAC), and memory depths above the bitstream's maximum. Long memory,
@@ -1756,7 +1905,7 @@ was found (commit not identified).
 - Changed: saved settings are fixed up at boot to match (68f7868).
 - Bench: census clean on 0.2.6. Visual check of the hidden items is pending (4db7576).
 
-#### 0.2.5 - 2026-10-18
+##### 0.2.5 - 2026-10-18
 
 - Fixed: EP2 OUT is unmasked again after a USB suspend, reset or disconnect (5086f7d). RX used to fall
   back to the 2 ms poll sweep after a resume.
@@ -1764,69 +1913,69 @@ was found (commit not identified).
   resumes, disconnects, EP0 setups and malformed EP0 setups.
 - Bench: the idle USB fault seen on 0.2.2 was not reproduced (0ddd08c).
 
-#### 0.2.4 - 2026-10-18
+##### 0.2.4 - 2026-10-18
 
 - Added: first-pass stage marks in GET_LINK_STATS, counters 31-34 (b05cdbd). They showed that the 1.5 s
   startup delay is in the init path, not in the first UI pass (5ee4533).
 
-#### 0.2.3 - 2026-10-18
+##### 0.2.3 - 2026-10-18
 
 - Changed: the MCP chip sits above RUN/STOP and stays steady (baee5b5).
 - Fixed: SET_TIMEBASE applies in one step, without flicker through intermediate values (baee5b5).
 
-#### 0.2.2 - 2026-10-18
+##### 0.2.2 - 2026-10-18
 
 - Added: SD sector commands SD_INFO, SD_READ_SECTORS, SD_STAGE and SD_WRITE_SECTORS (0d4d9bb). Writes
   are limited to a window below the first partition. Sectors 16-79 and 708-710 need explicit flags.
 - Added: first-pass startup counters (0d4d9bb).
 - Bench: the first persist of 0.2.3 to sector 750 failed mid-write and the second succeeded (a7fcf11).
 
-#### 0.2.1 - 2026-10-18
+##### 0.2.1 - 2026-10-18
 
 - Fixed: READ_TRACE clips a count past the end of the trace (d9e1ac6).
 
-#### 0.2.0 - 2026-10-18
+##### 0.2.0 - 2026-10-18
 
 - Added: protocol 1.3, shared control with the UI (d77298f). There is no LOCAL/REMOTE and no lock.
   It brings settings_seq, RUN/STOP/SINGLE, host single captures shown on screen and the MCP chip.
 - Bench: collaborative mode was accepted interactively on 0.2.1 (ecfd226).
 
-#### 0.1.7 - 2026-10-18
+##### 0.1.7 - 2026-10-18
 
 - Changed: wrap-safe RX ring helpers, with an all-phase ring test (5de512e).
 - Bench: first image persisted to the SD card and booted after a power cycle (9164b18, 30e8958).
 
-#### 0.1.6 - 2026-10-18
+##### 0.1.6 - 2026-10-18
 
 - Fixed: each OUT packet is read in one FIFO access run (697e1f6). This fixed request corruption at the
   2 KiB RX ring wrap. A census of 2000 PINGs and 100 x 64 KiB had no errors (3c7b623).
 
-#### 0.1.5 - 2026-10-18
+##### 0.1.5 - 2026-10-18
 
 - Added: request-corruption diagnostics GET_BAD_FRAME, the `PC_FIFO_MAP` alternative layout (`-m1`
   builds) and a census mode in `bench_link.py` (c31bd01).
 
-#### 0.1.4 - 2026-10-18
+##### 0.1.4 - 2026-10-18
 
 - Added: protocol 1.2 GET_LINK_STATS counters and an RX sweep for lost USB interrupts (aabe64a).
 
-#### 0.1.3 - 2026-10-18
+##### 0.1.3 - 2026-10-18
 
 - Fixed: the CDC FIFOs no longer overlap the fixed EP0 FIFO at bytes 0-63 (d0ae338).
 
-#### 0.1.2 - 2026-10-18
+##### 0.1.2 - 2026-10-18
 
 - Changed: safe requests are answered from the 1 ms timer IRQ, so PING takes about 1 ms instead of
   about 45 ms (afaee38, e3c5bf8).
 - Fixed: EP2 is flushed on a bus reset (afaee38).
 
-#### 0.1.1 - 2026-10-18
+##### 0.1.1 - 2026-10-18
 
 - Fixed: CDC FIFO layout inside the 2 KiB FIFO RAM (5a8432b). Large responses had stalled and 64 KiB
   failed on Windows.
 - Added: TX recovery, ENTER_FEL and protocol 1.1 main-loop pass times in GET_STATUS (5a8432b).
 
-#### 0.1.0 - 2026-10-18
+##### 0.1.0 - 2026-10-18
 
 - Added: the USB control protocol, with frame layer, command layer behind a hardware abstraction layer,
   CDC transport and shared test vectors (9ffd7ba, c5f41c8, 4aa239c). It is enabled by default (193e447).
@@ -1835,7 +1984,7 @@ was found (commit not identified).
 - Bench: enumeration, identify, REMOTE, readout, front end, timebase, trigger and generator checks
   passed on hardware (0b9c783, a7579d5, a4577f3, f7bd2bf, f9f9349).
 
-### Host library and MCP server (`mcp/`, package version 0.1.0)
+#### Host library and MCP server (`mcp/`, package version 0.1.0)
 
 - 2026-11-06 (mcp-battery): **`fnirsi1013d-battery`**, the hardware battery as a tool: it drives the MCP server over
   stdio as an agent does, in named groups, judges every step against an explicit expectation (PASS / FAIL / SKIP,
@@ -2018,7 +2167,7 @@ was found (commit not identified).
   step) on the scope and returns the verdict, the failing point and per point and core the mean, RMS, extremes and
   clipped samples; the simulator models the wizard's points with the CLIP and NOISE checks.
 
-### Tooling, FPGA and documentation
+#### Tooling, FPGA and documentation
 
 - Added: FPGA bitstream **0x153F** in `fpga/al3/dist` (unbenched, not flashed; the firmware still runs on 0x153E):
   both ADC cores of a chip are captured at one instant, so with Filter Off a ring word holds the designed pair, core B

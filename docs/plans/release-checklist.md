@@ -102,7 +102,7 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 - [ ] `mcp/pyproject.toml`: `version = "0.3.0"`.
 - [ ] `CHANGELOG.md`: `## [Unreleased]` first and empty, `## [0.3.0] - YYYY-MM-DD` below it and non-empty; the obsolete
       "Plan for the first tag" block and "Nothing has been tagged yet" removed; the 0.2.46-0.2.50 sub-sections in order.
-      The section text and the steps are ready in `docs/release-notes/changelog-0.3.0-draft.md` (rel-gen2, 517f252;
+      Applied in the release commit (2026-11-07); the draft was `docs/release-notes/changelog-0.3.0-draft.md` (rel-gen2, 517f252;
       refreshed up to fa8377b by docs-rel153d, 2026-10-26, and up to abd988a by docs-153f, 2026-11-07); delete that file in
       the release commit.
 - [x] `docs/release-notes/0.3.0.md` (re-ticked 2026-11-07, docs-153f: the 0x153F bench record and known issues from the bench log): every `{{placeholder}}` filled (screenshots, tested-on list, known issues), each fact

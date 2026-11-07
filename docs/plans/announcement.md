@@ -147,7 +147,7 @@ measurements while you hold the probes.
   core A against core B; finer capture timing stays on the list for later.
 - **The hardware counter with Filter Off.** Below 200 MSa/s the firmware still marks the result not valid and the cards
   show the record's measurement, although on 0x153F the count is right.
-- **USB.** In one 30-minute soak of three the link dropped 4 times for 0.6 s and recovered by itself, with no restart of
+- **USB.** In one 30-minute soak of four the link dropped 4 times for 0.6 s and recovered by itself, with no restart of
   the scope (bench 2026-11-06). I have not found the cause.
 - **The SD card's FAT32 partition must start at 8 MiB (sector 16384) or later.** The firmware sits in the raw sectors
   before it. Most cards start lower, so you recreate the partition. The card tool refuses a card that does not fit and
