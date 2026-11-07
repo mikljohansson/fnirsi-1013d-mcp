@@ -3,13 +3,15 @@ samples cover every phase). Model B[k] = f(2k), A[k] = f(2k + d). Per capture fo
 take the RMS of FB - FA (means removed). d = +1 designed (A one sample after B), d = +3 = B one conversion late (the
 0x153E fault at A3 B3), d = -1 = B one early. Prints mean RMS per d and the votes. Use this, not core_order.py, at divider
 0: there core_order.py's moving-word metric is taken over by carry errors when a level sits at a carry (2026-11-07, CH2).
-Both probes on the ladder input; it sets the generator and puts it back to 1 kHz."""
+Any periodic waveform works (the ladder rounds the square; only both cores seeing the same f matters), but the sharper
+the waveform the deeper the minimum: the probes on the post itself separate d best. It sets the generator and puts it
+back to 1 kHz."""
 import os
 import sys
 
 import numpy as np
 
-sys.path.insert(0, r"D:\src\fnirsi-1013d-mcp\mcp\src")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "mcp", "src"))
 from fnirsi1013d.scope import Scope  # noqa: E402
 from fnirsi1013d.transport import Transport, open_link  # noqa: E402
 
