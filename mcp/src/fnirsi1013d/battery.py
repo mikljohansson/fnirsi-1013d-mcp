@@ -829,14 +829,21 @@ async def g_coreorder(b: Battery, n: int = 12) -> None:
 
 
 async def g_loopback(b: Battery) -> None:
-    """Needs CH1 straight on the calibration post (no ladder): the self-test's levels and edges are the post's."""
+    """Needs CH1 straight on the calibration post (no ladder): the self-test's levels and edges are the post's. T7 is
+    a skip on a release build (FORCE is debug-only), every other check must pass, T4 and T5 among them."""
     def passed(res: Any) -> str | None:
-        if get(res, "passed"):
-            return None
-        bad = [f"{c['check']}: {c.get('reason') or c.get('measured')}" for c in get(res, "checks", []) if not c["pass"]]
-        return "; ".join(bad)[:500]
-    await b.step("X1", "scope_self_test_loopback", expect="every check passes (CH1 straight on the post)",
-                 check=passed)
+        checks = get(res, "checks", [])
+        bad = [f"{c['check']}: {c.get('reason') or c.get('measured') or c.get('measured_order') or c.get('offset_words')}"
+               for c in checks if c["pass"] is False]
+        if bad:
+            return "; ".join(bad)[:500]
+        ran = " ".join(c["check"] for c in checks if c["pass"] is True)
+        if "T4" not in ran or "T5" not in ran:
+            return "T4 or T5 did not run"
+        return None
+    await b.step("X1", "scope_self_test_loopback",
+                 expect="every check passes, T4 d = +1, T5 +1 +- 1 words; T7 skipped on a release build (CH1 straight "
+                        "on the post)", check=passed)
     await gen_1k(b, "X2")
 
 

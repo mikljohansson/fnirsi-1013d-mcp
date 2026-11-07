@@ -590,10 +590,24 @@ capture, decay fit, segments, host FFT, the scope's spectrum, Bode (host or devi
 (`build_report`, `load_result`), CLI `python -m fnirsi1013d.report <file|latest>`.
 
 **`self_test_loopback`** (tier 3, token). Asks the user (in the description) to connect the calibration
-pin to CH1 with the probe. Runs: generator at 10 kHz / 50 % and 1 MHz / 25 %, captures at several rates,
-checks frequency, duty and levels against expectations, and runs the protocol bench tests that need a
-known signal (protocol section 12, T4/T5/T7). Returns pass/fail per check. Used after every firmware or
-bitstream change.
+pin to CH1 with the probe, straight on the post. Runs at 1 V/div, Filter Off, with the generator at 10 kHz and 995.02 kHz
+(200 MHz / 201), 50 % duty, and judges medians over several captures, never one (bench 2026-11-07 14:14):
+
+- Frequency within 2 % at every rate (2, 20, 50, 200 MS/s; 5 captures, 200 at 200 MS/s).
+- Duty within 0.03 and swing 2.6 .. 3.7 V at 10 kHz only: at 995 kHz the post's slow edge does not settle (swing 2.1 V
+  at 25 % duty), so that square only serves the frequency, T4 and T5.
+- T4 (protocol section 12) over 200 captures at 200 MS/s: the fold method of `fpga/al3/tools/core_delay_fold.py`, passing when
+  the lowest mean RMS is at d = +1 (B first; -1 is A first, +3 the late core B of 0x153E) and more than half the captures
+  vote for it. The count of non-monotonic steps at the crossings is reported beside it (`drops_b_first`, `drops_a_first`) as
+  support, not judged. The protocol's 1000 captures are not needed: 200 decide on the unit, the time budget is 30 s.
+- T5 over the same captures: the median of crossing word - pretrigger_words within +1 +- 1 (the testbench's pretrigger word + 1,
+  fpga/al3/README.md section 22; the unit reads 0 .. 2, the histogram is in `counts`).
+- T7 needs FORCE, a debug-only command (protocol row 18): on a release build the check reads `pass: null`, `skipped: true`
+  with the reason and does not count against `passed`.
+
+No signal on CH1 ends the run at the first capture with the wiring in the reason. About 15 to 35 s; never over a minute.
+Restores channel, timebase, trigger (type and hold-off too), filter, generator and the RUN state. Used after every firmware
+or bitstream change.
 
 ### 4.5 Calibration, screen (tier 0)
 
