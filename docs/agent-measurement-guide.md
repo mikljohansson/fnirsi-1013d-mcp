@@ -161,7 +161,7 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
 | 20000 (10 kSa/s) | 15.1 | 15.4 | CIC2: 15.4 |
 | 100000 (2 kSa/s) | 15.6 (storage) | 15.2 (storage) | CIC2: 15.2 |
 
-## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C and later; 0x153E is the bitstream of release 0.3.0)
+## 3c. Trigger types, the hardware counter, peak detect (protocol 1.26, FPGA 0x153C and later; 0x153F is the bitstream of release 0.3.0)
 
 `scope_info` caps `TRIG_TYPES`, `HOLDOFF`, `COUNTER`, `PEAK_DETECT` (`scope_status` features `trig_types`, `counter`,
 `peak`). Not yet benched on the unit when this was written: say so with numbers from them.
@@ -188,7 +188,8 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   `hysteresis` in codes pins that one, `'auto'` releases it). Leave them auto unless the signal needs a specific
   level (a pulse train with ringing, a logic level). A signal under about 12 codes pk-pk gives no valid count on
   auto: use a more sensitive range. `vmin` / `vmax` are raw extremes over the whole gate, noise
-  peaks included; a capture's min / max are a few codes narrower.
+  peaks included; a capture's min / max are a few codes narrower. With Filter Off below 200 MSa/s the result has
+  `gated` true and `valid` false: use 200 MSa/s or a filter for a number you can quote.
 - **Peak detect at slow time bases** (`scope_capture(peak=true)` for one capture, `scope_set_decimation(filter='peak')`
   to leave it on): below 200 MSa/s every stored sample is the min and max of its window of raw 200 MSa/s samples, so
   a glitch shorter than the sample period is kept where plain sampling (and the filters) miss it. The result carries

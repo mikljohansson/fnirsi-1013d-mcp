@@ -27,13 +27,16 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 - **Encode, encode phase**: the clock edge that tells a core to sample. When a core's encode lands where the data lines
   are changing, the stored byte is garbage: a **metastable** core reads 20-35 codes RMS on a quiet input.
 - **Core order**: which of the two bytes in a stored word is the earlier sample. The firmware assumes an order; it can
-  differ between bitstreams (0x1535 vs 0x1537 on chip 2, bench 2026-10-19).
+  differ between bitstreams (0x1535 vs 0x1537 on chip 2, bench 2026-10-19). Up to 0x153E core B was stored one conversion
+  late at most rates with Filter Off on the maintainer's unit; 0x153F keeps the designed order at every rate (bench
+  2026-11-07).
 - **Code, LSB**: one step of the 8-bit converter, 0..255; 0 V sits near 128 after the offset calibration. One division is
   32 codes, so one code is about 3 mV at 0.1 V/div and 156 mV at 5 V/div.
-- **Capture stage, capture self-check**: on bitstream 0x153A each core's data is taken in at one of several 2.5 ns
-  steps after its encode. The calibration wizard tries the steps and keeps a clean one per core ("Capture stages: CH1
-  A3 B4"). After every 200 MSa/s capture the FPGA counts outlier samples per core; a core flagged again and again asks
-  for a new calibration in Diagnostics.
+- **Capture stage, capture self-check**: the FPGA takes an ADC chip's data in at one of several 2.5 ns steps, used at
+  200 MSa/s and with the filters. The calibration wizard tries the steps and keeps one that is clean on both cores of
+  the chip ("Capture stages: CH1 A3 B3"; the A and B numbers are the same on 0x153F; on 0x153A to 0x153E each core had
+  its own stage). After every full-rate capture the FPGA counts outlier samples per core; a core flagged again and
+  again asks for a new calibration in Diagnostics.
 - **Zero level, gain, calibration**: per range and per core, the code at 0 V (zero) and the codes per volt (gain). The
   calibration wizard measures the zero with the inputs open and the gain from the calibration post's square wave.
   **Volts calibration** is the older 1.00o5 procedure for the attenuator scale factors using an external DC source.
@@ -41,8 +44,8 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
   100 MHz each (**full-rate**); at slower rates with Filter Off the FPGA slows their clock with the sample-rate divider
   (**gated**). The cores read slightly differently in the two cases, so the calibration keeps values per class. (FPGA
   0x153D first ran the cores at full rate at every rate and fw 0.2.105 dropped the gated class for it, 2026-10-21; both
-  were reverted the next day.) The hardware counter needs full-rate cores: with Filter Off below 200 MS/s the cards show
-  the record's measurement.
+  were reverted the next day.) With Filter Off below 200 MS/s the firmware marks the hardware counter not valid and the
+  cards show the record's measurement.
 - **Tracker, class probe**: background code (fw 0.2.50+) that keeps measuring the small A-B and class differences while
   the scope runs and corrects the readout; it switches the sample rate briefly every 30 s to do so.
 
@@ -77,8 +80,8 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 ## Instrument level
 
 - **Bitstream, version word**: the FPGA configuration, stored in the 1 MB flash beside the FPGA (25Q80); the firmware
-  reads a 16-bit version word to know the features: 0x1432 stock, 0x1532 Atlan4's, 0x1533..0x153E this project's
-  (0x153E recommended; each firmware runs on one of them).
+  reads a 16-bit version word to know the features: 0x1432 stock, 0x1532 Atlan4's, 0x1533..0x153F this project's
+  (0x153F recommended; each firmware runs on one of them).
 - **Firmware, FEL, SD card**: the scope program boots from the SD card. **FEL** is the SoC's USB boot mode that lets a
   firmware be loaded into RAM without touching the card; a power cycle returns to the card's version.
 - **Calibration post, generator, DDS**: the metal post outputs a logic-level square wave from the FPGA's DDS (a phase

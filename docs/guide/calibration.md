@@ -10,6 +10,8 @@ it.
 ## Before you start
 
 - Let the scope run for 5 minutes. A calibration taken earlier is marked "recalibrate after 5 minutes of warm-up".
+  If you use 200 MSa/s with Filter Off, wait 30 minutes or more: on the maintainer's unit the share of samples with code
+  errors at that rate falls as the scope warms up, so calibrate and measure warm.
 - Have both probes at hand. The gain steps need each probe on the calibration post, set to 1X.
 
 ## Start the wizard

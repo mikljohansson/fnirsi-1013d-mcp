@@ -33,7 +33,7 @@ Sources, which you should open when you need the detail: [Install](install.md) (
     - Ask for a photo of the area around the flash chip and the header, and have them read the chip marking.
       [Hardware preparation](../hardware-prep.md), sections 1.2 and 3a, has the detail.
 3. **Which 3.3 V SPI programmer do they have?** The FPGA bitstream is required: the firmware runs only with the
-   bitstream of its release (0x153E) and shows a banner on any other. Flashing it needs six pins soldered to the 2x3
+   bitstream of its release (0x153F) and shows a banner on any other. Flashing it needs six pins soldered to the 2x3
    header from the back of the board, the pinout found by continuity, and a 3.3 V programmer: the FT2232D route in
    `BITSTREAMS.md` is the tested one; a plain CH341A can drive 5 V on the data lines and has killed a flash
    ([Hardware preparation](../hardware-prep.md), section 2.2).
@@ -57,7 +57,7 @@ Sources, which you should open when you need the detail: [Install](install.md) (
 ### 1. Download and verify
 
 From the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) (v0 releases are marked
-pre-release): the bitstream `fnirsi_1013d-fpga-al3-0x153e-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`,
+pre-release): the bitstream `fnirsi_1013d-fpga-al3-0x153f-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`,
 `fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the MCP wheel if wanted. In the download directory, on Linux or WSL:
 
 ```
@@ -70,7 +70,7 @@ prints the hash; compare it by eye with the line for that file in `SHA256SUMS`.
 
 ## The bitstream
 
-Only on an AL3A10 board, only with a 3.3 V programmer. The firmware runs only with bitstream **0x153E** and shows a
+Only on an AL3A10 board, only with a 3.3 V programmer. The firmware runs only with bitstream **0x153F** and shows a
 banner on any other, so the FPGA comes before the card. The config flash is wired only to the FPGA, so the scope
 cannot write it itself. Follow [`BITSTREAMS.md`](../../fpga/al3/dist/BITSTREAMS.md), "How to flash", step by step; in
 short, with the FT2232D tool from a checkout of the release tag (on Windows, with the FTDI driver that comes with the
@@ -95,15 +95,15 @@ python firmware/tools/spiflash_d2xx.py wiring
 4. **Write and verify**:
 
     ```
-    python firmware/tools/spiflash_d2xx.py write -i fnirsi_1013d-fpga-al3-0x153e-flash1m.bin --yes
-    python firmware/tools/spiflash_d2xx.py verify -i fnirsi_1013d-fpga-al3-0x153e-flash1m.bin
+    python firmware/tools/spiflash_d2xx.py write -i fnirsi_1013d-fpga-al3-0x153f-flash1m.bin --yes
+    python firmware/tools/spiflash_d2xx.py verify -i fnirsi_1013d-fpga-al3-0x153f-flash1m.bin
     ```
 
     The tool asks for the JEDEC ID to be typed and takes another double-read backup before it erases. Good: verify
     reports the chip identical to the file. **On any error do not power-cycle the scope**: write the backup from
     step 3 back first (Rollback below).
 5. Disconnect the programmer and switch the scope off. Do not start the stock firmware now: it needs the stock
-   bitstream. Go on with the card; after the first boot, Menu > Diagnostics, Status, shows FPGA 0x153E with its
+   bitstream. Go on with the card; after the first boot, Menu > Diagnostics, Status, shows FPGA 0x153F with its
    features. A bootloader older than v0.8 hangs on any custom bitstream; the card from step 4 below carries v0.8.
 
 ## The card
