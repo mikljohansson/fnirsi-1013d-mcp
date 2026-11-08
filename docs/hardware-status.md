@@ -2108,3 +2108,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   0 sleeps (one main-loop pass per step). Layout verdicts (owner): ACQ boxes and pass-time label good; "CH1 overrange" appears and clears;
   Spectrum Max hold, two generator sweeps 1..10 kHz: the band held at 0 dBV to 10 kHz and the square's harmonic comb falling to about
   -35 dB at 200 kHz (screenshot taken over USB).
+- 2026-11-08 14:13-14:5x (lead, owner present): **v0.3.1 released.** Release commit 3022da6, image f54ce4cdc73ca36082b9cba8aef800ae5fa1f5e9a07c295db8452876951a0b2e,
+  FEL-loaded: `#VER` fw=0.3.1, proto=1.29, fpga=0x153f; `fnirsi1013d-battery` on the ladder **207 PASS, 0 FAIL, 2 SKIP**
+  (`backups/battery-0.3.1/release/`). Local gates green (three builds, host tests, mcp 589, ruff, vectors, mkdocs --strict, the 0.3.1
+  wheel); main pushed, CI green with the same image hash. Dry run `v0.3.1-rc1`: release.yml green, 26 assets, SHA256SUMS 25 of 25; the
+  published `fnirsi_1013d-fw-0.3.1.bin` persisted to the card (backup `backups/sdcard/sd_750-2362_20261108-143755.bin`, sector 750
+  verified, checksum 0x00C2DA2A); rc removed; tag `v0.3.1` on 3022da6, release.yml green, SHA256SUMS 25 of 25,
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.1 (pre-release, as every tag below 1.0.0). The unit: 0x153F, fw 0.3.1
+  from the card, the calibration of 13:5x (with the other-channel tables). The task queue is empty.
