@@ -3462,6 +3462,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     built_from = f"saved capture {src.name}"
             if mask_meta is not None:
                 tol = dict(mask_meta.get("tolerance") or {})
+                guard = int(tol.get("samples") or 0)
                 if dv_arg is not None or dtime_arg is not None or tolerance_div is not None:
                     notes.append("tolerances given with a mask file are ignored: the file's mask is used as it is")
             else:
@@ -3470,6 +3471,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 dtime = dtime_arg if dtime_arg is not None else 2 * dt
                 k = int(round(dtime / dt))
                 upper, lower = A.mask_envelope(ref, dv, k)
+                guard = k
                 tol = {"volts": float(dv), "div": float(dv / vdiv) if vdiv else None, "time_s": float(k * dt),
                        "samples": k}
                 mask_meta = {"kind": "mask", "channel": channel, "dt": dt, "n_samples": int(ref.size),
@@ -3510,7 +3512,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 v = cap.channels[channel].volts.astype(np.float64)
                 if v.size != n_mask:
                     raise ToolError(f"scope_mask_test: capture {cap.capture_id} has {v.size} samples, the mask {n_mask}")
-                chk = A.mask_check(v, upper, lower)
+                chk = A.mask_check(v, upper, lower, guard=guard)
                 row: dict[str, Any] = {"capture_id": cap.capture_id, "passed": chk["passed"],
                                        "fail_samples": chk["fail_samples"],
                                        "clipped_samples": int(cap.channels[channel].clipped.sum())}

@@ -252,7 +252,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
-- [ ] **Battery follow-ups** (mcp-battery, 2026-11-06). (1) **Done, fw-031 101e056, bench section 98.** Firmware: GET_TIMEBASE should report the divider the FPGA
+- [x] (Done 2026-11-08: (3) RUN 62, STOP 64 steps / s without polls, docs/mcp-tools.md; (4) the mask test does not judge the time tolerance at the record ends.) **Battery follow-ups** (mcp-battery, 2026-11-06). (1) **Done, fw-031 101e056, bench section 98.** Firmware: GET_TIMEBASE should report the divider the FPGA
   holds (`pc_hal_divider_now`) while a host's raw divider runs, not drop it when acq_view_fit snaps the UI's time/div
   after a SET_TRIGGER total (finding 3; the host now corrects it from GET_DECIM, `Scope._held_timebase`). The spectrum
   view's "raw divider labelled with the UI rate" (protocol row 45) is the same root. (2) Done 05f5d62: `TrigQual` is
@@ -268,7 +268,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 - [x] **scope_status docstring** (docs-gen1)
 - [x] **Bode bench session** (10-19 14:35-15:25: RC low-pass and high-pass consistent to 0.14 dB / 1 deg, floor -80 dB, thru +0.3 dB, divider flat: tool accepted; capacitor dispersion is the part; DC overload in wiring B found, wiring A recommended)
-- [ ] **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
+- [x] (Won't do, owner 2026-11-08.) **Bode follow-ups** (after the bench): CH1 re-ranging when CH1 drops below 20 codes (resonant input nodes), the harmonic fast
   mode (design 1.3), the impedance mode z_series_ohm (design 2.4, coil L / Q / SRF for the detector); the PNG plot is done (scope_report, mcp-gen6).
 - [~] **1.19 / 1.20 on the unit, host side** (scope_health on 0x1539 10-19 21:12 and scope_cal_probe 20:25 done) (mcp-gen6 hand-off, mcp/AGENTS.md open item 0a): scope_health encode_check
   on 0x1538; scope_bode_sweep(where='device') on the divider and the RC next to where='host' (within 0.05 dB / 0.3 deg).
@@ -282,7 +282,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   `scope_capture_segments` (10 kHz generator: intervals 100 us +- 10 ns, every segment crossing at the pretrigger point) and
   `scope_averaged_capture(hardware=true)` against host averaging of the same signal (means within 0.1 code, N = 1 equal to READ_RAW);
   then make `hardware` default to auto when the record fits, add it to `scope_decay_fit`, and drop the "not yet verified" caveats.
-- [ ] **Hardware averaging by default** (from the item above): `hardware` auto when the record fits, the same in `scope_decay_fit`,
+- [x] (Won't do, owner 2026-11-08.) **Hardware averaging by default** (from the item above): `hardware` auto when the record fits, the same in `scope_decay_fit`,
   and the two "not yet verified" caveats in server.py dropped, with the 0.3.0 release notes' "Not benched" wording for segments
   and hardware averaging updated.
 - [x] **Version bump to 0.3.0** (released: tag v0.3.0 on ab93c0d, hardware-status 2026-11-07 12:46-13:00) in mcp/pyproject.toml and firmware PC_FW_VERSION, CHANGELOG section, release notes
@@ -372,7 +372,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [x] **Each channel's zero depends on the other channel's range** (fw-xzero 94a64d0, merged 10fa8d3: the gated class benched OK 11:4x; per clock class in fw-xzero2, not benched: firmware/AGENTS.md sections 99 and 100) (bench 2026-11-08 10:20, owner wants it fixed): about -1 / 0 / +1 code in three classes = the other channel's range relay coils on (range 1 none, 0 / 3 / 5 / 6 one, 2 / 4 two). The wizard's zero step measures the shift per range and class (about 4 s more), sector 708 bytes 108..127, every readout applies it; GET_CAL 460. Bench: rerun the 10:20 table after a wizard run, every cell within 0.3 code of 128 at ranges 2 and 5.
 - [ ] **Full-class zero offset after the wizard** (bench 2026-11-08 11:4x, 10fa8d3: CH1 +0.36 code at 200 MSa/s whatever CH2 does; 2026-11-07: up to +0.65 at full rate on both channels): not a condition of the zero step found in the code (firmware/AGENTS.md section 100); read GET_CAL 280 cm, then the settling check there (1 MSa/s, then 200 MSa/s captures over 2 minutes). If it settles: measure the full class after a dwell at full rate in the wizard.
 - [x] **scope_self_test_loopback judges from too little** (30afc1b; simulator only so far, `--groups loopback` on the unit is the check) (bench 2026-11-07 14:14, 0.3.1): 7 of 15 checks failed with no fault behind them. 25 % duty at 995 kHz on the post's slow edge (swing 2.1 V, duty 0.29..0.36): use 50 % or a lower frequency; T4 decides from one capture at 2.5 V/div (1000 captures in protocol section 12; over 200 at 1 V/div B first 0 drops, A first 134): many captures at 1 V/div; T5 tolerance +-1 against the simulated word + 1 (measured 1..2); T7 cannot pass on a release build (FORCE is debug-only): SKIP.
-- [ ] **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and
+- [x] (Closed 2026-11-08, owner: explained by a bad USB cable; the old cable dropped the link 4 times a minute with the same signature, a new one 0 in 2 min and the soaks since are clean.) **USB link drops in the 30-minute soak** (bench 2026-11-06 14:20-14:50, fw 0.2.105 b278bc0c on 0x153E, only USB and
   the probes connected): 4 drops in 17907 GET_STATUS requests, each a bus suspend (no SOFs) followed 129 ms later by a
   host bus reset and a normal enumeration, 0.6 s down, no device restart; three host opens failed the same way at 14:12.
   Find out whether the rate is new (earlier long soaks in `docs/hardware-status.md`), whether it follows the host port /

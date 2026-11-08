@@ -553,9 +553,8 @@ taken (the FPGA takes a commit within 3 clocks, or at the boundary of a step wit
 scope's main loop, not the link**: SET_GEN and GET_GEN are answered at the next main-loop pass (dispatch flags F_SCOPE
 / F_MODAL in `pc_cmds.c`), so each request costs one pass. Measured on the unit (battery 2026-11-06, fw 0.2.105,
 1 kHz .. 10 kHz in 200 log steps asked at 100 steps / s): 6.76 s, 34 ms per step with one GET_GEN poll per step, 29
-steps / s. Without the poll (SET_GEN's own answer says taken) a step should cost one pass; the rate in RUN and in STOP
-is still to be measured (`scope_sweep` with `steps=200, rate=100` in each state: `stats.achieved_steps_per_s`,
-`pending_polls`, `pending_sleeps`). A faster request runs as fast as the scope answers and the caveats say what was
+steps / s. Without the poll (SET_GEN's own answer says taken) a step costs one pass: measured 2026-11-08 on fw 0.3.0+ (the same
+200 log steps asked at 100 steps / s), 62 steps / s in RUN and 64 in STOP, 0 polls, 0 sleeps, so about 16 ms per step. A faster request runs as fast as the scope answers and the caveats say what was
 reached (a device-paced chirp needs a firmware CHIRP command, not in this protocol). At most 600 s per call. Returns
 the statistics (steps sent, achieved steps / s, late steps, polls, sleeps) and restores the generator it found. Watch it on the scope's Spectrum
 view or with `scope_capture_and_fft`.

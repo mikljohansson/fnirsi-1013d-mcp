@@ -293,3 +293,18 @@ async def test_dvm_without_dither_says_so(sim_factory, tmp_path):
         assert res["dither"] is False and res["uncertainty_volts"] == pytest.approx(res["step_volts"] / 2)
         assert any("no dither" in x for x in r["caveats"])
         assert any("auto time-out" in x for x in r["caveats"])  # auto mode on a DC level
+
+
+def test_mask_check_does_not_judge_the_time_tolerance_at_the_ends():
+    """The trigger jitter shifts a record by up to the time tolerance, so its first samples can show what came before the
+    reference's first sample: a level the held edge value of the envelope does not contain. Without the guard that fails
+    (battery follow-up 4, 2026-11-06); a fault inside the record is still found."""
+    from fnirsi1013d import analysis as A
+
+    ref = np.r_[np.zeros(50), np.ones(50)]           # low at the start, an edge at 50
+    up, lo = A.mask_envelope(ref, 0.1, 4)
+    shifted = np.r_[np.ones(2), np.zeros(48), np.ones(50)]   # 2 samples of the high level from before the record
+    assert not A.mask_check(shifted, up, lo)["passed"]
+    assert A.mask_check(shifted, up, lo, guard=4)["passed"]
+    glitch = ref.copy(); glitch[20] = 1.0             # a fault inside the record
+    assert not A.mask_check(glitch, up, lo, guard=4)["passed"]

@@ -346,12 +346,19 @@ def mask_envelope(ref: np.ndarray, dv: float, k: int) -> tuple[np.ndarray, np.nd
     return hi + dv, lo - dv
 
 
-def mask_check(v: np.ndarray, upper: np.ndarray, lower: np.ndarray) -> dict[str, Any]:
-    """Compare one record with the mask: the failing samples, the first one and the worst excursion in volts."""
+def mask_check(v: np.ndarray, upper: np.ndarray, lower: np.ndarray, guard: int = 0) -> dict[str, Any]:
+    """Compare one record with the mask: the failing samples, the first one and the worst excursion in volts.
+    ``guard`` samples at each end are not judged: there the time tolerance would need the reference before its first
+    (or after its last) sample, so an edge that the trigger jitter moves into them fails against a held edge value
+    (battery 2026-11-06 follow-up 4)."""
     v = np.asarray(v, dtype=np.float64)
     over = v - upper
     under = lower - v
     exc = np.maximum(over, under)
+    if guard > 0:
+        g = min(guard, exc.size)
+        exc[:g] = -np.inf
+        exc[exc.size - g:] = -np.inf
     fail = exc > 0
     n = int(fail.sum())
     out: dict[str, Any] = {"passed": n == 0, "fail_samples": n, "fail_mask": fail}
