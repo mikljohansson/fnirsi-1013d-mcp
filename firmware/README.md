@@ -2183,7 +2183,7 @@ per count), `dc_shift_size` (220) maps it to screen pixels for the trace and the
 | 80, 84, 88 | CH1 `dc_shift_center` (u32), `dc_shift_size` (i32), `dc_shift_value` (i32) |
 | 92-95 | 0 |
 | 96, 100, 104 | CH2 the same |
-| 108-511 | 0 (not covered by the checksum; every save rewrites the whole sector from zeros). Open firmware: 128-431 calibration v3 block (6.3), 432-487 calibration provenance (fw 0.2.52, protocol row 55: firmware build and version, FPGA word, what was written, uptime, power-on count and operating minutes at the calibration, DS3231 time when fitted; CRC-32), stamped when a save carries a changed v3 block |
+| 108-511 | 0 (108-119 are inside the checksum of 16..119, the rest outside; every save rewrites the whole sector from zeros). Open firmware: 108-127 the zero shift for the other channel's relays (fw-xzero, 6.6, protocol row 71), 128-431 calibration v3 block (6.3), 432-487 calibration provenance (fw 0.2.52, protocol row 55: firmware build and version, FPGA word, what was written, uptime, power-on count and operating minutes at the calibration, DS3231 time when fitted; CRC-32), stamped when a save carries a changed v3 block |
 
 **Sector 709** (settings, u16 words, checksum of words 2..255 in words 0-1, version 0x0100/0x0015 in words 2-3)
 holds the base calibration results: words 168-173 CH1 `dc_calibration_offset[0..5]`, 174-179 CH2, 184-187
@@ -2651,3 +2651,50 @@ mode subtracted, valid probes, age); grey until they ran. The bow q is in GET_CA
 4. Negative checks: a 40 MHz signal or the post square at 200 MSa/s with fast edges must not move d (records rejected or
    few pairs; `last_pairs`), a running sine must not trigger class probes (cm_age grows), opening a menu or arming a
    host single stops probes, and a probe never shows as a glitch in the trace (the screen just skips one update).
+
+### 6.6 The other channel's relays (fw-xzero, after fw 0.3.0, protocol 1.29)
+
+**Why.** Bench 2026-11-08 10:20 (owner's unit, fresh warm calibration, inputs open, Filter Off, 1 MSa/s, mean of 5
+captures): each channel's zero depends on the other channel's range. CH2 at 1 V/div read 128.23, 127.22, 129.11, 128.19,
+129.14, 128.23, 128.24 codes with CH1 at range 0..6; CH1 at 1 V/div 127.13, 126.56, 128.04, 127.11, 128.05, 127.11,
+127.11 with CH2 at range 0..6. The other channel's coupling did not matter (129.11 / 129.14).
+
+**The classes from the relays.** 0x33 / 0x36 value v drives three pins (fpga/al3/src/zaklad.v): relayX_1 = bit 0,
+relayX_2 = ~bit 1, relayX_3 = ~bit 2. Each HFD4/3 coil is switched by an SS8550 PNP from 3V3 through 1 kOhm
+(research/notes/hack-repo-hardware-fpga.md), so a coil is on while its pin is low (inference from the PNP; the
+partition below is the same with the opposite polarity). Coils on: range 0 one, 1 none, 2 two, 3 one, 4 two, 5 one, 6
+(the zoom of 5) one: exactly the bench's three classes ({1}, {0, 3, 5, 6}, {2, 4}), each about one code apart. Which coil
+is on does not matter, only how many: the coil current (tens of mA each) on the 3V3 rail the ADCs and op-amps share
+(thread notes p66: "relay switching causes pickup and trace shift"). The AC/DC switch is a KAQY214 photo-MOSFET (an LED
+of a few mA), which fits the coupling not mattering. The table is consistent with the wizard's order: CH1's zero step
+ran with CH2 on the UI's range (class 2 on the bench: CH1 reads 128.04 with CH2 in class 2), CH2's with CH1 left at range
+5 (class 1: CH2 reads 128.2 with CH1 in class 1). `acal_xz_class` (adc_cal.c).
+
+**Own range.** The bench measured one own range (1 V/div); whether the shift depends on it is not known (the
+2026-11-07 shorted-input numbers differ per range but the other channel's range was not recorded). The wizard measures
+it per own range, so either way is covered.
+
+**Zero step.** The other channel's range relays go to range 0 (class 1, the reference) for the whole of a channel's
+step (`cal_xz_other`); its offset PWM and coupling stay. After each range's zero (`acal_range_store`) `cal_xzero`
+measures, gated at the range's centre PWM, the mean of both cores with the other channel at range 0, 1, 2 and 0 again
+(8 conversions, 60 ms settle each). `acal_xz_store`: shift of class 0 = point 1 - (2 p0 + p3) / 3, class 2 = point 2 -
+(p0 + 2 p3) / 3 (a linear drift cancels), rounded to 1/8 code; ACAL_E_CLIP, ACAL_E_DRIFT (|p3 - p0| > 0.5 code) or
+ACAL_E_XZERO (over 3.5 codes). The shift is analog, ahead of the ADC, so the gated measurement is used for both clock
+classes (inference). Cost: about 0.35 s per range, 4 s per run; 18 relay switches of the other channel per channel.
+CAL_PROBE mode 0 sets the reference too.
+
+**Storage.** Sector 708 bytes 108..127 (the free bytes after Atlan's DC shift fields; 108..119 inside its checksum):
+u16 check = zlib.crc32('X' 'Z' 1 0, the v3 block's CRC-32, the 18 table bytes) & 0xFFFF, then 24 six-bit values
+(CH1 then CH2, range 0..5, class 0 then 2, 1/8 code, -4 .. +3.875). Both channels or nothing. Every save before fw-xzero
+wrote zeros there, so an older calibration loads with no shift; a save by an older firmware clears it (as the v3 block
+of the 1.00o5 firmware); another block fails the check. Vectors: `adc_cal_xz`.
+
+**Readout.** `acal_correction_xz` adds `xz[range][class(other range)]` (1/16 code) to both cores' zeros in both classes:
+the 8-bit offsets and comp / frac, corr16 (filtered captures, the spectrum's 16-bit zero, the 16-bit trigger level),
+peak detect's full-class correction and the class probe follow it; the 0 V code T and GET_CHANNEL zero_q8 do not move.
+`fpga_channel_correction(_full)` take the other channel's `samplevoltperdiv` at each readout; the host capture snapshot
+(`pc_hw_channel.xrange`) keeps it from the arm. GET_CAL 432..459 (row 71); Diagnostics > Calibration column "Other ch"
+(0 on / 2 on per range); the report one line per channel. Host tests: test_adc_cal `test_xzero` (classes from the pins,
+the drift-cancelling store, the correction per class against acal_correction, absent table / unknown range / unbound =
+unchanged, every value through the sector table, the binding), test_session (GET_CAL per class, own range, unbound, the
+snapshot), test_ui_diag, test_diag (the report line). Bench list: firmware/AGENTS.md section 99.
