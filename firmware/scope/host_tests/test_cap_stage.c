@@ -881,6 +881,40 @@ static void test_selfcheck(void)
   T_EQ(cs_flagged(c), 0);             //at the limit
   c[2] = 9;
   T_EQ(cs_flagged(c), 0x04);
+  T_EQ(cs_busy(c), 0);
+
+  //fw-csbusy: a quiet core with 40 outliers against its partner's 0 flags as before; up to a partner count of 71 the
+  //limit stays 8, from 72 it is partner / 8
+  c[0] = 0; c[1] = 0; c[2] = 40; c[3] = 0;
+  T_EQ(cs_flagged(c), 0x04);
+  c[2] = 71 + 9; c[3] = 71;
+  T_EQ(cs_flagged(c), 0x04);           //excess 9 > 8 (71 / 8 = 8)
+  c[2] = 80 + 10; c[3] = 80;
+  T_EQ(cs_flagged(c), 0);              //excess 10 = 80 / 8
+  c[2] = 80 + 11;
+  T_EQ(cs_flagged(c), 0x04);
+  c[2] = 1024 + 129; c[3] = 1024;
+  T_EQ(cs_flagged(c), 0x04);           //the busiest partner still checked: excess 129 > 128
+  T_EQ(cs_busy(c), 0);
+
+  //The bench (2026-11-08, 24.576 MHz on CH1, 200 MSa/s): both cores near 43000, about 2 % apart: busy, not flagged
+  c[0] = 42290; c[1] = 43153; c[2] = 0; c[3] = 0;
+  T_EQ(cs_busy(c), 0x03);
+  T_EQ(cs_flagged(c), 0);
+  //... with CH2 garbled on a quiet input at the same time: CH2 still flags, CH1 still abstains
+  c[2] = 0; c[3] = 40;
+  T_EQ(cs_flagged(c), 0x08);
+  T_EQ(cs_busy(c), 0x03);
+  //Busy needs both cores over 1024: a garbled core counting thousands against a quiet partner flags
+  c[0] = 5000; c[1] = 3;
+  T_EQ(cs_busy(c), 0);
+  T_EQ(cs_flagged(c) & 0x03, 0x01);
+  //Even a large difference on a busy chip abstains (the training catches a chip-wide fault), the counters' saturation
+  c[0] = 1025; c[1] = 9000;
+  T_EQ(cs_flagged(c) & 0x03, 0);
+  c[0] = 65535; c[1] = 65535;
+  T_EQ(cs_flagged(c) & 0x03, 0);
+  T_EQ(cs_busy(c), 0x03);
 }
 
 static void test_texts(void)

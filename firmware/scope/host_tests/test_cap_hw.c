@@ -224,6 +224,56 @@ static void test_gated_capture_is_not_checked(void)
   T_EQ(c.reads, 3);
 }
 
+//fw-csbusy (bench 2026-11-08, fw 0.3.1 on 0x153F): a 3.3 V 24.576 MHz clock on CH1 at 200 MSa/s makes both CH1 cores
+//count about 43000, about 2 % apart (the cores' gain mismatch). The old absolute limit flagged most captures and the
+//guard moved CH1 3 -> 4 and stored it. Now the chip abstains: nothing flags, nothing moves, nothing is stored or
+//logged, the counts stay readable; a quiet-input garble afterwards still moves the chip after three flags
+static void test_busy_signal_is_not_flagged(void)
+{
+  pc_hw_cap c;
+  uint32_t w0;
+  int i;
+
+  boot(V_3, 0xFFFF);
+  w0 = fm.writes63;
+
+  for(i=0;i<20;i++)
+  {
+    fm.cnt[0] = (uint16_t)(42290 + 37 * i); fm.cnt[1] = 43153; fm.cnt[2] = 0; fm.cnt[3] = 0;
+    if(i & 1)
+    {
+      fm.cnt[0] = 43153; fm.cnt[1] = (uint16_t)(42290 + 37 * i);
+    }
+    now_ms += 1000;
+    fpga_capture_check();
+    fpga_capture_service();
+  }
+
+  T_EQ(fm.reg63, V_3);
+  T_EQ(fm.writes63, w0);              //no 0x63 write
+  T_EQ(ev.n, 0);
+  T_EQ(sd_writes, 0);
+  pc_hal_cap_state(&c);
+  T_EQ(c.value, V_3);
+  T_EQ(c.reads, 20);
+  T_EQ(c.flagged_n, 0);
+  T_EQ(c.flagged, 0);
+  T_EQ(c.cnt[0], 43153);              //the last capture (odd: B the lower)
+  T_TRUE(c.flags & PC_CAPF_READ);
+  T_FALSE(c.flags & (PC_CAPF_FLAGGED | PC_CAPF_REPEAT | PC_CAPF_MOVED));
+
+  //Then a quiet input with CH1 A garbled: the watch has nothing from the busy captures, the third flag moves
+  capture_ch1a_garbled();
+  capture_ch1a_garbled();
+  T_EQ(fm.reg63, V_3);
+  capture_ch1a_garbled();
+  pc_hal_cap_state(&c);
+  T_TRUE(c.flags & PC_CAPF_MOVED);
+  T_EQ(c.flagged_n, 3);
+  T_EQ(ev.n, 1); T_EQ(ev.a, 0x23);
+  T_EQ(sd_writes, 1);
+}
+
 //The bench bug: the sweep writes 0x63 = V_4 through DEBUG_FPGA while the stored (and written) value is V_3, and CH1 at
 //stage 4 garbles. No move, no store, no log, no REPEAT; the counts are still read. Back at the firmware's value
 //the earlier captures do not count: three more flags are needed
@@ -487,6 +537,7 @@ int main(void)
 {
   test_guard_acts_on_own_value();
   test_gated_capture_is_not_checked();
+  test_busy_signal_is_not_flagged();
   test_guard_ignores_foreign_value();
   test_repeat_ignores_foreign_value();
   test_stored_for_previous_bitstream();

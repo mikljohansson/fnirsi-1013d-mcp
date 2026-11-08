@@ -78,8 +78,24 @@
 // a core captured inside its transition counts alone. 0x153F: a chip stage inside a transition both buses share garbles
 // both cores alike, which this rule does not flag (the training's absolute counts and q catch it); one core's own errors
 // beside its clean stage (README section 18) still flag. cs_excess = a core's count minus its chip partner's; above
-// CS_EXCESS_LIMIT the core is flagged (Diagnostics, GET_HEALTH, event 23). Inference, not benched: a large signal near
-// 100 MHz could make the cores' counts differ by itself.
+// max(CS_EXCESS_LIMIT, partner / CS_EXCESS_DIV) the core is flagged (Diagnostics, GET_HEALTH, event 23), and a busy chip
+// (cs_busy: both cores over CS_BUSY_COUNT) is not checked at all.
+//
+// Busy signals (fw-csbusy, bench 2026-11-08, fw 0.3.1 on 0x153F, firmware/AGENTS.md section 101): the counters count
+// every word whose sample differs from the core's previous one by more than the threshold, over the whole write window.
+// On CH1 at a 3.3 V 24.576 MHz clock (x1 probe, 200 MSa/s) both cores counted about 43000 (CH1 B 43153; the stored record
+// had 7489 / 7492 of 8190 words over the rule), and the cores' gain / zero mismatch (about 2 %) alone made one exceed the
+// other by hundreds to about a thousand: 11087 of 19060 full-rate captures flagged, the guard moved CH1 3 -> 4 and stored
+// it, although the record was clean (the odd core fitted the even core's template at 2.9 codes rms, even 2.0). So the
+// limit is relative: a garbled core on a quiet input counts tens to hundreds with its partner at 0 or a few (bench
+// 2026-10-22: CH1 A4 146 outliers in 8 captures on 1 kHz), where partner / 8 is below 8 and the rule is the old one up to
+// a partner count of 71; on a signal the partner's count is what the signal moves on both cores and the mismatch is a
+// few % of it, and 1 / 8 (12.5 %) is 5x the bench's 2.3 % (1000 of 43000). Over CS_BUSY_COUNT on both cores the signal
+// itself crosses the threshold on thousands of words and a garble cannot be told from the mismatch: the chip abstains
+// (no flag, so nothing reaches the repeat watch, REPEAT, event 23 or the guard; GET_HEALTH keeps the counts, Diagnostics
+// says "too busy to check"). Residual (inference, not benched): a signal whose sample-to-sample steps cluster at the
+// threshold (a sine with 2 pi f A x 10 ns near 32 codes) turns a 2 % gain difference into a several-fold count
+// difference; below CS_BUSY_COUNT such a signal can still flag a core, as it could before.
 //
 // Runtime guard (fw 0.2.105, cs_guard; cap_hw.c): every full-rate capture (200 MSa/s, any filter, peak detect) and the
 // counter need all four cores clean, so a stage the quiet training passed but a real signal garbles cannot wait for the
@@ -127,7 +143,9 @@
                                       //(1/16 code^2 per sample; below "Noise bound"), else CS_E_RESID
 #define CS_TIE_REPS       16          //tie pass: captures per candidate stage and point
 #define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
-#define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner
+#define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner (quiet partner)
+#define CS_EXCESS_DIV     8           //fw-csbusy: ... or more than the partner's count / 8 when that is larger
+#define CS_BUSY_COUNT     1024        //fw-csbusy: a chip whose cores both count more is busy: the check abstains
 
 //Stage of core (CS_CORES order) in a 0x63 value, and the value with it replaced (one field); cs_with_chip: both fields
 //of chip ch (0 CH1, 1 CH2), as the firmware writes every value since 0x153F
@@ -200,9 +218,12 @@ typedef struct
 //other chip keeps its value in start
 int      cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t);
 
-//Self-check: per core the count minus its chip partner's (0 when below); the cores above CS_EXCESS_LIMIT as a mask
+//Self-check: per core the count minus its chip partner's (0 when below); cs_flagged: the cores whose excess is above
+//max(CS_EXCESS_LIMIT, partner / CS_EXCESS_DIV), not on a busy chip, as a mask; cs_busy: both cores of every chip whose
+//cores both count more than CS_BUSY_COUNT (the check abstains there; "Self-check" above)
 void     cs_excess(const uint16_t cnt[CS_CORES], uint16_t ex[CS_CORES]);
 uint8_t  cs_flagged(const uint16_t cnt[CS_CORES]);
+uint8_t  cs_busy(const uint16_t cnt[CS_CORES]);
 
 //In operation (fw 0.2.81): a core the self-check flags in CS_REPEAT_N captures within CS_REPEAT_MS keeps failing at its
 //trained stage (the Diagnostics Calibration verdict asks for Calibrate, event 23 once). cs_watch_add takes the flagged

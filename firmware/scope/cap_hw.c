@@ -217,6 +217,9 @@ void fpga_capture_check(void)
   hw = cap_read(cap_st.cnt);
   cap_st.reads++;
   cap_st.flags  |= PC_CAPF_READ;
+
+  //fw-csbusy (bench 2026-11-08): the limit grows with the partner's count and a busy chip abstains (cap_stage.h
+  //"Busy signals"), so a busy capture flags nothing: no flagged_n, no repeat watch, no REPEAT, no event, no guard
   cap_st.flagged = cs_flagged(cap_st.cnt);
 
   if(!cap_st.flagged)

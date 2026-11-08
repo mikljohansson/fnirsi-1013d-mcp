@@ -395,17 +395,42 @@ void cs_excess(const uint16_t cnt[CS_CORES], uint16_t ex[CS_CORES])
     ex[k] = (cnt[k] > cnt[k ^ 1]) ? (uint16_t)(cnt[k] - cnt[k ^ 1]) : 0;
 }
 
+uint8_t cs_busy(const uint16_t cnt[CS_CORES])
+{
+  uint32_t k;
+  uint8_t  m = 0;
+
+  //Both cores of the chip above CS_BUSY_COUNT: the smaller count is the signal's own
+  for(k=0;k<CS_CORES;k+=2)
+    if((cnt[k] > CS_BUSY_COUNT) && (cnt[k + 1] > CS_BUSY_COUNT))
+      m |= (uint8_t)(3u << k);
+
+  return m;
+}
+
 uint8_t cs_flagged(const uint16_t cnt[CS_CORES])
 {
   uint16_t ex[CS_CORES];
-  uint32_t k;
+  uint32_t k, lim;
   uint8_t  m = 0;
 
   cs_excess(cnt, ex);
 
   for(k=0;k<CS_CORES;k++)
-    if(ex[k] > CS_EXCESS_LIMIT)
+  {
+    //fw-csbusy: the partner's count is what the signal moves on both cores; the cores' gain mismatch makes them
+    //differ by a few % of it, so the limit grows with it, and a busy chip (cs_busy) abstains
+    if(cnt[k ^ 1] > CS_BUSY_COUNT)
+      continue;
+
+    lim = cnt[k ^ 1] / CS_EXCESS_DIV;
+
+    if(lim < CS_EXCESS_LIMIT)
+      lim = CS_EXCESS_LIMIT;
+
+    if(ex[k] > lim)
       m |= (uint8_t)(1u << k);
+  }
 
   return m;
 }

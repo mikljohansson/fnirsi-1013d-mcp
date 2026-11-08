@@ -1327,6 +1327,7 @@ static int ud_cap_line(const ud_input *in, char *p)
   const uint8_t *h = in->health + H_CAP;
   uint16_t cnt[CS_CORES], ex[CS_CORES];
   uint32_t k, n = 0;
+  uint8_t  busy;
   int colour = UD_C_SOFT;
 
   if(!(h[2] & PC_CAPF_HAS))
@@ -1356,21 +1357,32 @@ static int ud_cap_line(const ud_input *in, char *p)
     return colour;
   }
 
-  //fw 0.2.81: flagged 3 times in a minute (since the last saved training) asks for Calibrate even after a clean capture
+  for(k=0;k<CS_CORES;k++)
+    cnt[k] = (uint16_t)g16(h + 4 + 2 * k);
+
+  //fw 0.2.81: flagged 3 times in a minute (since the last saved training) asks for Calibrate even after a clean capture.
+  //fw-csbusy: a busy chip was not checked (cs_busy, from the counts), which is not "clean"
   if(!(h[2] & PC_CAPF_FLAGGED))
   {
+    busy = cs_busy(cnt);
+
+    if(busy)
+    {
+      p = s_str(p, "last capture too busy to check (");
+      p = s_str(p, (busy == 0x0F) ? "CH1, CH2" : ((busy & 0x03) ? "CH1" : "CH2"));
+      p = s_str(p, ")");
+    }
+    else
+      p = s_str(p, (h[2] & PC_CAPF_REPEAT) ? "last capture clean" : "capture clean");
+
     if(h[2] & PC_CAPF_REPEAT)
     {
-      s_str(p, "last capture clean, flagged 3 times in a minute: calibrate");
+      s_str(p, ", flagged 3 times in a minute: calibrate");
       return UD_C_WARN;
     }
 
-    s_str(p, "capture clean");
     return colour;
   }
-
-  for(k=0;k<CS_CORES;k++)
-    cnt[k] = (uint16_t)g16(h + 4 + 2 * k);
 
   cs_excess(cnt, ex);
 
