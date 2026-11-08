@@ -37,10 +37,10 @@ measurement stops within about a second.
 ![Calibration wizard, zero level](screenshot:calibration-zero)
 
 **Screen 1** measures both channels on all six ranges. The progress line reads "CH1: measuring range 3 of 6", then
-"CH1: zero level done". The step takes about 12 seconds. Each channel first trains its capture
+"CH1: zero level done". The step takes about 18 seconds. Each channel first trains its capture
 stages ("CH1: training capture stages..."), which adds about half a second. After the zero of each range the wizard
-switches the other channel's range relays three times (you hear them click): their coil current moves the zero of the
-channel being measured by about a code, and the scope corrects for it from then on, whatever range the other channel is
+switches the other channel's range relays three times at 2 MSa/s and three times at 200 MSa/s (you hear them click):
+their coil current moves the zero of the channel being measured by about a code, a different amount at each rate, and the scope corrects for it from then on, whatever range the other channel is
 on. A calibration saved by an older firmware has no such correction; run Calibrate once to add it. While a USB cable is connected, the screen
 says in amber "USB is connected: unplug it before Calibrate". **Continue** appears when both channels passed.
 

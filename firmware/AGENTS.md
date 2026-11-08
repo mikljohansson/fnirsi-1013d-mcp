@@ -4,7 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range, stored in sector 708 bytes 108..127, applied at every readout; GET_CAL 460 bytes; not benched; section 99.**
+**Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range and clock class, stored in sector 708, applied at every readout; GET_CAL 480 bytes; gated class benched (10fa8d3), per-class not benched; sections 99 and 100.**
 **Branch fw-153f (2026-11-07): fw 0.2.105, protocol 1.28 unchanged: built for FPGA 0x153F (both cores of a chip captured at one instant), the capture-stage training, tie pass and guard per chip (the stages quiet on both cores), the reference pass gone, power-on 0x06DB; the legacy EXT shift 12 at dividers 1..3 in its own last commit; not benched; section 97.**
 **Branch fw-legacy2 (2026-10-27): fw 0.2.105, protocol 1.28 unchanged: the last multi-bitstream code (capture-stage version argument, the pre-0x153A Bode reason 8 rule, the per-variant geometry fields and ring arguments, stale comments); behaviour on 0x153D unchanged; section 93.**
 **Branch fw-capmetric (2026-10-22): fw 0.2.105, protocol 1.28 (row 68): the capture-stage training parks at the carries 63.5..191.5 and keeps only the quiet stages (0 outliers and the 3-sample-median residual within 25 % + 4 of the core's best); GET_CAL 432 bytes with the last training; section 92.**
@@ -7526,3 +7526,62 @@ Save writes 708 and 709; run 30 minutes after power-on)**
 Regression signs: a cell moving by about 1 code with the other channel's range after step 2 (a class wrong: check 434
 against the range), a whole row off by the same amount (the reference: the zeros were not taken at one coil on), the
 wizard failing "zero still moving" on the shift points (raise CAL_XZ_SETTLE_MS), ACAL_E_XZERO on a healthy unit.
+
+## 100. fw-xzero2: the other channel's shift per clock class; the full-class zero offset (protocol 1.29 extended, GET_CAL 480)
+
+Branch `fw-xzero` fast-forwarded to main 10fa8d3; commits 10026da (firmware), 97b9fb2 (mcp), then the docs. Brief (coordinator, 2026-11-08, bench of 10fa8d3 after an 11:40 wizard):
+the gated class passes (every 1 MSa/s cell within 0.24 code of 128 at ranges 2 and 5, both channels); at 200 MSa/s and
+with CIC2 the two-coil shift is about half the gated one (CH2 r2 with CH1 at 2 / 4: 127.48 / 127.43, overcorrected) and
+no coil reads +0.1..0.2; CH1 at 200 MSa/s sits flat at about +0.36 whatever CH2 does. **Nothing benched, nothing flashed.**
+
+**(1) Per clock class.** `acal_channel.xz[class][range][relay class]`; `cal_xzero` measures the four points gated (8
+conversions) and then at 200 MSa/s (64, the PWM ripple; ACAL_E_TIMING on a garbled capture), `acal_xz_store(.., cls)`;
+`acal_correction_xz` adds the readout's class to the 8-bit offsets and the full class to corr16 (`acal_corr.xzf16`), so
+the filtered paths, the 16-bit trigger level and peak detect take the full value. Cost: about 0.85 s per range, 10 s per
+wizard run (6 s more than 10fa8d3), 36 relay switches of the other channel per channel. Storage: the full table's 18 bytes
+in sector 708 bytes 4..15, 44..47, 76..77 (free: before Atlan's checksummed area and the unused input_calibration[7]
+slots); the check (108..109) becomes version 2 over both tables; a version 1 save (the 11:40 calibration) still loads,
+the full class a copy of the gated table as 10fa8d3 applied it (xz_valid ACAL_XZ_V_GATED only, GET_CAL 432 bit 2 clear):
+**run the wizard again to get the full class**. GET_CAL 480 bytes: 432 bit 2 full class measured, 438 i16 the full
+class's shift now, 460..477 the full table. Protocol stays 1.29 (unreleased): the layout is extended in place, not in the
+reserved bytes (they were 5), and the vector `resp_get_cal_1_29` was regenerated at 480 bytes; mcp reads both lengths
+(460 = one table in both classes). Diagnostics' "Other ch" column keeps the gated table; the report lists both.
+
+**(2) The flat full-class offset (CH1 +0.36 at 200 MSa/s).** Checked against the conditions the readout sees:
+- Other channel: at range 0 (the reference) during the whole zero step, so the stored zeros are the reference class's;
+  the readout adds the table for the other channel's class. Matches.
+- Capture stage: the channel's chip is trained first and its zeros are taken with that stage; the other chip's field
+  does not touch this chip. Matches.
+- Tracker d / e: half to each core with opposite signs, the mean of the cores unchanged. Not a common offset.
+- **Tracker cm (the class probe)**: a real mismatch in 10fa8d3, fixed by (1): the probe compares the live full and gated
+  means corrected with the same xz in both classes, so with the other channel on a class-0 or class-2 range it learnt the
+  full-vs-gated difference of the shift and then subtracted it from the full class at every other-channel state (a flat
+  offset). It cannot be CH1's +0.36, though: CH1's 200 MSa/s cells do not move with CH2's range (128.29..128.42, a
+  spread of 0.13), so CH1's full and gated shifts agree and the probe would have learnt about 0 from them. Ask: GET_CAL CH1
+  280 `cm_q8` and 282 `cm_probes`. If cm is about -0.36 x 256 = -92, it is the probe (look for what it saw); if cm is 0
+  (it runs only in UI RUN on a quiet input, never during host singles), the offset is in the stored full zero.
+- Remaining, not found in the code: the zero step takes the full-rate zero 30 ms after switching the encodes from the
+  gated rate (2 MSa/s, about 0.3 s per range) and the capture-stage training is the only long full-rate stretch; the
+  readout at 200 MSa/s sees the ADC after seconds to minutes at full rate. If the AD9288's zero moves with its encode
+  rate over time (README 6.5: both cores rose 0.7-0.8 code in two hours against the gated class; 2026-11-07: full rate
+  +0.65 code high on both channels), the stored full zero is low by that. Inference only; not changed without data.
+  Bench check, about 5 minutes: CH1 range 2, inputs open, Filter Off, 1 MSa/s in RUN for a minute, then 200 MSa/s and a
+  host capture every second for 120 s (mean corrected code per capture), then the same after 10 minutes at 200 MSa/s.
+  A mean that starts near 128 and climbs to +0.36 is the settling (fix: the wizard measures the full class after a
+  dwell at full rate, or the class probe tracks it); a constant +0.36 from the first capture is not, then send
+  CAL_PROBE mode 0 CH1 range 2 (it repeats the zero step's points) next to that capture.
+
+**Checks**: `make gcc10`, `make`, `make PC_DEBUG=1 BUILD=build-dbg` without warnings; `make -C host_tests test` green
+(test_adc_cal 69624, test_session 73366, test_diag 494, check_vectors 169 with both tables against acal_xz_pack);
+mcp pytest and ruff (CI selection) clean.
+
+**Bench (coordinator / owner; FEL load of `make gcc10`, FPGA 0x153F, backup 700-710 first, 30 minutes warm)**
+1. Before the wizard (the 11:40 calibration): GET_CAL 480 bytes, 432 = 3 (no bit 2), 460.. = the gated table: readings
+   as on 10fa8d3.
+2. Wizard, probes and USB unplugged: zero step about 18 s, six clicks of the other channel per range; Save.
+3. GET_CAL: 432 = 7, 460..477 the full table: expect CH2 range 2 class 2 about +10 (half of the gated +20), class 0
+   about -10; record all ranges for both channels; 438 follows the other channel's range, 436 = 438 at divider 0.
+4. The table of 11:4x again: 1 MSa/s, 200 MSa/s, CIC2 at 1 MSa/s, ranges 2 and 5, both channels, the other channel at
+   0..6. Pass: every cell within 0.3 code of 128 in both classes, except CH1's flat full-class offset if (2) is the
+   settling (then the cells' spread within a row within 0.3 code, and the check above).
+5. The (2) check above, with GET_CAL 280..287 read before it.

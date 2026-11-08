@@ -2698,3 +2698,14 @@ peak detect's full-class correction and the class probe follow it; the 0 V code 
 the drift-cancelling store, the correction per class against acal_correction, absent table / unknown range / unbound =
 unchanged, every value through the sector table, the binding), test_session (GET_CAL per class, own range, unbound, the
 snapshot), test_ui_diag, test_diag (the report line). Bench list: firmware/AGENTS.md section 99.
+
+**Per clock class (fw-xzero2, bench 2026-11-08 11:4x).** The first build (10fa8d3) measured the shift gated and applied it
+in both classes: the gated rates passed (every cell within 0.24 code), but at 200 MSa/s and with a filter the two-coil
+shift is about half the gated one (CH2 range 2: about 0.5 code overcorrected). Now `cal_xzero` measures the same four
+points again at 200 MSa/s (64 conversions each) and the readout takes the table of its clock class (corr16 the full
+one). Zero step about 0.85 s per range, 10 s per run. Storage: the full table's 18 bytes in sector 708 bytes 4..15,
+44..47, 76..77, the check over both (version 2); a version 1 table loads with the full class a copy of the gated one.
+GET_CAL 480 bytes (438 the full class's shift now, 460..477 the full table, 432 bit 2). The flat full-class offset seen
+on CH1 (+0.36 code at 200 MSa/s whatever CH2 does) is not explained by the zero step's conditions in the code (the
+other channel's reference, the stage, the tracker); firmware/AGENTS.md section 100 has the analysis and the bench check
+that tells a settling of the full-rate zero from a constant offset.
