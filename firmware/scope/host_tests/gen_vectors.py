@@ -395,6 +395,48 @@ def adc_cal_v3_section():
     }
 
 
+# fw-xzero (protocol 1.29, row 71): the other channel's relays, sector 708 bytes 108..127, bound to the v3 block above.
+# Example = host_tests/test_adc_cal.c xz_example(): CH1 class 0 -16 - 2 r, class 2 14 + 2 r; CH2 class 0 2 r - 64, class 2
+# 62 - 2 r (1/16 code, even: stored in 1/8 code)
+def adc_cal_xz_example():
+    return [[[-16 - 2 * r, 0, 14 + 2 * r] for r in range(6)], [[2 * r - 64, 0, 62 - 2 * r] for r in range(6)]]
+
+
+def adc_cal_xz_pack(xz, block):
+    bits = 0
+    i = 0
+    for ch in xz:
+        for row in ch:
+            for v in (row[0], row[2]):
+                assert v % 2 == 0 and -64 <= v <= 62
+                bits |= ((v // 2) & 0x3F) << (6 * i)
+                i += 1
+    tab = bits.to_bytes(18, "little")
+    check = zlib.crc32(b"XZ\x01\x00" + block[-4:] + tab) & 0xFFFF
+    return struct.pack("<H", check) + tab
+
+
+def adc_cal_xz_section():
+    blk = adc_cal_v3_pack([adc_cal_v3_channel(), adc_cal_v3_channel(True)])
+    xz = adc_cal_xz_example()
+    tab = adc_cal_xz_pack(xz, blk)
+    assert len(tab) == 20
+    return {
+        "notes": "fw-xzero (protocol 1.29, row 71): the zero shift of each channel for the other channel's range relays, "
+                 "sector 708 bytes 108..127 (after Atlan's DC shift fields; 108..119 inside its checksum of 16..119), "
+                 "written with the v3 block of section adc_cal_v3 (block_hex there). u16 check = zlib.crc32('X' 'Z' "
+                 "version 1, 0, the v3 block's last 4 bytes (its CRC-32), the 18 table bytes) & 0xFFFF; then 24 values "
+                 "of 6 bits, least significant bit first: for CH1 then CH2, range 0..5, class 0 then class 2 (class = "
+                 "the other channel's range relay coils on: range 0 1, 1 0, 2 2, 3 1, 4 2, 5 1, 6 1; class 1 is the "
+                 "reference the zeros were measured with, shift 0), two's complement in 1/8 code (-4 .. +3.875). The "
+                 "shift is added to both cores' zeros of the channel's range in both clock classes. All 20 bytes zero = "
+                 "no table (an older save); a check mismatch (another block) = no table. xz: [channel][range][class] in "
+                 "1/16 code as GET_CAL 440..457 report it.",
+        "xz": xz,
+        "table_hex": tab.hex(),
+    }
+
+
 # fw 0.2.52 (protocol 1.16, row 55): the three new stored layouts, packed here with struct and checked against the C
 # packers (test_diag --layouts) by check_vectors.py. Same inputs as host_tests/test_diag.c layout_*().
 def diag_layouts_section():
@@ -855,6 +897,24 @@ def build():
         "(the 2026-10-22 sweep's CH2 q16 x 34)",
         [decoded(CMDS["GET_CAL"], 98, cb, flags=FLAG_RESPONSE)])
 
+    # 5k. Protocol 1.29 (fw-xzero, section 14 row 71): GET_CAL 460 bytes, 432..459 the other channel's relays: 432 u8
+    # flags (bit 0 the channel has a table, bit 1 applied now: the block bound), 433 u8 the other channel's range, 434 u8
+    # its class (coils on 0..2), 435 0, 436 i16 the shift applied now (1/16 code), 438 u16 0, 440 i8[range 6][class 3]
+    # the table (1/16 code), 458 u16 0. The example: CH2's answer with CH1 at range 1 (no coil on), CH2 at range 3
+    cb = bytearray(460)
+    cb[0] = 1
+    cb[432:436] = bytes([0x03, 1, 0, 0])
+    xz = adc_cal_xz_example()[1]
+    cb[436:438] = struct.pack("<h", xz[3][0])
+    cb[440:458] = struct.pack("<18b", *[v for row in xz for v in row])
+    cb = bytes(cb)
+    f = frame(CMDS["GET_CAL"], 99, cb, flags=FLAG_RESPONSE)
+    add("resp_get_cal_1_29", f, [],
+        "1.29 GET_CAL response (460 bytes; 0..431 zero here but byte 0 channel 1): 432 flags 0x03 (table, applied), 433 "
+        "CH1 at range 1, 434 class 0 (no coil on), 436 the shift applied -58 (CH2 range 3, class 0: -3.625 codes), 440 "
+        "the table of adc_cal_xz's CH2 example ([range][class 0, 1, 2]: -64 0 62, -62 0 60, ..)",
+        [decoded(CMDS["GET_CAL"], 99, cb, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")
@@ -893,6 +953,7 @@ def build():
             "cases": decim_cases(),
         },
         "adc_cal_v3": adc_cal_v3_section(),
+        "adc_cal_xz": adc_cal_xz_section(),
         "diag_layouts": diag_layouts_section(),
         "decim_peak": {
             "notes": "1.26 peak detect (FPGA 0x153C, fw-c6), checked against pc_decim.c by decim_check --peak / --peak-corr. "

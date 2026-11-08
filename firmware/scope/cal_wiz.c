@@ -329,6 +329,7 @@ const char *cw_reason_text(int rc)
     case ACAL_E_GAIN_CLASS: return "the gain differs between sample rates";
     case ACAL_E_TIMING:     return "ADC capture timing: the 200 MSa/s data stays garbled";
     case ACAL_E_READOUT:    return "ADC readout fault near code 128: power-cycle and retry; report it if it persists";
+    case ACAL_E_XZERO:      return "the other channel's range moves the zero by over 3.5 codes";
     case CW_RC_CANCELLED:   return "cancelled";
     default:                return "measurement failed";
   }

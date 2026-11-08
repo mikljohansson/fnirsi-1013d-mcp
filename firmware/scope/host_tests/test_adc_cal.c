@@ -1289,10 +1289,246 @@ static void test_readout_fault(void)
 #undef LEVEL
 }
 
+//fw-xzero: the other channel's relays. The classes from the relay pins, the zero step's arithmetic, the sector 708 table
+//and the correction with the shift for each class
+static void test_xzero(void)
+{
+  static const uint8_t coils[7] = { 1, 0, 2, 1, 2, 1, 1 };    //coils on per range (6 = the zoom of 5)
+  uint16_t pwm[7] = { 904, 900, 908, 903, 908, 903, 903 };
+  uint8_t  blk[ACAL_BLOCK_BYTES], tab[ACAL_XZ_BYTES], t2[ACAL_XZ_BYTES];
+  acal_channel ch[2], out[2], c;
+  acal_corr k0, k;
+  int32_t  m16[4], v, r, j, cls, dco;
+  uint32_t i;
+
+  //Classes: the bench's partition (2026-11-08: range 1 alone -1 code, ranges 2 and 4 +1, 0 / 3 / 5 / 6 as the
+  //calibration) from the pins relayX_1 = bit 0, relayX_2 = ~bit 1, relayX_3 = ~bit 2, a coil on while its pin is low
+  for(r=0;r<7;r++)
+  {
+    uint32_t pins = ((uint32_t)r & 1) | ((~(uint32_t)r & 2)) | ((~(uint32_t)r & 4));   //pin levels, bit i = relayX_(i+1)
+    uint32_t n = 0;
+
+    if(r == 6)
+      pins = (5 & 1) | (~5u & 2) | (~5u & 4);
+    for(i=0;i<3;i++)
+      n += !(pins & (1u << i));
+    T_EQ(acal_xz_class((uint8_t)r), coils[r]);
+    T_EQ(n, coils[r]);
+  }
+  T_EQ(acal_xz_class(200), 1);
+  for(cls=0;cls<ACAL_XZ_CLASSES;cls++)
+    T_EQ(acal_xz_class(acal_xz_range((uint8_t)cls)), cls);
+  T_EQ(acal_xz_range(ACAL_XZ_REF), 0);
+
+  //The zero step: a linear drift cancels (reference at the ends, the classes at a third and two thirds), the result
+  //in 1/8 code
+  unit_ch1(&c, pwm);
+  for(v=-36;v<=36;v+=6)                                       //drift over the four points (1/16 code), thirds exact
+  {
+    m16[0] = 2048;
+    m16[1] = 2048 + v / 3 - 16;                                 //class 0: -1 code
+    m16[2] = 2048 + 2 * v / 3 + 15;                             //class 2: +0.94 code
+    m16[3] = 2048 + v;
+    if(iabs_t(v) > ACAL_MAX_DRIFT16)
+    {
+      T_EQ(acal_xz_store(m16, 0, &c, 3), ACAL_E_DRIFT);
+      continue;
+    }
+    T_EQ(acal_xz_store(m16, 0, &c, 3), ACAL_OK);
+    T_EQ(c.xz[3][0], -16); T_EQ(c.xz[3][1], 0);
+    T_TRUE((c.xz[3][2] == 14) || (c.xz[3][2] == 16));           //15 rounds to an even sixteenth
+    T_EQ(c.xz[3][2] % 2, 0);
+  }
+  m16[0] = m16[3] = 2048; m16[1] = 2048 - 56; m16[2] = 2048 + 56;
+  T_EQ(acal_xz_store(m16, 0, &c, 2), ACAL_OK);                 //3.5 codes: the limit
+  T_EQ(c.xz[2][0], -56); T_EQ(c.xz[2][2], 56);
+  m16[2] = 2048 + 59;                                          //3.69 codes: over it, c unchanged
+  T_EQ(acal_xz_store(m16, 0, &c, 2), ACAL_E_XZERO);
+  T_EQ(c.xz[2][2], 56);
+  m16[2] = 2048;
+  T_EQ(acal_xz_store(m16, 3, &c, 2), ACAL_E_CLIP);
+  T_EQ(acal_xz_store(m16, 0, &c, ACAL_RANGES), ACAL_E_XZERO);
+  T_TRUE(strlen(acal_reason_text(ACAL_E_XZERO)) <= 21);
+
+  //The correction: the shift moves both cores' zeros in both classes; 0 V stays at T. No table, no known range, an
+  //unbound block: exactly acal_correction
+  unit_ch1(&c, pwm);
+  for(r=0;r<ACAL_RANGES;r++)
+  {
+    c.xz[r][0] = (int8_t)(-16 - 2 * r);
+    c.xz[r][2] = (int8_t)(14 + 2 * r);
+  }
+  for(cls=0;cls<2;cls++)
+    for(dco=-300;dco<=300;dco+=150)
+      for(r=0;r<7;r++)
+      {
+        acal_correction(&c, pwm, (uint8_t)r, cls ? 99 : 0, (int16_t)dco, 385, -2, 2, &k0);
+
+        //xz_valid clear: no change for any other range
+        for(j=0;j<7;j++)
+        {
+          acal_correction_xz(&c, pwm, (uint8_t)r, cls ? 99 : 0, (int16_t)dco, 385, -2, 2, (uint8_t)j, &k);
+          T_EQ(k.xz16, 0); T_EQ(k.off_a, k0.off_a); T_EQ(k.off_b, k0.off_b); T_EQ(k.corr16, k0.corr16);
+          T_EQ(k.xcls, coils[j]);
+        }
+
+        c.xz_valid = 1;
+        acal_correction_xz(&c, pwm, (uint8_t)r, cls ? 99 : 0, (int16_t)dco, 385, -2, 2, ACAL_XZ_NONE, &k);
+        T_EQ(k.xz16, 0); T_EQ(k.off_a, k0.off_a); T_EQ(k.corr16, k0.corr16); T_EQ(k.xcls, ACAL_XZ_NONE);
+
+        for(j=0;j<7;j++)
+        {
+          int32_t s = c.xz[(r > 5) ? 5 : r][coils[j]];
+          int32_t ka = 16 * k0.comp_a + k0.frac_a, kb = 16 * k0.comp_b + k0.frac_b;
+
+          acal_correction_xz(&c, pwm, (uint8_t)r, cls ? 99 : 0, (int16_t)dco, 385, -2, 2, (uint8_t)j, &k);
+          T_EQ(k.xz16, s);
+          //the correction at 0 V moves by -s per core; offsets by -gain x s / 16 (rounded); corr16 by -gain16 x s
+          T_EQ(16 * k.comp_a + k.frac_a, ka - s);
+          T_EQ(16 * k.comp_b + k.frac_b, kb - s);
+          T_TRUE(iabs_t((int32_t)(k.off_a - k0.off_a) + (int32_t)(((int64_t)k.gain_a * s) / 16)) <= 1);
+          T_TRUE(iabs_t((int32_t)(k.off_b - k0.off_b) + (int32_t)(((int64_t)k.gain_b * s) / 16)) <= 1);
+          T_TRUE(iabs_t(k.corr16 - k0.corr16 + (int32_t)(((int64_t)k.gain16 * s + 32768) >> 16)) <= 1);
+          T_EQ(k.zero_q8, k0.zero_q8); T_EQ(k.gain_a, k0.gain_a); T_EQ(k.gain16, k0.gain16);
+          if(coils[j] == ACAL_XZ_REF)
+          {
+            T_EQ(k.off_a, k0.off_a); T_EQ(k.corr16, k0.corr16);
+          }
+        }
+
+        pwm[1]++;                                               //not bound: 1.00o5, no shift
+        acal_correction_xz(&c, pwm, (uint8_t)r, cls ? 99 : 0, (int16_t)dco, 385, -2, 2, 1, &k);
+        T_EQ(k.version, 1); T_EQ(k.xz16, 0); T_EQ(k.off_a, -2 * 65536);
+        pwm[1]--;
+        c.xz_valid = 0;
+      }
+
+  //A raw mean shifted by the other channel's relays reads T again once the shift is applied (the readout loop)
+  c.xz_valid = 1;
+  for(j=0;j<3;j++)
+  {
+    uint32_t lfsr = 7;
+    int64_t  sum = 0;
+    int32_t  n, z16, raw16;
+
+    acal_correction_xz(&c, pwm, 2, 99, 0, 385, -2, 2, acal_xz_range((uint8_t)j), &k);
+    //core A at its 0 V: the stored zero plus the shift, raw codes dithered around it
+    z16 = c.zero[ACAL_GATED][0][2] + c.xz[2][j];
+    for(n=0;n<16000;n++)
+    {
+      raw16 = z16 + (int32_t)(rnd() % 33) - 16;
+      sum += loop_code((raw16 + (int32_t)(rnd() % 16)) / 16, &k, 0, &lfsr);
+    }
+    T_TRUE(iabs_t((int32_t)(sum * 16 / 16000) - 2048) <= 3);
+  }
+
+  //Sector 708 bytes 108..127: inside the free bytes, after Atlan's DC shift fields (ends at 108), before the block
+  T_EQ(ACAL_XZ_OFFSET, 108);
+  T_TRUE(ACAL_XZ_OFFSET + ACAL_XZ_BYTES <= ACAL_SECTOR_OFFSET);
+  example_channels(ch);
+  acal_pack(ch, blk);
+  memset(tab, 0xEE, sizeof(tab));
+  acal_xz_pack(ch, blk, tab);                                  //no table: zeros, nothing loads from them
+  for(i=0;i<ACAL_XZ_BYTES;i++)
+    T_EQ(tab[i], 0);
+  memset(out, 0, sizeof(out));
+  out[0].xz_valid = out[1].xz_valid = 1; out[0].xz[1][0] = 5;
+  T_EQ(acal_xz_unpack(tab, blk, out), 0);
+  T_EQ(out[0].xz_valid, 0); T_EQ(out[1].xz_valid, 0); T_EQ(out[0].xz[1][0], 0);
+
+  //every representable value round-trips, both channels, every range and class
+  for(v=-64;v<=62;v+=2)
+  {
+    for(i=0;i<2;i++)
+    {
+      for(r=0;r<ACAL_RANGES;r++)
+      {
+        ch[i].xz[r][0] = (int8_t)((v + 2 * r + 34 * (int32_t)i + 64) % 128 - 64);
+        ch[i].xz[r][1] = 0;
+        ch[i].xz[r][2] = (int8_t)((v - 6 * r + 64 + 128) % 128 - 64);
+      }
+      ch[i].xz_valid = 1;
+    }
+    acal_xz_pack(ch, blk, tab);
+    memcpy(out, ch, sizeof(out));
+    for(i=0;i<2;i++) { memset(out[i].xz, 0x55, sizeof(out[i].xz)); out[i].xz_valid = 0; }
+    T_EQ(acal_xz_unpack(tab, blk, out), 1);
+    T_MEM(&out[0], &ch[0], sizeof(acal_channel));
+    T_MEM(&out[1], &ch[1], sizeof(acal_channel));
+  }
+
+  //one channel without a table (a failed zero step never saves, but the pair is all or nothing): zeros
+  ch[1].xz_valid = 0;
+  acal_xz_pack(ch, blk, t2);
+  for(i=0;i<ACAL_XZ_BYTES;i++)
+    T_EQ(t2[i], 0);
+  ch[1].xz_valid = 1;
+
+  //bound to its block: another calibration's block (the CRC differs) or a flipped bit fails the check
+  acal_xz_pack(ch, blk, tab);
+  T_EQ(acal_xz_unpack(tab, blk, out), 1);
+  ch[0].zero[ACAL_GATED][0][2]++;
+  {
+    uint8_t blk2[ACAL_BLOCK_BYTES];
+
+    acal_pack(ch, blk2);
+    T_EQ(acal_xz_unpack(tab, blk2, out), 0);
+    T_EQ(out[0].xz_valid, 0);
+  }
+  ch[0].zero[ACAL_GATED][0][2]--;
+  for(i=0;i<ACAL_XZ_BYTES*8;i++)
+  {
+    memcpy(t2, tab, sizeof(t2));
+    t2[i / 8] ^= (uint8_t)(1u << (i % 8));
+    T_EQ(acal_xz_unpack(t2, blk, out), 0);
+  }
+
+  //acal_unpack clears the table (it is not in the block); acal_xz_unpack after it sets it
+  memset(out, 0, sizeof(out));
+  out[0].xz_valid = 1; out[1].xz[4][2] = 9;
+  T_EQ(acal_unpack(blk, out), ACAL_OK);
+  T_EQ(out[0].xz_valid, 0); T_EQ(out[1].xz[4][2], 0);
+  T_EQ(acal_xz_unpack(tab, blk, out), 1);
+  T_MEM(&out[0], &ch[0], sizeof(acal_channel));
+}
+
+//--xz: the vectors file's adc_cal_xz table (gen_vectors.py adc_cal_xz_section: example_channels with xz_example) as hex
+static void xz_example(acal_channel ch[2])
+{
+  uint32_t r;
+
+  for(r=0;r<ACAL_RANGES;r++)
+  {
+    ch[0].xz[r][0] = (int8_t)(-16 - 2 * (int32_t)r); ch[0].xz[r][1] = 0; ch[0].xz[r][2] = (int8_t)(14 + 2 * r);
+    ch[1].xz[r][0] = (int8_t)(2 * (int32_t)r - 64); ch[1].xz[r][1] = 0; ch[1].xz[r][2] = (int8_t)(62 - 2 * (int32_t)r);
+  }
+
+  ch[0].xz_valid = ch[1].xz_valid = 1;
+}
+
+static int pack_xz_example(void)
+{
+  acal_channel ch[2];
+  uint8_t blk[ACAL_BLOCK_BYTES], tab[ACAL_XZ_BYTES];
+  uint32_t i;
+
+  example_channels(ch);
+  xz_example(ch);
+  acal_pack(ch, blk);
+  acal_xz_pack(ch, blk, tab);
+
+  for(i=0;i<ACAL_XZ_BYTES;i++)
+    printf("%02x", tab[i]);
+  printf("\n");
+  return 0;
+}
+
 int main(int argc, char **argv)
 {
   if((argc > 1) && !strcmp(argv[1], "--pack"))
     return pack_example();
+  if((argc > 1) && !strcmp(argv[1], "--xz"))
+    return pack_xz_example();
 
   test_crc_and_block();
   test_round_pair();
@@ -1305,5 +1541,6 @@ int main(int argc, char **argv)
   test_trigger_level16();
   test_points();
   test_readout_fault();
+  test_xzero();
   return t_report("test_adc_cal");
 }

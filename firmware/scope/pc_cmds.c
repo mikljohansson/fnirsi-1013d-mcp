@@ -500,8 +500,8 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
 //tracking folded in exactly as the readout does it (acal_v4_apply; protocol row 54)
 static void pc_channel_corr(const pc_hw_channel *c, acal_corr *k)
 {
-  acal_correction(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset, c->dc_shift_value,
-                  c->adc_a_comp, c->adc_b_comp, k);
+  acal_correction_xz(c->cal2_loaded ? &c->cal2 : 0, c->cal_offset, c->range, c->divider, c->dcoffset,
+                     c->dc_shift_value, c->adc_a_comp, c->adc_b_comp, c->xrange, k);
   acal_v4_apply(&c->trk, &c->cm, k);
 }
 
@@ -2738,6 +2738,25 @@ void pc_cal_body(int ch, uint8_t *resp)
         pc_put_u32(resp + 368 + 16 * k + 4 * s, ct.q[k][s]);
         pc_put_u32(resp + 400 + 16 * k + 4 * s, ct.sum[k][s]);
       }
+  }
+
+  //1.29 (fw-xzero, row 71): the other channel's relays (adc_cal.h): 432 flags (bit 0 the channel has a table, bit 1 it
+  //is applied now: bound block, table, a non-zero shift or not), 433 the other channel's range now, 434 its class (coils on
+  //0..2), 435 0, 436 i16 the shift applied now (1/16 code, both cores, also in 74..111), 438 u16 0, 440 i8[range 6][class
+  //3] the table (1/16 code; [ACAL_XZ_REF] 0), 458 u16 0
+  {
+    uint32_t r, j;
+    uint8_t  has = (uint8_t)(c.cal2_loaded && c.cal2.xz_valid);
+
+    resp[432] = (uint8_t)((has ? 1 : 0) | ((has && bound) ? 2 : 0));
+    resp[433] = c.xrange;
+    resp[434] = acal_xz_class(c.xrange);
+    pc_put_u16(resp + 436, (uint16_t)k.xz16);
+
+    if(has)
+      for(r=0;r<ACAL_RANGES;r++)
+        for(j=0;j<ACAL_XZ_CLASSES;j++)
+          resp[440 + ACAL_XZ_CLASSES * r + j] = (uint8_t)c.cal2.xz[r][j];
   }
 }
 

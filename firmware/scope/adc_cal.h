@@ -41,6 +41,7 @@
 #define ACAL_CLASSES         2            //clock classes in this version
 #define ACAL_FULL            0            //ADCs at full rate: legacy divider 0, every filtered capture
 #define ACAL_GATED           1            //legacy divider >= 1 (encode clock gated by the FPGA)
+#define ACAL_XZ_CLASSES      3            //fw-xzero: the other channel's range relay coils on: 0, 1, 2 (acal_xz_class)
 
 #define ACAL_SECTOR_OFFSET   128          //byte offset of the block in sector 708
 #define ACAL_MAGIC           0x4C414341u  //"ACAL" little-endian
@@ -72,6 +73,12 @@ typedef struct
   uint8_t  gain_range;                              //hardware range the gains were measured on, ACAL_GAIN_NONE
   uint8_t  gain_flags;                              //ACAL_GAIN_KEPT
   uint16_t gain_lever;                              //gated span between the post levels, mean of both cores, 1/16 code
+  //fw-xzero (not in the v3 block: sector 708 bytes 108..127, acal_xz_pack): the shift of this channel's raw zero, both
+  //cores and both clock classes, while the other channel's range relays are in class k (acal_xz_class), against the
+  //zeros above (measured with the other channel in ACAL_XZ_REF, so xz[r][ACAL_XZ_REF] = 0). 1/16 code, a multiple of 2
+  //(stored in 1/8 code). Used only while xz_valid
+  int8_t   xz[ACAL_RANGES][ACAL_XZ_CLASSES];
+  uint8_t  xz_valid;
 } acal_channel;
 
 //Sector block: the two channels <-> ACAL_BLOCK_BYTES bytes (little-endian, CRC-32/ISO-HDLC = zlib.crc32 over all but the
@@ -116,6 +123,32 @@ int      acal_prov_unpack(const uint8_t *in, acal_prov *p);                 //AC
 //The parts that differ between two blocks' channels (ACAL_PROV_* bits), 0 = same calibration
 uint8_t  acal_prov_what(const acal_channel old[2], const acal_channel cur[2]);
 
+//fw-xzero: the other channel's relays (bench 2026-11-08 10:20, the owner's unit, inputs open, 1 MSa/s): a channel's zero
+//moves by about -1 / 0 / +1 code with the OTHER channel's range, in three classes, its coupling does not matter. The
+//classes are the number of the other channel's range relay coils that are on. 0x33 / 0x36 value v drives the pins
+//relayX_1 = v bit 0, relayX_2 = ~bit 1, relayX_3 = ~bit 2 (fpga/al3/src/zaklad.v); each HFD4 coil is switched by an
+//SS8550 PNP from 3V3, on while its pin is low (research/notes/hack-repo-hardware-fpga.md; the polarity is an inference,
+//the partition is the same either way). Coils on per range: 0 one, 1 none, 2 two, 3 one, 4 two, 5 one (6 = 5). The coil
+//current (tens of mA each) shares the 3V3 rail with the ADCs and op-amps (thread notes p66: relay switching shifts the
+//trace); the AC/DC switch is a KAQY214 photo-MOSFET (an LED, a few mA), which fits the coupling not mattering
+#define ACAL_XZ_REF          1            //the class the zero step measures the zeros in
+#define ACAL_XZ_NONE         0xFF         //acal_correction_xz: the other channel's range not known, no shift
+#define ACAL_XZ_OFFSET       108          //sector 708: 20 free bytes after Atlan's DC shift fields (108..119 inside its
+                                          //checksum of 16..119, 120..127 outside), zero in every save before fw-xzero
+#define ACAL_XZ_BYTES        20           //u16 check, then 24 six-bit values: [ch][range][class 0, class 2], 1/8 code
+#define ACAL_XZ_VERSION      1            //in the check's input, so another layout fails the check
+#define ACAL_XZ_MAX16        (56)         //|shift| <= 3.5 codes (the six-bit field holds -4 .. +3.875)
+
+uint8_t  acal_xz_class(uint8_t range);    //range 0..6 (the other channel's samplevoltperdiv) -> 0..2
+uint8_t  acal_xz_range(uint8_t cls);      //the range the zero step sets the other channel to for class cls: 1, 0, 2
+
+//The table of both channels after the v3 block (block = the packed ACAL_BLOCK_BYTES, its CRC binds the table to it) into
+//ACAL_XZ_BYTES at out; zeros unless both channels have xz_valid
+void     acal_xz_pack(const acal_channel ch[2], const uint8_t *block, uint8_t *out);
+//The table from in for the block it was saved with: 1 and both channels' xz / xz_valid set, else 0 and both cleared (an
+//older save: zeros; another block: the check fails)
+int      acal_xz_unpack(const uint8_t *in, const uint8_t *block, acal_channel ch[2]);
+
 //1 when c was measured at exactly these PWM centres (cal_offset[0..5])
 int      acal_bound(const acal_channel *c, const uint16_t *cal_offset);
 
@@ -141,6 +174,8 @@ typedef struct
   int32_t  shift;                         //dcoffset x 100 / dc_shift_value (C division), added for the measurements
   int32_t  zero_q8;                       //trace code of 0 V x 256 (mean of both corrected cores)
   int32_t  corr16;                        //16-bit path (ADCs at full rate): added to every converted sample, 1/16 code
+  int16_t  xz16;                          //fw-xzero: the shift added to both cores' zeros for the other channel's relays
+  uint8_t  xcls;                          //their class (acal_xz_class), ACAL_XZ_NONE when not known
 } acal_corr;
 
 //Dither for the 8-bit loop: xorshift32 step (three register instructions on ARM, no constants to load; state never 0).
@@ -151,6 +186,12 @@ typedef struct
 //value of the capture (legacy clock class)
 void     acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
                          int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out);
+//fw-xzero: the same with the other channel's range xrange (0..6, ACAL_XZ_NONE = not known): with a bound block and its
+//table, c->xz[range][class(xrange)] is added to both cores' zeros in both classes (8-bit offsets, comp / frac, corr16), so
+//0 V stays at T whatever the other channel's relays. acal_correction = xrange ACAL_XZ_NONE
+void     acal_correction_xz(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
+                            int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, uint8_t xrange,
+                            acal_corr *out);
 
 //Rail-rule limits from gain_a/b and off_a/b: clip_lo = the larger of the two cores' codes for raw 0, clip_hi = the
 //smaller of their codes for raw 255 (acal_correction, and acal_track_apply after it moves the gains and offsets)
@@ -287,6 +328,14 @@ uint32_t acal_probe_pack(uint8_t *dst, uint8_t ch, uint8_t range, int rc, uint8_
 //Checks m (acal_range_check) and stores it as range r of c: ACAL_OK or the first ACAL_E_* (c unchanged then)
 int      acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r);
 
+//fw-xzero: the other channel's relays on range r of the zero step, after acal_range_store. m16[4] = the mean of both
+//cores (1/16 code, gated, at the range's centre PWM) with the other channel at acal_xz_range(ACAL_XZ_REF), then (0), (2),
+//then ACAL_XZ_REF again, equally spaced in time (a linear drift cancels: each class is compared with the reference
+//interpolated to its time). clipped: samples at 0 or 255 over the four points. ACAL_OK with c->xz[r] set (rounded to
+//1/8 code), else ACAL_E_CLIP, ACAL_E_DRIFT (the two reference points more than ACAL_MAX_DRIFT16 apart) or ACAL_E_XZERO
+//(a shift over ACAL_XZ_MAX16), c unchanged then
+int      acal_xz_store(const int32_t m16[4], uint32_t clipped, acal_channel *c, uint8_t r);
+
 //----------------------------------------------------------------------------------------------------------------------------------
 //Gain step (calibration post, generator output low / high, both static)
 
@@ -367,5 +416,6 @@ const char *acal_reason_text(int reason);                     //failure box text
 #define ACAL_E_READOUT       19           //fw 0.2.67: samples at 0 / 255 only at full rate with the level near code 128
                                           //(acal_readout_fault); fw 0.2.79: also a 0x153A core with no clean
                                           //capture stage (cap_stage.h)
+#define ACAL_E_XZERO         20           //fw-xzero: the other channel's relays move the zero by more than 3.5 codes
 
 #endif /* ADC_CAL_H */

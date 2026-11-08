@@ -18,7 +18,7 @@
 extern FONTDATA font_2, font_3, font_5;
 
 static uint8_t     health[124];
-static uint8_t     cal[2][364];
+static uint8_t     cal[2][PC_CAL_RESP_LEN];
 static uint32_t    link[64];
 static pc_image_id run;
 static pc_card_id  card;
@@ -335,7 +335,30 @@ static void test_pages(void)
   //Calibration page: the raw numbers
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   T_TRUE(has_text("Calibration block (sector 708): CH1 in use, CH2 in use."));
-  T_TRUE(has_text("131.0 / 136.6"));
+  T_TRUE(has_text("131.0/136.6"));
+  {
+    //fw-xzero: no table, a dim "-" per range and channel in the last column
+    uint32_t i, n = 0;
+
+    for(i=0;i<pg.ntext;i++)
+      if(!strcmp(pg.text[i].text, "-") && (pg.text[i].colour == UD_C_DIM))
+        n++;
+    T_EQ(n, 2 * ACAL_RANGES);
+  }
+  //fw-xzero: the other channel's relays per range (0 / 2 on), the widest values inside the column
+  cal[0][432] = 1; cal[1][432] = 3;
+  cal[0][440 + 3 * 2] = (uint8_t)-16; cal[0][440 + 3 * 2 + 2] = 14;
+  cal[1][440] = (uint8_t)-56; cal[1][440 + 2] = 56; cal[1][440 + 3 * 5] = (uint8_t)-56; cal[1][440 + 3 * 5 + 2] = (uint8_t)-56;
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
+  check_layout("cal other channel", 0);
+  T_TRUE(has_text("Other ch"));
+  T_TRUE(has_text("-1.0/+0.9"));
+  T_TRUE(has_text("-3.5/+3.5"));
+  T_TRUE(has_text("-3.5/-3.5"));
+  T_TRUE(has_text("0.0/0.0"));
+  T_EQ(text_colour("-1.0/+0.9"), UD_C_TEXT);
+  memset(cal[0] + 432, 0, PC_CAL_RESP_LEN - 432); memset(cal[1] + 432, 0, PC_CAL_RESP_LEN - 432);
+  ud_build(&pg, UD_PAGE_CAL, &in, 0);
   T_TRUE(has_text("+0.2 %"));
   T_TRUE(has_text("Gains full A 1.0071, B 0.9940"));
   T_TRUE(has_text("Gains gated A 0.9888, B 0.9888, range 1 V"));

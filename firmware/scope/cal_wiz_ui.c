@@ -371,6 +371,55 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail, int *cs_rc)
   return (rc == CS_OK) ? ACAL_OK : ACAL_E_READOUT;
 }
 
+//fw-xzero: the other channel's range relays shift this channel's zero by about -1 / 0 / +1 code in three classes (the
+//coils on, adc_cal.h acal_xz_class; bench 2026-11-08 10:20). The zero step sets the other channel to the reference class
+//(acal_xz_range(ACAL_XZ_REF)) for the whole of a channel's step, so the stored zeros belong to that class, and after each
+//range's zero measures the shift of the two other classes on the quiet input: gated (the shift is analog, before the ADC,
+//so it is the same in both clock classes; inference), at the range's centre PWM, 8 conversions per point with the other
+//channel at the reference, class 0, class 2 and the reference again (a linear drift cancels, acal_xz_store). Only the
+//other channel's range relays move (0x33 / 0x36); its offset PWM and coupling stay. 4 x (60 ms + 8 conversions), about
+//0.35 s per range, about 4 s per wizard run; 18 relay switches of the other channel per channel
+#define CAL_XZ_SETTLE_MS    60
+#define CAL_XZ_CONVS         8
+
+static void cal_xz_other(uint32 ch, uint8 cls)
+{
+  (void)fpga_relay_write(cal_cmds[ch ^ 1][0], acal_xz_range(cls));
+}
+
+static int cal_xzero(uint32 ch, uint32 r, int32 pwm, acal_channel *c, acal_fail *fail)
+{
+  static const uint8 seq[4] = { ACAL_XZ_REF, 0, 2, ACAL_XZ_REF };
+  acal_acc acc[2][2];
+  int32_t  mean[2], m16[4];
+  uint32_t i, clipped = 0;
+  int      rc;
+
+  cal_set_rate(CAL_RATE_GATED);
+
+  for(i=0;i<4;i++)
+  {
+    cal_xz_other(ch, seq[i]);
+    cal_measure(r, pwm, CAL_XZ_SETTLE_MS, CAL_XZ_CONVS, acc);
+    cal_result(acc, mean, 0, 0, 0, &clipped);
+    m16[i] = (mean[0] + mean[1]) / 2;
+  }
+
+  rc = acal_xz_store(m16, clipped, c, (uint8)r);
+
+  //The result line names the moving zero as for the zero point (cw_zero_line); no measurement point note
+  memset(fail, 0, sizeof(*fail));
+  fail->point = ACAL_PT_NONE;
+
+  if(rc == ACAL_E_DRIFT)
+  {
+    fail->cls   = ACAL_GATED;
+    fail->value = m16[3] - m16[0];
+  }
+
+  return rc;
+}
+
 //The last range cal_channel measured per channel, for CAL_PROBE in the wizard's context
 static acal_point cal_last_pt[2][ACAL_POINTS];
 static acal_fail  cal_last_fail[2];
@@ -395,6 +444,10 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
   *fail_r = 0;
   cal_cap_st[ch]  = CW_C_NONE;
   cal_cap_bad[ch] = 0;
+
+  //fw-xzero: the other channel in the reference class for the whole step (cal_train's 60 ms settle follows); cal_end
+  //puts the UI's range back
+  cal_xz_other(ch, ACAL_XZ_REF);
 
   //fw 0.2.79: the capture stages of this channel's cores first (cal_train), the zeros after them
   {
@@ -452,10 +505,15 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
     if(rc == ACAL_OK)
       rc = acal_range_store(&m, c, (uint8)r);
 
+    //fw-xzero: the other channel's relays at this range's centre
+    if(rc == ACAL_OK)
+      rc = cal_xzero(ch, r, m.pwm, c, fail);
+
     if(rc != ACAL_OK)
       return rc;
   }
 
+  c->xz_valid = 1;
   return ACAL_OK;
 }
 
@@ -1075,6 +1133,7 @@ int32_t pc_hal_cal_probe(uint8_t ch, uint8_t range, uint8_t settle, uint8_t pres
   {
     cal_begin();
     cal_scratch_channel(ch);
+    cal_xz_other(ch, ACAL_XZ_REF);        //fw-xzero: as the wizard's zero step (the other channel's relays)
     calibrationsettings.samplevoltperdiv = range;
     fpga_set_channel_voltperdiv(&calibrationsettings);
     timer0_delay(60);

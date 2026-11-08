@@ -630,7 +630,7 @@ static void test_texts(void)
   T_STR(t, "CH2 calibrated: cores matched to 0.4 code, gains not measured");
 
   //Every failure has words (no "OK" or the short report form)
-  for(rc=ACAL_E_RESPONSE;rc<=ACAL_E_READOUT;rc++)
+  for(rc=ACAL_E_RESPONSE;rc<=ACAL_E_XZERO;rc++)
   {
     if(rc == 17)                        //reserved (adc_cal.h)
       continue;
