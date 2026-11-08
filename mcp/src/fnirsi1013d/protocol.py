@@ -3949,6 +3949,12 @@ CAP_CORES = ("CH1 A", "CH1 B", "CH2 A", "CH2 B")
 #: apart; cap_stage.h "Self-check")
 CAP_EXCESS_LIMIT = 8
 CAP_QUIET_PARTNER = 8
+#: what the counts count: per-core sample-to-sample jumps over 0x64 codes (cap_stage.h CS_THR_USE / CS_THR_TRAIN).
+#: fw-genlimit: the self-check counts at 48 (32 up to fw 0.3.1, where a clean edge stepping 28..36 codes per core split
+#: the cores by noise and was flagged: bench 2026-11-08, 12.5 MHz from the post at 100 mV/div AC); the wizard's
+#: training (GET_CAL 364.. outlier sums) counts at 32
+CAP_THRESHOLD_SELF_CHECK = 48
+CAP_THRESHOLD_TRAIN = 32
 #: GET_CAL 364 (protocol 1.28): the channel's last capture stage training
 CAPT_RAN = 0x01
 CAPT_FAILED = 0x02
@@ -4158,6 +4164,9 @@ class HealthResp(Payload):
             "flagged_repeatedly": bool(f & CAPF_REPEAT), "moved_by_guard": bool(f & CAPF_MOVED)}
         busy = cap_busy(self.cap_counts) if read else 0
         out["busy_cores"] = cap_core_names(busy)
+        out["counts_note"] = (f"outliers = a core's sample-to-sample jumps over {CAP_THRESHOLD_SELF_CHECK} codes "
+                              f"({CAP_THRESHOLD_TRAIN} up to fw 0.3.1, where a clean edge stepping about "
+                              f"{CAP_THRESHOLD_TRAIN} codes per core could flag one core)")
         # A flag the current rule does not raise: a firmware up to 0.3.1 flagged a busy signal (cap_stage.h
         # "Self-check"); the capture was not shown to be garbled
         out["flag_from_busy_signal"] = bool(read and f & CAPF_FLAGGED and not cap_flagged(self.cap_counts)

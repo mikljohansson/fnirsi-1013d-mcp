@@ -29,6 +29,24 @@ def test_self_check_quiet_partner_rule():
     assert P.cap_flagged((65535, 65535, 0, 0)) == 0
 
 
+def test_self_check_threshold_matches_the_firmware():
+    # fw-genlimit (bench 2026-11-08 19:41): the self-check counts jumps over 48 codes, the training over 32; the host's
+    # constants mirror cap_stage.h
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "firmware" / "scope" / "cap_stage.h").read_text()
+    fw = {m.group(1): int(m.group(2)) for m in re.finditer(r"#define (CS_\w+)\s+(\d+)\b", src)}
+    assert fw["CS_THR_USE"] == P.CAP_THRESHOLD_SELF_CHECK == 48
+    assert fw["CS_THR_TRAIN"] == P.CAP_THRESHOLD_TRAIN == 32
+    assert fw["CS_EXCESS_LIMIT"] == P.CAP_EXCESS_LIMIT and fw["CS_QUIET_PARTNER"] == P.CAP_QUIET_PARTNER
+    # 735d82a's false flag (CH1 B 9..27 against A 0..1 at the old 32) is still a flag by the counts' rule: the fix is the
+    # threshold the counts are taken at, so the host only says what the counts mean
+    assert P.cap_flagged((1, 27, 0, 0)) == 0x02
+    d = _health(P.CAPF_HAS | P.CAPF_TRAINED | P.CAPF_READ, 0, (0, 0, 0, 0)).describe_capture()
+    assert "over 48 codes" in d["counts_note"] and "32 up to fw 0.3.1" in d["counts_note"]
+
+
 def _health(flags: int, flagged: int, counts: tuple[int, int, int, int]) -> P.HealthResp:
     return P.HealthResp(layout=3, length=128, cap_value=P.CAP_POWER_ON, cap_flags=flags, cap_flagged=flagged,
                         cap_counts=counts, cap_reads=19060, cap_flagged_n=11087)
