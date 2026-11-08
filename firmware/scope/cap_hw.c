@@ -4,7 +4,8 @@
 // every accepted full-rate capture (self-check, GET_HEALTH, event 23; never after a gated one: fpga_capture_check), the wizard's training and the stored value
 // (sector 708 bytes 488..503, through pc_diag.c's calibration load / save hooks: written by the wizard's Save only).
 // fw-153f: one stage per chip (0x153F). fw-csbusy (owner 2026-11-08): the self-check is a diagnostic only; the runtime
-// guard of fw 0.2.105 (moved a flagged chip and wrote sector 708) and its stored sets are gone.
+// guard of fw 0.2.105 (moved a flagged chip and wrote sector 708) and its stored sets are gone. fw-genlimit: the
+// self-check counts at 0x64 = CS_THR_USE 48, the training at CS_THR_TRAIN 32 (cap_stage.h "The self-check's threshold").
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "types.h"
@@ -63,6 +64,17 @@ static uint16 cap_read(uint16_t cnt[CS_CORES])
   return (uint16)(v & CS_MASK);
 }
 
+//0x64, the outlier threshold of the 0x36 counters: CS_THR_USE for the self-check, CS_THR_TRAIN while the wizard trains
+//(fw-genlimit; cap_stage.h). The only writer of 0x64 besides DEBUG_FPGA
+static void cap_thr(uint8 thr)
+{
+  if(!(cap_st.flags & PC_CAPF_HAS))
+    return;
+
+  fpga_write_cmd(0x64);
+  fpga_write_byte(thr);
+}
+
 //Boot (pc_glue_init) and after a calibration load: the stored value when it was trained on the built-for bitstream
 //(PC_FW_FPGA_VERSION), else the power-on CS_PO.
 //Always written: a FEL load leaves the FPGA with whatever the previous firmware wrote
@@ -80,8 +92,7 @@ static void cap_apply(void)
       cap_st.flags |= PC_CAPF_OTHER;
   }
 
-  fpga_write_cmd(0x64);
-  fpga_write_byte(CS_THR_USE);
+  cap_thr(CS_THR_USE);
   fpga_capture_write(v);
 }
 
@@ -219,8 +230,11 @@ int fpga_capture_train(uint8_t cores, const cs_io *io, cs_train *t)
 {
   int rc;
 
+  //The training counts at its own threshold (32, as since 0.2.80), the self-check after it at CS_THR_USE
   cap_training = 1;
+  cap_thr(CS_THR_TRAIN);
   rc = cs_train_run(io, cap_st.value, cores, t);
+  cap_thr(CS_THR_USE);
   cap_training = 0;
   cap_train_note(t, rc);
 

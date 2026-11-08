@@ -85,6 +85,18 @@
 // flags (0 of 885, 7562 and 35703 captures). 0x153F: a chip stage inside a transition both buses share garbles both cores
 // alike, which no partner rule flags (the training's absolute counts and q catch it).
 //
+// The self-check's threshold (fw-genlimit): the counters count jumps over 0x64 codes, so a clean signal whose per-core
+// steps (10 ns apart) cluster at the threshold splits by noise and the cores' gain mismatch: one core counts, its partner
+// hardly. Bench 2026-11-08 19:41 (735d82a): 12.5 MHz from the calibration post at 100 mV/div AC (92 codes pk-pk) steps
+// 28..36 codes per core around 32; CH1 B counted 9..27 against A's 0..1 and 17 of 305 captures were flagged, while both
+// cores folded to about 1 code rms (max 4). So the self-check counts at CS_THR_USE 48 and the training keeps 32
+// (cap_hw.c writes 0x64 = 32 around cs_train_run and 48 back after it; nothing else writes 0x64 but DEBUG_FPGA). Why 48:
+// the 2026-10-20 sweep read 16..48 alike (0 on a clean stage, hundreds or 65535 on a bad one), so a garble still counts;
+// the garbles are rails and jumps of tens to 128 codes at 0x7F / 0x80 (a bitwise mix of 0x7F and 0x80 is at least 48
+// codes off in about 5 of 8 words against 6 of 8 at 32: inference, bits drawn alike), and the bench signal's largest step
+// plus noise (36 + 4) stays 8 codes below it. A clean signal stepping about 48 codes per core (the same square near 120
+// codes pk-pk) can still be flagged: a diagnostic only, as above.
+//
 // What a flag does: GET_HEALTH 106 bit 3 / 107 / 120, Diagnostics; a core flagged in CS_REPEAT_N captures within
 // CS_REPEAT_MS (cs_watch) sets REPEAT (the Diagnostics Calibration verdict and GET_HEALTH ask for Calibrate) and logs
 // event 23 once. Nothing acts on it: the runtime guard of fw 0.2.105 (moved a flagged chip inside its stored clean set
@@ -103,9 +115,13 @@
 
 #define CS_PO             0x06DB      //0x63 at power-on (0x153F): stage 3 on both chips, the B fields 3 too
 #define CS_THR_PO         8           //0x64 at power-on (codes)
-#define CS_THR_USE        32          //0x64 as the firmware writes it: CH2's analog noise at range 0 near code 128 is
-                                      //about 3 codes rms and saturates the counters at 8; 16..48 all read 0 on a clean
-                                      //stage and hundreds on a bad one (bench 2026-10-20 10:14)
+#define CS_THR_TRAIN      32          //0x64 while the wizard trains (since 0.2.80): CH2's analog noise at range 0 near
+                                      //code 128 is about 3 codes rms and saturates the counters at 8; 16, 24, 32, 40 and
+                                      //48 all read 0 on a clean stage and hundreds (CH1 A4) or 65535 (CH2 B2) on a bad
+                                      //one (bench 2026-10-20 10:08-10:14)
+#define CS_THR_USE        48          //0x64 for the self-check after full-rate captures (fw-genlimit; 32 up to 0.3.1):
+                                      //the highest benched value of that sweep, and clear of a clean edge's steps
+                                      //("Self-check" below: a 12.5 MHz square stepping 28..36 codes per core)
 #define CS_MASK           0x0FFF      //0x63 as the firmware writes and compares it (bits 15:12 select nothing, written 0)
 #define CS_TRAILER_MASK   0x3FFF      //the stored trailer's value field (0x153A..0x153E's reference bits: format only)
 #define CS_CORES          4           //0 CH1 A, 1 CH1 B, 2 CH2 A, 3 CH2 B (the 0x36 order)

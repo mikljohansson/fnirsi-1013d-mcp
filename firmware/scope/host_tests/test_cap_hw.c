@@ -409,11 +409,14 @@ static int tr_park(void *ctx, uint32_t code16)
   return 0;
 }
 
+static uint32_t tr_thr_other;         //captures the training took at a 0x64 other than CS_THR_TRAIN
+
 static int tr_measure(void *ctx, uint16_t v, uint8_t resid, uint16_t cnt[CS_CORES], uint32_t e[CS_CORES])
 {
   uint8_t sa = cs_stage(v, 2);
 
   (void)ctx;
+  tr_thr_other += (fm.reg64 != CS_THR_TRAIN);
   memset(cnt, 0, CS_CORES * sizeof(cnt[0]));
   cnt[2] = (sa == 2) ? 500 : 0;
   cnt[3] = ((sa == 2) || (sa == 4)) ? 400 : 0;
@@ -446,7 +449,15 @@ static void test_train_note(void)
   pc_hal_cap_train(1, &ct);
   T_EQ(ct.flags, 0);
 
+  //fw-genlimit: the training counts at 0x64 = 32 (as since 0.2.80), the self-check before and after it at 48
+  T_EQ(CS_THR_TRAIN, 32);
+  T_EQ(CS_THR_USE, 48);
+  T_EQ(fm.reg64, CS_THR_USE);
+  tr_thr_other = 0;
   T_EQ(fpga_capture_train(0x0C, &io, &t), CS_OK);
+  T_EQ(tr_thr_other, 0);
+  T_EQ(t.captures > 0, 1);
+  T_EQ(fm.reg64, CS_THR_USE);
   pc_hal_cap_train(0, &ct);
   T_EQ(ct.flags, 0);                  //CH1 not trained
   pc_hal_cap_train(1, &ct);
@@ -471,6 +482,8 @@ static void test_train_note(void)
 
     T_EQ(fpga_capture_train(0x0C, &io2, &t), CS_E_DIRTY);
   }
+  T_EQ(tr_thr_other, 0);
+  T_EQ(fm.reg64, CS_THR_USE);         //a failed training restores it too
   pc_hal_cap_train(1, &ct);
   T_EQ(ct.flags, PC_CAPT_RAN | PC_CAPT_FAILED);
   T_EQ(ct.set[0], 0);
