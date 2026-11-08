@@ -3932,7 +3932,9 @@ CAPF_READ = 0x04  # outlier counts were read after a full-rate capture since boo
 CAPF_FLAGGED = 0x08  # the last read flagged a core
 CAPF_OTHER = 0x10  # a stored value exists for another bitstream (not applied: recalibrate)
 CAPF_REPEAT = 0x20  # fw 0.2.81 (GET_HEALTH 106 only): a core flagged in 3 captures within a minute: recalibrate
-#: fw 0.2.105 (GET_HEALTH 106 only): the runtime guard moved a flagged core to another stage of its trained clean set
+#: retired (fw-csbusy, always 0): fw 0.2.105 .. 0.3.1 set it when the runtime guard moved a flagged core to another
+#: stage of its trained clean set and stored it; the guard is gone (owner 2026-11-08: only the calibration dialog
+#: writes calibration data)
 CAPF_MOVED = 0x40
 #: 0x63 at power-on (FPGA 0x153F): stage 3 on both chips. Since 0x153F both cores of a chip are captured at one instant,
 #: bits 2:0 (CH1) / 8:6 (CH2); the B fields (5:3, 11:9) and bits 13:12 select nothing and the firmware writes the B
@@ -3940,13 +3942,13 @@ CAPF_MOVED = 0x40
 CAP_POWER_ON = 0x06DB
 #: the 0x36 order of the cores; flag masks use bit i = core i
 CAP_CORES = ("CH1 A", "CH1 B", "CH2 A", "CH2 B")
-#: self-check: a core is flagged when its outlier count exceeds its chip partner's by more than this, or by more than
-#: the partner's count / CAP_EXCESS_DIV when that is larger (fw-csbusy); a chip whose cores both count more than
-#: CAP_BUSY_COUNT is busy and not checked (bench 2026-11-08: a 24.576 MHz clock made both CH1 cores count about 43000,
-#: about 2 % apart, and fw 0.3.1 flagged it; cap_stage.h "Busy signals")
+#: self-check (fw-csbusy, a diagnostic only): a core is flagged when its chip partner counted at most CAP_QUIET_PARTNER
+#: outliers and the core exceeds it by more than CAP_EXCESS_LIMIT (the garble signature: tens to hundreds against about
+#: 0); a chip whose cores both count more than CAP_QUIET_PARTNER is not checkable (busy). Up to fw 0.3.1 the rule was the
+#: excess alone, which flagged busy signals (bench 2026-11-08: a 24.576 MHz clock, both CH1 cores about 43000, 2 %
+#: apart; cap_stage.h "Self-check")
 CAP_EXCESS_LIMIT = 8
-CAP_EXCESS_DIV = 8
-CAP_BUSY_COUNT = 1024
+CAP_QUIET_PARTNER = 8
 #: GET_CAL 364 (protocol 1.28): the channel's last capture stage training
 CAPT_RAN = 0x01
 CAPT_FAILED = 0x02
@@ -3994,18 +3996,17 @@ def cap_excess(counts: Iterable[int]) -> list[int]:
 
 
 def cap_busy(counts: Iterable[int]) -> int:
-    """Both cores of every chip whose cores both count more than CAP_BUSY_COUNT, as a mask (cs_busy): the self-check
-    abstains there."""
+    """Both cores of every chip whose cores both count more than CAP_QUIET_PARTNER, as a mask (cs_busy): not
+    checkable."""
     c = list(counts)
-    return sum(3 << k for k in (0, 2) if c[k] > CAP_BUSY_COUNT and c[k + 1] > CAP_BUSY_COUNT)
+    return sum(3 << k for k in (0, 2) if c[k] > CAP_QUIET_PARTNER and c[k + 1] > CAP_QUIET_PARTNER)
 
 
 def cap_flagged(counts: Iterable[int]) -> int:
-    """The cores whose excess is above max(CAP_EXCESS_LIMIT, partner // CAP_EXCESS_DIV), not on a busy chip, as a
-    mask (cs_flagged, fw-csbusy; up to fw 0.3.1 the limit was CAP_EXCESS_LIMIT alone)."""
+    """The cores whose partner counted at most CAP_QUIET_PARTNER and whose excess is above CAP_EXCESS_LIMIT, as a
+    mask (cs_flagged, fw-csbusy; up to fw 0.3.1 the excess alone)."""
     c = list(counts)
-    return sum(1 << i for i, e in enumerate(cap_excess(c))
-               if c[i ^ 1] <= CAP_BUSY_COUNT and e > max(CAP_EXCESS_LIMIT, c[i ^ 1] // CAP_EXCESS_DIV))
+    return sum(1 << i for i, e in enumerate(cap_excess(c)) if c[i ^ 1] <= CAP_QUIET_PARTNER and e > CAP_EXCESS_LIMIT)
 
 
 def pack_cap_trailer(value: int, fpga: int) -> bytes:
@@ -4157,8 +4158,8 @@ class HealthResp(Payload):
             "flagged_repeatedly": bool(f & CAPF_REPEAT), "moved_by_guard": bool(f & CAPF_MOVED)}
         busy = cap_busy(self.cap_counts) if read else 0
         out["busy_cores"] = cap_core_names(busy)
-        # A flag the current rule does not raise: a firmware up to 0.3.1 flagged a busy signal (cap_stage.h "Busy
-        # signals"); the capture was not shown to be garbled
+        # A flag the current rule does not raise: a firmware up to 0.3.1 flagged a busy signal (cap_stage.h
+        # "Self-check"); the capture was not shown to be garbled
         out["flag_from_busy_signal"] = bool(read and f & CAPF_FLAGGED and not cap_flagged(self.cap_counts)
                                             & self.cap_flagged)
         if not read:
@@ -4180,8 +4181,10 @@ class HealthResp(Payload):
             text += "; a value stored for another bitstream is not applied: run the calibration wizard"
         if f & CAPF_REPEAT:
             text += "; a core was flagged in 3 captures within a minute: run the calibration wizard"
-        if f & CAPF_MOVED:
-            text += "; a flagged core was moved to another trained stage this boot (stored)"
+        if f & CAPF_MOVED:  # retired: only a firmware up to 0.3.1 sets it
+            text += ("; this firmware's runtime guard moved a flagged core to another stage this boot and stored it "
+                     "(firmware up to 0.3.1; the move may come from a busy signal: run the calibration wizard with the "
+                     "inputs open to train the stages again)")
         out["text"] = text
         return out
 
@@ -4519,7 +4522,7 @@ class DeviceEvent:
             if a & 0x10:
                 end = f"no clean stage for {cores}, kept" if a & 0x0F else "now"
                 return f"adc_capture training ended: {end} {cap_stages_text(b)} (0x{b:04X})"
-            if a & 0x20:  # fw 0.2.105: the runtime guard moved these cores inside their trained clean set (stored)
+            if a & 0x20:  # fw 0.2.105 .. 0.3.1 only: the runtime guard moved these cores (stored); retired
                 return f"adc_capture guard moved {cores}: now {cap_stages_text(b)} (0x{b:04X})"
             # fw 0.2.81: logged once per core when it was flagged in 3 captures within a minute (0.2.79-0.2.80: when
             # the set of flagged cores changed)

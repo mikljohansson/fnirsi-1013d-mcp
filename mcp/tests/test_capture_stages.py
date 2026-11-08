@@ -70,12 +70,13 @@ def test_health_capture_words():
     assert rep["flagged_repeatedly"]
     assert rep["text"] == ("capture stages CH1 A3 B4, CH2 A3 B4 (trained); capture clean; a core was flagged in 3 "
                            "captures within a minute: run the calibration wizard")
-    # fw 0.2.105: GET_HEALTH 106 bit 6, the runtime guard moved a core this boot
+    # fw 0.2.105 .. 0.3.1: GET_HEALTH 106 bit 6, the runtime guard moved a core this boot (retired since fw-csbusy)
     mv = P.HealthResp(cap_value=0x08E3, cap_flags=P.CAPF_HAS | P.CAPF_TRAINED | P.CAPF_READ | P.CAPF_MOVED,
                       cap_reads=9).describe_capture()
     assert mv["moved_by_guard"] and not rep["moved_by_guard"]
-    assert mv["text"] == ("capture stages CH1 A3 B4, CH2 A3 B4 (trained); capture clean; a flagged core was moved to "
-                          "another trained stage this boot (stored)")
+    assert mv["text"].startswith("capture stages CH1 A3 B4, CH2 A3 B4 (trained); capture clean; this firmware's runtime "
+                                 "guard moved a flagged core")
+    assert "firmware up to 0.3.1" in mv["text"]
     assert P.HealthResp(cap_flags=0).describe_capture() == {
         "has_stages": False, "text": "no ADC capture stages on this bitstream (FPGA 0x153A and later)"}
 

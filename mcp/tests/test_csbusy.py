@@ -11,19 +11,21 @@ from fnirsi1013d.scope import Scope
 from test_server import client_for
 
 
-def test_self_check_rule_relative_and_busy():
-    # Quiet input: a garbled core against a partner at 0 flags as before (limit 8 up to a partner count of 71)
+def test_self_check_quiet_partner_rule():
+    # Quiet input: a garbled core against a partner at 0 flags as before
     assert P.cap_flagged((0, 0, 40, 0)) == 0x04
     assert P.cap_flagged((0, 0, 8, 0)) == 0 and P.cap_flagged((0, 0, 9, 0)) == 0x04
-    assert P.cap_flagged((71 + 9, 71, 0, 0)) == 0x01
-    # From 72 the limit is partner // 8
-    assert P.cap_flagged((90, 80, 0, 0)) == 0 and P.cap_flagged((91, 80, 0, 0)) == 0x01
-    assert P.cap_flagged((1024 + 129, 1024, 0, 0)) == 0x01 and P.cap_busy((1024 + 129, 1024, 0, 0)) == 0
-    # The bench: both cores near 43000, about 2 % apart: busy, not flagged; CH2 still checked
+    # The partner may count up to 8; above that the chip is not checkable (owner 2026-11-08)
+    assert P.cap_flagged((17, 8, 0, 0)) == 0x01 and P.cap_flagged((16, 8, 0, 0)) == 0
+    assert P.cap_flagged((300, 9, 0, 0)) == 0 and P.cap_busy((300, 9, 0, 0)) == 0x03
+    # The bench: a 24.576 MHz clock (both cores near 43000, about 2 % apart) and 354e676's failed run (12.5 MHz at
+    # 100 mV/div AC, counts in the hundreds that differ by more than an eighth): busy, not flagged; CH2 still checked
     bench = (42290, 43153, 0, 40)
     assert P.cap_busy(bench) == 0x03 and P.cap_flagged(bench) == 0x08
-    # A core counting thousands against a quiet partner is not busy and flags
+    assert P.cap_busy((120, 400, 0, 0)) == 0x03 and P.cap_flagged((120, 400, 0, 0)) == 0
+    # A core counting thousands against a quiet partner flags; one count each is checkable and clean
     assert P.cap_busy((5000, 3, 0, 0)) == 0 and P.cap_flagged((5000, 3, 0, 0)) == 0x01
+    assert P.cap_busy((1, 1, 0, 0)) == 0 and P.cap_flagged((1, 1, 0, 0)) == 0
     assert P.cap_flagged((65535, 65535, 0, 0)) == 0
 
 
@@ -47,6 +49,9 @@ def test_describe_capture_busy_and_an_older_firmwares_flag():
                                                                  "captures flagged since boot")
     assert _health(read, 0, (0, 0, 0, 0)).describe_capture()["text"].endswith("capture clean; 11087 of 19060 "
                                                                              "full-rate captures flagged since boot")
+    # 354e676 on the bench: CH1 counts in the hundreds, flagged by its relative rule: an older firmware's busy flag
+    d = _health(read | P.CAPF_FLAGGED, 0x02, (120, 400, 0, 0)).describe_capture()
+    assert d["flag_from_busy_signal"] and d["busy_cores"] == ["CH1 A", "CH1 B"]
 
 
 def test_simulator_does_not_flag_a_busy_signal(sim_factory):
