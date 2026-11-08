@@ -12,6 +12,10 @@ published as pre-releases.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-08
+
+A maintenance release on the same FPGA bitstream, 0x153F. User-facing notes: `docs/release-notes/0.3.1.md`.
+
 ### Firmware
 
 - The ACQ chip reads "ACQ" / "Roll" in roll mode, the word the rest of the UI uses; it read "Long" (f737cee).
@@ -44,6 +48,9 @@ published as pre-releases.
   from the record: on the ladder CH2 is one SKIP, both probes on the post judge both channels; the moving-word metric is gone
   (f2e0878).
 - Simulator: the Nth edge with an idle time waits for a gap as the FPGA does, so battery step T10 is judged there (05f5d62).
+- `scope_mask_test` does not judge the time tolerance at a record's ends, where the trigger jitter shifts in what the
+  reference never saw; `scope_sweep` measured at 62 steps / s in RUN and 64 in STOP without polls (3be7d70).
+- Simulator: the default clock is `time.perf_counter` (the 15 ns generator commit on Windows with Python 3.12, ab93c0d).
 
 ## [0.3.0] - 2026-11-07
 
