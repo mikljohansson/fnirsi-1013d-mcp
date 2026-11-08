@@ -188,7 +188,11 @@ Effective bits (re the 8-bit range) vs N, estimate `8 + log2 sqrt(noise-equivale
   min / max with hysteresis round(span / 6), at least 6 codes, so slow noisy edges count once; a `level` in volts or a
   `hysteresis` in codes pins that one, `'auto'` releases it). Leave them auto unless the signal needs a specific
   level (a pulse train with ringing, a logic level). A signal under about 12 codes pk-pk gives no valid count on
-  auto: use a more sensitive range. `vmin` / `vmax` are raw extremes over the whole gate, noise
+  auto: use a more sensitive range. Under about 24 codes a count can still be valid and wrong on fast edges (bench:
+  13 codes read 19.2..20.9 MHz on a 24.576 MHz clock through a x1 probe, 97 codes read it exactly); the result says
+  so: use a more sensitive range or a x10 probe and compare a few readings. Above 4.294967 MHz the firmware's own
+  `firmware_frequency_hz` field saturates and reads None; `frequency_hz` is the number. `vmin` / `vmax` are raw
+  extremes over the whole gate, noise
   peaks included; a capture's min / max are a few codes narrower. With Filter Off below 200 MSa/s the result has
   `gated` true and `valid` false: use 200 MSa/s or a filter for a number you can quote.
 - **Peak detect at slow time bases** (`scope_capture(peak=true)` for one capture, `scope_set_decimation(filter='peak')`

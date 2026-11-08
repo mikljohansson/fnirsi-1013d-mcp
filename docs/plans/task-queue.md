@@ -6,6 +6,24 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- [x] (Done on branch fw-csbusy, aa32e98, firmware/AGENTS.md section 101; bench pending.) **Capture-stage self-check
+  flags busy signals; the guard stores the move** (bench 2026-11-08 ~17:0x,
+  fw 0.3.1 on 0x153F, induction-imager session: CH1 on a 3.3 V 24.576 MHz clock, x1 probe, 200 MSa/s). `cs_excess` flags a core whose 0x36 count
+  exceeds its partner's by more than an absolute `CS_EXCESS_LIMIT` 8, but on a large fast signal both cores count nearly every
+  word (tens of thousands per capture), so raw-core gain/zero mismatch alone gives excesses in the hundreds to thousands:
+  11087 of 19060 full-rate captures flagged, "CH1 B 43153 outliers", and the guard moved CH1 0x06DB -> 0x06E4 (A4 B4) and
+  wrote sector 708 (event 23 at uptime 1377 s). The record was clean: c11219 folded on 24.5752 MHz, odd core vs the even
+  core's template 2.9 codes RMS (even 2.0), none over 25; the 0x36 rule run on the stored record gives 7489 / 7492 per core.
+  This is the inference in `cap_stage.h` ("a large signal near 100 MHz could make the cores' counts differ by itself"),
+  now benched. Needs a limit relative to the partner's count (or no flag when the partner is busy), and the guard must
+  not store on such flags. On the unit: re-run the wizard (inputs open) to get 0x06DB back. Fixed: limit max(8, partner
+  / 8), a chip with both cores over 1024 not checked.
+- [x] (Done on branch fw-csbusy, b5600b9.) **GET_COUNTER freq_mHz saturates at 4.294967 MHz** (same bench): the u32
+  millihertz field cannot hold signals above
+  ~4.29 MHz; the mcp shows `firmware_frequency_hz` 4294970 for 24.6 MHz. Host: report None / "saturated" at 0xFFFFFFFF
+  (frequency_hz from E / T is right). Also a caveat when the auto band has few codes (13 codes read 19.2..20.9 MHz
+  wandering on 24.576 MHz; 97 codes read it exactly).
+
 - **Gated encodes back for Filter Off at slow rates** (owner decisions 2026-10-22 11:45, after the 11:36 A/B: 0x153C's
   gated encodes are clean at 2 MSa/s where 0x153D's full-rate encodes show 1-2 % CH2 code errors, and 0x153D's encode timing is
   worse at 200 MSa/s too). Supersedes the 2026-10-21 17:59 "ADCs always at full rate": 0x153D returns to 0x153C's encode

@@ -11,6 +11,21 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Firmware
+
+- The ADC capture self-check no longer flags a busy signal: a core is flagged when its outlier count exceeds its chip
+  partner's by more than 8 or by more than an eighth of the partner's count, and a chip whose cores both count over
+  1024 is not checked. On a 24.576 MHz clock both CH1 cores counted about 43000, about 2 % apart, and 0.3.1 flagged
+  most captures and moved and stored CH1's capture stage although the record was clean. Diagnostics says "last capture
+  too busy to check" then; a quiet input is checked as before (aa32e98).
+
+### Host (mcp)
+
+- `scope_health` and the capture caveats follow the new self-check rule and do not advise the calibration wizard for a
+  0.3.1 flag on a busy signal (`flag_from_busy_signal`); `scope_counter` reports `firmware_frequency_hz` None with a
+  caveat above 4.294967 MHz, where the firmware's millihertz field saturates (`frequency_hz` is exact), and warns when a
+  valid count spans fewer than 24 codes (b5600b9).
+
 ### Releases
 
 - A `vX.Y.Z` tag is published as a full release and becomes the latest release on GitHub; only `-rcN` dry runs are
