@@ -8,9 +8,10 @@ variants configure their FPGA differently (`docs/hardware-prep.md` section 3a).
 Each firmware version supports one bitstream. The entry marked **recommended** here and in `manifest.json` is the one
 the current firmware needs; on any other it shows a banner that names the one needed. The other entries are history:
 **supported** ones were benched good with the firmware named in their row (and are a valid target for going back to
-that firmware), **unbenched** ones were built and simulated but never flashed, **withdrawn** ones failed on the bench
-and are not attached. Flashing the FPGA is a step of the install (`docs/guide/install.md`); it needs a 3.3 V SPI
-programmer on the config-flash header and a verified backup first.
+that firmware), **unbenched** ones were built and simulated but never flashed, **withdrawn** ones failed on the bench.
+A release attaches only the recommended image; the others are in `fpga/al3/dist` in the repository. Flashing the FPGA
+is a step of the install (`docs/guide/install.md`); it needs a 3.3 V SPI programmer on the config-flash header and a
+verified backup first.
 
 ## Which one to use
 
@@ -21,9 +22,9 @@ programmer on the config-flash header and a verified backup first.
 | 0x1534 | supported | decimation filter before the decimator: boxcar, CIC2, CIC3; 16-bit samples | 0.2.30 to 0.2.102 | flashed 2026-10-18; decimation bench |
 | 0x1535 | supported | compensation FIR after the CIC (boxcar+FIR, CIC2+FIR, CIC3+FIR at 10 MSa/s and slower) | 0.2.44 to 0.2.102 | flashed 2026-10-19; alias of a 892.857 kHz square at 1 MSa/s -76.1 dBV with CIC2+FIR |
 | 0x1536 | unbenched | segmented capture and hardware averaging (sequencer in front of the 0x1535 capture logic) | 0.2.58 to 0.2.102 | built and simulated, never flashed |
-| 0x1537 | withdrawn, not attached | deterministic record start and A/B order at divided rates | 0.2.58 to 0.2.102 | flashed 2026-10-19: CH2 core A garbled in about 40 % of full-rate captures |
-| 0x1538 | withdrawn, not attached | stateless ADC encode: core order B-first guaranteed at every rate and after any write; self-check read 0x33 (0xF6 = good); fixes the encode-phase race of 0x1532-0x1536 and the marginal flop of 0x1537 | 0.2.58 to 0.2.102 (0.2.62 and later read 0x33) | flashed 2026-10-19 17:46: encode clean, but the MCU readout mixes bytes near multi-bit code boundaries; superseded by 0x1539 |
-| 0x1539 | withdrawn, not attached | MCU readout byte loaded on the strobe start and held; fixes the bit mixing of 0x1537/0x1538 near multi-bit code boundaries; i_mcu_clk constrained | 0.2.62 to 0.2.102 | flashed 2026-10-19 20:06: CAL_PROBE passes, but both A cores still garbled at means 128..145 at 200 MS/s (the ADC data capture window, not the readout); superseded by 0x153A |
+| 0x1537 | withdrawn | deterministic record start and A/B order at divided rates | 0.2.58 to 0.2.102 | flashed 2026-10-19: CH2 core A garbled in about 40 % of full-rate captures |
+| 0x1538 | withdrawn | stateless ADC encode: core order B-first guaranteed at every rate and after any write; self-check read 0x33 (0xF6 = good); fixes the encode-phase race of 0x1532-0x1536 and the marginal flop of 0x1537 | 0.2.58 to 0.2.102 (0.2.62 and later read 0x33) | flashed 2026-10-19 17:46: encode clean, but the MCU readout mixes bytes near multi-bit code boundaries; superseded by 0x1539 |
+| 0x1539 | withdrawn | MCU readout byte loaded on the strobe start and held; fixes the bit mixing of 0x1537/0x1538 near multi-bit code boundaries; i_mcu_clk constrained | 0.2.62 to 0.2.102 | flashed 2026-10-19 20:06: CAL_PROBE passes, but both A cores still garbled at means 128..145 at 200 MS/s (the ADC data capture window, not the readout); superseded by 0x153A |
 | 0x153A | supported | ADC data captured in IOB registers at a selectable stage per core against the edge the core is encoded on, B first by T/2 at every rate; capture self-check (read 0x36) and training registers 0x63 / 0x64; fixes the garbled cores near codes 128..145 of 0x1537-0x1539 | 0.2.81 to 0.2.102 (the wizard trains the capture stages; the power-on stages can be wrong per unit) | 2026-10-20: wizard trained 0x08E3, band sweep clean at all four rates, self-check 0 flagged of 18865 captures (docs/hardware-status.md 10:04-10:49); superseded by 0x153B at 20:42 (untriggered auto-mode records could be spliced) |
 | 0x153B | supported (recommended 2026-10-20 to 2026-10-22) | records that end on the auto time-out or the firmware's forced stop report 0x14 at the write pointer (W - total + pretrigger), so untriggered records are the newest total words instead of ring 0 .. total - 1 spliced at the stop; the time-out no longer cuts a triggered record; no trigger after the stop (0x18 is the record's) | 0.2.97 to 0.2.103 (0.2.103 runs on 0x153B only; 0.2.104 and later show the banner) | flashed 2026-10-20 19:31 and verified; benched 20:40-20:49 on fw 0.2.102 with the probes on the post: 0 of 100 untriggered captures spliced (50 at 1 MSa/s, 50 at 200 MSa/s), 50 of the Scope view's auto-mode traces contiguous, ten Frequency response sweeps 100 Hz..1 MHz without a retake or a flagged point (README section 11) |
 | 0x153C | supported | trigger types (pulse width, Nth edge, timeout on CH1 / CH2 / EXT) and the trigger hold-off (0x1B); peak-detect acquisition (0x56 bit 1); hardware counter with min / max (0x61, 0x62, read 0x35); the stock design's unused registers gone (write 0x3C / read 0x41, reads 0x24..0x27, write 0x0F, 0x53 bits 4..2) and the sample-rate divider taken on 20 bits | 0.2.104 only (0.2.105 and later show the banner) | built 2026-10-21 (fpga-c4): clk_200MHz 0 errors at 4.772 ns, tb/run.sh 16 steps ALL PASS on seeds 12345 and 4242; flashed 2026-10-21 17:35 and benched on fw 0.2.104: pulse width, timeout, hold-off, peak detect and Nth edge pass; the counter is exact with the ADCs at full rate (1 kHz to 1 MHz) and not valid with Filter Off at the divided rates; 2026-10-22 11:36, CH2 code errors (Filter Off): 0 % at 2 MSa/s, core A 1.01 % / B 0.86 % at 200 MSa/s |
@@ -32,12 +33,12 @@ programmer on the config-flash header and a verified backup first.
 | 0x153F | **recommended** since 2026-11-07: benched on the maintainer's unit | both ADC cores of a chip captured at one instant, so with Filter Off core B is half a word before core A at every rate and stage (0x153A to 0x153E took each core against its own encode edge and stored core B one conversion late at most rates on the maintainer's unit, whose ADCs release both buses after the B encode); one capture stage per chip (0x63 bits 2:0 / 8:6), used at 200 MSa/s and with the filters, none at the divided rates; everything else as 0x153E | release 0.3.0 | built 2026-11-06 (fpga-153f, roll q10 ea38475: every clock 0 errors, clk_200MHz 4.789 ns, 6401 LUT / 5673 reg / 7272 LE = 84.2 %, #ireg 33, #oreg 15, encode pads B 6.97 / A 7.34 ns on both chips as on 0x153E; a fresh rebuild of the committed source gives the same bytes); `tb/run.sh` (18 steps, `REF_SRC_DIR` with `da645d0.v` added) on seeds 12345 and 4242 (2026-11-07, the review of fpga-153f, snapshots of the committed `src` + `tb`): **ALL PASS on both seeds, every step, no exception** (12345 / 4242: ext 39; decim 107 + cic_model 1868 / 1882 samples; fir 168 + cic_model 1575 / 1610 samples; long 8; seg 54 / 56 + seg_model 22 runs 0 failures; trigpos 1252 (37 cases); contract 42 and the transcript = `contract_0x153F.txt`; encphase PASS (the late-CH2-A annotation fails through 0x33 as it must); mcuread 70 + 26; adccap 35952 strict + 6298 acceptance, STRICT ORDER PASS on the design and FAIL on da645d0; firstrec 38; timeout 85; trigtypes 1293; peak 45; counter 115; stream 757; square 14102). The author's runs of 2026-11-06/07 on the same RTL had one failing step per seed (tb_seg 12345, tb_fir 4242); the review traced both to the testbenches and fixed them there (a stimulus process that had inherited the write clock's 1 ps simulation delay, and the 0x1534 reference's swap bit written in a compared phase; README section 22 "Tests" and the section 20 addendum), the bitstream unchanged; not flashed. Flashed 2026-11-07 and benched on the firmware built for it (docs/hardware-status.md 09:43-11:33): the wizard trained stage 3 on both chips; the designed core delay at every rate tested from 200 MSa/s to 200 kSa/s on both channels; 1000.00 Hz on the hardware counter at 20 kSa/s Filter Off; the hardware battery 201 of 202 steps passed and 1 skipped; CH2 code errors 0 % at 2 MSa/s and, 80 minutes after power-on, a peak over the offset sweep of A 5.8 %, B 1.0 % at 200 MSa/s (0x153E: A 5.2 %, B 0.65 %), accepted by the owner for the right core order |
 
 **Use the recommended image.** Release 0.3.0 runs only with 0x153F, firmware 0.2.105 only with 0x153D; on any other
-bitstream, older or newer, they show the mismatch banner and do not acquire. The supported rows are attached for going back to the
-firmware named in their row, or to a state someone reported against; the withdrawn rows (0x1537 to 0x1539) are not
-attached. 0x1532 to 0x1536 share an ADC encode-phase race: after a sample-rate change one core of a channel can deliver
-garbled 200 MSa/s data. Firmware 0.2.61 to 0.2.102 checked every full-rate capture on them after a rate change and
-retried, and showed their FPGA line in amber in Diagnostics (`CHANGELOG.md` 0.2.61; `fpga/al3/README.md` "Changes"
-section 7).
+bitstream, older or newer, they show the mismatch banner and do not acquire. The supported rows are kept in
+`fpga/al3/dist` in the repository for going back to the firmware named in their row, or to a state someone reported
+against; only the recommended image is attached to a release. 0x1532 to 0x1536 share an ADC encode-phase race: after a
+sample-rate change one core of a channel can deliver garbled 200 MSa/s data. Firmware 0.2.61 to 0.2.102 checked every
+full-rate capture on them after a rate change and retried, and showed their FPGA line in amber in Diagnostics
+(`CHANGELOG.md` 0.2.61; `fpga/al3/README.md` "Changes" section 7).
 
 The firmware of this release runs with the recommended row only.
 
@@ -47,7 +48,7 @@ differ between bitstreams. Diagnostics shows "FPGA changed since calibration" un
 
 ## Files and hashes
 
-Release assets, per version (0x1537 to 0x1539 are withdrawn and not attached):
+A release attaches the recommended version only; every version is in `fpga/al3/dist` as `al3-<version>.bin` (raw):
 
 - `fnirsi_1013d-fpga-al3-<version>.bin`: the bitstream as TD's bitgen wrote it, 282,898 bytes.
 - `fnirsi_1013d-fpga-al3-<version>-flash1m.bin`: the same, padded with 0xFF to 1,048,576 bytes, the size of the

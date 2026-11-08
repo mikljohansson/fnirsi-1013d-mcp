@@ -82,7 +82,7 @@ on the way.
    there, made from `docs/plans/announcement.md` and the CHANGELOG since 0.2.25). Every `{{placeholder}}`
    must be filled; `release_meta.py` refuses a file that still has one. The job appends the file list and
    `SHA256SUMS` to it.
-4. **FPGA bitstreams.** The release attaches the images committed in `fpga/al3/dist/`
+4. **FPGA bitstreams.** The release attaches the recommended image committed in `fpga/al3/dist/`
    (`fpga/al3/dist/BITSTREAMS.md`, "Provenance", says why they are committed and not built in CI). For a new
    bitstream version, before the release commit:
    - build it from a committed `fpga/al3/src` (`SRC_REV=<commit> ./build.sh`, `fpga/al3/TD_SETUP.md`), flash it
@@ -167,7 +167,7 @@ An rc that failed costs nothing: fix on main, tag `-rc2`. A failed run on the re
 | `fnirsi_1013d-fw-X.Y.Z.bin` | the scope image (eGON.EXE, GCC 10 protocol build) for FEL or SD sector 750 |
 | `fnirsi_1013d-sdtools-X.Y.Z.zip` | `make_release_sd_package.py`, `make_sd_image.py`, `mksunxi.py` |
 | `fnirsi1013d-X.Y.Z-py3-none-any.whl`, `fnirsi1013d-X.Y.Z.tar.gz` | the mcp package (`python -m build mcp`, the same build the `wheel` job tested) |
-| `fnirsi_1013d-fpga-al3-0x15xx.bin` | each bitstream in `fpga/al3/dist` except `withdrawn` ones, as bitgen wrote it |
+| `fnirsi_1013d-fpga-al3-0x15xx.bin` | the `recommended` bitstream in `fpga/al3/dist` only, as bitgen wrote it |
 | `fnirsi_1013d-fpga-al3-0x15xx-flash1m.bin` | the same padded with 0xFF to the 1 MiB config flash, the file users write |
 | `BITSTREAMS.md` | which bitstream to use, firmware versions, how to flash, rollback |
 | `SHA256SUMS` | sha256 of every file above, also printed in the release notes |

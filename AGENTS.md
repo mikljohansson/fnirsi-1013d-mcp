@@ -133,7 +133,7 @@ the GCC 10, GCC 13 and PC_DEBUG builds, host tests, the
 mcp ruff and pytest runs on Linux and Windows, and both protocol-vector checkers. Keep those commands
 green locally before pushing. A `vX.Y.Z` tag runs `release.yml`. The tag must equal `PC_FW_VERSION`
 and the mcp version, `CHANGELOG.md` needs a matching section and `docs/release-notes/X.Y.Z.md` holds the
-release notes; a `vX.Y.Z-rcN` tag is a dry run. Releases attach the bitstreams in `fpga/al3/dist`. Atlan4's binary-only bootloader and
+release notes; a `vX.Y.Z-rcN` tag is a dry run. Releases attach the recommended bitstream from `fpga/al3/dist`. Atlan4's binary-only bootloader and
 updater are never attached; `tools/make_release_sd_package.py` fetches them on the user's machine.
 Procedure, FEL hash check and the GPL reasoning: `docs/releasing.md`. Add user-visible changes to
 `CHANGELOG.md` under Unreleased, citing the commit.

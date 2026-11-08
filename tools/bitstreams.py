@@ -8,9 +8,9 @@ is the gate between that directory and a release:
   python3 -I tools/bitstreams.py check              # CI: files, hashes, headers, manifest <-> BITSTREAMS.md
   python3 -I tools/bitstreams.py check --release    # release.yml: also one benched "recommended" image, the
                                                     # firmware's PC_FW_FPGA_VERSION, no placeholders
-  python3 -I tools/bitstreams.py pack --out dist    # release.yml: raw .bin + 1 MiB flash image per bitstream, BITSTREAMS.md
+  python3 -I tools/bitstreams.py pack --out dist    # release.yml: raw .bin + 1 MiB flash image of the recommended one, BITSTREAMS.md
 
-pack writes, for every entry whose status is not "withdrawn":
+pack writes, for the one entry whose status is "recommended" (older images stay in fpga/al3/dist, not attached):
   fnirsi_1013d-fpga-al3-<version>.bin           the bitstream as TD's bitgen wrote it (282,898 bytes)
   fnirsi_1013d-fpga-al3-<version>-flash1m.bin   the same padded with 0xFF to the 1 MiB of the 25Q80 config flash
 and checks the padded image against flash_image_sha256 before it writes it. Exit 1 with a message on any mismatch.
@@ -124,9 +124,10 @@ def pack(out, dist=DIST):
     manifest, _ = load(dist)
     out.mkdir(parents=True, exist_ok=True)
     written = []
-    for e in manifest["bitstreams"]:
-        if e["status"] == "withdrawn":
-            continue
+    recommended = [e for e in manifest["bitstreams"] if e["status"] == "recommended"]
+    if len(recommended) != 1:
+        raise SystemExit("pack: exactly one bitstream must be recommended (found %d)" % len(recommended))
+    for e in recommended:
         raw = (dist / e["file"]).read_bytes()
         padded = flash_image(raw, manifest["flash_size"])
         if sha256(raw) != e["sha256"] or sha256(padded) != e["flash_image_sha256"]:
