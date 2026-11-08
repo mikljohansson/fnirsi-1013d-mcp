@@ -409,7 +409,7 @@ static void test_bodies(void)
   mock.life.power_on = 12;
 
   //1.28 (fw-capmetric): the channel's last capture stage training, 364..431; none since boot: zeros
-  T_EQ(PC_CAL_RESP_LEN, 460);
+  T_EQ(PC_CAL_RESP_LEN, 480);
   {
     static const uint8_t zero[68];
 
@@ -531,11 +531,14 @@ static void test_report(void)
     acal_gain_carry(0, &c->cal2);
     T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
     has("    other channel's relays, zero shift codes per range (0 / 2 on): not measured (calibrate)\r\n");
-    c->cal2.xz[0][0] = -16; c->cal2.xz[0][2] = 14; c->cal2.xz[5][0] = -2; c->cal2.xz_valid = 1;
+    c->cal2.xz[ACAL_GATED][0][0] = -16; c->cal2.xz[ACAL_GATED][0][2] = 14; c->cal2.xz[ACAL_GATED][5][0] = -2;
+    c->cal2.xz[ACAL_FULL][0][0] = -8; c->cal2.xz[ACAL_FULL][0][2] = 6;
+    c->cal2.xz_valid = ACAL_XZ_V_GATED | ACAL_XZ_V_FULL;
     c->range = 0; mock.ch[0].range = 2;
     T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
-    has("    other channel's relays, zero shift codes per range (0 / 2 on): -1.000/0.875 0.000/0.000 0.000/0.000 "
-        "0.000/0.000 0.000/0.000 -0.125/0.000; now 0.875 (other channel at range 2, 2 on)\r\n");
+    has("    other channel's relays, zero shift codes per range (0 / 2 on): gated -1.000/0.875 0.000/0.000 0.000/0.000 "
+        "0.000/0.000 0.000/0.000 -0.125/0.000; full rate -0.500/0.375 0.000/0.000 0.000/0.000 0.000/0.000 0.000/0.000 "
+        "0.000/0.000; now 0.375, 16-bit 0.375 (other channel at range 2, 2 on)\r\n");   //divider 0: the full class
   }
   mock_reset(PC_FW_FPGA_VERSION);
   pc_session_init(&S);

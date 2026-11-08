@@ -73,11 +73,13 @@ typedef struct
   uint8_t  gain_range;                              //hardware range the gains were measured on, ACAL_GAIN_NONE
   uint8_t  gain_flags;                              //ACAL_GAIN_KEPT
   uint16_t gain_lever;                              //gated span between the post levels, mean of both cores, 1/16 code
-  //fw-xzero (not in the v3 block: sector 708 bytes 108..127, acal_xz_pack): the shift of this channel's raw zero, both
-  //cores and both clock classes, while the other channel's range relays are in class k (acal_xz_class), against the
-  //zeros above (measured with the other channel in ACAL_XZ_REF, so xz[r][ACAL_XZ_REF] = 0). 1/16 code, a multiple of 2
-  //(stored in 1/8 code). Used only while xz_valid
-  int8_t   xz[ACAL_RANGES][ACAL_XZ_CLASSES];
+  //fw-xzero (not in the v3 block: sector 708, acal_xz_pack): the shift of this channel's raw zero, both cores, per clock
+  //class (bench 2026-11-08 11:4x: at full rate about half the gated shift for two coils), while the other channel's
+  //range relays are in class k (acal_xz_class), against the zeros above (measured with the other channel in
+  //ACAL_XZ_REF, so xz[c][r][ACAL_XZ_REF] = 0). 1/16 code, a multiple of 2 (stored in 1/8 code). Used while xz_valid
+  //has ACAL_XZ_V_GATED; without ACAL_XZ_V_FULL (a table saved before the full class was measured) the full class holds
+  //a copy of the gated one, as that build applied it
+  int8_t   xz[ACAL_CLASSES][ACAL_RANGES][ACAL_XZ_CLASSES];
   uint8_t  xz_valid;
 } acal_channel;
 
@@ -136,18 +138,27 @@ uint8_t  acal_prov_what(const acal_channel old[2], const acal_channel cur[2]);
 #define ACAL_XZ_OFFSET       108          //sector 708: 20 free bytes after Atlan's DC shift fields (108..119 inside its
                                           //checksum of 16..119, 120..127 outside), zero in every save before fw-xzero
 #define ACAL_XZ_BYTES        20           //u16 check, then 24 six-bit values: [ch][range][class 0, class 2], 1/8 code
-#define ACAL_XZ_VERSION      1            //in the check's input, so another layout fails the check
+                                          //(the gated clock class)
+//The full class's 24 values (the same packing, 18 bytes) in the other free bytes of the sector: 4..15 (before Atlan's
+//checksummed area), 44..47 and 76..77 (the unused input_calibration[7] slots of CH1 and CH2, inside the checksum)
+#define ACAL_XZF_BYTES       18
+#define ACAL_XZ_VERSION      2            //the check covers the gated and the full tables
+#define ACAL_XZ_VERSION_G    1            //fw-xzero's first build (10fa8d3): the check covers the gated table only
+#define ACAL_XZ_V_GATED      0x01         //xz_valid: a table (the gated class measured)
+#define ACAL_XZ_V_FULL       0x02         //xz_valid: the full class measured too
 #define ACAL_XZ_MAX16        (56)         //|shift| <= 3.5 codes (the six-bit field holds -4 .. +3.875)
 
 uint8_t  acal_xz_class(uint8_t range);    //range 0..6 (the other channel's samplevoltperdiv) -> 0..2
 uint8_t  acal_xz_range(uint8_t cls);      //the range the zero step sets the other channel to for class cls: 1, 0, 2
 
-//The table of both channels after the v3 block (block = the packed ACAL_BLOCK_BYTES, its CRC binds the table to it) into
-//ACAL_XZ_BYTES at out; zeros unless both channels have xz_valid
-void     acal_xz_pack(const acal_channel ch[2], const uint8_t *block, uint8_t *out);
-//The table from in for the block it was saved with: 1 and both channels' xz / xz_valid set, else 0 and both cleared (an
-//older save: zeros; another block: the check fails)
-int      acal_xz_unpack(const uint8_t *in, const uint8_t *block, acal_channel ch[2]);
+//The tables of both channels into the 512-byte sector 708 image (its v3 block at ACAL_SECTOR_OFFSET must be packed
+//already: its CRC binds the tables to it): the gated table at ACAL_XZ_OFFSET, the full one in the bytes above; zeros
+//unless both channels have both classes (ACAL_XZ_V_GATED | ACAL_XZ_V_FULL)
+void     acal_xz_pack(const acal_channel ch[2], uint8_t *sector);
+//The tables from the sector image for the block in it: 2 = both classes (version 2), 1 = the gated table of a version 1
+//save (the full class a copy of it, xz_valid ACAL_XZ_V_GATED), 0 = none (an older save: zeros; another block: the check
+//fails): both channels' xz cleared and xz_valid 0
+int      acal_xz_unpack(const uint8_t *sector, acal_channel ch[2]);
 
 //1 when c was measured at exactly these PWM centres (cal_offset[0..5])
 int      acal_bound(const acal_channel *c, const uint16_t *cal_offset);
@@ -175,6 +186,8 @@ typedef struct
   int32_t  zero_q8;                       //trace code of 0 V x 256 (mean of both corrected cores)
   int32_t  corr16;                        //16-bit path (ADCs at full rate): added to every converted sample, 1/16 code
   int16_t  xz16;                          //fw-xzero: the shift added to both cores' zeros for the other channel's relays
+                                          //in this readout's clock class (cls)
+  int16_t  xzf16;                         //the same in the full class (the 16-bit path: corr16)
   uint8_t  xcls;                          //their class (acal_xz_class), ACAL_XZ_NONE when not known
 } acal_corr;
 
@@ -187,7 +200,8 @@ typedef struct
 void     acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
                          int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out);
 //fw-xzero: the same with the other channel's range xrange (0..6, ACAL_XZ_NONE = not known): with a bound block and its
-//table, c->xz[range][class(xrange)] is added to both cores' zeros in both classes (8-bit offsets, comp / frac, corr16), so
+//table, c->xz[clock class][range][class(xrange)] is added to both cores' zeros (8-bit offsets and comp / frac with the
+//readout's clock class, corr16 with the full class), so
 //0 V stays at T whatever the other channel's relays. acal_correction = xrange ACAL_XZ_NONE
 void     acal_correction_xz(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
                             int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, uint8_t xrange,
@@ -328,13 +342,14 @@ uint32_t acal_probe_pack(uint8_t *dst, uint8_t ch, uint8_t range, int rc, uint8_
 //Checks m (acal_range_check) and stores it as range r of c: ACAL_OK or the first ACAL_E_* (c unchanged then)
 int      acal_range_store(const acal_range_meas *m, acal_channel *c, uint8_t r);
 
-//fw-xzero: the other channel's relays on range r of the zero step, after acal_range_store. m16[4] = the mean of both
-//cores (1/16 code, gated, at the range's centre PWM) with the other channel at acal_xz_range(ACAL_XZ_REF), then (0), (2),
+//fw-xzero: the other channel's relays on range r of the zero step, after acal_range_store, for clock class cls. m16[4] =
+//the mean of both cores (1/16 code, in class cls, at the range's centre PWM) with the other channel at
+//acal_xz_range(ACAL_XZ_REF), then (0), (2),
 //then ACAL_XZ_REF again, equally spaced in time (a linear drift cancels: each class is compared with the reference
 //interpolated to its time). clipped: samples at 0 or 255 over the four points. ACAL_OK with c->xz[r] set (rounded to
 //1/8 code), else ACAL_E_CLIP, ACAL_E_DRIFT (the two reference points more than ACAL_MAX_DRIFT16 apart) or ACAL_E_XZERO
 //(a shift over ACAL_XZ_MAX16), c unchanged then
-int      acal_xz_store(const int32_t m16[4], uint32_t clipped, acal_channel *c, uint8_t r);
+int      acal_xz_store(const int32_t m16[4], uint32_t clipped, acal_channel *c, uint8_t r, uint8_t cls);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Gain step (calibration post, generator output low / high, both static)

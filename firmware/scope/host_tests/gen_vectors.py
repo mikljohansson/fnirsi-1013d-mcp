@@ -398,11 +398,14 @@ def adc_cal_v3_section():
 # fw-xzero (protocol 1.29, row 71): the other channel's relays, sector 708 bytes 108..127, bound to the v3 block above.
 # Example = host_tests/test_adc_cal.c xz_example(): CH1 class 0 -16 - 2 r, class 2 14 + 2 r; CH2 class 0 2 r - 64, class 2
 # 62 - 2 r (1/16 code, even: stored in 1/8 code)
-def adc_cal_xz_example():
-    return [[[-16 - 2 * r, 0, 14 + 2 * r] for r in range(6)], [[2 * r - 64, 0, 62 - 2 * r] for r in range(6)]]
+def adc_cal_xz_example(full=False):
+    """[channel][range][class] in 1/16 code, gated (full=False) or full class: the full class half a code nearer 0."""
+    d = 8 if full else 0
+    return [[[-16 - 2 * r + d, 0, 14 + 2 * r - d] for r in range(6)],
+            [[2 * r - 64 + d, 0, 62 - 2 * r - d] for r in range(6)]]
 
 
-def adc_cal_xz_pack(xz, block):
+def adc_cal_xz_pack6(xz):
     bits = 0
     i = 0
     for ch in xz:
@@ -411,29 +414,40 @@ def adc_cal_xz_pack(xz, block):
                 assert v % 2 == 0 and -64 <= v <= 62
                 bits |= ((v // 2) & 0x3F) << (6 * i)
                 i += 1
-    tab = bits.to_bytes(18, "little")
-    check = zlib.crc32(b"XZ\x01\x00" + block[-4:] + tab) & 0xFFFF
-    return struct.pack("<H", check) + tab
+    return bits.to_bytes(18, "little")
+
+
+def adc_cal_xz_pack(xz_gated, xz_full, block):
+    tab, tabf = adc_cal_xz_pack6(xz_gated), adc_cal_xz_pack6(xz_full)
+    check = zlib.crc32(b"XZ\x02\x00" + block[-4:] + tab + tabf) & 0xFFFF
+    return struct.pack("<H", check) + tab, tabf
 
 
 def adc_cal_xz_section():
     blk = adc_cal_v3_pack([adc_cal_v3_channel(), adc_cal_v3_channel(True)])
-    xz = adc_cal_xz_example()
-    tab = adc_cal_xz_pack(xz, blk)
-    assert len(tab) == 20
+    xz, xzf = adc_cal_xz_example(), adc_cal_xz_example(True)
+    tab, tabf = adc_cal_xz_pack(xz, xzf, blk)
+    assert len(tab) == 20 and len(tabf) == 18
     return {
         "notes": "fw-xzero (protocol 1.29, row 71): the zero shift of each channel for the other channel's range relays, "
-                 "sector 708 bytes 108..127 (after Atlan's DC shift fields; 108..119 inside its checksum of 16..119), "
-                 "written with the v3 block of section adc_cal_v3 (block_hex there). u16 check = zlib.crc32('X' 'Z' "
-                 "version 1, 0, the v3 block's last 4 bytes (its CRC-32), the 18 table bytes) & 0xFFFF; then 24 values "
-                 "of 6 bits, least significant bit first: for CH1 then CH2, range 0..5, class 0 then class 2 (class = "
-                 "the other channel's range relay coils on: range 0 1, 1 0, 2 2, 3 1, 4 2, 5 1, 6 1; class 1 is the "
-                 "reference the zeros were measured with, shift 0), two's complement in 1/8 code (-4 .. +3.875). The "
-                 "shift is added to both cores' zeros of the channel's range in both clock classes. All 20 bytes zero = "
-                 "no table (an older save); a check mismatch (another block) = no table. xz: [channel][range][class] in "
-                 "1/16 code as GET_CAL 440..457 report it.",
+                 "per clock class, written with the v3 block of section adc_cal_v3 (block_hex there). Sector 708 bytes "
+                 "108..127 (after Atlan's DC shift fields; 108..119 inside its checksum of 16..119): u16 check, then the "
+                 "gated table; the full table's 18 bytes at 4..15, 44..47, 76..77 (in that order; the unused "
+                 "input_calibration[7] slots, 44..47 and 76..77 inside the checksum). A table = 24 values of 6 bits, "
+                 "least significant bit first: for CH1 then CH2, range 0..5, class 0 then class 2 (class = the other "
+                 "channel's range relay coils on: range 0 1, 1 0, 2 2, 3 1, 4 2, 5 1, 6 1; class 1 is the reference the "
+                 "zeros were measured with, shift 0), two's complement in 1/8 code (-4 .. +3.875). check = "
+                 "zlib.crc32('X' 'Z' 2 0, the v3 block's last 4 bytes (its CRC-32), the 18 gated bytes, the 18 full "
+                 "bytes) & 0xFFFF. Version 1 (fw-xzero's first build, 10fa8d3: the gated table only, check over 'X' "
+                 "'Z' 1 0, the block CRC and the gated bytes; the full bytes zero) loads with the full class a copy of "
+                 "the gated one. All 20 bytes zero = no table (an older save); a check mismatch (another block) = no "
+                 "table. The 8-bit readout adds the table of its clock class, the 16-bit path (corr16) the full one. "
+                 "xz / xz_full: [channel][range][class] in 1/16 code as GET_CAL 440..457 / 460..477 report them. "
+                 "table_hex = bytes 108..127, full_hex = the 18 full bytes in order.",
         "xz": xz,
+        "xz_full": xzf,
         "table_hex": tab.hex(),
+        "full_hex": tabf.hex(),
     }
 
 
@@ -897,22 +911,26 @@ def build():
         "(the 2026-10-22 sweep's CH2 q16 x 34)",
         [decoded(CMDS["GET_CAL"], 98, cb, flags=FLAG_RESPONSE)])
 
-    # 5k. Protocol 1.29 (fw-xzero, section 14 row 71): GET_CAL 460 bytes, 432..459 the other channel's relays: 432 u8
-    # flags (bit 0 the channel has a table, bit 1 applied now: the block bound), 433 u8 the other channel's range, 434 u8
-    # its class (coils on 0..2), 435 0, 436 i16 the shift applied now (1/16 code), 438 u16 0, 440 i8[range 6][class 3]
-    # the table (1/16 code), 458 u16 0. The example: CH2's answer with CH1 at range 1 (no coil on), CH2 at range 3
-    cb = bytearray(460)
+    # 5k. Protocol 1.29 (fw-xzero, section 14 row 71): GET_CAL 480 bytes, 432..479 the other channel's relays: 432 u8
+    # flags (bit 0 the channel has a table, bit 1 applied now: the block bound, bit 2 the full class measured), 433 u8
+    # the other channel's range, 434 u8 its class (coils on 0..2), 435 0, 436 i16 the shift applied now in the 8-bit
+    # readout's clock class, 438 i16 the full class's (the 16-bit path), 440 i8[range 6][class 3] the gated table (1/16
+    # code), 458 u16 0, 460 i8[6][3] the full table, 478 u16 0. The example: CH2's answer with CH1 at range 1 (no coil
+    # on), CH2 at range 3, a gated divider
+    cb = bytearray(480)
     cb[0] = 1
-    cb[432:436] = bytes([0x03, 1, 0, 0])
-    xz = adc_cal_xz_example()[1]
-    cb[436:438] = struct.pack("<h", xz[3][0])
+    cb[432:436] = bytes([0x07, 1, 0, 0])
+    xz, xzf = adc_cal_xz_example()[1], adc_cal_xz_example(True)[1]
+    cb[436:440] = struct.pack("<hh", xz[3][0], xzf[3][0])
     cb[440:458] = struct.pack("<18b", *[v for row in xz for v in row])
+    cb[460:478] = struct.pack("<18b", *[v for row in xzf for v in row])
     cb = bytes(cb)
     f = frame(CMDS["GET_CAL"], 99, cb, flags=FLAG_RESPONSE)
     add("resp_get_cal_1_29", f, [],
-        "1.29 GET_CAL response (460 bytes; 0..431 zero here but byte 0 channel 1): 432 flags 0x03 (table, applied), 433 "
-        "CH1 at range 1, 434 class 0 (no coil on), 436 the shift applied -58 (CH2 range 3, class 0: -3.625 codes), 440 "
-        "the table of adc_cal_xz's CH2 example ([range][class 0, 1, 2]: -64 0 62, -62 0 60, ..)",
+        "1.29 GET_CAL response (480 bytes; 0..431 zero here but byte 0 channel 1): 432 flags 0x07 (table, applied, full "
+        "class measured), 433 CH1 at range 1, 434 class 0 (no coil on), 436 the shift applied -58 (CH2 range 3, class "
+        "0, gated: -3.625 codes), 438 the full class's -50, 440 the gated table of adc_cal_xz's CH2 example ([range]"
+        "[class 0, 1, 2]: -64 0 62, -62 0 60, ..), 460 the full table (-56 0 54, ..)",
         [decoded(CMDS["GET_CAL"], 99, cb, flags=FLAG_RESPONSE)])
 
     # 6. ASCII probe (section 10)

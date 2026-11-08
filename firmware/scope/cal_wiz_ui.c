@@ -374,20 +374,22 @@ static int cal_train(uint32 ch, cs_train *t, acal_fail *fail, int *cs_rc)
 //fw-xzero: the other channel's range relays shift this channel's zero by about -1 / 0 / +1 code in three classes (the
 //coils on, adc_cal.h acal_xz_class; bench 2026-11-08 10:20). The zero step sets the other channel to the reference class
 //(acal_xz_range(ACAL_XZ_REF)) for the whole of a channel's step, so the stored zeros belong to that class, and after each
-//range's zero measures the shift of the two other classes on the quiet input: gated (the shift is analog, before the ADC,
-//so it is the same in both clock classes; inference), at the range's centre PWM, 8 conversions per point with the other
-//channel at the reference, class 0, class 2 and the reference again (a linear drift cancels, acal_xz_store). Only the
-//other channel's range relays move (0x33 / 0x36); its offset PWM and coupling stay. 4 x (60 ms + 8 conversions), about
-//0.35 s per range, about 4 s per wizard run; 18 relay switches of the other channel per channel
+//range's zero measures the shift of the two other classes on the quiet input, in each clock class (bench 11:4x: at full
+//rate about half the gated shift for two coils on, so the shift is not only analog ahead of the ADC), at the range's
+//centre PWM, with the other channel at the reference, class 0, class 2 and the reference again (a linear drift cancels,
+//acal_xz_store): 8 conversions per point gated, 64 at 200 MSa/s. Only the other channel's range relays move (0x33 /
+//0x36); its offset PWM and coupling stay. 4 x (60 ms + 8 gated conversions) + 4 x (60 ms + 64 full-rate conversions),
+//about 0.8 s per range, about 10 s per wizard run; 36 relay switches of the other channel per channel
 #define CAL_XZ_SETTLE_MS    60
 #define CAL_XZ_CONVS         8
+#define CAL_XZ_CONVS_FULL   64
 
 static void cal_xz_other(uint32 ch, uint8 cls)
 {
   (void)fpga_relay_write(cal_cmds[ch ^ 1][0], acal_xz_range(cls));
 }
 
-static int cal_xzero(uint32 ch, uint32 r, int32 pwm, acal_channel *c, acal_fail *fail)
+static int cal_xzero_class(uint32 ch, uint32 r, int32 pwm, uint8 cls, acal_channel *c, acal_fail *fail)
 {
   static const uint8 seq[4] = { ACAL_XZ_REF, 0, 2, ACAL_XZ_REF };
   acal_acc acc[2][2];
@@ -395,27 +397,44 @@ static int cal_xzero(uint32 ch, uint32 r, int32 pwm, acal_channel *c, acal_fail 
   uint32_t i, clipped = 0;
   int      rc;
 
-  cal_set_rate(CAL_RATE_GATED);
+  cal_set_rate((cls == ACAL_FULL) ? CAL_RATE_FULL : CAL_RATE_GATED);
+  fpga_enc_garbled = 0;
 
   for(i=0;i<4;i++)
   {
     cal_xz_other(ch, seq[i]);
-    cal_measure(r, pwm, CAL_XZ_SETTLE_MS, CAL_XZ_CONVS, acc);
+    cal_measure(r, pwm, CAL_XZ_SETTLE_MS, (cls == ACAL_FULL) ? CAL_XZ_CONVS_FULL : CAL_XZ_CONVS, acc);
     cal_result(acc, mean, 0, 0, 0, &clipped);
     m16[i] = (mean[0] + mean[1]) / 2;
   }
-
-  rc = acal_xz_store(m16, clipped, c, (uint8)r);
 
   //The result line names the moving zero as for the zero point (cw_zero_line); no measurement point note
   memset(fail, 0, sizeof(*fail));
   fail->point = ACAL_PT_NONE;
 
+  if(fpga_enc_garbled)
+    return ACAL_E_TIMING;
+
+  rc = acal_xz_store(m16, clipped, c, (uint8)r, cls);
+
   if(rc == ACAL_E_DRIFT)
   {
-    fail->cls   = ACAL_GATED;
+    fail->cls   = cls;
     fail->value = m16[3] - m16[0];
   }
+
+  return rc;
+}
+
+//fw-xzero (bench 2026-11-08 11:4x): the shift differs between the clock classes (at full rate about half the gated one
+//for two coils on), so both are measured: gated, then at 200 MSa/s (64 conversions per point for the PWM ripple, as the
+//full-rate zero)
+static int cal_xzero(uint32 ch, uint32 r, int32 pwm, acal_channel *c, acal_fail *fail)
+{
+  int rc = cal_xzero_class(ch, r, pwm, ACAL_GATED, c, fail);
+
+  if(rc == ACAL_OK)
+    rc = cal_xzero_class(ch, r, pwm, ACAL_FULL, c, fail);
 
   return rc;
 }
@@ -513,7 +532,7 @@ static int cal_channel(acal_channel *c, uint32 ch, uint32_t *match16, acal_fail 
       return rc;
   }
 
-  c->xz_valid = 1;
+  c->xz_valid = ACAL_XZ_V_GATED | ACAL_XZ_V_FULL;
   return ACAL_OK;
 }
 

@@ -1180,18 +1180,23 @@ static void test_cal_battery_pattern(void)
     r = req(PC_CMD_GET_CAL, "\1", 1);
     T_EQ(r.p[432], 0); T_EQ(r.p[433], 1); T_EQ(r.p[434], 0); T_EQ(pc_get_u16(r.p + 436), 0);
     T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9); T_EQ((int32_t)pc_get_u32(r.p + 84), -20);
-    T_EQ(r.p[440], 0); T_EQ(r.p[457], 0);
+    T_EQ(r.p[440], 0); T_EQ(r.p[457], 0); T_EQ(r.p[460], 0); T_EQ(r.p[477], 0); T_EQ(pc_get_u16(r.p + 438), 0);
 
-    //A table: range 3 moves -1 code with CH1's relays all off (range 1), +0.875 with two on (ranges 2, 4)
-    c->cal2.xz[3][0] = -16; c->cal2.xz[3][2] = 14; c->cal2.xz[5][0] = 4; c->cal2.xz_valid = 1;
+    //A table: range 3 moves -1 code with CH1's relays all off (range 1), +0.875 with two on (ranges 2, 4), gated; the
+    //full class half of it (the 16-bit path, corr16)
+    c->cal2.xz[ACAL_GATED][3][0] = -16; c->cal2.xz[ACAL_GATED][3][2] = 14; c->cal2.xz[ACAL_GATED][5][0] = 4;
+    c->cal2.xz[ACAL_FULL][3][0] = -8; c->cal2.xz[ACAL_FULL][3][2] = 6; c->cal2.xz[ACAL_FULL][5][0] = 2;
+    c->cal2.xz_valid = ACAL_XZ_V_GATED | ACAL_XZ_V_FULL;
     r = req(PC_CMD_GET_CAL, "\1", 1);
-    T_EQ(r.p[432], 1 | 2); T_EQ(r.p[433], 1); T_EQ(r.p[434], 0); T_EQ((int16_t)pc_get_u16(r.p + 436), -16);
+    T_EQ(r.p[432], 1 | 2 | 4); T_EQ(r.p[433], 1); T_EQ(r.p[434], 0); T_EQ((int16_t)pc_get_u16(r.p + 436), -16);
+    T_EQ((int16_t)pc_get_u16(r.p + 438), -8);
     T_EQ((int8_t)r.p[440 + 9], -16); T_EQ(r.p[440 + 10], 0); T_EQ(r.p[440 + 11], 14); T_EQ(r.p[440 + 15], 4);
-    //A 1671 - 16 = 1655, to 1648: -7 = -1 code + 9; B 1594 - 16 = 1578: +70 = 4 + 6; 16-bit 1648 - (1668 + 1635) / 2 =
-    //-3.5 -> -4; the 0 V code stays T
+    T_EQ((int8_t)r.p[460 + 9], -8); T_EQ(r.p[460 + 11], 6); T_EQ(r.p[460 + 15], 2);
+    //A 1671 - 16 = 1655, to 1648: -7 = -1 code + 9; B 1594 - 16 = 1578: +70 = 4 + 6; 16-bit (full class, -8)
+    //1648 - (1676 + 1643) / 2 = -11.5 -> -12; the 0 V code stays T
     T_EQ((int16_t)pc_get_u16(r.p + 74), -1); T_EQ(r.p[78], 9);
     T_EQ((int16_t)pc_get_u16(r.p + 76), 4); T_EQ(r.p[79], 6);
-    T_EQ((int32_t)pc_get_u32(r.p + 84), -4);
+    T_EQ((int32_t)pc_get_u32(r.p + 84), -12);
     T_EQ((int32_t)pc_get_u32(r.p + 100), 4096 * -7); T_EQ((int32_t)pc_get_u32(r.p + 104), 4096 * 70);
     T_EQ((int32_t)pc_get_u32(r.p + 80), 103 * 256);
     r = req(PC_CMD_GET_CHANNEL, "\1", 1);
@@ -1201,8 +1206,9 @@ static void test_cal_battery_pattern(void)
     {
       mock.ch[0].range = (uint8_t)j;
       r = req(PC_CMD_GET_CAL, "\1", 1);
-      T_EQ(r.p[434], 2); T_EQ((int16_t)pc_get_u16(r.p + 436), 14);
+      T_EQ(r.p[434], 2); T_EQ((int16_t)pc_get_u16(r.p + 436), 14); T_EQ((int16_t)pc_get_u16(r.p + 438), 6);
       T_EQ((int16_t)pc_get_u16(r.p + 74), -3); T_EQ(r.p[78], 11);
+      T_EQ((int32_t)pc_get_u32(r.p + 84), -26);                 //1648 - (1690 + 1657) / 2 = -25.5
     }
     //one on (ranges 0, 3, 5 and the zoom 6): the reference class, no shift
     for(j=0;j<=6;j++)
@@ -1218,12 +1224,22 @@ static void test_cal_battery_pattern(void)
     mock.ch[0].range = 1;
     c->range = 5;
     r = req(PC_CMD_GET_CAL, "\1", 1);
-    T_EQ((int16_t)pc_get_u16(r.p + 436), 4);
+    T_EQ((int16_t)pc_get_u16(r.p + 436), 4); T_EQ((int16_t)pc_get_u16(r.p + 438), 2);
+    //the full class at divider 0: the 8-bit loop takes the full table too
+    c->divider = 0;
+    r = req(PC_CMD_GET_CAL, "\1", 1);
+    T_EQ(r.p[73] & 4, 0); T_EQ((int16_t)pc_get_u16(r.p + 436), 2); T_EQ((int16_t)pc_get_u16(r.p + 438), 2);
+    c->divider = 199;
+    //a table without the full class (a 10fa8d3 save: the gated copy): bit 2 clear
+    c->cal2.xz_valid = ACAL_XZ_V_GATED;
+    r = req(PC_CMD_GET_CAL, "\1", 1);
+    T_EQ(r.p[432], 1 | 2);
+    c->cal2.xz_valid = ACAL_XZ_V_GATED | ACAL_XZ_V_FULL;
     c->range = 3;
     //a block that is not bound: version 1, the table reported (bit 0) but not applied
     c->cal_offset[2]++;
     r = req(PC_CMD_GET_CAL, "\1", 1);
-    T_EQ(r.p[72], 1); T_EQ(r.p[432], 1); T_EQ(pc_get_u16(r.p + 436), 0); T_EQ((int16_t)pc_get_u16(r.p + 74), 2);
+    T_EQ(r.p[72], 1); T_EQ(r.p[432], 1 | 4); T_EQ(pc_get_u16(r.p + 436), 0); T_EQ((int16_t)pc_get_u16(r.p + 74), 2);
     c->cal_offset[2]--;
     memset(c->cal2.xz, 0, sizeof(c->cal2.xz)); c->cal2.xz_valid = 0;
     mock.ch[0].range = xr0;
@@ -3714,7 +3730,7 @@ static void test_capture_stages(void)
   mock.cap.trailer = CS_T_VALID; mock.cap.stored = 0x0924; mock.cap.stored_fpga = 0x153A; mock.cap.value = 0x0924;
   mock.cap.flags |= PC_CAPF_TRAINED;
   r = req(PC_CMD_GET_CAL, (const uint8_t *)"\x01", 1);
-  T_EQ(r.len, 460); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
+  T_EQ(r.len, 480); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
   T_EQ(pc_get_u16(r.p + 358), 0x0924); T_EQ(pc_get_u16(r.p + 360), 0x153A); T_EQ(pc_get_u16(r.p + 362), 0x0924);
 
   //EXT shifts: legacy 12 samples at dividers 0..3 (fw-153f, 0x153F: core A one word earlier at 1..3) and 14 from 4 up

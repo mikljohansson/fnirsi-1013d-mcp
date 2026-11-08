@@ -719,15 +719,23 @@ static void sec_cal_channel(pc_text *t, const uint8_t *c)
     pc_text_str(t, "    other channel's relays, zero shift codes per range (0 / 2 on):");
     if(c[432] & 0x01)
     {
-      for(r=0;r<ACAL_RANGES;r++)
+      for(m=0;m<2;m++)
       {
-        pc_text_str(t, " ");
-        pc_text_fix(t, (int8_t)c[440 + 3 * r], 16, 3);
-        pc_text_str(t, "/");
-        pc_text_fix(t, (int8_t)c[440 + 3 * r + 2], 16, 3);
+        pc_text_str(t, m ? "; full rate" : " gated");
+        if(m && !(c[432] & 0x04))
+          pc_text_str(t, " (not measured: the gated values)");
+        for(r=0;r<ACAL_RANGES;r++)
+        {
+          pc_text_str(t, " ");
+          pc_text_fix(t, (int8_t)c[(m ? 460 : 440) + 3 * r], 16, 3);
+          pc_text_str(t, "/");
+          pc_text_fix(t, (int8_t)c[(m ? 460 : 440) + 3 * r + 2], 16, 3);
+        }
       }
       pc_text_str(t, "; now ");
       pc_text_fix(t, (int16_t)g16(c + 436), 16, 3);
+      pc_text_str(t, ", 16-bit ");
+      pc_text_fix(t, (int16_t)g16(c + 438), 16, 3);
       pc_text_str(t, " (other channel at range ");
       pc_text_udec(t, c[433]);
       pc_text_str(t, ", ");
