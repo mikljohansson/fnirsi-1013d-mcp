@@ -9,6 +9,8 @@
 #include "test_util.h"
 #include "settings_check.h"
 #include "adc_cal.h"
+#include "gen_pat.h"
+#include "pc_cmds.h"      //PC_FPGA_MAX_TOTAL
 
 #define VER_HI 0x0100      //variables.h SETTING_SECTOR_VERSION_HIGH / _LOW
 #define VER_LO 0x0015
@@ -90,6 +92,18 @@ static const char cal_1104[] =
   "e307e507e507e207e407e2071208160812081208160813087ebd55bda7bdf9bdb5bd8cbdf9bd8cbd14be7ebd30bec3bd55bd1fbd71bd2cbd8cbd55bd6dbc6dbc"
   "89bc89bca4bc7bbc11040c04090711050b080909060707050605050705050706848178811981e07e02008205504e6e864150525601003800f7bbc207302e322e"
   "3130350000000000000000003d150f00d0230100540000006502000000000000000000002e50a6494143415001001000db063d158c8302a1abfb00008f80a4d5";
+
+//sd_700-710_20261108-194120.bin: the record 354e676's power-off save wrote after a host SET_GEN of 12.5 MHz (generator
+//off, words 194 / 195 = 0x00BE 0xBC20); 0.3.1's check (10 MHz) refused it at word 194 and loaded the defaults
+static const char rec_1108[] =
+  "0e00a831000115000000000000000000010001000100000005000500000037013601000000000000000000000000000000000000000000000000000000000000"
+  "0100000001000000020002000000640045010000000000000000000000000000000000000000000000000000000000001f000000000000000000800000005d01"
+  "36010000000000000000000000000000000000000000000000000000000000000000000000006400190000000000000000000000010094000000000000000000"
+  "0000000000000000000000000100000001000000000001000000000000000000000000000000000000000000000000000000b70023020000a700480101000000"
+  "00000000000000000000000000000000000000000000000000000000030000000200000001000000000000000000000000000000030000000200000001000000"
+  "0000000000000000000000000000000061035c0365035f0364035f035a0355035e0359035d0359030000000000000000feff02000100ffff0000000000000000"
+  "00000000be0020bc3200000000000000fe3fdc0568b2030000000000000000de545e0010019a01c723d514e03200000000b203ca000041b301b101a411a0d1a0"
+  "fe1100002c000000cc030000010001000000000016000000000000000000000000000000142a0000d87b0000d30000600000000000000000e400000000000000";
 
 
 static void load(const char *hex, uint16_t *w)
@@ -286,10 +300,11 @@ static void test_fields(void)
   T_EQ(check(w, &bad), SREC_BAD_FIELD);
   T_EQ(bad, 57);
 
-  //Generator frequency 0..10 MHz (two words, high first)
+  //Generator frequency 0..25 MHz (two words, high first; fw-genlimit: was 10 MHz)
+  T_EQ(SREC_GEN_MAX_HZ, 25000000);
   load(rec_1022_gate, w);
-  w[194] = 10000000 >> 16;
-  w[195] = 10000000 & 0xFFFF;
+  w[194] = 25000000 >> 16;
+  w[195] = 25000000 & 0xFFFF;
   seal(w);
   T_EQ(check(w, &bad), SREC_OK);
   w[195]++;
@@ -365,9 +380,109 @@ static void test_cal_1104(void)
   T_EQ(cb, 0);
 }
 
+//fw-genlimit: the 11-08 record (a host's 12.5 MHz generator) loads now, unchanged
+static void test_1108(void)
+{
+  uint16_t w[256], copy[256], bad = 0xFFFF;
+
+  load(rec_1108, w);
+  memcpy(copy, w, sizeof(w));
+  T_EQ(((uint32_t)w[194] << 16) | w[195], 12500000);
+  T_EQ(check(w, &bad), SREC_OK);
+  T_EQ(bad, 0);
+  T_MEM(w, copy, sizeof(w));
+}
+
+//fw-genlimit: every value a host SET_* command can put into the saved settings passes the check, at both ends of each
+//range at once. The handlers' limits (pc_cmds.c) and the HAL's copies (pc_hal_scope.c) into the record's words
+//(scope_save_config_data):
+//  SET_CHANNEL  enable, coupling, invert 0..1; range (sample and display V/div both) and probe 0..6; per channel
+//  SET_TIMEBASE index 11..34 at its table rate (time_per_div_sample_rate: 28 - index, 0 from 28 on), roll mode off
+//  SET_TRIGGER  source 0..2, edge 0..1, mode (UI order) 0..2, total 80..PC_FPGA_MAX_TOTAL even, pretrigger 0..total - 2
+//  SET_GEN      enable 0..1; the UI copy (gp_ui_hz / gp_ui_pct) of any valid P16 / H16: 0 Hz .. 25 MHz, 0..100 %
+//Not in the check, so nothing to match: offsets and the trigger level (words 17, 41, 61), the decimation, trigger type,
+//hold-off and counter words (202..223 behind their markers), the life record.
+static void put_extremes(uint16_t *w, int top)
+{
+  uint64_t p16 = top ? GP_P16_MIN : GP_P16_LIMIT - 1;
+  uint32_t total = top ? PC_FPGA_MAX_TOTAL : 80, hz = gp_ui_hz(p16), base, c;
+
+  for(c=0;c<2;c++)
+  {
+    base = c ? 32 : 8;
+    w[base + 0]  = (uint16_t)top;              //enable
+    w[base + 1]  = (uint16_t)top;              //coupling
+    w[base + 2]  = top ? 6 : 0;                //probe
+    w[base + 4]  = top ? 6 : 0;                //display V/div
+    w[base + 5]  = top ? 6 : 0;                //sample V/div
+    w[base + 10] = (uint16_t)top;              //invert
+  }
+
+  w[56]  = top ? 34 : 11;                      //time/div
+  w[57]  = top ? 0 : 17;                       //its rate
+  w[87]  = 0;                                  //roll mode off (SET_TIMEBASE)
+  w[58]  = top ? 2 : 0;                        //trigger mode
+  w[59]  = (uint16_t)top;                      //edge
+  w[60]  = top ? 2 : 0;                        //source (EXT)
+  w[192] = (uint16_t)top;                      //generator on
+  w[194] = (uint16_t)(hz >> 16);
+  w[195] = (uint16_t)hz;
+  w[196] = gp_ui_pct(p16, top ? p16 : 0);      //duty
+  w[200] = (uint16_t)total;
+  w[201] = (uint16_t)(top ? total - 2 : 0);
+}
+
+static void test_host_extremes(void)
+{
+  uint16_t w[256], bad = 0xFFFF;
+  uint32_t i;
+  int      top;
+
+  //The generator's UI copy at SET_GEN's ends: 25 MHz (P16 8 clocks, also what 25e9 mHz gives), 0 Hz (the longest P16),
+  //12.5 MHz as benched; the duty 0..100 %
+  T_EQ(gp_ui_hz(GP_P16_MIN), SREC_GEN_MAX_HZ);
+  T_EQ(gp_ui_hz(gp_p16_from_mhz(GP_FREQ_MAX_MHZ)), SREC_GEN_MAX_HZ);
+  T_EQ(gp_ui_hz(GP_P16_LIMIT - 1), 0);
+  T_EQ(gp_ui_hz(gp_p16_from_mhz(12500000000ull)), 12500000);
+  T_EQ(gp_ui_pct(GP_P16_MIN, GP_P16_MIN), 100);
+  T_EQ(gp_ui_pct(GP_P16_MIN, 0), 0);
+
+  for(top=0;top<2;top++)
+  {
+    load(rec_1022_gate, w);
+    put_extremes(w, top);
+    seal(w);
+    T_EQ(check(w, &bad), SREC_OK);
+    T_EQ(bad, 0);
+  }
+
+  //Every SET_TIMEBASE index at its rate
+  for(i=11;i<=34;i++)
+  {
+    load(rec_1022_gate, w);
+    w[87] = 0;
+    w[56] = (uint16_t)i;
+    w[57] = (uint16_t)((i < 28) ? 28 - i : 0);
+    seal(w);
+    T_EQ(check(w, &bad), SREC_OK);
+  }
+
+  //Every SET_GEN frequency the UI copy can hold: 1 Hz steps around the top, a coarse sweep below
+  for(i=0;i<=SREC_GEN_MAX_HZ;i+=(i < 24999000) ? 999983 : 1)
+  {
+    load(rec_1022_gate, w);
+    w[194] = (uint16_t)(i >> 16);
+    w[195] = (uint16_t)i;
+    seal(w);
+    T_EQ(check(w, &bad), SREC_OK);
+  }
+}
+
 int main(void)
 {
   test_1104();
+  test_1108();
+  test_host_extremes();
   test_good();
   test_zero_body();
   test_damage();

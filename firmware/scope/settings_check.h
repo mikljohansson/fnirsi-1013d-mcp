@@ -23,6 +23,7 @@
 #define SETTINGS_CHECK_H
 
 #include <stdint.h>
+#include "gen_pat.h"
 
 #define SREC_WORDS        256
 
@@ -36,6 +37,10 @@
 //The PWM centres a calibration may store (adc_cal.h ACAL_PWM_MIN..ACAL_PWM_MAX)
 #define SREC_PWM_MIN      200
 #define SREC_PWM_MAX      1800
+
+//The generator frequency (Hz): SET_GEN's cap (gen_pat.h, 25 MHz), which the generator menu keeps too (generator.h
+//GEN_f_MAX). fw-genlimit: up to 0.3.1 this was the menu's 10 MHz, so a host's 12.5 MHz was saved and refused at boot.
+#define SREC_GEN_MAX_HZ   ((uint32_t)(GP_FREQ_MAX_MHZ / 1000u))
 
 //Version and checksum only (as 1.00o5 checked): SREC_OK, SREC_BAD_VERSION or SREC_BAD_SUM
 int srec_check_header(const uint16_t *w, uint16_t ver_hi, uint16_t ver_lo);

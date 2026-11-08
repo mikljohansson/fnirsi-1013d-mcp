@@ -29,8 +29,9 @@ Tap the frequency box or the duty box to open a keypad ("Set frequency" or "Set 
 - **Back** deletes the last digit, **Clear** empties the field.
 - **OK** applies the value.
 
-A typed frequency above 10 MHz is set to 10 MHz. A duty above 100 % is set to 100 %. The frequency is a whole number of
-hertz.
+A typed frequency above 25 MHz is set to 25 MHz, the same limit as over USB. A duty above 100 % is set to 100 %. The
+frequency is a whole number of hertz. At high frequencies the duty cycle moves in coarse steps: a period is 20 clocks of
+5 ns at 10 MHz and 8 at 25 MHz, and each half lasts at least 2 clocks.
 
 The wave shape, amplitude, offset and phase rows of the original firmware are gone, because the hardware cannot do
 them.

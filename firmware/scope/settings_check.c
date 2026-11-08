@@ -20,7 +20,6 @@
 #define TB_FIRST     11
 #define RATE_LAST    28     //sample_rate_settings[29]
 #define RATES_SHORT  18     //acq_view.h ACQ_RATES
-#define GEN_MAX_HZ   10000000u   //generator.h GEN_f_MAX
 #define TOTAL_MIN    80     //SET_TRIGGER: total 80..max_total, even; pretrigger + 2 <= total
 
 typedef struct
@@ -121,9 +120,9 @@ int srec_check_fields(const uint16_t *w, uint16_t *bad_word)
       return srec_bad(bad_word, W_CAL_C + i);
   }
 
-  //Generator frequency (int32, high word first): 0..GEN_f_MAX as the generator menu allows
+  //Generator frequency (int32, high word first): 0..25 MHz, what SET_GEN and the generator menu can set
   freq = ((uint32_t)w[W_FPGA + 2] << 16) | w[W_FPGA + 3];
-  if(freq > GEN_MAX_HZ)
+  if(freq > SREC_GEN_MAX_HZ)
     return srec_bad(bad_word, W_FPGA + 2);
 
   //Memory depth and trigger point: SET_TRIGGER's geometry (a depth over the bitstream's is clamped on load)

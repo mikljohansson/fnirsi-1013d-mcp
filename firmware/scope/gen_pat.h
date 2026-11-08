@@ -46,6 +46,11 @@ int      gp_split(uint64_t p16, uint64_t h16, gp_square *sq);
 //square; 1 = a static level instead (frequency 0 or duty 0 %: low; duty 100 %: high), *level says which
 int      gp_ui_square(uint32_t freq_hz, uint8_t duty_pct, uint64_t *p16, uint64_t *h16, uint8_t *level);
 
+//The other way, a host's P16 / H16 as the UI's copy (fpgasettings.gen_freq / gen_duty, the generator menu and the settings
+//record): Hz and percent rounded. A valid P16 (>= GP_P16_MIN) gives 0..25 MHz, a valid H16 (<= P16) 0..100 %.
+uint32_t gp_ui_hz(uint64_t p16);
+uint8_t  gp_ui_pct(uint64_t p16, uint64_t h16);
+
 //The Bode stimulus: an integer period of P clocks, n_h = ceil(P / 2), n_l = floor(P / 2), no fraction
 void     gp_bode_square(uint32_t period, uint64_t *p16, uint64_t *h16);
 

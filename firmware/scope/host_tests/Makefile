@@ -143,8 +143,8 @@ $(OUT)/test_roll: test_roll.c test_util.h $(ROLL_SRCS) fpga_model.h $(SRC)/fpga_
 	$(CC) $(CFLAGS) -DPC_HOST_TEST -o $@ test_roll.c $(ROLL_SRCS)
 
 # fw-settings0: the stored settings record (sector 709) checked whole before it is applied, on the maintainer's records
-$(OUT)/test_settings: test_settings.c test_util.h $(SRC)/settings_check.c $(SRC)/settings_check.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h | $(OUT)
-	$(CC) $(CFLAGS) -o $@ test_settings.c $(SRC)/settings_check.c $(SRC)/adc_cal.c
+$(OUT)/test_settings: test_settings.c test_util.h $(SRC)/settings_check.c $(SRC)/settings_check.h $(SRC)/adc_cal.c $(SRC)/adc_cal.h $(SRC)/gen_pat.c $(SRC)/gen_pat.h $(SRC)/pc_cmds.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_settings.c $(SRC)/settings_check.c $(SRC)/adc_cal.c $(SRC)/gen_pat.c
 
 $(OUT)/test_phosphor: test_phosphor.c test_util.h $(SRC)/phos_map.c $(SRC)/phos_map.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_phosphor.c $(SRC)/phos_map.c

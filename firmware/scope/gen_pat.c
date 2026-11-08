@@ -24,6 +24,16 @@ uint16_t gp_bp_from_h16(uint64_t p16, uint64_t h16)
   return (uint16_t)((h16 * 10000 + p16 / 2) / p16);
 }
 
+uint32_t gp_ui_hz(uint64_t p16)
+{
+  return (uint32_t)((gp_mhz_from_p16(p16) + 500) / 1000);
+}
+
+uint8_t gp_ui_pct(uint64_t p16, uint64_t h16)
+{
+  return (uint8_t)((gp_bp_from_h16(p16, h16) + 50) / 100);
+}
+
 int gp_split(uint64_t p16, uint64_t h16, gp_square *sq)
 {
   uint64_t l16 = (h16 <= p16) ? p16 - h16 : 0;
@@ -55,7 +65,7 @@ int gp_ui_square(uint32_t freq_hz, uint8_t duty_pct, uint64_t *p16, uint64_t *h1
 
   p = gp_p16_from_mhz((uint64_t)freq_hz * 1000);
 
-  //The UI's 10 MHz limit keeps P >= 20 clocks
+  //The UI's limit (generator.h GEN_f_MAX, 25 MHz) keeps P >= 8 clocks: a P below saturates there
   if(p < GP_P16_MIN)
     p = GP_P16_MIN;
 

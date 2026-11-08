@@ -407,8 +407,8 @@ void pc_hal_gen_write(uint64_t p16, uint64_t h16, uint8_t enable)
 
     if(p16)
     {
-      fpgasettings.gen_freq = (uint32)((gp_mhz_from_p16(p16) + 500) / 1000);
-      fpgasettings.gen_duty = (uint8)((gp_bp_from_h16(p16, h16) + 50) / 100);
+      fpgasettings.gen_freq = gp_ui_hz(p16);          //0..25 MHz: the settings check's range (settings_check.h)
+      fpgasettings.gen_duty = gp_ui_pct(p16, h16);
     }
 
     pc_draw_begin(&save);

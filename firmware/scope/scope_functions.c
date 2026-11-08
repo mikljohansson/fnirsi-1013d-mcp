@@ -5845,7 +5845,7 @@ typedef char scope_srec_layout_check[((CHANNEL1_SETTING_OFFSET == 8) && (CHANNEL
                                       (TRIGGER_SETTING_OFFSET == 56) && (OTHER_SETTING_OFFSET == 80) &&
                                       (CURSOR_SETTING_OFFSET == 120) && (MEASUREMENT_SETTING_OFFSET == 136) &&
                                       (CALIBRATION_SETTING_OFFSET == 168) && (CALIBRATION_SETTING_OFFSET_C == 184) &&
-                                      (FPGA_SETTING_OFFSET == 192) && (GEN_f_MAX == 10000000)) ? 1 : -1];
+                                      (FPGA_SETTING_OFFSET == 192) && (GEN_f_MAX == SREC_GEN_MAX_HZ)) ? 1 : -1];
 
 void scope_load_configuration_data(void)
 {
