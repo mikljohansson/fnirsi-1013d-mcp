@@ -2095,3 +2095,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   0.5 % not, 201 kHz reads 1 kHz (the alias), with a filter 201 kHz; the owner sees "ACQ Roll". fw-xzero (10fa8d3, protocol 1.29) after a
   wizard: 1 MSa/s every cell within 0.24 code of 128 (ranges 2 and 5, both channels); 200 MSa/s CH2 r2 worst 0.57 (other at 2/4: 127.45,
   overcorrected), CIC2 0.39, CH1 r2 flat +0.36 (the full-class offset): sent back for a per-class table.
+- 2026-11-08 13:5x-14:0x (owner, lead): **fw-xzero per clock class** (a98cdee, image 888875c9, FEL; wizard by the owner with probes and USB
+  unplugged; probes unplugged for the table; mean of 5 captures). Both tables stored (xz_flags 7). Rows: own range, cells: the other
+  channel at range 0..6, worst |code - 128| and the spread across the seven: 1 MSa/s CH2 r2 0.07 / 0.10, CH1 r2 0.08 / 0.06, CH2 r5 0.17 /
+  0.21, CH1 r5 0.28 / 0.25; 200 MSa/s CH2 r2 0.32 / 0.35, CH1 r2 0.37 / 0.18, CH2 r5 0.37 / 0.53, CH1 r5 0.19 / 0.29; CIC2 at 1 MSa/s CH2
+  r2 0.20 / 0.29, CH1 r2 0.44 / 0.09, CH2 r5 0.37 / 0.32, CH1 r5 0.41 / 0.37. Before the fix the spread was 1.9 codes (127.22 .. 129.14).
+  **The other-channel shift is gone to within the readings' noise** (the full-rate cells scatter by up to 0.5 code without the
+  class pattern). Left: CH1's flat full-class offset, +0.35 .. +0.44 code at every other-channel state (CH1 r2 at 200 MSa/s and CIC2),
+  not a measurement-condition mismatch found in the code (firmware/AGENTS.md section 100 has the check).
