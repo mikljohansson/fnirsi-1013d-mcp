@@ -1,9 +1,9 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // test_cap_hw.c - the target glue of the capture stages (cap_hw.c) against a mock FPGA bus and SD sector 708: the
-// self-check's repeat watch, REPEAT and the runtime guard only act on captures taken at the 0x63 value the firmware wrote
-// (fw-guardfix, bench 2026-10-22: a DEBUG_FPGA write of 0x63 by the capture-window sweep made the guard move and store a
-// core). fw-153f (0x153F): one stage per chip, the guard moves a flagged core's chip. cap_hw.c is included so every
-// test starts from a fresh boot (its state is static)
+// self-check's repeat watch and REPEAT only count captures taken at the 0x63 value the firmware wrote (fw-guardfix,
+// bench 2026-10-22). fw-153f (0x153F): one stage per chip. fw-csbusy (owner 2026-11-08: "Only the calibration dialog
+// should write calibration data"): the self-check is a diagnostic only, it never writes 0x63 or the card, and it flags a
+// core only against a quiet partner. cap_hw.c is included so every test starts from a fresh boot (its state is static)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include <stdio.h>
@@ -52,31 +52,22 @@ int pc_glue_adc_full_rate(void) { return full_rate; }
 static struct { uint32_t n; uint8_t a; uint16_t b; } ev;
 void pc_usb_log_fpga_capture(uint8 a, uint16 b) { ev.n++; ev.a = a; ev.b = b; }
 
+//Sector 708 as the calibration load hands it over; any card write from cap_hw.c is counted (there must be none)
 static uint8_t  sd708[512];
 static uint32_t sd_writes;
 
-int pc_hal_sd_read(uint32_t sector, uint32_t count, uint8_t *dst)
-{
-  if((sector != INPUT_CALIBRATION_SECTOR) || (count != 1))
-    return -1;
-
-  memcpy(dst, sd708, 512);
-  return 0;
-}
-
 int pc_hal_sd_write(uint32_t sector, uint32_t count, const uint8_t *src)
 {
-  if((sector != INPUT_CALIBRATION_SECTOR) || (count != 1))
-    return -1;
-
-  memcpy(sd708, src, 512);
+  (void)sector;
+  (void)count;
+  (void)src;
   sd_writes++;
   return 0;
 }
 
-//A fresh boot on the built-for bitstream: sector 708 holds stored, trained on the bitstream fpga, with the clean sets
-//(stored 0 = no trailer)
-static void boot_on(uint16_t stored, uint16_t sets, uint16_t fpga)
+//A fresh boot on the built-for bitstream: sector 708 holds stored, trained on the bitstream fpga (stored 0 = no
+//trailer). Bytes 504..511 hold the 0.2.105 clean sets (all stages) to show that nothing reads them any more
+static void boot_on(uint16_t stored, uint16_t fpga)
 {
   memset(&fm, 0, sizeof(fm));
   memset(&ev, 0, sizeof(ev));
@@ -87,125 +78,121 @@ static void boot_on(uint16_t stored, uint16_t sets, uint16_t fpga)
 
   memset(&cap_st, 0, sizeof(cap_st));
   memset(&cap_watch, 0, sizeof(cap_watch));
-  cap_training = 0; cap_stored_sets = 0; cap_sets = 0; cap_sets_v = 0; cap_moved = 0; cap_store = 0;
+  cap_training = 0;
   memset(cap_train, 0, sizeof(cap_train));
 
   if(stored)
-  {
     cs_trailer_pack(stored, fpga, sd708 + CS_TRAILER_OFFSET);
-    cs_ext_pack(sd708, sets);
-  }
+
+  sd708[504] = 0xFF; sd708[505] = 0xFF;
 
   fpga_capture_init();
   fpga_capture_loaded(sd708);
 }
 
 //Trained on the bitstream this firmware is built for (PC_FW_FPGA_VERSION)
-static void boot(uint16_t stored, uint16_t sets)
+static void boot(uint16_t stored)
 {
-  boot_on(stored, sets, PC_FW_FPGA_VERSION);
+  boot_on(stored, PC_FW_FPGA_VERSION);
 }
 
-//One accepted full-rate capture with CH1 A garbled (the other cores quiet), 5 s after the previous one, then the MAIN
-//loop's service
-static void capture_ch1a_garbled(void)
+//One accepted full-rate capture with these counts, 5 s after the previous one
+static void capture(uint16_t a1, uint16_t b1, uint16_t a2, uint16_t b2)
 {
-  memset(fm.cnt, 0, sizeof(fm.cnt));
-  fm.cnt[0] = 150;
+  fm.cnt[0] = a1; fm.cnt[1] = b1; fm.cnt[2] = a2; fm.cnt[3] = b2;
   now_ms += 5000;
   fpga_capture_check();
-  fpga_capture_service();
+}
+
+//CH1 A garbled, the other cores quiet
+static void capture_ch1a_garbled(void)
+{
+  capture(150, 0, 0, 0);
 }
 
 //0x153F values (both cores of a chip at one stage): CH1 at 4 / 3, CH2 at 3
 #define V_4   0x06E4
 #define V_3   0x06DB
 
-//Control: the trained value in effect garbles; the guard moves the chip of CH1 A once and stores the new value
-static void test_guard_acts_on_own_value(void)
+//The trained value in effect garbles on a quiet input: flags, REPEAT and event 23 once after three in a minute, and
+//nothing else: 0x63, the stored value and the card stay (fw 0.2.105's guard moved the chip and wrote sector 708)
+static void test_repeat_is_advice_only(void)
 {
-  uint16_t v, f, sets;
+  uint32_t w0;
   pc_hw_cap c;
+  int i;
 
   T_EQ(V_4, cs_with_chip(CS_PO, 0, 4));
   T_EQ(V_3, CS_PO);
-  boot(V_4, 0xFFFF);
+  boot(V_4);
   T_EQ(fm.reg63, V_4);
   T_EQ(fm.reg64, CS_THR_USE);
   T_TRUE(cap_st.flags & PC_CAPF_TRAINED);
+  w0 = fm.writes63;
 
   capture_ch1a_garbled();
   capture_ch1a_garbled();
-  T_EQ(fm.reg63, V_4);
   T_EQ(ev.n, 0);
+  pc_hal_cap_state(&c);
+  T_FALSE(c.flags & PC_CAPF_REPEAT);
   capture_ch1a_garbled();
 
-  //CH1 4 removed from 2..5 for both cores: {2, 3, 5} -> 3, written into both fields; event a = 0x20 | both cores
-  T_EQ(fm.reg63, V_3);
   pc_hal_cap_state(&c);
-  T_EQ(c.value, V_3);
-  T_EQ(c.stored, V_3);
-  T_TRUE(c.flags & PC_CAPF_MOVED);
-  T_FALSE(c.flags & PC_CAPF_REPEAT);
-  T_EQ(ev.n, 1); T_EQ(ev.a, 0x23); T_EQ(ev.b, V_3);
-  T_EQ(sd_writes, 1);
-  T_EQ(cs_trailer_unpack(sd708 + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
-  T_EQ(v, V_3); T_EQ(f, PC_FW_FPGA_VERSION);
-  T_EQ(cs_ext_unpack(sd708, &sets), 1);
-  T_EQ(cs_sets_core(sets, 0), 0x2C);
-  T_EQ(cs_sets_core(sets, 1), 0x2C);
-  T_EQ(cs_sets_core(sets, 2), 0x3C);
-
-  //Moved once per boot: CH1 B now flags at 3 three times, REPEAT, no second move
-  {
-    int i;
-
-    for(i=0;i<3;i++)
-    {
-      memset(fm.cnt, 0, sizeof(fm.cnt));
-      fm.cnt[1] = 150;
-      now_ms += 5000;
-      fpga_capture_check();
-      fpga_capture_service();
-    }
-  }
-
-  pc_hal_cap_state(&c);
-  T_EQ(fm.reg63, V_3);
   T_TRUE(c.flags & PC_CAPF_REPEAT);
+  T_TRUE(c.flags & PC_CAPF_FLAGGED);
+  T_FALSE(c.flags & PC_CAPF_MOVED);
+  T_EQ(ev.n, 1); T_EQ(ev.a, 0x01); T_EQ(ev.b, 150);
+  T_EQ(fm.reg63, V_4);
+  T_EQ(fm.writes63, w0);
+  T_EQ(c.value, V_4);
+  T_EQ(c.stored, V_4);
+  T_TRUE(c.flags & PC_CAPF_TRAINED);
+  T_EQ(sd_writes, 0);
+
+  //More flags on both cores: still nothing written; CH1 B reaches REPEAT once
+  for(i=0;i<5;i++)
+    capture(0, 150, 0, 0);
+
+  pc_hal_cap_state(&c);
   T_EQ(ev.n, 2); T_EQ(ev.a, 0x02);
-  T_EQ(sd_writes, 1);
+  T_EQ(fm.writes63, w0);
+  T_EQ(sd_writes, 0);
+  T_EQ(c.flagged_n, 8);
+
+  //A clean capture clears FLAGGED, REPEAT stays until a saved training; the wizard's commit clears it
+  capture(0, 0, 0, 0);
+  pc_hal_cap_state(&c);
+  T_FALSE(c.flags & PC_CAPF_FLAGGED);
+  T_TRUE(c.flags & PC_CAPF_REPEAT);
+  fpga_capture_commit();
+  pc_hal_cap_state(&c);
+  T_FALSE(c.flags & PC_CAPF_REPEAT);
 }
 
 //fw-capgate (bench 2026-11-06): Filter Off at a divided rate. The counters differ between the cores on a real edge
 //(the encodes are gated, the cores sample half a record sample apart): the capture is not read at all, so it neither
-//flags, counts toward REPEAT nor reaches the guard, and it leaves no trace in the state. Back at full rate three flags
-//are needed again
+//flags nor counts toward REPEAT, and it leaves no trace in the state. Back at full rate three flags are needed again
 static void test_gated_capture_is_not_checked(void)
 {
   pc_hw_cap c;
   int i;
 
-  boot(V_4, 0xFFFF);
+  boot(V_4);
   full_rate = 0;
 
   for(i=0;i<5;i++)
     capture_ch1a_garbled();
 
-  T_EQ(fm.reg63, V_4);
   T_EQ(ev.n, 0);
-  T_EQ(sd_writes, 0);
   pc_hal_cap_state(&c);
-  T_EQ(c.value, V_4);
   T_EQ(c.reads, 0);
   T_EQ(c.flagged_n, 0);
   T_EQ(c.flagged, 0);
-  T_FALSE(c.flags & (PC_CAPF_READ | PC_CAPF_FLAGGED | PC_CAPF_REPEAT | PC_CAPF_MOVED));
+  T_FALSE(c.flags & (PC_CAPF_READ | PC_CAPF_FLAGGED | PC_CAPF_REPEAT));
 
   full_rate = 1;
   capture_ch1a_garbled();
   capture_ch1a_garbled();
-  T_EQ(fm.reg63, V_4);
   T_EQ(ev.n, 0);
   pc_hal_cap_state(&c);
   T_EQ(c.reads, 2);
@@ -215,77 +202,77 @@ static void test_gated_capture_is_not_checked(void)
   full_rate = 0;
   capture_ch1a_garbled();
   full_rate = 1;
-  T_EQ(fm.reg63, V_4);
+  T_EQ(ev.n, 0);
 
   capture_ch1a_garbled();
-  T_EQ(fm.reg63, V_3);
   pc_hal_cap_state(&c);
-  T_TRUE(c.flags & PC_CAPF_MOVED);
+  T_TRUE(c.flags & PC_CAPF_REPEAT);
   T_EQ(c.reads, 3);
+  T_EQ(fm.reg63, V_4);
 }
 
-//fw-csbusy (bench 2026-11-08, fw 0.3.1 on 0x153F): a 3.3 V 24.576 MHz clock on CH1 at 200 MSa/s makes both CH1 cores
-//count about 43000, about 2 % apart (the cores' gain mismatch). The old absolute limit flagged most captures and the
-//guard moved CH1 3 -> 4 and stored it. Now the chip abstains: nothing flags, nothing moves, nothing is stored or
-//logged, the counts stay readable; a quiet-input garble afterwards still moves the chip after three flags
+//fw-csbusy, the bench cases: a 24.576 MHz clock on CH1 (both cores about 43000, about 2 % apart; fw 0.3.1 flagged 11087
+//of 19060 captures) and 354e676's failed run, a 12.5 MHz square at 100 mV/div AC (92 codes pk-pk) under the scope's RUN
+//loop: counts in the hundreds that differ by more than an eighth (354e676 flagged 5 captures in 5 s and its guard moved
+//CH1 0x06E4 -> 0x06D2 and stored it). Neither chip has a quiet core: not checkable, no flag, no REPEAT, no event, no
+//write. A quiet-input garble afterwards still flags and reaches REPEAT after three
 static void test_busy_signal_is_not_flagged(void)
 {
   pc_hw_cap c;
   uint32_t w0;
   int i;
 
-  boot(V_3, 0xFFFF);
+  boot(V_4);
   w0 = fm.writes63;
 
   for(i=0;i<20;i++)
   {
-    fm.cnt[0] = (uint16_t)(42290 + 37 * i); fm.cnt[1] = 43153; fm.cnt[2] = 0; fm.cnt[3] = 0;
     if(i & 1)
-    {
-      fm.cnt[0] = 43153; fm.cnt[1] = (uint16_t)(42290 + 37 * i);
-    }
-    now_ms += 1000;
-    fpga_capture_check();
-    fpga_capture_service();
+      capture(43153, (uint16_t)(42290 + 37 * i), 0, 0);
+    else
+      capture((uint16_t)(40 + 13 * i), (uint16_t)(400 + 29 * i), 0, 0);
   }
 
-  T_EQ(fm.reg63, V_3);
-  T_EQ(fm.writes63, w0);              //no 0x63 write
+  T_EQ(fm.reg63, V_4);
+  T_EQ(fm.writes63, w0);
   T_EQ(ev.n, 0);
   T_EQ(sd_writes, 0);
   pc_hal_cap_state(&c);
-  T_EQ(c.value, V_3);
+  T_EQ(c.value, V_4);
   T_EQ(c.reads, 20);
   T_EQ(c.flagged_n, 0);
   T_EQ(c.flagged, 0);
-  T_EQ(c.cnt[0], 43153);              //the last capture (odd: B the lower)
+  T_EQ(c.cnt[0], 43153);              //the last capture's counts stay readable
   T_TRUE(c.flags & PC_CAPF_READ);
   T_FALSE(c.flags & (PC_CAPF_FLAGGED | PC_CAPF_REPEAT | PC_CAPF_MOVED));
 
-  //Then a quiet input with CH1 A garbled: the watch has nothing from the busy captures, the third flag moves
+  //CH2 garbled on a quiet input meanwhile: checked as before
+  capture(42290, 43153, 0, 40);
+  pc_hal_cap_state(&c);
+  T_EQ(c.flagged, 0x08);
+
+  //A quiet input with CH1 A garbled: the watch has nothing from the busy captures, the third flag sets REPEAT
   capture_ch1a_garbled();
-  capture_ch1a_garbled();
-  T_EQ(fm.reg63, V_3);
   capture_ch1a_garbled();
   pc_hal_cap_state(&c);
-  T_TRUE(c.flags & PC_CAPF_MOVED);
-  T_EQ(c.flagged_n, 3);
-  T_EQ(ev.n, 1); T_EQ(ev.a, 0x23);
-  T_EQ(sd_writes, 1);
+  T_FALSE(c.flags & PC_CAPF_REPEAT);
+  capture_ch1a_garbled();
+  pc_hal_cap_state(&c);
+  T_TRUE(c.flags & PC_CAPF_REPEAT);
+  T_EQ(fm.reg63, V_4);
+  T_EQ(sd_writes, 0);
 }
 
-//The bench bug: the sweep writes 0x63 = V_4 through DEBUG_FPGA while the stored (and written) value is V_3, and CH1 at
-//stage 4 garbles. No move, no store, no log, no REPEAT; the counts are still read. Back at the firmware's value
-//the earlier captures do not count: three more flags are needed
-static void test_guard_ignores_foreign_value(void)
+//The bench bug of fw-guardfix: the sweep writes 0x63 = V_4 through DEBUG_FPGA while the stored (and written) value is
+//V_3, and CH1 at stage 4 garbles. No REPEAT, no log; the counts are still read. Back at the firmware's value the
+//earlier captures do not count: three more flags are needed
+static void test_repeat_ignores_foreign_value(void)
 {
-  uint16_t v, f;
   uint32_t k;
   pc_hw_cap c;
 
-  boot(V_3, 0xFFFF);
+  boot(V_3);
   T_EQ(fm.reg63, V_3);
-  T_TRUE(cap_st.flags & PC_CAPF_TRAINED);
   T_EQ(fm.writes63, 2);               //boot: the power-on value, then the stored value at the calibration load
 
   raw_write_63(V_4);
@@ -295,54 +282,32 @@ static void test_guard_ignores_foreign_value(void)
 
   pc_hal_cap_state(&c);
   T_EQ(fm.reg63, V_4);                //the sweep's value stays
-  T_EQ(fm.writes63, 2);               //the firmware wrote no 0x63 since
+  T_EQ(fm.writes63, 2);
   T_EQ(c.value, V_3);
-  T_EQ(c.stored, V_3);
-  T_TRUE(c.flags & PC_CAPF_TRAINED);
-  T_FALSE(c.flags & (PC_CAPF_MOVED | PC_CAPF_REPEAT));
+  T_FALSE(c.flags & PC_CAPF_REPEAT);
   T_EQ(ev.n, 0);
-  T_EQ(sd_writes, 0);
-  T_EQ(cs_trailer_unpack(sd708 + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
-  T_EQ(v, V_3);
   T_EQ(c.reads, 6);                   //GET_HEALTH still shows what the FPGA counted
   T_EQ(c.flagged_n, 6);
   T_EQ(c.flagged, 0x01);
   T_EQ(c.cnt[0], 150);
 
-  //The sweep restores the firmware's value; now CH1 3 garbles: two flags are not enough, the third moves the chip
   raw_write_63(V_3);
   capture_ch1a_garbled();
   capture_ch1a_garbled();
-  T_EQ(fm.reg63, V_3);
   T_EQ(ev.n, 0);
   capture_ch1a_garbled();
-  T_EQ(ev.n, 1); T_EQ(ev.a, 0x23);
-  T_EQ(fm.reg63, V_4);                //{2, 4, 5}: 4
-  T_EQ(sd_writes, 1);
-}
+  T_EQ(ev.n, 1); T_EQ(ev.a, 0x01);
+  T_EQ(fm.reg63, V_3);
 
-//Without a trained value REPEAT follows the same rule. And a raw write of the stored value while the firmware wrote
-//another one since (an unsaved wizard result): not the firmware's value either
-static void test_repeat_ignores_foreign_value(void)
-{
-  uint32_t k;
-  pc_hw_cap c;
-
-  //No trailer: the power-on value written, not trained
-  boot(0, 0);
-  T_EQ(fm.reg63, CS_PO);
+  //No trailer: the power-on value; a raw write elsewhere does not count, at the firmware's value REPEAT once
+  boot(0);
   T_FALSE(cap_st.flags & PC_CAPF_TRAINED);
-
   raw_write_63(cs_with_chip(CS_PO, 0, 2));
 
   for(k=0;k<4;k++)
     capture_ch1a_garbled();
 
-  pc_hal_cap_state(&c);
-  T_FALSE(c.flags & PC_CAPF_REPEAT);
   T_EQ(ev.n, 0);
-
-  //At the firmware's value: REPEAT and event 23 once (a = the core; no trained set, nothing to move)
   raw_write_63(CS_PO);
 
   for(k=0;k<3;k++)
@@ -350,42 +315,23 @@ static void test_repeat_ignores_foreign_value(void)
 
   pc_hal_cap_state(&c);
   T_TRUE(c.flags & PC_CAPF_REPEAT);
-  T_FALSE(c.flags & PC_CAPF_MOVED);
-  T_EQ(ev.n, 1); T_EQ(ev.a, 0x01);
-  T_EQ(fm.reg63, CS_PO);
-  T_EQ(sd_writes, 0);
-
-  //Trained V_3, the firmware wrote V_4 since, the FPGA holds V_3 through a raw write: no move, no REPEAT
-  boot(V_3, 0xFFFF);
-  fpga_capture_write(V_4);
-  T_FALSE(cap_st.flags & PC_CAPF_TRAINED);
-  raw_write_63(V_3);
-
-  for(k=0;k<4;k++)
-    capture_ch1a_garbled();
-
-  pc_hal_cap_state(&c);
-  T_FALSE(c.flags & (PC_CAPF_MOVED | PC_CAPF_REPEAT));
-  T_EQ(ev.n, 0);
-  T_EQ(sd_writes, 0);
-  T_EQ(fm.reg63, V_3);
+  T_EQ(ev.n, 1);
 
   //0x153F: the dead bits 15:12 in the FPGA's copy (a DEBUG_FPGA write) are not the firmware's concern: the value it
   //compares is 0x63 & CS_MASK
-  boot(V_3, 0xFFFF);
+  boot(V_3);
   raw_write_63(V_3 | 0x3000);
 
   for(k=0;k<3;k++)
     capture_ch1a_garbled();
 
-  T_EQ(ev.n, 1); T_EQ(ev.a, 0x23);
-  T_EQ(fm.reg63, V_4);
+  T_EQ(ev.n, 1); T_EQ(ev.a, 0x01);
+  T_EQ(fm.reg63, V_3 | 0x3000);
 }
 
-//fw-153e / fw-153f: a card trained on the previous bitstream (0x153E, the release before 0x153F): the stored value is
-//not applied (the power-on value, OTHER: Diagnostics asks for Calibrate), the guard and the repeat watch's store do
-//nothing, the card is not written; the wizard's commit binds the new value to the built-for word and the next save
-//stores that
+//fw-153e / fw-153f: a card trained on the previous bitstream (0x153E): the stored value is not applied (the power-on
+//value, OTHER: Diagnostics asks for Calibrate), the card is not written; the wizard's commit binds the new value to
+//the built-for word and the save stores that, with bytes 504..511 left 0 (no stored sets since fw-csbusy)
 static void test_stored_for_previous_bitstream(void)
 {
   uint16_t v, f;
@@ -395,10 +341,9 @@ static void test_stored_for_previous_bitstream(void)
 
   T_TRUE(PC_FW_FPGA_VERSION != 0x153E);
   T_EQ(CS_PO, 0x06DB);
-  boot_on(0x08E3, 0xFFFF, 0x153E);
+  boot_on(0x08E3, 0x153E);
   pc_hal_cap_state(&c);
   T_EQ(fm.reg63, CS_PO);
-  T_EQ(fm.reg64, CS_THR_USE);
   T_EQ(c.value, CS_PO);
   T_EQ(c.trailer, CS_T_VALID);
   T_EQ(c.stored, 0x08E3);
@@ -407,13 +352,11 @@ static void test_stored_for_previous_bitstream(void)
   T_TRUE(c.flags & PC_CAPF_OTHER);
   T_FALSE(c.flags & PC_CAPF_TRAINED);
 
-  //Garbled captures at the power-on value: REPEAT once, nothing moved, nothing stored
   for(k=0;k<4;k++)
     capture_ch1a_garbled();
 
   pc_hal_cap_state(&c);
   T_TRUE(c.flags & PC_CAPF_REPEAT);
-  T_FALSE(c.flags & PC_CAPF_MOVED);
   T_EQ(fm.reg63, CS_PO);
   T_EQ(sd_writes, 0);
 
@@ -436,13 +379,16 @@ static void test_stored_for_previous_bitstream(void)
   T_EQ(cs_trailer_unpack(sec + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);
   T_EQ(v, V_4); T_EQ(f, PC_FW_FPGA_VERSION);
 
+  for(k=504;k<512;k++)
+    T_EQ(sec[k], 0);
+
   //The next boot applies it
-  boot_on(V_4, 0, PC_FW_FPGA_VERSION);
+  boot_on(V_4, PC_FW_FPGA_VERSION);
   T_EQ(fm.reg63, V_4);
   T_TRUE(cap_st.flags & PC_CAPF_TRAINED);
 
   //A 0x153E trailer with a reference bit (0x153A..0x153E's B timing) is valid and OTHER, not applied
-  boot_on(0x2924, 0xFFFF, 0x153E);
+  boot_on(0x2924, 0x153E);
   pc_hal_cap_state(&c);
   T_EQ(c.trailer, CS_T_VALID);
   T_EQ(c.stored, 0x2924);
@@ -496,7 +442,7 @@ static void test_train_note(void)
   pc_hw_cap_train ct;
   cs_train        t;
 
-  boot(0, 0);
+  boot(0);
   pc_hal_cap_train(1, &ct);
   T_EQ(ct.flags, 0);
 
@@ -519,7 +465,7 @@ static void test_train_note(void)
   T_EQ(ct.sum[1][2], 2 * 400);
 
   //No common stage (B dirty at 3 too): failed, nothing changes
-  boot(0, 0);
+  boot(0);
   {
     static const cs_io io2 = { 0, 2, 1, 0, tr_park, tr_measure_b3 };
 
@@ -535,10 +481,9 @@ static void test_train_note(void)
 
 int main(void)
 {
-  test_guard_acts_on_own_value();
+  test_repeat_is_advice_only();
   test_gated_capture_is_not_checked();
   test_busy_signal_is_not_flagged();
-  test_guard_ignores_foreign_value();
   test_repeat_ignores_foreign_value();
   test_stored_for_previous_bitstream();
   test_train_note();

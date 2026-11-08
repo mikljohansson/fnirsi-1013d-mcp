@@ -51,7 +51,7 @@
 
 //The capture self-check of one capture (bode_cap.check, fw 0.2.83)
 #define BODE_CHK_CLEAN        0     //checked: nothing flagged
-#define BODE_CHK_FAULT        1     //0x36 outliers flagged on this capture, or the repeat watch (PC_CAPF_REPEAT) is set
+#define BODE_CHK_FAULT        1     //0x36 outliers flagged on this capture (fw-csbusy: not REPEAT)
 
 //Thru calibration state
 #define BODE_THRU_NONE        0

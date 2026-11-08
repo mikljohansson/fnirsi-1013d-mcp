@@ -434,8 +434,8 @@ typedef struct
 #define PC_CAPF_OTHER        0x10  //a stored value exists for another bitstream (not applied: recalibrate)
 #define PC_CAPF_REPEAT       0x20  //fw 0.2.81: a core was flagged in 3 captures within a minute since the last saved
                                    //training (cap_stage.h cs_watch): recalibrate
-#define PC_CAPF_MOVED        0x40  //fw 0.2.105: the runtime guard moved a core off a flagged stage this boot, inside its
-                                   //trained clean set (cap_stage.h cs_guard; event 23 a bit 5)
+#define PC_CAPF_MOVED        0x40  //retired (fw-csbusy, always 0): fw 0.2.105 .. 354e676 set it when the runtime guard moved
+                                   //a flagged chip this boot and stored it (event 23 a bit 5, also retired)
 
 //1.28 (fw-capmetric): the last capture stage training of a channel since boot (cap_stage.h "Quiet stages"; GET_CAL
 //364..431). Index 0 = the channel's core A, 1 = core B; stages 2..5 at 0..3. fw-153f (0x153F, one stage per chip): q

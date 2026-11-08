@@ -400,9 +400,9 @@ uint8_t cs_busy(const uint16_t cnt[CS_CORES])
   uint32_t k;
   uint8_t  m = 0;
 
-  //Both cores of the chip above CS_BUSY_COUNT: the smaller count is the signal's own
+  //Neither core of the chip quiet: the signal itself moves both, the capture cannot be checked
   for(k=0;k<CS_CORES;k+=2)
-    if((cnt[k] > CS_BUSY_COUNT) && (cnt[k + 1] > CS_BUSY_COUNT))
+    if((cnt[k] > CS_QUIET_PARTNER) && (cnt[k + 1] > CS_QUIET_PARTNER))
       m |= (uint8_t)(3u << k);
 
   return m;
@@ -411,26 +411,15 @@ uint8_t cs_busy(const uint16_t cnt[CS_CORES])
 uint8_t cs_flagged(const uint16_t cnt[CS_CORES])
 {
   uint16_t ex[CS_CORES];
-  uint32_t k, lim;
+  uint32_t k;
   uint8_t  m = 0;
 
   cs_excess(cnt, ex);
 
+  //fw-csbusy (owner 2026-11-08): only the garble signature, a core counting against a quiet partner
   for(k=0;k<CS_CORES;k++)
-  {
-    //fw-csbusy: the partner's count is what the signal moves on both cores; the cores' gain mismatch makes them
-    //differ by a few % of it, so the limit grows with it, and a busy chip (cs_busy) abstains
-    if(cnt[k ^ 1] > CS_BUSY_COUNT)
-      continue;
-
-    lim = cnt[k ^ 1] / CS_EXCESS_DIV;
-
-    if(lim < CS_EXCESS_LIMIT)
-      lim = CS_EXCESS_LIMIT;
-
-    if(ex[k] > lim)
+    if((cnt[k ^ 1] <= CS_QUIET_PARTNER) && (ex[k] > CS_EXCESS_LIMIT))
       m |= (uint8_t)(1u << k);
-  }
 
   return m;
 }
@@ -475,78 +464,6 @@ uint8_t cs_watch_add(cs_watch *w, uint8_t flagged, uint32_t now_ms)
   }
 
   return reached;
-}
-
-void cs_watch_forget(cs_watch *w, uint8_t cores)
-{
-  uint32_t k, i;
-
-  for(k=0;k<CS_CORES;k++)
-  {
-    if(!(cores & (1u << k)))
-      continue;
-
-    w->n[k] = 0;
-    w->repeat &= (uint8_t)~(1u << k);
-
-    for(i=0;i<CS_REPEAT_N - 1;i++)
-      w->t[k][i] = 0;
-  }
-}
-
-uint16_t cs_sets_pack(const uint8_t set[CS_CORES])
-{
-  uint16_t v = 0;
-  uint32_t k;
-
-  for(k=0;k<CS_CORES;k++)
-    v = cs_sets_with(v, k, set[k]);
-
-  return v;
-}
-
-uint8_t cs_sets_core(uint16_t sets, uint32_t core)
-{
-  return (uint8_t)(((sets >> (4 * core)) & 0x0F) << CS_STAGE_MIN);
-}
-
-uint16_t cs_sets_with(uint16_t sets, uint32_t core, uint8_t set)
-{
-  return (uint16_t)((sets & ~(0x0Fu << (4 * core))) | ((uint32_t)((set >> CS_STAGE_MIN) & 0x0F) << (4 * core)));
-}
-
-uint8_t cs_guard(uint16_t *value, uint16_t *sets, uint8_t cores)
-{
-  uint32_t ch, a;
-  uint8_t  moved = 0, cur, set, s;
-
-  //0x153F: per chip. A flagged core moves its chip: the chip's stage (core A's field) leaves the set both cores share
-  for(ch=0;ch<2;ch++)
-  {
-    a = 2 * ch;
-
-    if(!(cores & (3u << a)))
-      continue;
-
-    cur = cs_stage(*value, a);
-    set = (uint8_t)(cs_sets_core(*sets, a) & cs_sets_core(*sets, a + 1));
-
-    //A stage outside the stored set (or no set): not the trained value, nothing to move within
-    if(!CLEAN(set, cur))
-      continue;
-
-    set = (uint8_t)(set & ~(1u << cur));
-    s   = cs_pick(set);
-
-    if(s == CS_NONE)
-      continue;
-
-    *value = cs_with_chip(*value, ch, s);
-    *sets  = cs_sets_with(cs_sets_with(*sets, a, set), a + 1, set);
-    moved |= (uint8_t)(3u << a);
-  }
-
-  return moved;
 }
 
 static char *cs_str(char *p, const char *s)
@@ -624,46 +541,4 @@ int cs_trailer_unpack(const uint8_t *in, uint16_t *v, uint16_t *fpga)
   *v    = (uint16_t)cs_get16(in + 8);
   *fpga = (uint16_t)cs_get16(in + 10);
   return CS_T_VALID;
-}
-
-//CRC-32 of the trailer's 12 bytes before its own CRC and the sets' 4 bytes (a CRC over the whole trailer would not bind:
-//a CRC-32 over data followed by its own CRC is the same constant for every data)
-static uint32_t cs_ext_crc(const uint8_t *sector)
-{
-  uint8_t  b[16];
-  uint32_t i;
-
-  for(i=0;i<12;i++)
-    b[i] = sector[CS_TRAILER_OFFSET + i];
-
-  for(i=0;i<4;i++)
-    b[12 + i] = sector[CS_EXT_OFFSET + i];
-
-  return acal_crc32(b, 16);
-}
-
-void cs_ext_pack(uint8_t *sector, uint16_t sets)
-{
-  uint8_t *p = sector + CS_EXT_OFFSET;
-  uint32_t crc;
-
-  p = cs_put16(p, sets);
-  p = cs_put16(p, 0);
-  crc = cs_ext_crc(sector);
-  p = cs_put16(p, crc & 0xFFFF);
-  cs_put16(p, crc >> 16);
-}
-
-int cs_ext_unpack(const uint8_t *sector, uint16_t *sets)
-{
-  const uint8_t *p = sector + CS_EXT_OFFSET;
-
-  *sets = 0;
-
-  if((cs_get16(p + 2) != 0) ||
-     ((cs_get16(p + 4) | (cs_get16(p + 6) << 16)) != cs_ext_crc(sector)))
-    return 0;
-
-  *sets = (uint16_t)cs_get16(p);
-  return 1;
 }

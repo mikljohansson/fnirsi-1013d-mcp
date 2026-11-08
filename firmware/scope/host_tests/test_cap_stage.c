@@ -782,84 +782,6 @@ static void test_train(void)
   T_EQ(t.value, CS_PO);
 }
 
-static void test_guard(void)
-{
-  uint8_t  set[CS_CORES] = { 0x3C, 0x3C, 0x38, 0x38 };
-  uint16_t sets = cs_sets_pack(set), v = chips(4, 3);
-  cs_watch w;
-
-  T_EQ(sets, 0xEEFF);
-  T_EQ(cs_sets_core(sets, 0), 0x3C);
-  T_EQ(cs_sets_core(sets, 2), 0x38);
-  T_EQ(cs_sets_core(sets, 3), 0x38);
-  T_EQ(cs_sets_with(sets, 2, 0x2C), 0xEBFF);
-
-  //The bench case: CH1 A4 flagged, the chip trained 2..5: 4 leaves both cores' sets, {2, 3, 5} gives 3 for both
-  T_EQ(cs_guard(&v, &sets, 0x01), 0x03);
-  T_EQ(v, chips(3, 3));
-  T_EQ(cs_sets_core(sets, 0), 0x2C);
-  T_EQ(cs_sets_core(sets, 1), 0x2C);
-  T_EQ(cs_sets_core(sets, 2), 0x38);   //CH2 untouched
-
-  //Flagged again (a later boot), now core B: 3 leaves, {2, 5}: 2; then 2 leaves: 5; then nothing is left: kept
-  T_EQ(cs_guard(&v, &sets, 0x02), 0x03);
-  T_EQ(v, chips(2, 3));
-  T_EQ(cs_guard(&v, &sets, 0x03), 0x03);
-  T_EQ(v, chips(5, 3));
-  T_EQ(cs_guard(&v, &sets, 0x01), 0);
-  T_EQ(v, chips(5, 3));
-  T_EQ(cs_sets_core(sets, 0), 0x20);
-  T_EQ(cs_sets_core(sets, 1), 0x20);
-
-  //CH2 B flagged at 3 in {3, 4, 5}: {4, 5} gives 4 for the chip
-  T_EQ(cs_guard(&v, &sets, 0x08), 0x0C);
-  T_EQ(v, chips(5, 4));
-  T_EQ(cs_sets_core(sets, 2), 0x30);
-  T_EQ(cs_sets_core(sets, 3), 0x30);
-
-  //A chip stage outside its set (not the trained value): kept, whatever the B field holds
-  v = cs_with(chips(3, 2), 3, 4);
-  sets = cs_sets_pack(set);
-  T_EQ(cs_guard(&v, &sets, 0x0C), 0);
-  T_EQ(v, cs_with(chips(3, 2), 3, 4));
-  T_EQ(sets, cs_sets_pack(set));
-
-  //No stored set: no move
-  v = CS_PO;
-  sets = 0;
-  T_EQ(cs_guard(&v, &sets, 0x0F), 0);
-  T_EQ(v, CS_PO);
-
-  //Both chips at once
-  v = CS_PO;
-  sets = cs_sets_pack(set);
-  T_EQ(cs_guard(&v, &sets, 0x05), 0x0F);
-  T_EQ(v, chips(4, 4));               //CH1 3 in 2..5: {2, 4, 5} gives 4; CH2 3 in 3..5: {4, 5} gives 4
-
-  //Sets that differ between the cores (stored by a per-core firmware): the chip moves within their intersection
-  {
-    uint8_t old[CS_CORES] = { 0x3C, 0x38, 0x3C, 0x3C };
-
-    v = CS_PO;
-    sets = cs_sets_pack(old);
-    T_EQ(cs_guard(&v, &sets, 0x01), 0x03);
-    T_EQ(v, chips(4, 3));             //{3, 4, 5} without 3
-    T_EQ(cs_sets_core(sets, 0), 0x30);
-    T_EQ(cs_sets_core(sets, 1), 0x30);
-  }
-
-  //The watch forgets a moved core (its next repeat counts from the new stage)
-  cs_watch_clear(&w);
-  T_EQ(cs_watch_add(&w, 0x05, 0), 0);
-  T_EQ(cs_watch_add(&w, 0x05, 10), 0);
-  T_EQ(cs_watch_add(&w, 0x05, 20), 0x05);
-  cs_watch_forget(&w, 0x01);
-  T_EQ(w.repeat, 0x04);
-  T_EQ(cs_watch_add(&w, 0x01, 30), 0);
-  T_EQ(cs_watch_add(&w, 0x01, 40), 0);
-  T_EQ(cs_watch_add(&w, 0x01, 50), 0x01);
-}
-
 static void test_selfcheck(void)
 {
   uint16_t c[4] = { 0, 0, 0, 0 }, ex[4];
@@ -883,35 +805,37 @@ static void test_selfcheck(void)
   T_EQ(cs_flagged(c), 0x04);
   T_EQ(cs_busy(c), 0);
 
-  //fw-csbusy: a quiet core with 40 outliers against its partner's 0 flags as before; up to a partner count of 71 the
-  //limit stays 8, from 72 it is partner / 8
+  //fw-csbusy (owner 2026-11-08): a core is flagged only against a quiet partner (at most 8); a quiet core with 40
+  //outliers against 0 flags as before
   c[0] = 0; c[1] = 0; c[2] = 40; c[3] = 0;
   T_EQ(cs_flagged(c), 0x04);
-  c[2] = 71 + 9; c[3] = 71;
-  T_EQ(cs_flagged(c), 0x04);           //excess 9 > 8 (71 / 8 = 8)
-  c[2] = 80 + 10; c[3] = 80;
-  T_EQ(cs_flagged(c), 0);              //excess 10 = 80 / 8
-  c[2] = 80 + 11;
-  T_EQ(cs_flagged(c), 0x04);
-  c[2] = 1024 + 129; c[3] = 1024;
-  T_EQ(cs_flagged(c), 0x04);           //the busiest partner still checked: excess 129 > 128
-  T_EQ(cs_busy(c), 0);
+  c[3] = 8; c[2] = 17;
+  T_EQ(cs_flagged(c), 0x04);           //partner 8, excess 9
+  c[2] = 16;
+  T_EQ(cs_flagged(c), 0);              //excess 8
+  c[3] = 9; c[2] = 300;
+  T_EQ(cs_flagged(c), 0);              //partner 9: not checkable
+  T_EQ(cs_busy(c), 0x0C);
 
-  //The bench (2026-11-08, 24.576 MHz on CH1, 200 MSa/s): both cores near 43000, about 2 % apart: busy, not flagged
+  //The bench cases: 2026-11-08 a 24.576 MHz clock on CH1, both cores near 43000 about 2 % apart; 354e676's run, a 12.5 MHz
+  //square at 100 mV/div AC (92 codes pk-pk): the cores count in the hundreds and differ by more than an eighth.
+  //Neither is checkable, neither flags
   c[0] = 42290; c[1] = 43153; c[2] = 0; c[3] = 0;
   T_EQ(cs_busy(c), 0x03);
   T_EQ(cs_flagged(c), 0);
-  //... with CH2 garbled on a quiet input at the same time: CH2 still flags, CH1 still abstains
+  c[0] = 120; c[1] = 400;
+  T_EQ(cs_busy(c), 0x03);
+  T_EQ(cs_flagged(c), 0);
+  //... with CH2 garbled on a quiet input at the same time: CH2 still flags
   c[2] = 0; c[3] = 40;
   T_EQ(cs_flagged(c), 0x08);
-  T_EQ(cs_busy(c), 0x03);
-  //Busy needs both cores over 1024: a garbled core counting thousands against a quiet partner flags
+  //A garbled core counting thousands against a quiet partner flags; one count each is clean and checkable
   c[0] = 5000; c[1] = 3;
   T_EQ(cs_busy(c), 0);
   T_EQ(cs_flagged(c) & 0x03, 0x01);
-  //Even a large difference on a busy chip abstains (the training catches a chip-wide fault), the counters' saturation
-  c[0] = 1025; c[1] = 9000;
+  c[0] = 1; c[1] = 1;
   T_EQ(cs_flagged(c) & 0x03, 0);
+  T_EQ(cs_busy(c), 0);
   c[0] = 65535; c[1] = 65535;
   T_EQ(cs_flagged(c) & 0x03, 0);
   T_EQ(cs_busy(c), 0x03);
@@ -964,30 +888,6 @@ static void test_trailer(void)
 
   memset(b, 0, sizeof(b));
   T_EQ(cs_trailer_unpack(b, &v, &f), CS_T_NONE);
-
-  //The clean sets after it (bytes 504..511), bound to the trailer by the CRC
-  {
-    uint8_t  sec[512];
-    uint16_t sets;
-
-    T_EQ(CS_EXT_OFFSET, CS_TRAILER_OFFSET + CS_TRAILER_BYTES);
-    T_EQ(CS_EXT_OFFSET + CS_EXT_BYTES, 512);
-    memset(sec, 0, sizeof(sec));
-    T_EQ(cs_ext_unpack(sec, &sets), 0);         //a 0.2.79..0.2.104 save: zeros
-    cs_trailer_pack(0x08E3, 0x153D, sec + CS_TRAILER_OFFSET);
-    cs_ext_pack(sec, 0x1E7F);
-    T_EQ(sec[504], 0x7F);
-    T_EQ(sec[505], 0x1E);
-    T_EQ(cs_ext_unpack(sec, &sets), 1);
-    T_EQ(sets, 0x1E7F);
-    T_EQ(cs_trailer_unpack(sec + CS_TRAILER_OFFSET, &v, &f), CS_T_VALID);   //the trailer as 0.2.79+ read it
-    T_EQ(v, 0x08E3);
-
-    //Another trailer (an older firmware's save of a new value with the old sets left): not valid
-    cs_trailer_pack(0x08E4, 0x153D, sec + CS_TRAILER_OFFSET);
-    T_EQ(cs_ext_unpack(sec, &sets), 0);
-    T_EQ(sets, 0);
-  }
 }
 
 int main(void)
@@ -1002,7 +902,6 @@ int main(void)
   test_metric();
   test_noise_bound();
   test_watch();
-  test_guard();
   test_selfcheck();
   test_texts();
   test_trailer();

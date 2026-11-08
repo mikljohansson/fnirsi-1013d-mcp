@@ -42,7 +42,7 @@
 //
 // Per chip (fw-153f): cs_pass captures both cores of a trained chip at stage s, the sums, q and the quiet sets stay per
 // core (GET_CAL 364..431), and the chip's set is the intersection quiet[A] & quiet[B]: a stage is usable when both
-// cores are quiet at it. Pick, tie pass, the stored set (both cores hold the chip's set) and the guard run on it. A chip
+// cores are quiet at it. Pick and tie pass run on it (GET_CAL reports it for both cores). A chip
 // with no common quiet stage fails the training (CS_E_DIRTY; t->bad: the cores without a quiet stage of their own, or
 // both when each has some and none is shared). The reference pass (a B core with no clean stage measured again with
 // its chip's bit 12 / 13) is gone with the B timing it selected.
@@ -71,47 +71,29 @@
 // {2,5} -> 2.
 //
 // A chip with no common clean stage fails the training (fail fast: the wizard names the cores and nothing is stored).
-// The chip's set (cs_train.set, both cores, after the tie pass) is stored with the value (cs_ext_*): it bounds the
-// runtime guard.
+// The chip's set (cs_train.set, both cores, after the tie pass) is reported (GET_CAL 364..431), not stored.
 //
-// Self-check after full-rate captures: a signal moves both cores of a chip alike (they sample the same input 5 ns apart),
-// a core captured inside its transition counts alone. 0x153F: a chip stage inside a transition both buses share garbles
-// both cores alike, which this rule does not flag (the training's absolute counts and q catch it); one core's own errors
-// beside its clean stage (README section 18) still flag. cs_excess = a core's count minus its chip partner's; above
-// max(CS_EXCESS_LIMIT, partner / CS_EXCESS_DIV) the core is flagged (Diagnostics, GET_HEALTH, event 23), and a busy chip
-// (cs_busy: both cores over CS_BUSY_COUNT) is not checked at all.
+// Self-check after full-rate captures, a diagnostic only (fw-csbusy, owner 2026-11-08: "Only the calibration dialog
+// should write calibration data"): a core captured inside its transition garbles alone near 0x7F / 0x80 and counts tens
+// to hundreds of outliers while its chip partner, sampling the same input 5 ns apart, counts 0 or a few. That is the
+// only signature this check flags: cs_flagged = a core whose partner counted at most CS_QUIET_PARTNER and whose count
+// exceeds the partner's by more than CS_EXCESS_LIMIT. A chip whose two cores both count more than CS_QUIET_PARTNER
+// (cs_busy) is not checkable: the signal itself crosses the threshold and the cores' gain mismatch (about 2 %) makes their
+// counts differ by itself. Bench: 2026-11-08 fw 0.3.1, a 24.576 MHz clock on CH1, both cores about 43000, 11087 of 19060
+// captures flagged by the old absolute limit; 354e676's relative limit (max(8, partner / 8), abstain over 1024) still
+// flagged a 12.5 MHz square at 100 mV/div AC (92 codes pk-pk) 5 times in 5 s. The bench log since 0x153F has 0 genuine
+// flags (0 of 885, 7562 and 35703 captures). 0x153F: a chip stage inside a transition both buses share garbles both cores
+// alike, which no partner rule flags (the training's absolute counts and q catch it).
 //
-// Busy signals (fw-csbusy, bench 2026-11-08, fw 0.3.1 on 0x153F, firmware/AGENTS.md section 101): the counters count
-// every word whose sample differs from the core's previous one by more than the threshold, over the whole write window.
-// On CH1 at a 3.3 V 24.576 MHz clock (x1 probe, 200 MSa/s) both cores counted about 43000 (CH1 B 43153; the stored record
-// had 7489 / 7492 of 8190 words over the rule), and the cores' gain / zero mismatch (about 2 %) alone made one exceed the
-// other by hundreds to about a thousand: 11087 of 19060 full-rate captures flagged, the guard moved CH1 3 -> 4 and stored
-// it, although the record was clean (the odd core fitted the even core's template at 2.9 codes rms, even 2.0). So the
-// limit is relative: a garbled core on a quiet input counts tens to hundreds with its partner at 0 or a few (bench
-// 2026-10-22: CH1 A4 146 outliers in 8 captures on 1 kHz), where partner / 8 is below 8 and the rule is the old one up to
-// a partner count of 71; on a signal the partner's count is what the signal moves on both cores and the mismatch is a
-// few % of it, and 1 / 8 (12.5 %) is 5x the bench's 2.3 % (1000 of 43000). Over CS_BUSY_COUNT on both cores the signal
-// itself crosses the threshold on thousands of words and a garble cannot be told from the mismatch: the chip abstains
-// (no flag, so nothing reaches the repeat watch, REPEAT, event 23 or the guard; GET_HEALTH keeps the counts, Diagnostics
-// says "too busy to check"). Residual (inference, not benched): a signal whose sample-to-sample steps cluster at the
-// threshold (a sine with 2 pi f A x 10 ns near 32 codes) turns a 2 % gain difference into a several-fold count
-// difference; below CS_BUSY_COUNT such a signal can still flag a core, as it could before.
-//
-// Runtime guard (fw 0.2.105, cs_guard; cap_hw.c): every full-rate capture (200 MSa/s, any filter, peak detect) and the
-// counter need all four cores clean, so a stage the quiet training passed but a real signal garbles cannot wait for the
-// next calibration. A core flagged in CS_REPEAT_N captures within CS_REPEAT_MS (cs_watch) while the trained value of
-// this bitstream is in effect and its stored clean set is known moves its chip, at most once per boot: the chip's stage
-// is removed from the stored set (both cores) and cs_pick chooses again from what is left. So it never leaves the
-// trained set, and the set only shrinks: it cannot oscillate, also not over boots. The new value is written to 0x63,
-// stored in sector 708 at once (MAIN context, fpga_capture_service) and logged (event 23 a = 0x20 | the moved cores:
-// both of the chip, b = the new value). A chip with nothing left keeps its stage and asks for Calibrate (REPEAT) as
-// before.
+// What a flag does: GET_HEALTH 106 bit 3 / 107 / 120, Diagnostics; a core flagged in CS_REPEAT_N captures within
+// CS_REPEAT_MS (cs_watch) sets REPEAT (the Diagnostics Calibration verdict and GET_HEALTH ask for Calibrate) and logs
+// event 23 once. Nothing acts on it: the runtime guard of fw 0.2.105 (moved a flagged chip inside its stored clean set
+// and wrote sector 708) is gone with the stored sets, and the firmware never changes 0x63 from the self-check. Every
+// guard move on the owner's unit since 0x153F was a false alarm.
 //
 // Ownership (fw-guardfix, bench 2026-10-22): the self-check reads the 0x63 value the FPGA holds with the counts (0x36's
 // first two bytes). A capture taken at a value the firmware did not write (DEBUG_FPGA: fpga/al3/tools/capwin_sweep.py,
-// a manual sweep) still updates the counts, but it neither feeds cs_watch (no REPEAT) nor reaches the guard, and nothing
-// is logged; the guard also acts only while the FPGA holds the stored value of this bitstream. Whoever wrote 0x63 owns
-// the stages until it holds the firmware's value again.
+// a manual sweep) still updates the counts, but it does not feed cs_watch (no REPEAT) and nothing is logged.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #ifndef CAP_STAGE_H
@@ -143,9 +125,8 @@
                                       //(1/16 code^2 per sample; below "Noise bound"), else CS_E_RESID
 #define CS_TIE_REPS       16          //tie pass: captures per candidate stage and point
 #define CS_STAGES         (CS_STAGE_MAX - CS_STAGE_MIN + 1)
-#define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its chip partner (quiet partner)
-#define CS_EXCESS_DIV     8           //fw-csbusy: ... or more than the partner's count / 8 when that is larger
-#define CS_BUSY_COUNT     1024        //fw-csbusy: a chip whose cores both count more is busy: the check abstains
+#define CS_EXCESS_LIMIT   8           //self-check: outliers a core may have more than its quiet chip partner
+#define CS_QUIET_PARTNER  8           //fw-csbusy: the most a partner may count for the check (else not checkable)
 
 //Stage of core (CS_CORES order) in a 0x63 value, and the value with it replaced (one field); cs_with_chip: both fields
 //of chip ch (0 CH1, 1 CH2), as the firmware writes every value since 0x153F
@@ -211,16 +192,16 @@ typedef struct
   uint32_t q[CS_CORES][CS_STAGES];    //fw-capmetric: sum of E / CS_RESID_DIV over the band
   uint8_t  tie[CS_CORES];             //tie pass: the chip's two stages measured (bits, both cores; 0 = no tie)
   uint32_t tie_sum[CS_CORES][2];      //their counts summed per core, lower stage first
-  uint8_t  set[CS_CORES];             //the chip's set after the tie pass, the same in both cores (the guard's bound)
+  uint8_t  set[CS_CORES];             //the chip's set after the tie pass, the same in both cores (GET_CAL)
 } cs_train;
 
 //Train the chips of the cores in mask cores (the parked channel: 0x03 CH1, 0x0C CH2; one core names its chip); the
 //other chip keeps its value in start
 int      cs_train_run(const cs_io *io, uint16_t start, uint8_t cores, cs_train *t);
 
-//Self-check: per core the count minus its chip partner's (0 when below); cs_flagged: the cores whose excess is above
-//max(CS_EXCESS_LIMIT, partner / CS_EXCESS_DIV), not on a busy chip, as a mask; cs_busy: both cores of every chip whose
-//cores both count more than CS_BUSY_COUNT (the check abstains there; "Self-check" above)
+//Self-check: per core the count minus its chip partner's (0 when below); cs_flagged: the cores whose partner counted at
+//most CS_QUIET_PARTNER and whose excess is above CS_EXCESS_LIMIT, as a mask; cs_busy: both cores of every chip whose
+//cores both count more than CS_QUIET_PARTNER (not checkable; "Self-check" above)
 void     cs_excess(const uint16_t cnt[CS_CORES], uint16_t ex[CS_CORES]);
 uint8_t  cs_flagged(const uint16_t cnt[CS_CORES]);
 uint8_t  cs_busy(const uint16_t cnt[CS_CORES]);
@@ -241,18 +222,6 @@ typedef struct
 
 void     cs_watch_clear(cs_watch *w);
 uint8_t  cs_watch_add(cs_watch *w, uint8_t flagged, uint32_t now_ms);
-void     cs_watch_forget(cs_watch *w, uint8_t cores);   //the cores' history and repeat bit (the guard moved them)
-
-//Clean sets of the four cores in 16 bits: core k's stages 2..5 in bits 4k .. 4k + 3
-uint16_t cs_sets_pack(const uint8_t set[CS_CORES]);
-uint8_t  cs_sets_core(uint16_t sets, uint32_t core);    //as a cs_pick mask (bit s = stage s)
-uint16_t cs_sets_with(uint16_t sets, uint32_t core, uint8_t set);
-
-//Runtime guard (per chip since 0x153F): every chip with a core in cores whose stage in *value (core A's field) is in
-//its set (in *sets: both cores' sets in common) gets that stage removed from both cores' sets and cs_pick's choice from
-//the rest written into both fields; a chip with nothing left is not moved (its sets unchanged). Returns the cores moved
-//(both of a moved chip); *value and *sets updated
-uint8_t  cs_guard(uint16_t *value, uint16_t *sets, uint8_t cores);
 
 //Texts (no libc), each returns the pointer to its NUL: "CH1 A3 B3" (ch 0 / 1; the two fields as stored, equal in
 //every value the firmware writes since 0x153F), "CH1 A3 B3, CH2 A3 B3", the core name "CH2 A"
@@ -274,14 +243,7 @@ char    *cs_core_name(char *p, uint32_t core);
 void     cs_trailer_pack(uint16_t v, uint16_t fpga, uint8_t *out);
 int      cs_trailer_unpack(const uint8_t *in, uint16_t *v, uint16_t *fpga);   //CS_T_*; *v, *fpga 0 unless VALID
 
-//fw 0.2.105: the clean sets after it, sector 708 bytes 504..511 (the trailer stays version 1, so 0.2.79+ read it as
-//before; their saves clear this): u16 the sets (cs_sets_pack), u16 0, u32 zlib.crc32 of bytes 488..499 followed by
-//504..507 (the trailer without its CRC, then the sets: they belong to that trailer only). sector = the whole 512-byte
-//sector; unpack 1 = valid (*sets 0 otherwise)
-#define CS_EXT_OFFSET     504
-#define CS_EXT_BYTES      8
-
-void     cs_ext_pack(uint8_t *sector, uint16_t sets);
-int      cs_ext_unpack(const uint8_t *sector, uint16_t *sets);
+//Bytes 504..511 held the trained clean sets for the runtime guard (fw 0.2.105 .. 354e676); fw-csbusy neither reads nor
+//writes them, and its calibration save leaves them 0 (an older firmware then finds no sets and has no guard)
 
 #endif /* CAP_STAGE_H */

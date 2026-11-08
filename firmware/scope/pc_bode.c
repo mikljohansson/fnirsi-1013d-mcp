@@ -235,7 +235,8 @@ static void bh_force(void *ctx)
 
 //fw 0.2.83: the capture self-check of this capture (FPGA 0x153A+, cap_hw.c). 0x36 is read after a legacy 200 MSa/s
 //capture only, as after the host's (pc_cmds.c pc_enc_rearm: the counters compare a core's successive words, the
-//full-rate case fw-cap validated); a decimated capture has the repeat watch only. Never a flag of an earlier capture.
+//full-rate case fw-cap validated); a decimated capture is not judged (fw-csbusy: REPEAT ends no sweep). Never a flag
+//of an earlier capture.
 static uint8 bh_check(void)
 {
   pc_hw_cap cs;
@@ -249,7 +250,8 @@ static uint8 bh_check(void)
 
   pc_hal_cap_state(&cs);
 
-  if((cs.flags & PC_CAPF_REPEAT) || (now && (cs.flags & PC_CAPF_FLAGGED)))
+  //fw-csbusy (owner 2026-11-08): the self-check judges this capture only; REPEAT is advice and ends no sweep
+  if(now && (cs.flags & PC_CAPF_FLAGGED))
     return BODE_CHK_FAULT;
 
   return BODE_CHK_CLEAN;

@@ -2,8 +2,9 @@
 // cap_hw.c - the target side of FPGA 0x153A's capture stages (cap_stage.h, fw 0.2.79): the 0x63 value at boot (the trained
 // one stored with the calibration when it was trained on this bitstream, else the power-on 0x06DB), the 0x36 read after
 // every accepted full-rate capture (self-check, GET_HEALTH, event 23; never after a gated one: fpga_capture_check), the wizard's training and the stored value
-// (sector 708 bytes 488..503, through pc_diag.c's calibration load / save hooks). fw 0.2.105: the trained clean sets
-// (bytes 504..511) and the runtime guard (cap_stage.h "Runtime guard"). fw-153f: one stage per chip (0x153F).
+// (sector 708 bytes 488..503, through pc_diag.c's calibration load / save hooks: written by the wizard's Save only).
+// fw-153f: one stage per chip (0x153F). fw-csbusy (owner 2026-11-08): the self-check is a diagnostic only; the runtime
+// guard of fw 0.2.105 (moved a flagged chip and wrote sector 708) and its stored sets are gone.
 //----------------------------------------------------------------------------------------------------------------------------------
 
 #include "types.h"
@@ -14,20 +15,11 @@
 #include "pc_transport.h"
 #include "cap_stage.h"
 #include "cap_hw.h"
-#include "variables.h"
-
-#include <string.h>
 
 static pc_hw_cap cap_st;                    //GET_HEALTH / GET_CAL
 static uint8     cap_training;              //the self-check is off while the wizard trains
 static cs_watch  cap_watch;                 //fw 0.2.81: cores flagged 3 times in a minute (PC_CAPF_REPEAT)
 
-//fw 0.2.105: the stored clean sets (cs_sets_pack; saved with the trailer; 0 = unknown: no guard), and the sets of the
-//value cap_sets_v as the wizard's trainings left them (they become the stored ones at its Save)
-static uint16    cap_stored_sets, cap_sets, cap_sets_v;
-static uint8     cap_moved;                 //cores the guard moved since boot (once each)
-static uint8     cap_store;                 //the guard's new value waits for fpga_capture_service's sector 708 write
-static uint32    cap_sector[128];            //sector 708 for the guard's write (pc_hal_sd_*: 4-byte aligned)
 static pc_hw_cap_train cap_train[2];          //1.28: the last training per channel (GET_CAL 364..431)
 
 void pc_hal_cap_state(pc_hw_cap *c)
@@ -103,13 +95,6 @@ void fpga_capture_loaded(const uint8_t *sector)
 {
   cap_st.trailer = (uint8)cs_trailer_unpack(sector + CS_TRAILER_OFFSET, &cap_st.stored, &cap_st.stored_fpga);
 
-  //The clean sets when they belong to this trailer (a 0.2.79..0.2.104 save leaves none: no guard until a training)
-  if((cap_st.trailer != CS_T_VALID) || !cs_ext_unpack(sector, &cap_stored_sets))
-    cap_stored_sets = 0;
-
-  cap_sets   = cap_stored_sets;
-  cap_sets_v = cap_st.stored;
-
   //A reload after boot (Restore default settings) applies it at once
   if(cap_st.flags & PC_CAPF_HAS)
     cap_apply();
@@ -118,10 +103,7 @@ void fpga_capture_loaded(const uint8_t *sector)
 void fpga_capture_save(uint8_t *sector)
 {
   if(cap_st.trailer == CS_T_VALID)
-  {
     cs_trailer_pack(cap_st.stored, cap_st.stored_fpga, sector + CS_TRAILER_OFFSET);
-    cs_ext_pack(sector, cap_stored_sets);
-  }
 }
 
 void fpga_capture_commit(void)
@@ -132,67 +114,10 @@ void fpga_capture_commit(void)
   cap_st.trailer     = CS_T_VALID;
   cap_st.stored      = cap_st.value;
   cap_st.stored_fpga = PC_FW_FPGA_VERSION;
-  cap_stored_sets    = (cap_sets_v == cap_st.value) ? cap_sets : 0;
-  cap_st.flags       = (uint8)((cap_st.flags & ~(PC_CAPF_OTHER | PC_CAPF_REPEAT | PC_CAPF_MOVED)) | PC_CAPF_TRAINED);
+  cap_st.flags       = (uint8)((cap_st.flags & ~(PC_CAPF_OTHER | PC_CAPF_REPEAT)) | PC_CAPF_TRAINED);
 
   //A new trained value: the repeat watch starts again
   cs_watch_clear(&cap_watch);
-}
-
-//fw 0.2.105: cores that reached the repeat watch, moved once per boot inside their trained clean set (cs_guard) while
-//the stored value of this bitstream is in effect and its sets are known; the new value is in effect and stored at once
-//(the sector write waits for fpga_capture_service). hw = the 0x63 value the FPGA held for this capture (0x36). Returns
-//the cores moved
-static uint8 cap_guard(uint8 reached, uint16 hw)
-{
-  uint16 v = cap_st.value, sets = cap_stored_sets;
-  uint8  moved;
-
-  reached &= (uint8)~cap_moved;
-
-  //TRAINED: the stored value of this bitstream is in effect, so the stored sets are its sets. fw-guardfix: and the FPGA
-  //holds it (a DEBUG_FPGA write of 0x63 does not pass fpga_capture_write; the caller already skips such captures, this
-  //is the guard's own check before it writes 0x63 and sector 708)
-  if(!reached || !(cap_st.flags & PC_CAPF_TRAINED) || (hw != cap_st.stored))
-    return 0;
-
-  moved = cs_guard(&v, &sets, reached);
-
-  if(!moved)
-    return 0;
-
-  cap_moved      |= moved;
-  cap_sets        = sets;
-  cap_sets_v      = v;
-  cap_stored_sets = sets;
-  cap_st.stored   = v;
-  cap_store       = 1;
-  fpga_capture_write(v);
-  cap_st.flags |= PC_CAPF_MOVED;
-
-  //The moved cores' watch starts again at their new stage (a repeat there asks for Calibrate)
-  cs_watch_forget(&cap_watch, moved);
-
-  //Event 23: a = 0x20 | the cores moved, b = the new 0x63 value
-  pc_usb_log_fpga_capture((uint8)(0x20 | moved), v);
-  return moved;
-}
-
-void fpga_capture_service(void)
-{
-  if(!cap_store)
-    return;
-
-  cap_store = 0;
-
-  //Only the trailer and the sets change (bytes 488..511; the 1.00o5 checksum and the v3 block are before them). A
-  //failed read writes nothing: the value stays in effect and the next calibration save stores it
-  if(pc_hal_sd_read(INPUT_CALIBRATION_SECTOR, 1, (uint8 *)cap_sector))
-    return;
-
-  cs_trailer_pack(cap_st.stored, cap_st.stored_fpga, (uint8 *)cap_sector + CS_TRAILER_OFFSET);
-  cs_ext_pack((uint8 *)cap_sector, cap_stored_sets);
-  (void)pc_hal_sd_write(INPUT_CALIBRATION_SECTOR, 1, (const uint8 *)cap_sector);
 }
 
 void fpga_capture_check(void)
@@ -210,7 +135,7 @@ void fpga_capture_check(void)
   //was flagged (a 1 kHz square at 200 kSa/s: excess 15 and 43; the guard moved CH2 B and CH1 A off their trained
   //stages and stored that, REPEAT then ended every Frequency response sweep with reason 8). The callers reach this
   //after every accepted capture since the 0x33 check covers every capture (fw-gated, 2026-10-22). A gated capture is
-  //not read: no count, no flag, no REPEAT, no guard; GET_HEALTH keeps the last full-rate read
+  //not read: no count, no flag, no REPEAT; GET_HEALTH keeps the last full-rate read
   if(!pc_glue_adc_full_rate())
     return;
 
@@ -218,8 +143,8 @@ void fpga_capture_check(void)
   cap_st.reads++;
   cap_st.flags  |= PC_CAPF_READ;
 
-  //fw-csbusy (bench 2026-11-08): the limit grows with the partner's count and a busy chip abstains (cap_stage.h
-  //"Busy signals"), so a busy capture flags nothing: no flagged_n, no repeat watch, no REPEAT, no event, no guard
+  //fw-csbusy (owner 2026-11-08): a core is flagged only against a quiet partner; a chip whose cores both count is not
+  //checkable (cap_stage.h "Self-check"): no flagged_n, no repeat watch, no REPEAT, no event
   cap_st.flagged = cs_flagged(cap_st.cnt);
 
   if(!cap_st.flagged)
@@ -233,19 +158,16 @@ void fpga_capture_check(void)
 
   //fw-guardfix (bench 2026-10-22): a capture taken at a 0x63 value the firmware did not write (a DEBUG_FPGA write: the
   //capture-window sweep, a manual sweep) says nothing about the firmware's stages. The counts above stay (GET_HEALTH
-  //shows what the FPGA counted), but the capture neither counts toward REPEAT nor reaches the guard, and nothing is
-  //logged: whoever wrote 0x63 owns the stages until it holds the firmware's value again
+  //shows what the FPGA counted), but the capture does not count toward REPEAT and nothing is logged: whoever wrote 0x63
+  //owns the stages until it holds the firmware's value again
   if(hw != cap_st.value)
     return;
 
   //fw 0.2.81: an intermittent stage flags now and then (bench 2026-10-20, CH1 A4); a core flagged in 3 captures within a
   //minute keeps failing at its stage: REPEAT (the Diagnostics Calibration verdict asks for Calibrate) and event 23 once
-  //per core (a = the cores that reached it, b = the largest excess of this capture), until a training is saved
+  //per core (a = the cores that reached it, b = the largest excess of this capture), until a training is saved.
+  //fw-csbusy: advice only, nothing changes 0x63 or the stored calibration
   reached = cs_watch_add(&cap_watch, cap_st.flagged, pc_hal_ms());
-
-  //fw 0.2.105: first the guard; the cores it could not move ask for Calibrate
-  if(reached)
-    reached &= (uint8)~cap_guard(reached, hw);
 
   if(reached)
   {
@@ -301,21 +223,6 @@ int fpga_capture_train(uint8_t cores, const cs_io *io, cs_train *t)
   rc = cs_train_run(io, cap_st.value, cores, t);
   cap_training = 0;
   cap_train_note(t, rc);
-
-  //fw 0.2.105: the trained cores' clean sets for the new value (the other cores' only while they belong to the start)
-  if(rc == CS_OK)
-  {
-    uint32 k;
-
-    if(cap_sets_v != t->start)
-      cap_sets = 0;
-
-    for(k=0;k<CS_CORES;k++)
-      if(t->cores & (1u << k))
-        cap_sets = cs_sets_with(cap_sets, k, t->set[k]);
-
-    cap_sets_v = t->value;
-  }
 
   //The result, or back to the value before; event 23 with bit 4 set: a = 0x10 | cores without a clean stage, b = 0x63
   fpga_capture_write((rc == CS_OK) ? t->value : t->start);

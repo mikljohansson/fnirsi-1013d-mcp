@@ -438,18 +438,18 @@ static void test_pages(void)
   check_layout("cal capture repeat", 0);
   T_EQ(text_colour("ADC capture stages CH1 A4 B4, CH2 A3 B4 (trained): last capture clean, flagged 3 times in a minute: "
                    "calibrate"), UD_C_WARN);
-  //fw 0.2.105: the runtime guard moved CH1 A to 3 (the line fits with the note)
+  //fw-csbusy: MOVED is retired (the guard is gone); a stray bit shows nothing
   health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED | PC_CAPF_READ | PC_CAPF_MOVED; health[104] = 0xE3;
   ud_build(&pg, UD_PAGE_CAL, &in, &note);
-  check_layout("cal capture moved", 0);
-  T_EQ(text_colour("ADC capture stages CH1 A3 B4, CH2 A3 B4 (trained, a flagged core moved): capture clean"), UD_C_SOFT);
-  //fw-csbusy (bench 2026-11-08): a busy chip was not checked, which the line says instead of "clean"
+  T_EQ(text_colour("ADC capture stages CH1 A3 B4, CH2 A3 B4 (trained): capture clean"), UD_C_SOFT);
+  T_FALSE(has_text("moved"));
+  //fw-csbusy (bench 2026-11-08): a chip without a quiet core was not checked, which the line says instead of "clean"
   health[106] = PC_CAPF_HAS | PC_CAPF_TRAINED | PC_CAPF_READ; health[104] = 0xDB; health[105] = 0x06;
   health[108] = 0x92; health[109] = 0xA5; health[110] = 0x91; health[111] = 0xA8;   //CH1 42386, 43153
   ud_build(&pg, UD_PAGE_CAL, &in, &note);
   check_layout("cal capture busy", 0);
   T_EQ(text_colour("ADC capture stages CH1 A3 B3, CH2 A3 B3 (trained): last capture too busy to check (CH1)"), UD_C_SOFT);
-  health[112] = 0x00; health[113] = 0x08; health[114] = 0x00; health[115] = 0x08;   //CH2 2048, 2048
+  health[112] = 12; health[113] = 0x00; health[114] = 0x90; health[115] = 0x01;     //CH2 12, 400 (12.5 MHz, 92 codes)
   ud_build(&pg, UD_PAGE_CAL, &in, 0);
   T_TRUE(has_text("(trained): last capture too busy to check (CH1, CH2)"));
   health[112] = 0; health[113] = 0; health[114] = 0; health[115] = 0;
