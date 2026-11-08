@@ -2082,3 +2082,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   2 h, then the scope answers: 598 requests, 0 failures, 0 drops, no restart, `#VER` fine afterwards; 3 bus resets and suspends during the
   closed port, recovered by themselves. An earlier firmware lost USB here. Owner: zero offsets at the shorted input accepted, not a
   known issue in the notes; no overnight run. **Every release check is closed; the announcement is the owner's.**
+- 2026-11-07 19:4x and 2026-11-08 09:45-11:46 (owner, lead): **0.3.1 bench.** Shorted / open zeros: the code-128 carry is not the
+  cause (offset sweeps straight within 0.4 code; ranges 2 and 4 share hardware). With probes unplugged after a fresh wizard,
+  **each channel's zero depends on the other channel's range**: CH2 at range 2, CH1 at 0..6: 128.23 127.22 129.11 128.19 129.14 128.23
+  128.24; CH1 at range 2: 127.13 126.56 128.04 127.11 128.05 127.11 127.11; coupling no effect (relay classes: other channel's coils on).
+  The calibration wizard's zero step needs the probes unplugged (the guide says so; connected free tips gave "too much noise" on CH1).
+  USB: the old cable dropped the link 4 times a minute with or without relay switching; a new cable: 1195 requests in 2 min, 0 drops
+  (the 2026-11-06 drops had the same signature; inference: the cable). On main 93eee7d / 1cb15b4 (FEL): loopback group 10 of 10 (T4
+  fold d = +1 over 200, T5 median +1, T7 skipped as debug-only); coreorder group 50 of 50 (d = +1 at 12 dividers, both channels, on the
+  post); full battery on the ladder 207 PASS, 0 FAIL, 2 SKIP; section 98: GET_TIMEBASE keeps divider 999 through a snap (= GET_DECIM);
+  counter VALID at 2 MSa/s / 200 / 20 kSa/s (1000.0 Hz), not valid at 10 kSa/s; at 200 kSa/s 40 kHz valid, 60 kHz not, 1 kHz 2 % valid,
+  0.5 % not, 201 kHz reads 1 kHz (the alias), with a filter 201 kHz; the owner sees "ACQ Roll". fw-xzero (10fa8d3, protocol 1.29) after a
+  wizard: 1 MSa/s every cell within 0.24 code of 128 (ranges 2 and 5, both channels); 200 MSa/s CH2 r2 worst 0.57 (other at 2/4: 127.45,
+  overcorrected), CIC2 0.39, CH1 r2 flat +0.36 (the full-class offset): sent back for a per-class table.
