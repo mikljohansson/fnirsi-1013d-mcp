@@ -118,7 +118,7 @@ def test_get_cal_364():
     r = P.CalResp(cap_trailer=1, cap_flags=P.CAPF_HAS | P.CAPF_TRAINED, cap_stored=0x08DC, cap_stored_fpga=0x153A,
                   cap_value=0x08DC)
     b = r.pack()
-    assert len(b) == 460 and struct.unpack_from("<BBHHH", b, 356) == (1, 3, 0x08DC, 0x153A, 0x08DC)
+    assert len(b) == 480 and struct.unpack_from("<BBHHH", b, 356) == (1, 3, 0x08DC, 0x153A, 0x08DC)
     c = P.CalResp.unpack(b)
     assert c.has_capture and c.has_provenance and c.cap_stored == 0x08DC
     d = c.describe_capture()
@@ -184,7 +184,7 @@ def test_simulator_al3c(sim_factory):
         h = s.health()
         assert (h.layout, h.length, h.cap_value, h.cap_flags, h.cap_reads) == (3, 128, P.CAP_POWER_ON, P.CAPF_HAS, 0)
         c = s.get_cal(0, cached=False)
-        assert c.nbytes == 460 and (c.cap_trailer, c.cap_flags, c.cap_value) == (0, P.CAPF_HAS, P.CAP_POWER_ON)
+        assert c.nbytes == 480 and (c.cap_trailer, c.cap_flags, c.cap_value) == (0, P.CAPF_HAS, P.CAP_POWER_ON)
         s.set_timebase(divider=0)
         s.capture(["CH1"])
         h = s.health()

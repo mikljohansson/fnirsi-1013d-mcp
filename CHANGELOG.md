@@ -26,7 +26,9 @@ published as pre-releases.
   of the other channel's relay coils on (about 4 s more, the other channel's relays click), stores it in sector 708 and
   every readout applies it (8-bit and 16-bit paths, the 16-bit trigger level, peak detect). A calibration saved before
   works as before, without the correction, until Calibrate is run again. Diagnostics > Calibration shows it in the
-  "Other ch" column; GET_CAL 460 bytes, protocol 1.29 (94a64d0).
+  "Other ch" column; GET_CAL 460 bytes, protocol 1.29 (94a64d0). The shift is measured and applied per clock class:
+  at 200 MSa/s and with a filter it is about half the 2 MSa/s one, and the first build overcorrected there by up to half
+  a code; the zero step takes about 6 s more, GET_CAL is 480 bytes (10026da, mcp 97b9fb2).
 
 ### Host (`mcp`)
 

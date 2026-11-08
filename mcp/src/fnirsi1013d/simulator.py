@@ -556,6 +556,8 @@ class SimConfig:
     #: (bench 2026-11-08: about -1 / 0 / +1 code); the wizard measured it (GET_CAL 432..459, rounded to 1/8 code) with
     #: the zeros taken at 1 coil on. None: no cross-talk and no table
     xzero: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    #: the same in the full clock class (the ADCs at full rate: divider 0, every filter); None: as ``xzero``
+    xzero_full: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
     #: protocol 1.15 (with cal_v3): the full-rate class drifted after the calibration, per channel (d, e, q, cm) in
     #: corrected codes: core A reads + (d + e x + q x^2) / 2 + cm, core B - (d + e x + q x^2) / 2 + cm (x = code - 128);
     #: the firmware's tracker is modelled as converged (it reports and takes out d, e and cm; q is reported only)
@@ -1202,7 +1204,8 @@ class Device:
         else:
             zero = 128.0 + self.cfg.offset_slope * cs.dcoffset
         g = self.cfg.core_gain[ch]
-        zero += self._xz16(ch, settings) / 16.0  # fw-xzero: the other channel's range relays (both cores alike)
+        # fw-xzero: the other channel's range relays (both cores alike; the filtered path runs the ADCs at full rate)
+        zero += self._xz16(ch, settings, P.CAL_CLASS_FULL if core is None else None) / 16.0
         if core is None:  # filtered: the ADCs run at full rate, both cores weigh equally
             out = zero + v / vpl * (g[0][0] + g[0][1]) / 2 + \
                 (self.raw_zero_offset(ch, 0, 0) + self.raw_zero_offset(ch, 1, 0)) / 2
@@ -1225,17 +1228,19 @@ class Device:
         off = self.cfg.zero_error[ch][core] + (self.cfg.core_b_offset[ch] if core == 1 else 0.0)
         return off + (self.cfg.gated_zero_shift[ch][core] if cls == P.CAL_CLASS_GATED else 0.0)
 
-    def _xz_table(self, ch: int) -> tuple[int, ...] | None:
-        """fw-xzero: the table the wizard stored for channel ch, [range][class] in 1/16 code (even), or None."""
+    def _xz_table(self, ch: int, cls: int = P.CAL_CLASS_GATED) -> tuple[int, ...] | None:
+        """fw-xzero: the table the wizard stored for channel ch and clock class cls, [range][class] in 1/16 code (even),
+        or None."""
         if not self.cfg.cal_v3 or self.cfg.xzero is None:
             return None
-        x = self.cfg.xzero[ch]
+        x = (self.cfg.xzero_full or self.cfg.xzero)[ch] if cls == P.CAL_CLASS_FULL else self.cfg.xzero[ch]
         row = tuple(2 * int(round(8 * (x[k] - x[1]))) for k in range(3))
         return row * 6
 
-    def _xz16(self, ch: int, settings: Settings) -> int:
-        """The shift of channel ch's raw zeros (1/16 code) for the other channel's range in ``settings``."""
-        t = self._xz_table(ch)
+    def _xz16(self, ch: int, settings: Settings, cls: int | None = None) -> int:
+        """The shift of channel ch's raw zeros (1/16 code) for the other channel's range in ``settings``, in clock class
+        ``cls`` (default: the settings' class)."""
+        t = self._xz_table(ch, self._clock_class(settings) if cls is None else cls)
         if t is None:
             return 0
         return t[3 * min(settings.channels[ch].range, 5) + P.xz_class_of(settings.channels[1 - ch].range)]
@@ -1276,10 +1281,10 @@ class Device:
         t16 = 16 * P.cal_target(d, self.cal[ch].dc_shift_value)
         out: dict = {"gain": [], "off": [], "comp": [], "frac": [], "t16": t16}
         zf = []
-        xz = self._xz16(ch, settings)  # fw-xzero: acal_correction_xz
+        xz, xzf = self._xz16(ch, settings, cls), self._xz16(ch, settings, P.CAL_CLASS_FULL)  # acal_correction_xz
         for k in (0, 1):
             zc16 = tb.zero16_at(cls, k, r, d) + xz
-            zf.append(tb.zero16_at(P.CAL_CLASS_FULL, k, r, d) + xz)
+            zf.append(tb.zero16_at(P.CAL_CLASS_FULL, k, r, d) + xzf)
             g = tb.gain_q16(cls, k)
             out["gain"].append(g)
             out["off"].append(P._rdiv(t16 * 65536 - g * zc16, 16))
@@ -3251,7 +3256,7 @@ class Device:
         g = self.cfg.core_gain[ch]
         gm = (g[0][0] + g[0][1]) / 2
         zero = self._offset_zero(ch, cs.dcoffset) + (self.raw_zero_offset(ch, 0, 0) + self.raw_zero_offset(ch, 1, 0)) / 2
-        zero += self._xz16(ch, settings) / 16.0
+        zero += self._xz16(ch, settings, P.CAL_CLASS_FULL) / 16.0
         if self.cfg.v4 is not None:
             g_ref = (g[1][0] + g[1][1]) / 2
             zero += self.cfg.v4[ch][3] * gm / g_ref
@@ -3856,8 +3861,11 @@ class Device:
         r.gain16, r.corr16 = v["gain16"], v["corr16"]
         r.cal_zero_q8 = v["t16"] * 16
         xt = self._xz_table(ch)
-        if xt is not None:  # 1.29: the table and the shift applied (the block is bound here)
-            r.xz_flags, r.xz_table, r.xz_applied16 = P.XZ_TABLE | P.XZ_APPLIED, xt, self._xz16(ch, s)
+        if xt is not None:  # 1.29: the tables and the shifts applied (the block is bound here)
+            r.xz_flags = P.XZ_TABLE | P.XZ_APPLIED | P.XZ_FULL
+            r.xz_table, r.xz_table_full = xt, self._xz_table(ch, P.CAL_CLASS_FULL)
+            r.xz_applied16 = self._xz16(ch, s, P.CAL_CLASS_GATED if s.divider else P.CAL_CLASS_FULL)
+            r.xz_applied16_full = self._xz16(ch, s, P.CAL_CLASS_FULL)
         if self.cfg.v4 is not None:
             d, e, q, cm = self.cfg.v4[ch]
             r.track_flags = (P.TRACK_RECORD | P.TRACK_E | P.TRACK_Q | P.TRACK_LAST_USABLE | P.TRACK_PROBE_DATA |

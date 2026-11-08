@@ -6004,9 +6004,10 @@ void scope_load_input_calibration_data(void)
         //Calibration data v3 (bytes 128.., outside the checksum): used per channel while bound to the 709 PWM centres
         adc_cal_loaded = (acal_unpack((uint8 *)buffer + ACAL_SECTOR_OFFSET, adc_cal) == ACAL_OK);
 
-        //fw-xzero: the other channel's relays, bytes 108..127, for this block only (zeros from an older save: no shift)
+        //fw-xzero: the other channel's relays (bytes 108..127, the full class in 4..15, 44..47, 76..77), for this block
+        //only (zeros from an older save: no shift)
         if(adc_cal_loaded)
-          acal_xz_unpack((uint8 *)buffer + ACAL_XZ_OFFSET, (uint8 *)buffer + ACAL_SECTOR_OFFSET, adc_cal);
+          acal_xz_unpack((uint8 *)buffer, adc_cal);
 
         if(scope_settings_result == SREC_OK)
         {
@@ -6148,8 +6149,9 @@ void scope_save_input_calibration_data(void)
     {
       acal_pack(adc_cal, (uint8 *)buffer + ACAL_SECTOR_OFFSET);
 
-      //fw-xzero: the other channel's relays (bytes 108..127; 108..119 lie inside the checksum below, which covers them)
-      acal_xz_pack(adc_cal, (uint8 *)buffer + ACAL_SECTOR_OFFSET, (uint8 *)buffer + ACAL_XZ_OFFSET);
+      //fw-xzero: the other channel's relays (bytes 108..127 and 4..15, 44..47, 76..77; those from 16 to 119 lie inside
+      //the checksum below, which covers them)
+      acal_xz_pack(adc_cal, (uint8 *)buffer);
     }
 
     //Calibration provenance after the block, stamped when the block is new (fw 0.2.52, pc_diag.c)

@@ -343,7 +343,7 @@ def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None
         from .protocol import CAL_CLASS_FULL, CAL_CLASS_GATED, CAL_CLASS_NAMES, cal_target
         r = min(cfg.range, 6)
         dco = cfg.offset_pwm - cal_resp.dc_calibration_offset[r]  # offset_pwm = centre[range] + dcoffset
-        xz = cal_resp.xz16(r, other_range) / 16.0 if hasattr(cal_resp, "xz16") else 0.0
+        xz = cal_resp.xz16(r, other_range, clock_class) / 16.0 if hasattr(cal_resp, "xz16") else 0.0
         za = cal_resp.zero_at(clock_class, 0, r, dco) + xz
         zb = cal_resp.zero_at(clock_class, 1, r, dco) + xz
         t = cal_target(dco, cal_resp.dc_shift_value)

@@ -2741,22 +2741,29 @@ void pc_cal_body(int ch, uint8_t *resp)
   }
 
   //1.29 (fw-xzero, row 71): the other channel's relays (adc_cal.h): 432 flags (bit 0 the channel has a table, bit 1 it
-  //is applied now: bound block, table, a non-zero shift or not), 433 the other channel's range now, 434 its class (coils on
-  //0..2), 435 0, 436 i16 the shift applied now (1/16 code, both cores, also in 74..111), 438 u16 0, 440 i8[range 6][class
-  //3] the table (1/16 code; [ACAL_XZ_REF] 0), 458 u16 0
+  //is applied now: bound block, table, a non-zero shift or not; bit 2 the full class was measured, else its table is the
+  //gated one's copy), 433 the other channel's range now, 434 its class (coils on 0..2), 435 0, 436 i16 the shift applied
+  //now in the 8-bit readout's class (1/16 code, both cores, also in 74..111), 438 i16 the full class's (the 16-bit path,
+  //in 84), 440 i8[range 6][class 3] the gated table (1/16 code; [ACAL_XZ_REF] 0), 458 u16 0, 460 i8[6][3] the full
+  //table, 478 u16 0
   {
     uint32_t r, j;
     uint8_t  has = (uint8_t)(c.cal2_loaded && c.cal2.xz_valid);
 
-    resp[432] = (uint8_t)((has ? 1 : 0) | ((has && bound) ? 2 : 0));
+    resp[432] = (uint8_t)((has ? 1 : 0) | ((has && bound) ? 2 : 0) |
+                          ((has && (c.cal2.xz_valid & ACAL_XZ_V_FULL)) ? 4 : 0));
     resp[433] = c.xrange;
     resp[434] = acal_xz_class(c.xrange);
     pc_put_u16(resp + 436, (uint16_t)k.xz16);
+    pc_put_u16(resp + 438, (uint16_t)k.xzf16);
 
     if(has)
       for(r=0;r<ACAL_RANGES;r++)
         for(j=0;j<ACAL_XZ_CLASSES;j++)
-          resp[440 + ACAL_XZ_CLASSES * r + j] = (uint8_t)c.cal2.xz[r][j];
+        {
+          resp[440 + ACAL_XZ_CLASSES * r + j] = (uint8_t)c.cal2.xz[ACAL_GATED][r][j];
+          resp[460 + ACAL_XZ_CLASSES * r + j] = (uint8_t)c.cal2.xz[ACAL_FULL][r][j];
+        }
   }
 }
 

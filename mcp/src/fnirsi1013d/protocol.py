@@ -56,8 +56,8 @@ PROTO_MAJOR = 1
 #: 0x0217 / 0x021A are unknown commands, caps bits 24 / 27 and features bits 12 / 13 reserved, trigger source 3 gone;
 #: 1.28 (fw 0.2.105, fw-capmetric, row 68): GET_CAL 432 bytes, 364..431 the channel's last capture stage training (the
 #: quiet sets, the residual metric q and the 0x36 sums per core and stage)
-#: 1.29 (after fw 0.3.0, fw-xzero, row 71): GET_CAL 460 bytes, 432..459 the channel's zero shift for the other
-#: channel's range relays (per range and relay class) and the shift applied now
+#: 1.29 (after fw 0.3.0, fw-xzero, row 71): GET_CAL 480 bytes (460 in 10fa8d3), 432..479 the channel's zero shift
+#: for the other channel's range relays (per clock class, range and relay class) and the shift applied now
 PROTO_MINOR = 29
 HEADER_SIZE = 16
 CRC_SIZE = 4
@@ -3471,7 +3471,8 @@ class CalResp(Payload):
               ("prov_minutes_since", "I"), ("cap_trailer", "B"), ("cap_flags", "B"), ("cap_stored", "H"),
               ("cap_stored_fpga", "H"), ("cap_value", "H"), ("train_flags", "B"), ("train_set", "2B"), ("_r4", "x"),
               ("train_q", "8I"), ("train_sum", "8I"), ("xz_flags", "B"), ("xz_range", "B"), ("xz_class", "B"),
-              ("_r5", "x"), ("xz_applied16", "h"), ("_r6", "2x"), ("xz_table", "18b"), ("_r7", "2x")]
+              ("_r5", "x"), ("xz_applied16", "h"), ("xz_applied16_full", "h"), ("xz_table", "18b"), ("_r7", "2x"),
+              ("xz_table_full", "18b"), ("_r8", "2x")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -3552,15 +3553,18 @@ class CalResp(Payload):
     train_set: tuple[int, ...] = field(default_factory=lambda: (0,) * 2)
     train_q: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
     train_sum: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
-    #: 1.29 (row 71, 432..459): XZ_* flags; the other channel's range when answered and its relay class (coils on,
-    #: xz_class_of); the shift applied now (1/16 code, both cores, included in 74..111); the table
-    #: [range][class 0, 1, 2] in 1/16 code (class 1 = the zeros' reference, 0): what the other channel's range
-    #: relays add to both cores' raw zeros of this channel, in both clock classes
+    #: 1.29 (row 71, 432..479): XZ_* flags; the other channel's range when answered and its relay class (coils on,
+    #: xz_class_of); the shift applied now in the 8-bit readout's clock class and in the full class (the 16-bit path;
+    #: 1/16 code, both cores, included in 74..111); the gated and the full table [range][class 0, 1, 2] in 1/16 code
+    #: (class 1 = the zeros' reference, 0): what the other channel's range relays add to both cores' raw zeros of this
+    #: channel. 10fa8d3 answered 460 bytes: one table, applied in both classes
     xz_flags: int = 0
     xz_range: int = 0
     xz_class: int = 0
     xz_applied16: int = 0
+    xz_applied16_full: int = 0
     xz_table: tuple[int, ...] = field(default_factory=lambda: (0,) * 18)
+    xz_table_full: tuple[int, ...] = field(default_factory=lambda: (0,) * 18)
     nbytes: int = field(default=0, compare=False)
 
     @classmethod
@@ -3651,12 +3655,14 @@ class CalResp(Payload):
         later measured it)."""
         return self.nbytes >= 460 and bool(self.xz_flags & XZ_TABLE)
 
-    def xz16(self, rng: int, other_range: int | None) -> int:
-        """The raw-zero shift (1/16 code) for this channel at range ``rng`` with the other channel at ``other_range``
-        (adc_cal.c acal_correction_xz): 0 without a table, without v3 in use or when the other range is not known."""
+    def xz16(self, rng: int, other_range: int | None, clock_class: int = CAL_CLASS_GATED) -> int:
+        """The raw-zero shift (1/16 code) for this channel at range ``rng`` in ``clock_class`` with the other channel at
+        ``other_range`` (adc_cal.c acal_correction_xz): 0 without a table, without v3 in use or when the other range is
+        not known. A 460-byte answer (10fa8d3) has the gated table only, which it applied in both classes."""
         if other_range is None or not self.has_xz or not self.v3:
             return 0
-        return self.xz_table[3 * min(rng, 5) + xz_class_of(other_range)]
+        tab = self.xz_table_full if clock_class == CAL_CLASS_FULL and self.nbytes >= 480 else self.xz_table
+        return tab[3 * min(rng, 5) + xz_class_of(other_range)]
 
     def describe_xz(self) -> dict[str, Any] | None:
         """432..459 (protocol 1.29) in words; None for an older answer."""
@@ -3665,11 +3671,16 @@ class CalResp(Payload):
         if not self.xz_flags & XZ_TABLE:
             return {"measured": False, "text": "the zero shift for the other channel's relays is not measured: run the "
                                                "calibration wizard (fw-xzero or later)"}
+        full = self.xz_table_full if self.nbytes >= 480 else self.xz_table
         return {"measured": True, "applied": bool(self.xz_flags & XZ_APPLIED),
+                "full_class_measured": bool(self.xz_flags & XZ_FULL),
                 "other_channel_range": self.xz_range, "other_channel_relays_on": self.xz_class,
                 "shift_now_codes": self.xz_applied16 / 16,
+                "shift_now_16bit_codes": (self.xz_applied16_full if self.nbytes >= 480 else self.xz_applied16) / 16,
                 "per_range_codes": {str(r): {"0_on": self.xz_table[3 * r] / 16, "2_on": self.xz_table[3 * r + 2] / 16}
                                     for r in range(6)},
+                "per_range_codes_full_rate": {str(r): {"0_on": full[3 * r] / 16, "2_on": full[3 * r + 2] / 16}
+                                              for r in range(6)},
                 "note": "the zeros were measured with one of the other channel's range relays on (its range 0); "
                         "ranges 0, 3, 5, 6 have one on, 1 none, 2 and 4 two"}
 
@@ -3921,6 +3932,7 @@ CAPT_REF = 0x04  # core B measured again with the A encode: 0x153A..0x153E firmw
 #: applied now (the v3 block is bound)
 XZ_TABLE = 0x01
 XZ_APPLIED = 0x02
+XZ_FULL = 0x04  # the full clock class measured (else its table is the gated one's copy)
 
 
 def xz_class_of(other_range: int) -> int:
