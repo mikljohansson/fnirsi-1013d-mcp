@@ -20,6 +20,12 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
   busy to check". On a 24.576 MHz clock 0.3.1 flagged most captures and moved and stored CH1's stage although the record
   was clean; a first fix with a relative limit (aa32e98) still flagged a 12.5 MHz square. "Flagged 3 times in a minute"
   still asks for Calibrate and no longer stops a Frequency response sweep (aa32e98, 80077b0).
+- A generator frequency set over USB above 10 MHz no longer makes the next boot discard every saved setting: the
+  generator menu and the saved-settings check now take the same 25 MHz limit as the USB command, and the menu keeps a
+  stored 12.5 MHz instead of cutting it to 10 MHz (5b16ac3).
+- The capture self-check no longer flags a clean fast edge whose sample-to-sample steps sit near its threshold (a
+  12.5 MHz square at 100 mV/div was flagged and Calibrate advised): it now counts jumps over 48 codes, while the
+  calibration wizard's training still counts at 32 (da5f22c).
 
 ### Host (mcp)
 
@@ -27,6 +33,7 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
   0.3.1 flag on a busy signal (`flag_from_busy_signal`); `scope_counter` reports `firmware_frequency_hz` None with a
   caveat above 4.294967 MHz, where the firmware's millihertz field saturates (`frequency_hz` is exact), and warns when a
   valid count spans fewer than 24 codes (b5600b9, f1f0da7).
+- `scope_health` says what the self-check's outlier counts count (jumps over 48 codes, 32 up to fw 0.3.1) (05fec9a).
 
 ### Releases
 

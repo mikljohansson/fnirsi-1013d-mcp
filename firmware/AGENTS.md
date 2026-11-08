@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-genlimit (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: one generator limit (SET_GEN's 25 MHz) for the generator menu and the settings check, so a host's 12.5 MHz no longer gets sector 709 refused at boot (every SET_* field audited, no other mismatch); the capture self-check counts at 0x64 = 48, the training keeps 32; not benched; section 102.**
 **Branch fw-csbusy (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: owner decision "only the calibration dialog writes calibration data": the capture-stage runtime guard and its sector 708 write are removed, the self-check is a diagnostic that flags a core only against a partner that counted at most 8 (else not checkable); REPEAT is advice only; not benched; section 101.**
 **Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range and clock class, stored in sector 708, applied at every readout; GET_CAL 480 bytes; gated class benched (10fa8d3), per-class not benched; sections 99 and 100.**
 **Branch fw-153f (2026-11-07): fw 0.2.105, protocol 1.28 unchanged: built for FPGA 0x153F (both cores of a chip captured at one instant), the capture-stage training, tie pass and guard per chip (the stages quiet on both cores), the reference pass gone, power-on 0x06DB; the legacy EXT shift 12 at dividers 1..3 in its own last commit; not benched; section 97.**
@@ -7667,3 +7668,92 @@ mcp test_csbusy, test_capture_stages. GCC 10 / GCC 13 / PC_DEBUG builds 0 warnin
 4. Quiet input (probes off, USB away, 30 minutes after power-on): Calibrate, Save: expected 0x06DB; then 200 MSa/s
    captures with the inputs open and with 1 kHz from the post at 1 V/div: "capture clean", `captures_flagged` 0. This
    Save also puts the unit back from the moved 0x06D2 and clears bytes 504..511.
+
+## 102. fw-genlimit: one generator limit for SET_GEN, the menu and the settings check; the self-check at 0x64 = 48 (after fw 0.3.1, protocol 1.29 unchanged)
+
+Branch `fw-genlimit` from main 7475cce. Commits: 5b16ac3 (the generator limit, test_settings), da5f22c (the self-check
+threshold, test_cap_hw), 05fec9a (mcp), then the docs commit with this section. `PC_FW_VERSION` not bumped (0.3.2 follows).
+**Not benched, nothing flashed.**
+
+**1. The generator limit (bench 2026-11-08 19:41 and 20:17, docs/hardware-status.md).** A host SET_GEN of 12.5 MHz
+(protocol: 1 mHz .. 25 MHz, gen_pat.h `GP_FREQ_MAX_MHZ`) reached `fpgasettings.gen_freq` through the HAL's UI copy,
+354e676's power-off save wrote it to sector 709, and the next boot's `srec_check` (`GEN_MAX_HZ` 10 MHz, a copy of
+generator.h `GEN_f_MAX`) refused the record with SREC_BAD_FIELD at word 194: every setting fell back to the defaults.
+- **The limit chosen: 25 MHz, the hardware's and the protocol's.** The square is two steps of a 5 ns clock; the
+  shortest period with both steps at least 2 clocks is 8 clocks (`GP_P16_MIN`) = 25 MHz, which SET_GEN has accepted since
+  fw-d5 and the bench drove (25 MHz and 12.5 MHz from the post, 2026-11-08). The menu's 10 MHz was Atlan's (generator.h
+  said "max frequency 5Mhz"), with no hardware reason left since the DDS was replaced: `gp_ui_square` clamps the period
+  at 8 clocks and the high step into 2 .. P - 2 clocks anyway. Now generator.h `GEN_f_MAX` = `GP_FREQ_MAX_MHZ / 1000`,
+  settings_check.h `SREC_GEN_MAX_HZ` the same, scope_functions.c's layout assert checks they agree. The HAL's UI copy
+  goes through `gp_ui_hz` / `gp_ui_pct` (gen_pat.c), which the test drives too.
+- **The menu with a stored 12.5 MHz**: the box shows "12.500000MHz" and the top bar "12.50MHz" (the same widths as
+  10 MHz); opening the keypad loads 12500000 and OK keeps it (before: OK clamped anything over 10 MHz to 10 MHz, so just
+  opening and closing the keypad changed a host's 12.5 MHz). A typed value over 25 MHz is set to 25 MHz. The keypad's MAX
+  key still sets 5 MHz (a preset, unchanged). docs/guide/generator.md says so, with the duty's coarse steps at high
+  frequencies.
+- **Audit: every field a SET_* command writes that the check limits** (pc_cmds.c handlers, pc_hal_scope.c copies,
+  scope_save_config_data words):
+  - SET_CHANNEL: enable, coupling, invert 0..1 (words 8 / 9 / 18, 32 / 33 / 42), range 0..6 into both sample and display
+    V/div (12 / 13, 36 / 37), probe 0..6 (10, 34): the check's ranges. The offset (17, 41) is not checked.
+  - SET_TIMEBASE mode 0: index 11..34 with `time_per_div_sample_rate` (17..0, all under the 18 short-mode rates) and
+    roll mode off; `acq_view_fit` snaps inside 11..34 and keeps the rate under ACQ_RATES; the saved rate is
+    `acq_view_rate_setting` (a STOP tap from the UI, also under 18). Mode 1 (raw divider) changes no saved word. Match.
+  - SET_TRIGGER: source 0..2, edge 0..1, mode 0..2 (mapped to the UI order), total 80..16382 even, pretrigger even and at
+    most total - 2: inside the check (total >= 80 even, pretrigger + 2 <= total). The level (61) is not checked. SET_DECIM's
+    `pc_dec_fit_memory` keeps total 6000 and its pretrigger in range. Match.
+  - SET_TRIGGER2 (type, N, H, hold-off) and GET_COUNTER's configuration: words 202 / 203 (the Type row, marker 0xA000)
+    or not saved; words 202..223 are not checked (each restore snaps or takes its defaults). No mismatch possible.
+  - SET_GEN: enable 0..1 (192), duty 0..100 % (196; a raw H16 is at most P16 - 2 clocks, so at most 100 %), frequency:
+    **the one mismatch** (25 MHz against 10 MHz), fixed.
+  - Not host-settable: the PWM centres and compensations (168..187: the wizard and the 1.00o5 calibration only), the
+    right menu, brightness, the switches (80..104), the cursors and the cards' hide switches.
+  - Bode view (BODE_CTRL) changes the generator only up to 10 MHz and gives it back at the end; CAL_PROBE restores what it
+    changes.
+- **Not changed**: the whole-record rejection (fw-settings0's policy, section 94). Queued as its own item for the owner.
+- **Tests**: test_settings 1181: the 11-08 record (`sd_700-710_20261108-194120.bin` sector 709, generator
+  12.5 MHz) now loads unchanged; every SET_* field at both ends of its range in one record (channels, time base 11 / 34
+  with their rates, trigger mode / edge / source, total 80 and 16382 with pretrigger 0 and total - 2, generator on, 0 Hz
+  and 25 MHz from `gp_ui_hz` of the longest and the shortest P16, duty 0 / 100 % from `gp_ui_pct`); every SET_TIMEBASE
+  index at its rate; generator frequencies 0 .. 25 MHz (1 Hz steps over the top kHz); 25 MHz + 1 Hz refused at word 194.
+
+**2. The self-check threshold (bench 2026-11-08 19:41, 735d82a).** 12.5 MHz from the post at 100 mV/div AC (92 codes
+pk-pk) steps 28..36 codes per core (10 ns apart), around the 0x64 threshold 32: noise and the cores' gain mismatch gave
+CH1 B 9..27 counts against A's 0..1, the quiet-partner rule (section 101) flagged 17 of 305 captures and REPEAT advised
+Calibrate; the raw records folded on 8 core samples to 0.98 / 1.39 codes rms, max 4 on both: clean.
+- **The rule chosen: the self-check counts at 0x64 = 48 (`CS_THR_USE`), the training keeps 32 (`CS_THR_TRAIN`).**
+  Evidence: the 2026-10-20 10:08-10:14 sweep (debug image, stage map at 200 MSa/s, three captures each) read thresholds
+  16, 24, 32, 40 and 48 alike, 0 on every clean stage and hundreds (CH1 A4) or 65535 (CH2 B2) on a bad one, so 48 still
+  sees a garble; the genuine garbles of firmware/AGENTS.md sections 54 / 87 and fpga/al3/AGENTS.md are rails and jumps of
+  tens to 128 codes at 0x7F / 0x80 (a bitwise mix of the two: at least 48 codes off in about 5 of 8 mixed words, 6 of 8 at
+  32: inference, bits drawn alike), and the bench signal's largest step plus its noise (36 + 4) stays 8 codes under 48.
+  64 was not benched as a threshold and loses about a third of the mixed words; a data rule (a garble is a spike off its
+  3-sample median, an edge is monotone) would need the record read after every flag: not for a release.
+- **0x64 writers** (audit): `cap_apply` (boot, calibration load) writes 48; `fpga_capture_train` writes 32 before
+  `cs_train_run` and 48 after it, failed or not (the wizard's zero step and CAL_PROBE mode 1 both train through it);
+  `cal_cap_measure` reads 0x36 only inside the training; DEBUG_FPGA can write anything (a capwin sweep sets its own).
+  The self-check never runs while `cap_training`, so its counts are always at 48. The power-on 8 never stays.
+- **What it does not fix**: a clean signal stepping about 48 codes per core (this square near 120 codes pk-pk) can still
+  split the cores and flag one; diagnostic only (nothing acts on a flag since section 101).
+- **mcp (05fec9a)**: `P.CAP_THRESHOLD_SELF_CHECK` 48 / `P.CAP_THRESHOLD_TRAIN` 32, `describe_capture` `counts_note`;
+  the counts' rule (`cap_flagged` / `cap_busy`) is unchanged (a 735d82a flag still reads as a flag: the counts were taken
+  at 32). test_csbusy checks the constants against cap_stage.h.
+- **Tests**: test_cap_hw 144 (every training capture at 32, 48 before and after, also after a failed training).
+
+**Gates**: GCC 10, GCC 13 and PC_DEBUG builds without warnings; `make test` green (test_settings 1181, test_cap_hw 144,
+check_vectors OK); mcp ruff clean, pytest 595 passed; `fnirsi1013d.vectors --check` ok; `release_meta.py --check-changelog` ok.
+
+**Bench (owner; back up SD 700-710 first: `fnirsi1013d-sd --port COM10 read 700 11 -o backups/sdcard/sd_700-710_<date>-pre-genlimit.bin`, twice, compare)**
+1. FEL-load this branch (`make gcc10`, `fnirsi1013d-flash`). GET_HEALTH 32 bit 3 set (709 valid).
+2. Generator over the protocol: SET_GEN 12.5 MHz 50 %, enable 1 (`Scope.set_gen`, or `scope_generator` with
+   `FNIRSI_MCP_GEN_MAX_HZ` raised). The generator button reads 12.50MHz; open the generator menu: the box reads
+   12.500000MHz; tap it and tap OK without typing: still 12.5 MHz (GET_GEN 12500000000 mHz). Change one other setting so the
+   save is due, wait 2 s, power off with the key.
+3. Power on, FEL-load the same image again: no "Saved settings not valid" notice, GET_HEALTH 32 bit 3 set, GET_GEN /
+   the menu 12.5 MHz with the setting of step 2 kept. `fnirsi1013d-sd read 709 1`: words 194 / 195 = 0x00BE 0xBC20.
+   (The card's 0.3.1 refuses this record at its next boot: put the generator under 10 MHz before going back to it.)
+4. Self-check: CH1 x1 on the post, generator 12.5 MHz 50 %, CH1 100 mV/div AC, 200 MSa/s, the scope's RUN loop for 2
+   minutes: `scope_health` capture stages `captures_flagged` 0 (GET_HEALTH 120), no REPEAT, no event 23; the counts
+   (108..115) 0 or a few on both CH1 cores (they were 0..1 / 9..27 at 32).
+5. Quiet input (probes off, USB away, 30 minutes after power-on): Calibrate, Save (expected 0x06DB; the training at 32 as
+   before: GET_CAL 364.. sums as in earlier trainings), then 200 MSa/s captures with the inputs open: "capture clean",
+   `captures_flagged` 0.

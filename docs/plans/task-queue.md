@@ -6,11 +6,19 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **SET_GEN accepts what the settings check rejects** (bench 2026-11-08 19:41, docs/hardware-status.md): the protocol
+- [x] (Done on branch fw-genlimit, 5b16ac3: one limit, SET_GEN's 25 MHz, for the generator menu and the settings check;
+  every other SET_* field audited, no other mismatch; firmware/AGENTS.md section 102; bench pending.) **SET_GEN accepts
+  what the settings check rejects** (bench 2026-11-08 19:41, docs/hardware-status.md): the protocol
   takes the generator up to 25 MHz, `settings_check.c` `GEN_MAX_HZ` allows 10 MHz, so a power-off save after a host set
   12.5 MHz stored a record the next boot refused (SREC_BAD_FIELD word 194): every setting fell back to defaults. One
   limit for both (the save, the load check and SET_GEN agree), and a bad field should not discard the whole record.
-- **Quiet-partner self-check still false-flags edge steps at the threshold** (same bench, 735d82a): 12.5 MHz from the
+- **A bad settings field discards the whole record** (split from the item above; fw-genlimit kept the policy of
+  fw-settings0, firmware/AGENTS.md section 94: a checksum-valid record with a field out of range was written by a writer
+  that did not hold the settings). Open: whether a field out of range should fall back alone (the 11-08 record lost every
+  setting for one generator word). Owner decision first.
+- [x] (Done on branch fw-genlimit, da5f22c: the self-check counts at 0x64 = 48, the training keeps 32; firmware/AGENTS.md
+  section 102; bench pending.) **Quiet-partner self-check still false-flags edge steps at the threshold** (same bench,
+  735d82a): 12.5 MHz from the
   post at 100 mV/div AC has per-core steps of 28..36 codes around the 0x64 threshold 32; noise gives core B 9..27 counts
   against A's 0..1, so "calibrate" is advised on clean data (both cores fold to 1 code rms). Harmless since nothing acts
   on it, but the advice is wrong; options: a higher runtime threshold (the garble jumps are 64..128 codes near
