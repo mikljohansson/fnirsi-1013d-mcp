@@ -2514,14 +2514,14 @@ channel's note reads "Capture stages: CH1 A4 B4". Save stores the value with the
 bytes before; after the provenance trailer, outside the v3 block, so an older firmware's 708 save clears it); Cancel and
 CAL_PROBE put the previous 0x63 back. At boot (and after a calibration load) 0x64 = 8 and 0x63 = the stored value when it
 was trained on the running bitstream, else the power-on 0x08E4. After every accepted full-rate capture the firmware reads
-0x36 and flags a core whose count exceeds its chip partner's by more than 8 (GET_HEALTH 104..123, event 23). Bench list:
-firmware/AGENTS.md section 54.
+0x36 and flags a core whose count exceeds its chip partner's by more than 8 (GET_HEALTH 104..123, event 23); since
+fw-csbusy only while the partner counted at most 8 (below). Bench list: firmware/AGENTS.md section 54.
 
 **One stage per chip (fw-153f, FPGA 0x153F).** 0x153F captures both cores of a chip at one instant: 0x63 bits 2:0 (CH1)
 and 8:6 (CH2) are the chip's stage (full rate only), the B fields and bits 13:12 select nothing, power-on 0x06DB. The
 training still measures and scores each core (the 0x36 sums, q and the quiet sets per core, GET_CAL 364..431), but the
-pick, the tie pass, the stored set and the runtime guard run on the chip's set, the stages quiet on both cores
-(`cs_train_run`, `cs_guard`); the result goes into both fields (`cs_with_chip`), so the texts read "CH1 A3 B3". The
+pick and the tie pass run on the chip's set, the stages quiet on both cores
+(`cs_train_run`); the result goes into both fields (`cs_with_chip`), so the texts read "CH1 A3 B3". The
 reference-bit retry described below for 0x153A..0x153E is gone; a chip without a common quiet stage fails the channel
 ("ADC readout fault near code 128", the note names the cores). firmware/AGENTS.md section 97.
 
@@ -2540,6 +2540,17 @@ In operation a core the self-check flags in 3 captures within a minute (`cs_watc
 (REPEAT): the Diagnostics Status verdict turns amber with "ADC capture flagged 3 times within a minute: run Calibrate.",
 the Calibration page line adds "calibrate", and event 23 is logged once per core (no longer whenever the flagged set
 changes). It clears when a training is saved; nothing retrains outside the wizard.
+
+**The self-check is a diagnostic only (fw-csbusy, owner 2026-11-08: "Only the calibration dialog should write
+calibration data").** fw 0.2.105 added a runtime guard that moved a repeatedly flagged chip to another stage of its
+trained set and wrote sector 708; on the owner's unit every one of its moves was a false alarm on a busy signal (both
+cores of a chip count thousands of outliers on a large fast signal and differ by their ~2 % gain mismatch). The guard,
+its stored sets (sector 708 bytes 504..511, now left 0) and GET_HEALTH 106 bit 6 MOVED (retired, always 0) are gone: the
+firmware never changes 0x63 or the card from the self-check. A core is flagged only when its chip partner counted at most
+8 and the core exceeds it by more than 8 (the garble signature: tens to hundreds against about 0); a chip whose cores
+both count more is not checkable, and Diagnostics reads "last capture too busy to check (CH1)". REPEAT stays advice:
+the verdict asks for Calibrate, nothing acts on it (the Frequency response sweep stops with reason 8 only for a capture
+flagged itself, not for REPEAT). firmware/AGENTS.md section 101.
 CAL_PROBE runs it from the host with the UI stopped (mode 0, about 1 s), or runs the whole zero step exactly as a
 Calibrate tap does, over the dimmed screen with the dialog, progress and Cancel polls (mode 1, about 15 s);
 `python firmware/tools/cal_probe.py <port> both all` prints every point (arguments: port, CH1 / CH2 / both, ranges, repeats,
@@ -2555,8 +2566,8 @@ cores of the parked channel, 2048 words each from the record's middle through RE
 `cs_resid`: E = the sum of (x[j] - median(x[j - 1], x[j], x[j + 1]))^2 over j = 1 .. n - 2 (integers only). Per core and
 stage q is the sum over the band of E / 127 (1/16 code^2 per sample). A stage is **quiet** when its 0x36 sum is 0 (the
 outlier rule stays the first gate) and q <= q_min x 5 / 4 + 4, q_min the smallest q of the core's outlier-clean stages
-(`cs_quiet`). `cs_pick`, the tie pass (unchanged: 0x36 counts at codes 126, 128, 130) and the stored set (sector 708
-bytes 504..511, the runtime guard's bound) use the quiet set; the guard itself is unchanged. On the sweep's numbers the
+(`cs_quiet`). `cs_pick` and the tie pass (unchanged: 0x36 counts at codes 126, 128, 130) use the quiet set (fw 0.2.105
+also stored it in sector 708 bytes 504..511 for the runtime guard; both gone since fw-csbusy). On the sweep's numbers the
 rule gives CH1 A {3}, CH1 B {3, 4, 5}, CH2 A {3}, CH2 B {3, 4, 5}: 0x08E3. A noise floor that every stage shares (the
 ADC's own code errors) raises every q alike and changes nothing. The wizard's training takes about 1.5 s per channel (17
 parks of 60 ms, 180 ms after a jump of more than 16 codes; 136 captures with two 2048-word reads; the tie pass). GET_CAL

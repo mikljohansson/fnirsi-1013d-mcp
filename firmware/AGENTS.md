@@ -4,7 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
-**Branch fw-csbusy (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: the capture-stage self-check's limit grows with the partner's count (max(8, partner / 8)) and a chip whose cores both count over 1024 is not checked, so a busy signal never flags, feeds the watch or moves the guard; not benched; section 101.**
+**Branch fw-csbusy (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: owner decision "only the calibration dialog writes calibration data": the capture-stage runtime guard and its sector 708 write are removed, the self-check is a diagnostic that flags a core only against a partner that counted at most 8 (else not checkable); REPEAT is advice only; not benched; section 101.**
 **Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range and clock class, stored in sector 708, applied at every readout; GET_CAL 480 bytes; gated class benched (10fa8d3), per-class not benched; sections 99 and 100.**
 **Branch fw-153f (2026-11-07): fw 0.2.105, protocol 1.28 unchanged: built for FPGA 0x153F (both cores of a chip captured at one instant), the capture-stage training, tie pass and guard per chip (the stages quiet on both cores), the reference pass gone, power-on 0x06DB; the legacy EXT shift 12 at dividers 1..3 in its own last commit; not benched; section 97.**
 **Branch fw-legacy2 (2026-10-27): fw 0.2.105, protocol 1.28 unchanged: the last multi-bitstream code (capture-stage version argument, the pre-0x153A Bode reason 8 rule, the per-variant geometry fields and ring arguments, stale comments); behaviour on 0x153D unchanged; section 93.**
@@ -7587,75 +7587,83 @@ mcp pytest and ruff (CI selection) clean.
    settling (then the cells' spread within a row within 0.3 code, and the check above).
 5. The (2) check above, with GET_CAL 280..287 read before it.
 
-## 101. fw-csbusy: the capture-stage self-check abstains on busy signals (after fw 0.3.1, protocol 1.29 unchanged)
+## 101. fw-csbusy: only the calibration dialog writes calibration data; the capture self-check is a diagnostic (after fw 0.3.1, protocol 1.29 unchanged)
 
-Branch `fw-csbusy` from main 938082f, commit aa32e98 (firmware), b5600b9 (mcp), then the docs. `PC_FW_VERSION` not
-bumped. **Not benched, nothing flashed.**
+Branch `fw-csbusy` from main 938082f. First pass aa32e98 (firmware), b5600b9 (mcp), 354e676 (docs): a relative limit,
+benched and failed. Rework after the owner's decision: 80077b0 (firmware), f1f0da7 (mcp), then the docs.
+`PC_FW_VERSION` not bumped. **The rework is not benched, nothing flashed.**
 
-**Bench evidence** (2026-11-08 ~17:0x, fw 0.3.1 build 3022da6 on 0x153F; docs/plans/task-queue.md): CH1 on a 3.3 V
-24.576 MHz clock, x1 probe, 200 MSa/s. GET_HEALTH: 11087 of 19060 full-rate captures flagged, "CH1 B 43153
-outliers"; event 23 a = 0x23: the guard moved CH1 0x06DB -> 0x06E4 (A4 B4) and stored it in sector 708. The record was
-clean (capture c11219 folded on 24.5752 MHz: the odd core fits the even core's template at 2.9 codes rms, even 2.0, no
-residual over 25 codes; the 0x36 rule on the stored record gives 7489 / 7492 of 8190 words per core).
+**Owner decision** (2026-11-08 ~18:05): "Only the calibration dialog should write calibration data."
 
-**Cause**: the 0x36 counters (zaklad.v "Outlier counters") count every word that differs from the core's previous word
-by more than 0x64 (32 as the firmware writes it), over the whole write window, saturating at 65535. On a large fast
-signal both cores count nearly every word, and the cores' gain / zero mismatch (about 2 %) makes one count hundreds to
-about a thousand more. `cs_flagged`'s absolute `CS_EXCESS_LIMIT` 8 flagged that; three flags in a minute reached the
-guard. cap_stage.h had named it as an unbenched inference.
+**Bench evidence.**
+- 2026-11-08 ~17:0x, fw 0.3.1 (3022da6) on 0x153F: CH1 on a 3.3 V 24.576 MHz clock, x1 probe, 200 MSa/s. 11087 of
+  19060 full-rate captures flagged, "CH1 B 43153 outliers"; the guard moved CH1 0x06DB -> 0x06E4 and stored it. The record
+  was clean (folded on 24.5752 MHz: odd core vs the even core's template 2.9 codes rms, even 2.0; the 0x36 rule on the
+  stored record 7489 / 7492 of 8190 words per core). Cause: the 0x36 counters count every word that jumps more than
+  0x64 (32) over the whole write window, so on a large fast signal both cores count nearly every word and their ~2 % gain
+  mismatch makes one exceed the other by hundreds to a thousand.
+- 2026-11-08 ~18:0x, 354e676 (limit max(8, partner / 8), a chip with both cores over 1024 not checked): CH1 x1 on the
+  calibration post, generator 12.5 MHz, CH1 100 mV/div AC (92 codes pk-pk), the scope's RUN loop at 200 MSa/s with 3000
+  samples: 5 captures flagged within 5 s of the range change, the guard moved CH1 0x06E4 -> 0x06D2 and stored it (event 23
+  at 53.7 s). A moderately busy signal under 1024 counts: the relative limit does not hold there (a signal whose steps
+  sit near the threshold turns the gain mismatch into a several-fold count difference).
+- The bench log since 0x153F (docs/hardware-status.md): 0 genuine flags, 0 of 885, 7562 and 35703 captures. Every
+  guard move since was a false alarm.
 
-**Rule** (`cs_flagged`, `cs_busy`; cap_stage.h "Busy signals"): a core is flagged when its excess over its chip partner
-is above max(`CS_EXCESS_LIMIT` 8, partner / `CS_EXCESS_DIV` 8); a chip whose two cores both count more than
-`CS_BUSY_COUNT` 1024 is busy and not checked. Reasoning:
-- Quiet sensitivity unchanged: partner / 8 is below 8 up to a partner count of 71, so a garbled core against a quiet
-  partner (the garble signature: tens to hundreds of outliers near 0x7F / 0x80 with the partner at 0 or a few; bench
-  2026-10-22 CH1 A4 146 outliers in 8 captures on 1 kHz) flags exactly as before.
-- K = 8 (12.5 % of the partner) is about 5x the bench's mismatch, 2.3 % (1000 of 43000); a 43153 / 42290 pair (2.0 %)
-  would need an excess over 5286.
-- Busy at 1024 on both cores: there the signal itself crosses the threshold on thousands of words, the difference is
-  the mismatch, and a garble cannot be told from it. The training (absolute counts, q, the tie pass) is the check for
-  that case. Up to 1024 the guard still sees a garble that adds more than 12.5 % to a moderately busy partner (a square
-  up to a few hundred kHz counts tens to hundreds).
-- Residual (inference, not benched): a signal whose sample-to-sample steps cluster at the 32-code threshold (a sine with
-  2 pi f A x 10 ns near 32 codes) turns a 2 % gain difference into a several-fold count difference; below 1024 that can
-  still flag a core, as it could before. If the bench shows it, the next step is a ratio test against both counts or a
-  per-capture amplitude gate, not a larger K.
+**What changed (80077b0).**
+- **The runtime guard is removed**: `cs_guard`, `cap_guard`, `fpga_capture_service` (and its call in
+  `pc_glue_ui_service`) with its sector 708 write, `cs_watch_forget`, the stored clean sets (`cs_sets_*`, `cs_ext_*`,
+  sector 708 bytes 504..511: not read any more, and a calibration save leaves them 0, so a 0.2.105..0.3.1 image booted
+  later finds no sets and has no guard; nothing needs them for compatibility), `cap_moved` / `cap_store` / `cap_sector`.
+  The firmware never writes 0x63 from the self-check. `PC_CAPF_MOVED` (GET_HEALTH 106 bit 6) stays defined, retired
+  (always 0); event 23 a bit 5 is never logged; Diagnostics' "(trained, a flagged core moved)" and the report's "a flagged
+  core moved" are gone. The training's chip set (`cs_train.set`) is still reported in GET_CAL 364..431.
+- **The rule** (`cs_flagged`, `cs_busy`; cap_stage.h "Self-check"): a core is flagged only when its chip partner counted
+  at most `CS_QUIET_PARTNER` 8 and the core exceeds the partner by more than `CS_EXCESS_LIMIT` 8 (the garble signature in
+  every genuine case: tens to hundreds near 0x7F / 0x80 against about 0; bench 2026-10-22 CH1 A4 146 outliers in 8
+  captures on 1 kHz). A chip whose two cores both count more than 8 is not checkable (busy): no flag, Diagnostics "last
+  capture too busy to check (CH1)". `CS_EXCESS_DIV` and `CS_BUSY_COUNT` are gone. A quiet input flags exactly as before
+  whenever the partner is at 0..8 (the 0.2.79 rule was the excess alone).
+- **REPEAT is advice only**: 3 flags in a minute still set GET_HEALTH 106 bit 5, the Diagnostics verdict "run
+  Calibrate" and event 23 once; nothing acts on it. pc_bode.c's `bh_check` now ends a Frequency response sweep with
+  reason 8 only for a flag of its own capture, no longer for REPEAT.
+- No protocol change: protocol.md row 64 gets the note (the rule, the retired bit / event / bytes, reason 8).
 
-**Watch / guard / UI** (cap_hw.c, ui_diag.c): a busy chip gives no flag, so nothing from it enters `flagged_n`,
-`cs_watch` (decided: busy captures do not feed the watch at all, they neither add nor clear history), REPEAT, event 23 or
-`cap_guard`; `reads` still counts the capture (its counts were read; GET_HEALTH 108 shows them). Diagnostics: "last
-capture too busy to check (CH1)" / "(CH1, CH2)" instead of "capture clean" (from the counts with `cs_busy`, no new
-field); with REPEAT from earlier quiet flags it ends ", flagged 3 times in a minute: calibrate" as before. The report
-file prints the counts as before. pc_bode.c's `bh_check` uses FLAGGED, so a busy Bode point (large amplitude near the top
-of a sweep) no longer ends a device sweep with reason 8. **No protocol change**: row 64 gets a note (the meaning of
-GET_HEALTH 107 / 120 and event 23 under the new rule).
+**Calibration writers (audit, firmware/scope).** Everything that writes sector 708 goes through
+`scope_save_input_calibration_data` (scope_functions.c; the v3 block `acal_pack`, the other-channel tables
+`acal_xz_pack`, the provenance stamp `PC_CAL_SAVE` -> `pc_glue_cal_save`, the capture-stage trailer
+`fpga_capture_save`, the 1.00o5 input calibration and DC shift words) except the removed guard. Its callers:
+1. `cal_wiz_ui.c` (the calibration wizard's Save, after `fpga_capture_commit`): the calibration dialog. Kept.
+2. `ui_diag_view.c` (Diagnostics' six-step 1.00o5 input calibration dialog, "Save calibration" at its last step). A
+   calibration dialog with an explicit Save. Kept.
+3. `statemachine.c` (the DC shift calibration's End button, right menu state 4): the user's own DC shift calibration
+   menu, saved on its End tap. Kept (a calibration dialog in the owner's sense; flag it if the owner disagrees).
+4. `cap_hw.c` `fpga_capture_service` (the guard): **removed**.
+Other card writers, not calibration or not autonomous: `pc_cmds.c` SD_WRITE (host raw write; 708..710 need the CONFIG
+flag, the documented backup / restore path of the bench and `fnirsi1013d-sd`), `mass_storage_class.c` (the USB drive
+mode: the PC writes the card), `diskio.c` (FatFs, the partition), `pc_diag.c` and `scope_functions.c` sector 709
+(settings), `ui_settings_ui.c` sector 710 (display / touch config and boot mode). Not changed. The calibration load
+(`scope_load_input_calibration_data`, `pc_glue_cal_loaded`, `fpga_capture_loaded`) only reads. 0x63 writers: boot /
+calibration load (`cap_apply`, the stored value), the wizard's training and its restore (`fpga_capture_train`), Cancel /
+CAL_PROBE restore; no runtime writer.
 
-**mcp**: `P.cap_flagged` follows the rule, `P.cap_busy`; `describe_capture` has `busy_cores`, "last capture too busy to
-check (CH1)", and `flag_from_busy_signal` (a FLAGGED answer the new rule would not raise: 0.3.1 on a busy signal) with
-the text saying it is not a sign of a garbled capture; `Session.enc_notes` gives no "run the calibration wizard" caveat
-for such a flag. Also on this branch: GET_COUNTER freq_mHz saturated (0xFFFFFFFF) gives `firmware_frequency_hz` None,
-`firmware_frequency_saturated` and a caveat; a valid count over fewer than `COUNTER_NARROW_SPAN` 24 codes gets a caveat
-(13 codes read 19.2..20.9 MHz on 24.576 MHz, 97 codes exactly).
+**mcp (f1f0da7)**: `cap_flagged` / `cap_busy` follow the rule (`CAP_QUIET_PARTNER`), `CAPF_MOVED` documented retired;
+`describe_capture` keeps `moved_by_guard` (set only by a firmware up to 0.3.1, the text says so and advises the wizard)
+and `flag_from_busy_signal` (a flag the current rule does not raise: 0.3.1's and 354e676's busy flags); the event 23 bit
+5 decode stays for old logs. The counter changes of b5600b9 are unchanged.
 
-**Tests**: test_cap_stage 370 (the bench pair busy and not flagged, 40 vs 0 flagged, the limit at partner 71 / 80 /
-1024, busy needs both cores, saturation), test_cap_hw 155 (`test_busy_signal_is_not_flagged`: 20 busy captures leave
-0x63, sector 708, the event log and flagged_n alone; a quiet garble afterwards still moves after three flags),
-test_ui_diag (the busy line and with REPEAT); mcp test_csbusy. GCC 10 / GCC 13 / PC_DEBUG builds 0 warnings.
+**Tests**: test_cap_stage 320, test_cap_hw 136 (REPEAT is advice only: no 0x63 or card write after any number of flags;
+the 24.576 MHz and 12.5 MHz bench counts busy; a quiet garble still reaches REPEAT; the foreign-value rule; a save leaves
+504..511 at 0 and the load ignores sets there), test_ui_diag 15174 (the busy lines, MOVED shows nothing), test_bode_sweep;
+mcp test_csbusy, test_capture_stages. GCC 10 / GCC 13 / PC_DEBUG builds 0 warnings.
 
-**Bench (owner; back up SD 700-710 first: the old build's guard writes sector 708)**
-0. The unit now holds the moved 0x06E4 in sector 708. Note GET_HEALTH 104 / 106 and GET_CAL 358 before anything.
-1. Old build (the card's 0.3.1), reproduce with at most two captures (the guard needs three in a minute): CH1 x1 probe on
-   the calibration post, 1 V/div DC, 200 MSa/s, Filter Off; `scope_generator` 25 MHz 50 % (P16 8 clocks, exact); take one
-   host capture (`scope_capture`), then `scope_health`: both CH1 counts (GET_HEALTH 108 / 110) in the thousands and
-   within a few % of each other, `flagged_cores` CH1 A or CH1 B, `captures_flagged` +1. If the counts are under a
-   thousand, try 10 MHz, or 2 V/div; log the counts and the swing (`scope_counter` min / max). Stop the generator.
-2. FEL-load this branch: `make gcc10` in firmware/scope, then `fnirsi1013d-flash` (docs/development.md); `#VER` 0.3.1
-   with this commit. Same setup as 1, the generator at the same frequency, RUN for a minute (the UI captures
-   continuously) and ten host captures: `captures_flagged` stays 0, `flagged_cores` [], 0x63 unchanged, no new event
-   23, Diagnostics Calibration page "last capture too busy to check (CH1)"; mcp `scope_health` text the same,
-   `busy_cores` [CH1 A, CH1 B]. Also `scope_counter`: `frequency_hz` 25 MHz, `firmware_frequency_hz` None with the
-   saturation caveat, the narrow-band caveat if max - min < 24.
-3. Quiet input, still on this build: probes off, USB cable away, 30 minutes after power-on; Calibrate. Expected 0x06DB
-   (CH1 A3 B3, CH2 A3 B3) as on 2026-11-07; Save. Then 200 MSa/s captures with the inputs open and with CH1 on 1 kHz
-   from the post (1 V/div): "capture clean", `captures_flagged` 0, counts 0 or a few. This also restores the unit's
-   0x06DB. Regression signs: a flag or REPEAT on the open input, the wizard picking another value than before.
+**Bench (owner; back up SD 700-710 first; read sector 708 before and after: `fnirsi1013d-sd --port COM10 read 708 1 -o backups/708_before.bin`, then `_after.bin`, and compare)**
+1. FEL-load this branch (`make gcc10`, `fnirsi1013d-flash`). Note GET_HEALTH 104 / 106 and GET_CAL 358.
+2. The failing case: CH1 x1 on the calibration post, generator 12.5 MHz 50 %, CH1 100 mV/div AC, 200 MSa/s, the scope's
+   RUN loop for 2 minutes. Expected: 0x63 (GET_HEALTH 104) unchanged, GET_HEALTH 106 bit 6 never set, no event 23 with a
+   bit 5, `captures_flagged` 0 (or only quiet-partner flags, which then need a look), Diagnostics "last capture too busy
+   to check (CH1)", sector 708 byte for byte as before.
+3. The same at 25 MHz (or the 24.576 MHz clock) and at 1 V/div: the same expectations.
+4. Quiet input (probes off, USB away, 30 minutes after power-on): Calibrate, Save: expected 0x06DB; then 200 MSa/s
+   captures with the inputs open and with 1 kHz from the post at 1 V/div: "capture clean", `captures_flagged` 0. This
+   Save also puts the unit back from the moved 0x06D2 and clears bytes 504..511.

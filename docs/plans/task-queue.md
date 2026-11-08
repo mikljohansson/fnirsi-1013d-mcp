@@ -6,7 +6,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- [x] (Done on branch fw-csbusy, aa32e98, firmware/AGENTS.md section 101; bench pending.) **Capture-stage self-check
+- **Only the calibration dialog writes calibration data** (owner decision 2026-11-08 ~18:05: "Only the calibration
+  dialog should write calibration data"; after the bench run of 354e676: 12.5 MHz from the post, CH1 100 mV/div AC, the
+  RUN loop flagged 5 captures in 5 s and the guard moved CH1 0x06E4 -> 0x06D2 and stored it, while the bench log since
+  0x153F has 0 genuine flags in 0 of 885, 7562 and 35703 captures). The runtime guard and its sector 708 write are
+  removed; the capture self-check is a diagnostic only (a core flagged only against a partner that counted at most 8;
+  REPEAT is advice). Done on fw-csbusy 80077b0, firmware/AGENTS.md section 101; bench pending.
+- [x] (Done on branch fw-csbusy, aa32e98, reworked in 80077b0 after the owner's decision above: the guard is gone and a
+  core is flagged only against a quiet partner; firmware/AGENTS.md section 101; bench pending.) **Capture-stage self-check
   flags busy signals; the guard stores the move** (bench 2026-11-08 ~17:0x,
   fw 0.3.1 on 0x153F, induction-imager session: CH1 on a 3.3 V 24.576 MHz clock, x1 probe, 200 MSa/s). `cs_excess` flags a core whose 0x36 count
   exceeds its partner's by more than an absolute `CS_EXCESS_LIMIT` 8, but on a large fast signal both cores count nearly every
@@ -16,8 +23,8 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   core's template 2.9 codes RMS (even 2.0), none over 25; the 0x36 rule run on the stored record gives 7489 / 7492 per core.
   This is the inference in `cap_stage.h` ("a large signal near 100 MHz could make the cores' counts differ by itself"),
   now benched. Needs a limit relative to the partner's count (or no flag when the partner is busy), and the guard must
-  not store on such flags. On the unit: re-run the wizard (inputs open) to get 0x06DB back. Fixed: limit max(8, partner
-  / 8), a chip with both cores over 1024 not checked.
+  not store on such flags. On the unit: re-run the wizard (inputs open) to get 0x06DB back. aa32e98's limit max(8,
+  partner / 8) with a chip over 1024 not checked failed on the bench (above); 80077b0 replaces it.
 - [x] (Done on branch fw-csbusy, b5600b9.) **GET_COUNTER freq_mHz saturates at 4.294967 MHz** (same bench): the u32
   millihertz field cannot hold signals above
   ~4.29 MHz; the mcp shows `firmware_frequency_hz` 4294970 for 24.6 MHz. Host: report None / "saturated" at 0xFFFFFFFF
