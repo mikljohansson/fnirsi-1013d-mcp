@@ -96,7 +96,7 @@ def main(argv=None):
             elif args.notes:
                 args.notes.write_text(notes + "\n", encoding="utf-8", newline="\n")
             print("version=%s" % version)
-            print("prerelease=%s" % ("true" if m.group(1) == "0" or m.group(4) else "false"))
+            print("prerelease=%s" % ("true" if m.group(4) else "false"))
 
     for e in errors:
         print("::error::%s" % e, file=sys.stderr)

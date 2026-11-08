@@ -175,7 +175,7 @@ An rc that failed costs nothing: fix on main, tag `-rc2`. A failed run on the re
 Before it publishes, the job runs the SD tools from the zip on a clean runner. They download Atlan4's
 package and build an SD package with the new image, which tests the path users take.
 
-Tags with major version 0, and every `-rcN` tag, are marked as pre-release. The release is created with
+Only `-rcN` tags are marked as pre-release; a `vX.Y.Z` tag becomes the repository's latest release. The release is created with
 `gh release create --verify-tag`, so the tag must already exist on GitHub.
 
 If a run fails, fix the cause on main and delete the tag locally and remotely. Then tag the fixed commit.

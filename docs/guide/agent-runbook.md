@@ -56,9 +56,8 @@ Sources, which you should open when you need the detail: [Install](install.md) (
 
 ### 1. Download and verify
 
-From the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases) (v0 releases are marked
-pre-release): the bitstream `fnirsi_1013d-fpga-al3-0x153f-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`,
-`fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the MCP wheel if wanted. In the download directory, on Linux or WSL:
+From the [releases page](https://github.com/mikljohansson/fnirsi-1013d-mcp/releases): the bitstream
+`fnirsi_1013d-fpga-al3-0x153f-flash1m.bin`, `fnirsi_1013d-fw-X.Y.Z.bin`, `fnirsi_1013d-sdtools-X.Y.Z.zip`, `SHA256SUMS`, plus the MCP wheel if wanted. In the download directory, on Linux or WSL:
 
 ```
 sha256sum -c SHA256SUMS --ignore-missing

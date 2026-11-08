@@ -7,8 +7,7 @@ All notable changes to this project are documented here. The format follows
 The firmware (`PC_FW_VERSION` in `firmware/scope/pc_cmds.h`) and the mcp package (`mcp/pyproject.toml`)
 share one version from the first tag on. A release tag `vX.Y.Z` requires both to read `X.Y.Z` and a non-empty
 `## [X.Y.Z] - YYYY-MM-DD` section in this file. The user-facing release notes are written separately in
-`docs/release-notes/X.Y.Z.md`; this file stays the development log. See `docs/releasing.md`. Tags below 1.0.0 are
-published as pre-releases.
+`docs/release-notes/X.Y.Z.md`; this file stays the development log. See `docs/releasing.md`.
 
 ## [Unreleased]
 
