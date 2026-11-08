@@ -11,6 +11,13 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Releases
+
+- A `vX.Y.Z` tag is published as a full release and becomes the latest release on GitHub; only `-rcN` dry runs are
+  pre-releases (a99eb1d).
+- A release attaches only the bitstream the firmware needs (raw and 1 MiB flash image); the older ones stay in
+  `fpga/al3/dist` in the repository (7d41cf3).
+
 ## [0.3.1] - 2026-11-08
 
 A maintenance release on the same FPGA bitstream, 0x153F. User-facing notes: `docs/release-notes/0.3.1.md`.
