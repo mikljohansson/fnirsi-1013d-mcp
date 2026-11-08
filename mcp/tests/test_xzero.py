@@ -22,6 +22,8 @@ VECTORS = json.loads((Path(__file__).resolve().parents[2] / "docs" / "protocol-v
 #: per channel the raw zero shift (codes) with the other channel's relays at 0, 1, 2 coils on (the owner's CH2 at 1 V/div:
 #: 127.22 / 128.23 / 129.11; CH1: 126.56 / 127.11 / 128.04)
 XZERO = ((-0.55, 0.0, 0.93), (-1.0, 0.0, 0.875))
+#: the full clock class (bench 2026-11-08 11:4x: about half the gated shift for two coils on, CH2 at 200 MSa/s)
+XZERO_FULL = ((-0.3, 0.0, 0.45), (-0.8, 0.0, 0.5))
 
 
 def frame_payload(name: str) -> bytes:
@@ -36,19 +38,25 @@ def test_relay_classes_are_the_bench_partition():
 
 def test_get_cal_1_29_vector():
     raw = frame_payload("resp_get_cal_1_29")
-    assert len(raw) == 460
+    assert len(raw) == 480
     c = P.CalResp.unpack(raw)
-    assert c.nbytes == 460 and c.has_xz and c.xz_flags == P.XZ_TABLE | P.XZ_APPLIED
-    assert (c.channel, c.xz_range, c.xz_class, c.xz_applied16) == (1, 1, 0, -58)
-    xz = VECTORS["adc_cal_xz"]["xz"][1]
+    assert c.nbytes == 480 and c.has_xz and c.xz_flags == P.XZ_TABLE | P.XZ_APPLIED | P.XZ_FULL
+    assert (c.channel, c.xz_range, c.xz_class, c.xz_applied16, c.xz_applied16_full) == (1, 1, 0, -58, -50)
+    xz, xzf = VECTORS["adc_cal_xz"]["xz"][1], VECTORS["adc_cal_xz"]["xz_full"][1]
     assert c.xz_table == tuple(v for row in xz for v in row)
+    assert c.xz_table_full == tuple(v for row in xzf for v in row)
     assert c.pack() == raw
-    # the readout's rule: own range, the other channel's class; nothing without v3 in use
+    # the readout's rule: own range, the other channel's class, the clock class; nothing without v3 in use
     assert c.xz16(3, 1) == 0  # cal_version 0 in the vector: not applied
     v3 = replace(c, cal_version=3)
     assert v3.xz16(3, 1) == -58 and v3.xz16(3, 2) == 62 - 6 and v3.xz16(6, 0) == 0 and v3.xz16(3, None) == 0
+    assert v3.xz16(3, 1, P.CAL_CLASS_FULL) == -50 and v3.xz16(3, 2, P.CAL_CLASS_FULL) == 48
     d = v3.describe_xz()
-    assert d["measured"] and d["per_range_codes"]["3"] == {"0_on": -58 / 16, "2_on": 56 / 16}
+    assert d["measured"] and d["full_class_measured"] and d["per_range_codes"]["3"] == {"0_on": -58 / 16, "2_on": 56 / 16}
+    assert d["per_range_codes_full_rate"]["3"] == {"0_on": -50 / 16, "2_on": 48 / 16} and d["shift_now_16bit_codes"] == -50 / 16
+    # a 460-byte answer (10fa8d3): the gated table in both classes, as that build applied it
+    first = replace(P.CalResp.unpack(raw[:460]), cal_version=3)
+    assert first.has_xz and first.xz16(3, 1, P.CAL_CLASS_FULL) == -58 and first.xz_table_full == (0,) * 18
     # a 1.28 answer: no table
     old = P.CalResp.unpack(raw[:432])
     assert not old.has_xz and old.describe_xz() is None and replace(old, cal_version=3).xz16(3, 1) == 0
@@ -59,7 +67,8 @@ def test_channel_scale_adds_the_shift_for_the_other_range():
     tab = tuple(v for _r in range(6) for v in (-16, 0, 14))
     cal = P.CalResp(cal_version=3, cal_flags=0x0B, dc_shift_value=385, dc_calibration_offset=(900,) * 7,
                     pwm=(900,) * 6, zero=(2048,) * 24, slope=(-17000,) * 24, gain_range=P.CAL_GAIN_NONE,
-                    xz_flags=P.XZ_TABLE | P.XZ_APPLIED, xz_table=tab, nbytes=460)
+                    xz_flags=P.XZ_TABLE | P.XZ_APPLIED | P.XZ_FULL, xz_table=tab,
+                    xz_table_full=tuple(v // 2 for v in tab), nbytes=480)
     cfg = P.ChannelConfig(range=3, offset_pwm=900, uv_per_lsb_q8=256 * 34000)
     base = channel_scale(0, cfg, cal, None, P.CAL_CLASS_GATED)
     for other, shift in ((1, -1.0), (2, 0.875), (4, 0.875), (0, 0.0), (3, 0.0), (5, 0.0), (6, 0.0)):
@@ -68,6 +77,10 @@ def test_channel_scale_adds_the_shift_for_the_other_range():
         # the 0 V code of the corrected codes stays T: comp = T - zero
         assert sc.zero_a + sc.adc_a_comp == base.zero_a + base.adc_a_comp == 128
         assert ("other channel's relays" in sc.source) == bool(shift)
+        # the full clock class (200 MSa/s and the 16-bit path) takes the full table
+        fb = channel_scale(0, cfg, cal, None, P.CAL_CLASS_FULL)
+        sf = channel_scale(0, cfg, cal, None, P.CAL_CLASS_FULL, other)
+        assert sf.zero_a - fb.zero_a == shift / 2
     # no table (an older calibration), or not v3: exactly as before
     for c in (replace(cal, xz_flags=0), replace(cal, nbytes=432), replace(cal, cal_version=1)):
         sc = channel_scale(0, cfg, c, None, P.CAL_CLASS_GATED, 1)
@@ -76,7 +89,7 @@ def test_channel_scale_adds_the_shift_for_the_other_range():
 
 
 def _sim(sim_factory):
-    srv = sim_factory(cal_v3=True, xzero=XZERO, noise_lsb=0.5)
+    srv = sim_factory(cal_v3=True, xzero=XZERO, xzero_full=XZERO_FULL, noise_lsb=0.5)
     srv.device.cfg.signals = (parse_signal("dc:v=0"), parse_signal("dc:v=0"))
     return srv
 
@@ -94,8 +107,10 @@ def test_zero_follows_the_other_channel_in_every_path(sim_factory, divider, filt
             s.set_channel(1, range_index=other)
             cal = s.get_cal(0, cached=False)
             assert cal.has_xz and cal.xz_range == other and cal.xz_class == cls
-            shift = 2 * round(8 * (XZERO[0][cls] - XZERO[0][1]))
-            assert cal.xz_applied16 == shift
+            full = divider == 0 or filt != "off"
+            x = XZERO_FULL if full else XZERO
+            shift = 2 * round(8 * (x[0][cls] - x[0][1]))
+            assert (cal.xz_applied16 if filt == "off" else cal.xz_applied16_full) == shift
             cap = s.capture(["CH1"])
             ch = cap.channels["CH1"]
             vpl = ch.config.volts_per_lsb
@@ -137,7 +152,7 @@ def test_older_firmware_and_no_table(sim_factory):
     srv = sim_factory(cal_v3=True, noise_lsb=0.5)
     with Scope.connect(srv.url) as s:
         cal = s.get_cal(0, cached=False)
-        assert cal.nbytes == 460 and not cal.has_xz and cal.xz_applied16 == 0
+        assert cal.nbytes == 480 and not cal.has_xz and cal.xz_applied16 == 0
         assert struct.unpack_from("<BBB", cal.pack(), 432)[0] == 0
     srv = sim_factory(cal_v3=True, xzero=XZERO, proto_minor=28)
     with Scope.connect(srv.url) as s:
@@ -155,5 +170,6 @@ def test_calibration_info_reports_the_table(sim_factory, tmp_path):
             x = r["other_channel_relays"]["CH1"]
             assert x["measured"] and x["other_channel_relays_on"] == 0 and x["shift_now_codes"] == -0.5
             assert x["per_range_codes"]["2"] == {"0_on": -0.5, "2_on": 0.875}
+            assert x["per_range_codes_full_rate"]["2"] == {"0_on": -0.25, "2_on": 0.5} and x["full_class_measured"]
 
     anyio.run(main)
