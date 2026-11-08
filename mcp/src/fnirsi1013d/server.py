@@ -394,7 +394,10 @@ class Session:
         if h.enc_flags & P.ENC_CONVENTION_BAD:
             out.append(f"the FPGA's encode convention check failed at boot (0x33 = 0x{h.enc_boot33:02X}): full-rate "
                        "core order is unknown; see scope_health")
-        if h.has_capture and h.cap_flags & P.CAPF_FLAGGED:  # 1.24: the 0x153A self-check
+        # 1.24: the 0x153A self-check; a flag the current rule does not raise is fw 0.3.1's busy-signal false flag
+        # (both cores of a chip count thousands, about 2 % apart): no advice to recalibrate on it
+        if (h.has_capture and h.cap_flags & P.CAPF_FLAGGED
+                and P.cap_flagged(h.cap_counts) & h.cap_flagged):
             cores = ", ".join(f"{n} {h.cap_counts[P.CAP_CORES.index(n)]} outliers"
                               for n in P.cap_core_names(h.cap_flagged))
             out.append(f"the scope's last 200 MSa/s capture was flagged by the ADC capture self-check ({cores}): a "
@@ -3090,7 +3093,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 row: dict[str, Any] = {"seq": r.seq, "valid": r.valid, "frequency_hz": _r6(r.frequency_hz),
                                        "period_s": _r6(r.period_s), "width_s": _r6(r.width_s), "duty": _r6(r.duty),
                                        "edges": r.e, "min_code": r.min, "max_code": r.max, "gated": r.gated,
-                                       "firmware_frequency_hz": _r6(r.freq_mhz / 1000) if r.freq_mhz else None}
+                                       "firmware_frequency_hz": _r6(r.firmware_frequency_hz)}
+                if r.freq_saturated:
+                    row["firmware_frequency_saturated"] = True
                 if sc is not None:
                     row["vmin"] = _r6(float(sc.volts_mean_raw(np.array([float(r.min)]))[0]))
                     row["vmax"] = _r6(float(sc.volts_mean_raw(np.array([float(r.max)]))[0]))
@@ -3149,6 +3154,18 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                      f"(high at >= {last.level}, low below {lo_thr}): use a more sensitive range, "
                                      "level / hysteresis 'auto', or a smaller pinned hysteresis; the scope's cards "
                                      "then show the record's measurement")
+            if any(r.freq_saturated for r in snaps):
+                notes.append("the firmware's own frequency field (GET_COUNTER freq_mHz, a u32 in millihertz) "
+                             "saturates at 4.294967 MHz, so firmware_frequency_hz is None; frequency_hz (from the "
+                             "edge count E and the clock count T) is the measurement")
+            narrow = [r for r in snaps if r.valid and r.min <= r.max and r.max - r.min < P.COUNTER_NARROW_SPAN]
+            if narrow and src_name != "EXT":
+                r = min(narrow, key=lambda r: r.max - r.min)
+                notes.append(f"the signal spans only {r.max - r.min} raw codes ({r.min}..{r.max}) over the gate: on "
+                             "fast edges the counter can miss or double edges with so small a band (bench: 13 codes "
+                             "read 19.2..20.9 MHz on a 24.576 MHz clock, 97 codes read it exactly). Use a more "
+                             "sensitive range, or a x10 probe for fast edges (a x1 probe's bandwidth is a few MHz), "
+                             "and compare readings: a spread over the resolution means edges are lost")
             if sc is not None:
                 notes.append("vmin / vmax are the raw extremes over the whole gate through the 8-bit model (mean of "
                              "both cores), noise peaks included: a few codes wider than a capture's min / max")

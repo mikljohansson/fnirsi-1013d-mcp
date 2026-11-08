@@ -2449,6 +2449,11 @@ COUNTER_AUTO = 0
 COUNTER_HYST_MIN = 6
 #: auto: a gate's max - min below this is no signal (the thresholds stay, the result is not VALID)
 COUNTER_AUTO_MIN_SPAN = 12
+#: a valid count over fewer raw codes than this (max - min) may miss or add edges on fast signals: bench 2026-11-08,
+#: 24.576 MHz on CH1 through a x1 probe, 13 codes (72..85) read 19.2..20.9 MHz, 97 codes read 24.5752 MHz
+COUNTER_NARROW_SPAN = 24
+#: GET_COUNTER byte 20 freq_mHz saturates here (u32 millihertz: 4.294967 MHz); E / T stays exact above it
+COUNTER_FREQ_MHZ_SAT = 0xFFFFFFFF
 
 
 def counter_auto_target(mn: int, mx: int, level_cfg: int = COUNTER_AUTO, hyst_cfg: int = COUNTER_AUTO
@@ -2564,6 +2569,19 @@ class CounterResp(Payload):
     def resolution(self) -> float | None:
         """Relative resolution of the frequency: one clock in T."""
         return 1.0 / self.t if self.valid else None
+
+    @property
+    def freq_saturated(self) -> bool:
+        """Byte 20 freq_mHz at its ceiling (COUNTER_FREQ_MHZ_SAT, 4.294967 MHz): the firmware's own figure is not the
+        frequency; frequency_hz (E / T) is."""
+        return self.freq_mhz == COUNTER_FREQ_MHZ_SAT
+
+    @property
+    def firmware_frequency_hz(self) -> float | None:
+        """Byte 20 in Hz; None when 0 (no valid count) or saturated (freq_saturated)."""
+        if not self.freq_mhz or self.freq_saturated:
+            return None
+        return self.freq_mhz / 1000.0
 
 
 def counter_gated_coarse(e: int, t: int, w: int, divider: int) -> bool:
@@ -3922,8 +3940,13 @@ CAPF_MOVED = 0x40
 CAP_POWER_ON = 0x06DB
 #: the 0x36 order of the cores; flag masks use bit i = core i
 CAP_CORES = ("CH1 A", "CH1 B", "CH2 A", "CH2 B")
-#: self-check: a core is flagged when its outlier count exceeds its chip partner's by more than this
+#: self-check: a core is flagged when its outlier count exceeds its chip partner's by more than this, or by more than
+#: the partner's count / CAP_EXCESS_DIV when that is larger (fw-csbusy); a chip whose cores both count more than
+#: CAP_BUSY_COUNT is busy and not checked (bench 2026-11-08: a 24.576 MHz clock made both CH1 cores count about 43000,
+#: about 2 % apart, and fw 0.3.1 flagged it; cap_stage.h "Busy signals")
 CAP_EXCESS_LIMIT = 8
+CAP_EXCESS_DIV = 8
+CAP_BUSY_COUNT = 1024
 #: GET_CAL 364 (protocol 1.28): the channel's last capture stage training
 CAPT_RAN = 0x01
 CAPT_FAILED = 0x02
@@ -3970,9 +3993,19 @@ def cap_excess(counts: Iterable[int]) -> list[int]:
     return [max(0, c[i] - c[i ^ 1]) for i in range(4)]
 
 
+def cap_busy(counts: Iterable[int]) -> int:
+    """Both cores of every chip whose cores both count more than CAP_BUSY_COUNT, as a mask (cs_busy): the self-check
+    abstains there."""
+    c = list(counts)
+    return sum(3 << k for k in (0, 2) if c[k] > CAP_BUSY_COUNT and c[k + 1] > CAP_BUSY_COUNT)
+
+
 def cap_flagged(counts: Iterable[int]) -> int:
-    """The cores whose excess is above CAP_EXCESS_LIMIT, as a mask (cs_flagged)."""
-    return sum(1 << i for i, e in enumerate(cap_excess(counts)) if e > CAP_EXCESS_LIMIT)
+    """The cores whose excess is above max(CAP_EXCESS_LIMIT, partner // CAP_EXCESS_DIV), not on a busy chip, as a
+    mask (cs_flagged, fw-csbusy; up to fw 0.3.1 the limit was CAP_EXCESS_LIMIT alone)."""
+    c = list(counts)
+    return sum(1 << i for i, e in enumerate(cap_excess(c))
+               if c[i ^ 1] <= CAP_BUSY_COUNT and e > max(CAP_EXCESS_LIMIT, c[i ^ 1] // CAP_EXCESS_DIV))
 
 
 def pack_cap_trailer(value: int, fpga: int) -> bytes:
@@ -4122,10 +4155,22 @@ class HealthResp(Payload):
             "stored_for_other_bitstream": bool(f & CAPF_OTHER), "last_counts": counts, "flagged_cores": flagged,
             "captures_read": self.cap_reads, "captures_flagged": self.cap_flagged_n,
             "flagged_repeatedly": bool(f & CAPF_REPEAT), "moved_by_guard": bool(f & CAPF_MOVED)}
+        busy = cap_busy(self.cap_counts) if read else 0
+        out["busy_cores"] = cap_core_names(busy)
+        # A flag the current rule does not raise: a firmware up to 0.3.1 flagged a busy signal (cap_stage.h "Busy
+        # signals"); the capture was not shown to be garbled
+        out["flag_from_busy_signal"] = bool(read and f & CAPF_FLAGGED and not cap_flagged(self.cap_counts)
+                                            & self.cap_flagged)
         if not read:
             state = "no 200 MSa/s capture read yet"
+        elif out["flag_from_busy_signal"]:
+            state = (", ".join(f"{n}: {self.cap_counts[CAP_CORES.index(n)]} outliers" for n in flagged)
+                     + " (a busy signal: both cores of the chip count many outliers and differ by their gain mismatch; "
+                     "this firmware flags that, newer firmware does not: not a sign of a garbled capture)")
         elif f & CAPF_FLAGGED:
             state = ", ".join(f"{n}: {self.cap_counts[CAP_CORES.index(n)]} outliers" for n in flagged)
+        elif busy:
+            state = f"last capture too busy to check ({', '.join(sorted({n[:3] for n in cap_core_names(busy)}))})"
         else:
             state = "capture clean"
         text = f"capture stages {out['stages']} ({source}); {state}"
