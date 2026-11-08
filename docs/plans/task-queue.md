@@ -402,7 +402,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Owner bench verdicts outstanding
 
-- [ ] 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
+- [x] (2026-11-08, owner on fw 0.3.0+: the ACQ boxes and the pass-time label look good, the overrange warning appears and clears, Max hold holds a 1..10 kHz generator sweep with its harmonic comb, screenshot `docs/hardware-status.md` 2026-11-08.) 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)
   (2026-11-07 14:30: owner, acquisition menu OK on 0.3.0; Max hold and the overrange warning have no verdict in the log.)
 

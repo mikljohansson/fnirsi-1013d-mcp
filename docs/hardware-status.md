@@ -2103,3 +2103,8 @@ Newest entries at the bottom. Format: date, who, what, result.
   **The other-channel shift is gone to within the readings' noise** (the full-rate cells scatter by up to 0.5 code without the
   class pattern). Left: CH1's flat full-class offset, +0.35 .. +0.44 code at every other-channel state (CH1 r2 at 200 MSa/s and CIC2),
   not a measurement-condition mismatch found in the code (firmware/AGENTS.md section 100 has the check).
+- 2026-11-08 14:1x-14:3x (owner, lead): queue closures by the owner: Bode follow-ups and hardware averaging by default won't do; the USB
+  drops explained by the bad cable. Generator sweep 200 log steps 1..10 kHz asked at 100 steps / s: RUN 62.0, STOP 64.0 steps / s, 0 polls,
+  0 sleeps (one main-loop pass per step). Layout verdicts (owner): ACQ boxes and pass-time label good; "CH1 overrange" appears and clears;
+  Spectrum Max hold, two generator sweeps 1..10 kHz: the band held at 0 dBV to 10 kHz and the square's harmonic comb falling to about
+  -35 dB at 200 kHz (screenshot taken over USB).
