@@ -2116,3 +2116,29 @@ Newest entries at the bottom. Format: date, who, what, result.
   verified, checksum 0x00C2DA2A); rc removed; tag `v0.3.1` on 3022da6, release.yml green, SHA256SUMS 25 of 25,
   https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.1 (pre-release, as every tag below 1.0.0). The unit: 0x153F, fw 0.3.1
   from the card, the calibration of 13:5x (with the other-channel tables). The task queue is empty.
+- 2026-11-08 17:53-18:00 (lead, owner present): **fw-csbusy bench (354e676), the fix fails.** Backup of SD 700-710 before
+  anything: `backups/sdcard/sd_700-710_20261108-175348.bin` (re-read identical; holds 0x06E4, the 0.3.1 guard's move of
+  ~17:0x). Old build (card 0.3.1), CH1 x1 probe on the calibration post, scope in STOP: generator 25 MHz (set through the
+  library; the mcp caps it at 1 MHz) gave 7 codes at 1 V/div DC and 43 codes at 100 mV/div AC, 0x36 counts 0 on every
+  core in both host captures (25 MHz = fs_core / 4, steps under the threshold 32): no reproduction from the post. FEL load
+  of 354e676 (image 196c63e2..., `usbipd bind --hardware-id 1f3a:efe8` by the owner first). Generator 12.5 MHz, CH1
+  100 mV/div AC (92 codes pk-pk), the scope's RUN loop at 200 MSa/s with 3000-sample records: within 5 s of the range
+  change 5 captures flagged and **the new build's guard moved CH1 0x06E4 -> 0x06D2 (A2 B2) and stored it** (event 23 at
+  53.7 s uptime). The host 16382-sample capture right after read counts 0 on every core. So the moderately busy case
+  (counts under `CS_BUSY_COUNT` 1024, the residual named in firmware/AGENTS.md section 101) does flag. Generator off,
+  STOP. The card holds 0x06D2 (stage 2 is in CH1's trained quiet set); the wizard restores 0x06DB. fw-csbusy not pushed.
+- 2026-11-08 19:41-19:50 (lead, owner present): **fw-csbusy rework (735d82a, image 9f86f6cc...) benched: no calibration
+  write.** Backup `backups/sdcard/sd_700-710_20261108-194120.bin` (re-read identical), sector 708 copy `708_before.bin`.
+  FEL load; CH1 x1 on the post, generator 12.5 MHz, CH1 100 mV/div AC, 200 MSa/s, the RUN loop for minutes: 17 of 305
+  captures flagged (CH1 B 10..27 against A 0..1: the quiet-partner rule), REPEAT advice, 0x63 stayed 0x06D2, no event 23
+  move, **sector 708 byte-identical** afterwards. The flags are false: raw records folded on 8 core samples, residual
+  rms 0.98 (A) / 1.39 (B) codes, max 4 on both; this signal's per-core steps cluster at 28..36 codes, around the
+  threshold 32, so noise puts B's few over it (9 against A's 1). **Found at boot: sector 709 rejected** (SREC_BAD_FIELD,
+  word 194): the 354e676 power-off save stored the generator at 12.5 MHz (set over the protocol for the test), above
+  `GEN_MAX_HZ` 10 MHz of the settings check, so the record was refused and defaults loaded. Corrected copy (generator
+  words back to 1000 Hz, checksum redone, passes srec_check): `backups/sdcard/709_fixed_20261108.bin`.
+- 2026-11-08 20:17-20:2x (lead, owner present, at the owner's request): corrected sector 709 written
+  (`fnirsi1013d-sd write backups/sdcard/709_fixed_20261108.bin --sector 709 --config --yes`, dry run first; the tool's
+  backup `backups/sdcard/sd_709-710_20261108-201744.bin`, read back identical), then ENTER_FEL so the RAM build left
+  without a power-off save, power cycle by the owner. Card 0.3.1 boots: power-on #45, sector 709 valid at boot, life
+  record found, stages 0x06D2 in effect, capture clean. Still to do: the wizard (restores 0x06DB).

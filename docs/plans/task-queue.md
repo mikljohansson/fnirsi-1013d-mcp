@@ -6,6 +6,15 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **SET_GEN accepts what the settings check rejects** (bench 2026-11-08 19:41, docs/hardware-status.md): the protocol
+  takes the generator up to 25 MHz, `settings_check.c` `GEN_MAX_HZ` allows 10 MHz, so a power-off save after a host set
+  12.5 MHz stored a record the next boot refused (SREC_BAD_FIELD word 194): every setting fell back to defaults. One
+  limit for both (the save, the load check and SET_GEN agree), and a bad field should not discard the whole record.
+- **Quiet-partner self-check still false-flags edge steps at the threshold** (same bench, 735d82a): 12.5 MHz from the
+  post at 100 mV/div AC has per-core steps of 28..36 codes around the 0x64 threshold 32; noise gives core B 9..27 counts
+  against A's 0..1, so "calibrate" is advised on clean data (both cores fold to 1 code rms). Harmless since nothing acts
+  on it, but the advice is wrong; options: a higher runtime threshold (the garble jumps are 64..128 codes near
+  0x7F / 0x80), or count only words near 0x7F / 0x80.
 - **Only the calibration dialog writes calibration data** (owner decision 2026-11-08 ~18:05: "Only the calibration
   dialog should write calibration data"; after the bench run of 354e676: 12.5 MHz from the post, CH1 100 mV/div AC, the
   RUN loop flagged 5 captures in 5 s and the guard moved CH1 0x06E4 -> 0x06D2 and stored it, while the bench log since
