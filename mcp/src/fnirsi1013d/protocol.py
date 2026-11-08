@@ -56,7 +56,9 @@ PROTO_MAJOR = 1
 #: 0x0217 / 0x021A are unknown commands, caps bits 24 / 27 and features bits 12 / 13 reserved, trigger source 3 gone;
 #: 1.28 (fw 0.2.105, fw-capmetric, row 68): GET_CAL 432 bytes, 364..431 the channel's last capture stage training (the
 #: quiet sets, the residual metric q and the 0x36 sums per core and stage)
-PROTO_MINOR = 28
+#: 1.29 (after fw 0.3.0, fw-xzero, row 71): GET_CAL 460 bytes, 432..459 the channel's zero shift for the other
+#: channel's range relays (per range and relay class) and the shift applied now
+PROTO_MINOR = 29
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -3468,7 +3470,8 @@ class CalResp(Payload):
               ("prov_state", "B"), ("_r3", "3x"), ("prov", "56s"), ("prov_power_ons_since", "I"),
               ("prov_minutes_since", "I"), ("cap_trailer", "B"), ("cap_flags", "B"), ("cap_stored", "H"),
               ("cap_stored_fpga", "H"), ("cap_value", "H"), ("train_flags", "B"), ("train_set", "2B"), ("_r4", "x"),
-              ("train_q", "8I"), ("train_sum", "8I")]
+              ("train_q", "8I"), ("train_sum", "8I"), ("xz_flags", "B"), ("xz_range", "B"), ("xz_class", "B"),
+              ("_r5", "x"), ("xz_applied16", "h"), ("_r6", "2x"), ("xz_table", "18b"), ("_r7", "2x")]
     channel: int = 0
     dc_calibration_offset: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
     input_calibration: tuple[int, ...] = field(default_factory=lambda: (0,) * 7)
@@ -3549,6 +3552,15 @@ class CalResp(Payload):
     train_set: tuple[int, ...] = field(default_factory=lambda: (0,) * 2)
     train_q: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
     train_sum: tuple[int, ...] = field(default_factory=lambda: (0,) * 8)
+    #: 1.29 (row 71, 432..459): XZ_* flags; the other channel's range when answered and its relay class (coils on,
+    #: xz_class_of); the shift applied now (1/16 code, both cores, included in 74..111); the table
+    #: [range][class 0, 1, 2] in 1/16 code (class 1 = the zeros' reference, 0): what the other channel's range
+    #: relays add to both cores' raw zeros of this channel, in both clock classes
+    xz_flags: int = 0
+    xz_range: int = 0
+    xz_class: int = 0
+    xz_applied16: int = 0
+    xz_table: tuple[int, ...] = field(default_factory=lambda: (0,) * 18)
     nbytes: int = field(default=0, compare=False)
 
     @classmethod
@@ -3632,6 +3644,34 @@ class CalResp(Payload):
                 "note": "q = the residual metric: the squared difference of each sample to its 3-sample median, summed "
                         "over the training band in 1/16 code^2 per sample; a stage is quiet when it has 0 outliers and q "
                         "<= the core's best x 5 / 4 + 4 (fpga/al3/README.md section 18)"}
+
+    @property
+    def has_xz(self) -> bool:
+        """The answer carries the 1.29 fields (460 bytes) and the channel has a table (the wizard of fw-xzero or
+        later measured it)."""
+        return self.nbytes >= 460 and bool(self.xz_flags & XZ_TABLE)
+
+    def xz16(self, rng: int, other_range: int | None) -> int:
+        """The raw-zero shift (1/16 code) for this channel at range ``rng`` with the other channel at ``other_range``
+        (adc_cal.c acal_correction_xz): 0 without a table, without v3 in use or when the other range is not known."""
+        if other_range is None or not self.has_xz or not self.v3:
+            return 0
+        return self.xz_table[3 * min(rng, 5) + xz_class_of(other_range)]
+
+    def describe_xz(self) -> dict[str, Any] | None:
+        """432..459 (protocol 1.29) in words; None for an older answer."""
+        if self.nbytes < 460:
+            return None
+        if not self.xz_flags & XZ_TABLE:
+            return {"measured": False, "text": "the zero shift for the other channel's relays is not measured: run the "
+                                               "calibration wizard (fw-xzero or later)"}
+        return {"measured": True, "applied": bool(self.xz_flags & XZ_APPLIED),
+                "other_channel_range": self.xz_range, "other_channel_relays_on": self.xz_class,
+                "shift_now_codes": self.xz_applied16 / 16,
+                "per_range_codes": {str(r): {"0_on": self.xz_table[3 * r] / 16, "2_on": self.xz_table[3 * r + 2] / 16}
+                                    for r in range(6)},
+                "note": "the zeros were measured with one of the other channel's range relays on (its range 0); "
+                        "ranges 0, 3, 5, 6 have one on, 1 none, 2 and 4 two"}
 
     def provenance(self) -> "Provenance | None":
         """The stored provenance when prov_state is 1 (valid), else None."""
@@ -3877,6 +3917,17 @@ CAP_EXCESS_LIMIT = 8
 CAPT_RAN = 0x01
 CAPT_FAILED = 0x02
 CAPT_REF = 0x04  # core B measured again with the A encode: 0x153A..0x153E firmware only, never set since fw-153f
+#: GET_CAL 432 (protocol 1.29, fw-xzero): the channel has a zero shift table for the other channel's relays; it is
+#: applied now (the v3 block is bound)
+XZ_TABLE = 0x01
+XZ_APPLIED = 0x02
+
+
+def xz_class_of(other_range: int) -> int:
+    """The other channel's range relay coils on for its range 0..6 (adc_cal.c acal_xz_class): 0x33 / 0x36 value v
+    drives relayX_1 = bit 0, relayX_2 = ~bit 1, relayX_3 = ~bit 2, a coil on while its pin is low; 6 is the zoom of 5."""
+    v = min(max(int(other_range), 0), 5)
+    return ((v & 1) ^ 1) + ((v >> 1) & 1) + ((v >> 2) & 1)
 #: GET_CAL 356: the stored value's trailer (sector 708 bytes 488..503)
 CAP_TRAILER_STATES = {0: "none", 1: "valid", 2: "bad"}
 CAP_TRAILER_MAGIC = b"ACAP"

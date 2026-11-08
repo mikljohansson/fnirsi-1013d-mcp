@@ -860,17 +860,32 @@ class Scope:
                 sd.verify(start_sector, image)
             return plan
 
-    def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None, clock_class: int | None = None) -> ChannelScale:
+    def scale(self, ch: int | str, cfg: P.ChannelConfig | None = None, clock_class: int | None = None,
+              other_range: int | None = None) -> ChannelScale:
         """Code <-> volt conversion for a channel with ``cfg`` (default: the current settings), per ADC core: the
         scope's calibration v3 (protocol 1.12) for ``clock_class`` (P.cal_clock_class of the capture; default: the
         current time base and filter), else the per-unit calibration when it covers the range, else the firmware's
-        uv_per_lsb / zero_code."""
+        uv_per_lsb / zero_code. ``other_range`` (1.29, fw-xzero): the other channel's range when the codes were taken
+        (a capture's: CaptureInfo); default the range GET_CAL saw (its relays shift this channel's raw zeros)."""
         c = channel_index(ch)
         # 1.15: the scope keeps tracking the full-rate cores; conversions use GET_CAL at most CAL_TRACK_AGE_S old
         cal = self.get_cal(c, max_age=CAL_TRACK_AGE_S if self.info.proto_minor >= 15 else None)
         if clock_class is None:
             clock_class = self.current_clock_class() if cal.v3 else P.CAL_CLASS_GATED
-        return channel_scale(c, cfg or self.get_channel(c), cal, self.unit_cal, clock_class)
+        if other_range is None and cal.has_xz:
+            other_range = cal.xz_range
+        return channel_scale(c, cfg or self.get_channel(c), cal, self.unit_cal, clock_class, other_range)
+
+    @staticmethod
+    def _xrange(c: int, ci: P.CaptureInfo | None, cfgs: dict[int, P.ChannelConfig] | None = None) -> int | None:
+        """The other channel's range a capture was taken with (fw-xzero: its relays shift channel c's zeros): from
+        GET_CAPTURE_INFO, else from the verified settings (CaptureContext.channels holds both); None without them (the
+        scale then takes the live one from GET_CAL)."""
+        if ci is not None:
+            return ci.channels[1 - c].range
+        if cfgs is not None and 1 - c in cfgs:
+            return cfgs[1 - c].range
+        return None
 
     def current_clock_class(self) -> int:
         """Calibration clock class of the live settings (full at divider 0 or with the filter on)."""
@@ -1378,7 +1393,7 @@ class Scope:
         for c in chans:
             cfg = cfgs[c]
             a, b = cores[2 * c], cores[2 * c + 1]
-            sc = self.scale(c, cfg, cls)
+            sc = self.scale(c, cfg, cls, self._xrange(c, ci, cfgs))
             comp = interleave(sc.codes_from_raw(a, "A"), sc.codes_from_raw(b, "B"), order)
             clip_raw = interleave((a == 0) | (a == 255), (b == 0) | (b == 255), order)
             off = start_sample - 2 * w0
@@ -1396,11 +1411,12 @@ class Scope:
                        bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
                        st.capture_settings_seq if shared else None, ci)
 
-    def _channel16(self, c: int, cfg: P.ChannelConfig, raw16: np.ndarray, dec: P.DecimConfig) -> ChannelData:
+    def _channel16(self, c: int, cfg: P.ChannelConfig, raw16: np.ndarray, dec: P.DecimConfig,
+                   other_range: int | None = None) -> ChannelData:
         """A channel of a decimated capture: stored u16 -> mean raw code of the filter window (x 2^S / N^K), the
         mean core compensation added for ``codes``; volts with the cores' mean zero and gain (both cores weigh
         equally in every boxcar / CIC window, N being even)."""
-        sc = self.scale(c, cfg, P.CAL_CLASS_FULL)  # the ADCs run at full rate with the filter on
+        sc = self.scale(c, cfg, P.CAL_CLASS_FULL, other_range)  # the ADCs run at full rate with the filter on
         mean_raw = raw16.astype(np.float64) * dec.code_per_count
         codes = sc.codes_mean_raw(mean_raw)  # v3: T + gain16 (m - mean zero); else m + the 1.00o5 mean compensation
         volts = sc.volts_mean_raw(mean_raw)
@@ -1425,18 +1441,19 @@ class Scope:
         if st is None:
             st = self.status()
         out = {CHANNEL_NAMES[c]: self._channel16(c, cfgs[c], np.frombuffer(data[c].tobytes(), "<u2").astype(np.uint16),
-                                                 dec) for c in chans}
+                                                 dec, self._xrange(c, ci, cfgs)) for c in chans}
         origin = ORIGIN_NAMES.get(st.capture_origin, "host")
         return Capture(hdr.capture_id, tb.dt, tb.divider, start_sample, trig.pretrigger_samples, trig.total_samples,
                        bool(st.flags & P.StatusFlags.FPGA_TRIGGERED) and not (st.flags & P.StatusFlags.AUTO_TIMEOUT),
                        bool(st.flags & P.StatusFlags.AUTO_TIMEOUT), out, trig, origin, hdr.acq_state,
                        st.capture_settings_seq, ci, decim=dec)
 
-    def _channel_peak(self, c: int, cfg: P.ChannelConfig, mn: np.ndarray, mx: np.ndarray) -> ChannelData:
+    def _channel_peak(self, c: int, cfg: P.ChannelConfig, mn: np.ndarray, mx: np.ndarray,
+                      other_range: int | None = None) -> ChannelData:
         """A channel of a 1.26 peak-detect record: raw minima and maxima of each window (both cores at full rate),
         converted with the 8-bit model's mean of both cores (the firmware's (gain_a + gain_b) / 2 and off); ``volts``
         and ``codes`` are the midpoint, ``clipped`` where a window touched a rail."""
-        sc = self.scale(c, cfg, P.CAL_CLASS_FULL)
+        sc = self.scale(c, cfg, P.CAL_CLASS_FULL, other_range)
         mn = np.asarray(mn, np.uint8)
         mx = np.asarray(mx, np.uint8)
         lo = sc.volts_mean_raw(mn.astype(np.float64))
@@ -1463,7 +1480,8 @@ class Scope:
             raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
         if st is None:
             st = self.status()
-        out = {CHANNEL_NAMES[c]: self._channel_peak(c, cfgs[c], data[c][0], data[c][1]) for c in chans}
+        out = {CHANNEL_NAMES[c]: self._channel_peak(c, cfgs[c], data[c][0], data[c][1], self._xrange(c, ci, cfgs))
+               for c in chans}
         origin = ORIGIN_NAMES.get(st.capture_origin, "host")
         return Capture(hdr.capture_id, tb.dt, tb.divider, start_sample, trig.pretrigger_samples, trig.total_samples,
                        bool(st.flags & P.StatusFlags.FPGA_TRIGGERED) and not (st.flags & P.StatusFlags.AUTO_TIMEOUT),
@@ -1495,13 +1513,13 @@ class Scope:
             cfg = cfgs[c]
             if dec is not None and arr.dtype == np.uint16:
                 if dec.peak:  # 1.26: the stored word is { max, min }
-                    out[CHANNEL_NAMES[c]] = self._channel_peak(c, cfg, arr & 0xFF, arr >> 8)
+                    out[CHANNEL_NAMES[c]] = self._channel_peak(c, cfg, arr & 0xFF, arr >> 8, self._xrange(c, ci, cfgs))
                 else:
-                    out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, arr, dec)
+                    out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, arr, dec, self._xrange(c, ci, cfgs))
                 continue
             codes = arr.astype(np.float64)
             clipped = (arr == 0) | (arr == 255)
-            sc = self.scale(c, cfg, P.cal_clock_class(hdr.divider, dec is not None))
+            sc = self.scale(c, cfg, P.cal_clock_class(hdr.divider, dec is not None), self._xrange(c, ci, cfgs))
             # trace sample i: index parity (with the start offset) says which core it came from (protocol 7.3)
             idx = hdr.start + np.arange(codes.size)
             first_is_b = order == 0
@@ -1753,10 +1771,10 @@ class Scope:
             cfg = ci.channel_config(c)
             if dec is not None:
                 mean16 = data[c][sl].astype(np.float64) / max(records, 1)
-                out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, mean16, dec)
+                out[CHANNEL_NAMES[c]] = self._channel16(c, cfg, mean16, dec, self._xrange(c, ci))
                 continue
             a, b = (x[sl].astype(np.float64) / max(records, 1) for x in data[c])
-            sc = self.scale(c, cfg, P.cal_clock_class(tb.divider, False))
+            sc = self.scale(c, cfg, P.cal_clock_class(tb.divider, False), self._xrange(c, ci))
             order = self.info.interleave_order
             codes = interleave(sc.codes_from_raw(a, "A"), sc.codes_from_raw(b, "B"), order)
             volts = interleave(sc.volts_raw(a, "A"), sc.volts_raw(b, "B"), order)

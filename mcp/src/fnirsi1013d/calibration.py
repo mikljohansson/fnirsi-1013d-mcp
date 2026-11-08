@@ -323,12 +323,14 @@ class ChannelScale:
 
 
 def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None,
-                  clock_class: int = 1) -> ChannelScale:
+                  clock_class: int = 1, other_range: int | None = None) -> ChannelScale:
     """Scale for channel ``ch`` with ChannelConfig ``cfg`` and CalResp ``cal_resp``. Order: the scope's calibration
     v3 when it is in use for the channel (protocol 1.12, row 51: per-core zeros and offset slopes of
     ``clock_class``, 0 full rate / 1 gated, and per-core, per-class gain corrections G_k[c] onto the gated mean
     gain), then ``unit`` (per-unit calibration file), then the firmware formula. With v3 a unit file that fits the
-    range contributes only its (gated, per-core) gains, carried to the capture's class by G_k[c] / G_k[gated]."""
+    range contributes only its (gated, per-core) gains, carried to the capture's class by G_k[c] / G_k[gated].
+    ``other_range`` (protocol 1.29, fw-xzero): the other channel's range when the codes were taken; its range relays
+    shift this channel's raw zeros by the GET_CAL table (CalResp.xz16), as the scope's readout applies it."""
     ca, cb = int(cal_resp.adc_a_comp), int(cal_resp.adc_b_comp)
     probe = cfg.probe_factor
     fw_g = cfg.volts_per_lsb
@@ -341,11 +343,14 @@ def channel_scale(ch: int, cfg: Any, cal_resp: Any, unit: UnitCalibration | None
         from .protocol import CAL_CLASS_FULL, CAL_CLASS_GATED, CAL_CLASS_NAMES, cal_target
         r = min(cfg.range, 6)
         dco = cfg.offset_pwm - cal_resp.dc_calibration_offset[r]  # offset_pwm = centre[range] + dcoffset
-        za = cal_resp.zero_at(clock_class, 0, r, dco)
-        zb = cal_resp.zero_at(clock_class, 1, r, dco)
+        xz = cal_resp.xz16(r, other_range) / 16.0 if hasattr(cal_resp, "xz16") else 0.0
+        za = cal_resp.zero_at(clock_class, 0, r, dco) + xz
+        zb = cal_resp.zero_at(clock_class, 1, r, dco) + xz
         t = cal_target(dco, cal_resp.dc_shift_value)
         Ga, Gb = cal_resp.gain_corr(clock_class, 0), cal_resp.gain_corr(clock_class, 1)
         src = f"scope calibration v3 ({CAL_CLASS_NAMES[clock_class]} clock)"
+        if xz:
+            src += f", other channel's relays {xz:+.3f} code"
         ga, gb = fw_g * Ga, fw_g * Gb
         if unit is not None and unit.has(ch, cfg.range):
             fa, fb = unit.core_fit(ch, cfg.range, "A"), unit.core_fit(ch, cfg.range, "B")
