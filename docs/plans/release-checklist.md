@@ -183,4 +183,4 @@ the 0.3.0 firmware. The 0x153F boxes come first.
 - [x] FEL check of the attached image (`docs/releasing.md` section 4): read-back identical, `#VER fw=0.3.0 (2026-11-07, on the rc asset, the same image as the tag's.)`, build hash
       equals `git rev-parse --short=8 v0.3.0`; noted in `docs/hardware-status.md`.
 - [x] `docs/releasing.md` section 7: the two open boxes ticked (2026-11-07: both shown by the rc1 and v0.3.0 runs of `release.yml`).
-- [ ] Announcement posted once (EEVblog thread, the repository, the subreddits in the draft).
+- [x] (2026-11-08, posted by the owner: a one-paragraph announcement for v0.3.1, title "AI agent MCP-over-USB for the FNIRSI 1013D oscilloscope".) Announcement posted once (EEVblog thread, the repository, the subreddits in the draft).
