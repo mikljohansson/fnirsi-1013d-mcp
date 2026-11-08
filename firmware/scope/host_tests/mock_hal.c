@@ -187,7 +187,8 @@ void mock_tx_release(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void pc_hal_channel_read(int ch, pc_hw_channel *c) { *c = mock.ch[ch]; }
+//fw-xzero: the other channel's range as the firmware's read takes it
+void pc_hal_channel_read(int ch, pc_hw_channel *c) { *c = mock.ch[ch]; c->xrange = mock.ch[ch ? 0 : 1].range; }
 
 static void mock_relay(int ch, int which, uint8_t v)
 {

@@ -154,6 +154,7 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
   uint32       ns  = scopesettings.nofsamples;
   uint32       div = fpga_divider;
   uint8        who = fpga_trace_who;
+  uint8        xr;
 
   fpga_trace_who = FPGA_WHO_PROBE;
 
@@ -190,11 +191,14 @@ static void probe_run(uint32 ch, PCHANNELSETTINGS s)
   fpga_set_trigger_mode();
   fpga_trace_who = who;
 
-  //The channel's v3 correction in each class (open loop: without v4), then the check and the update
-  acal_correction(&adc_cal[ch], s->dc_calibration_offset, s->samplevoltperdiv, sample_rate_settings[ACAL_PROBE_RATE_GATED],
-                  s->dcoffset, s->dc_shift_value, s->adc1compensation, s->adc2compensation, &kg);
-  acal_correction(&adc_cal[ch], s->dc_calibration_offset, s->samplevoltperdiv, 0, s->dcoffset, s->dc_shift_value,
-                  s->adc1compensation, s->adc2compensation, &kf);
+  //The channel's v3 correction in each class (open loop: without v4), then the check and the update. fw-xzero: both with
+  //the other channel's relays (the shift is the same in both classes, so c does not depend on it)
+  xr = ch ? scopesettings.channel1.samplevoltperdiv : scopesettings.channel2.samplevoltperdiv;
+  acal_correction_xz(&adc_cal[ch], s->dc_calibration_offset, s->samplevoltperdiv,
+                     sample_rate_settings[ACAL_PROBE_RATE_GATED], s->dcoffset, s->dc_shift_value, s->adc1compensation,
+                     s->adc2compensation, xr, &kg);
+  acal_correction_xz(&adc_cal[ch], s->dc_calibration_offset, s->samplevoltperdiv, 0, s->dcoffset, s->dc_shift_value,
+                     s->adc1compensation, s->adc2compensation, xr, &kf);
   acal_cm_probe(&acal_cms[ch], &m, &kg, &kf, timer0ticks, 0);
 }
 #endif

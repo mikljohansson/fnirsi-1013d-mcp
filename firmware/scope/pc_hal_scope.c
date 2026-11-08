@@ -142,6 +142,7 @@ void pc_hal_channel_read(int ch, pc_hw_channel *c)
   c->cal2            = adc_cal[ch ? 1 : 0];
   c->trk             = acal_trk[ch ? 1 : 0];
   c->cm              = acal_cms[ch ? 1 : 0];
+  c->xrange          = pc_ch(ch ? 0 : 1)->samplevoltperdiv;
 }
 
 void pc_hal_channel_write(int ch, const pc_hw_channel *c, uint8_t mask)

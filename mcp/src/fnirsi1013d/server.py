@@ -1419,6 +1419,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 out["capture_stages"] = cals[0].describe_capture()
             if cals[0].has_training:  # protocol 1.28: each channel's last capture stage training since boot
                 out["capture_training"] = {CHANNEL_NAMES[ch]: cals[ch].describe_training() for ch in (0, 1)}
+            if cals[0].nbytes >= 460:  # protocol 1.29 (fw-xzero): the zero shift for the other channel's relays
+                out["other_channel_relays"] = {CHANNEL_NAMES[ch]: cals[ch].describe_xz() for ch in (0, 1)}
             if cal is not None:
                 out.update({
                     "unit": cal.unit, "points": len(cal.points),

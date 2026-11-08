@@ -37,8 +37,11 @@ measurement stops within about a second.
 ![Calibration wizard, zero level](screenshot:calibration-zero)
 
 **Screen 1** measures both channels on all six ranges. The progress line reads "CH1: measuring range 3 of 6", then
-"CH1: zero level done". The step takes about 8 seconds. Each channel first trains its capture
-stages ("CH1: training capture stages..."), which adds about half a second. While a USB cable is connected, the screen
+"CH1: zero level done". The step takes about 12 seconds. Each channel first trains its capture
+stages ("CH1: training capture stages..."), which adds about half a second. After the zero of each range the wizard
+switches the other channel's range relays three times (you hear them click): their coil current moves the zero of the
+channel being measured by about a code, and the scope corrects for it from then on, whatever range the other channel is
+on. A calibration saved by an older firmware has no such correction; run Calibrate once to add it. While a USB cable is connected, the screen
 says in amber "USB is connected: unplug it before Calibrate". **Continue** appears when both channels passed.
 
 **Screens 2 and 3** first check the signal on the post ("CH1: checking the signal on the post"), then measure the gain
@@ -58,6 +61,7 @@ probe". **Calibrate** stays, so you can try again. There is no Skip.
 | the input is not at 0 V: unplug the probe | Remove the probe from the input, then retry |
 | too much noise, range 3 at 200 MSa/s: ... (or "too much noise: unplug the probes, move chargers and USB away") | Remove everything from the inputs, unplug USB and move chargers away. The second line names the limit: 1.0 code RMS at 2 MSa/s, 3.0 codes at 200 MSa/s |
 | zero still moving, range 3 at 2 MSa/s: ... | Let the scope warm up for a few minutes, then retry |
+| the other channel's range moves the zero by over 3.5 codes | The other channel's relays shifted this channel's zero far more than on a healthy unit (about 1 code). Retry with nothing on either input; if it stays, open an issue with a Diagnostics screenshot |
 | No signal on CH1: tip on the post? | Put the probe tip on the calibration post |
 | the post signal clips: set the probe to 1X | Switch the probe to 1X |
 | the post signal moved: hold the tip still | Retry without moving the probe |
@@ -105,7 +109,10 @@ limits are the wizard's own pass criterion, so a calibration that passed shows O
 calibration was taken, for example "Calibrated on fw 0.2.59, FPGA 0x1535, 12 min after power-on, 1 power-on ago."
 
 Diagnostics > Calibration shows the values per range: the offset centre, the volts factor, the zeros and gains of both
-cores, the noise and the background tracking. A value outside its limit is amber.
+cores, the noise and the background tracking. A value outside its limit is amber. The column "Other ch" holds the zero
+shift in codes with none and with two of the other channel's range relays on (its range 1, and its ranges 2 and 4);
+its ranges 0, 3, 5 and the 50 mV zoom are the reference, with no shift. A "-" there means the calibration was saved
+before the wizard measured it.
 
 **Clear calibration** on that page asks first, then clears the zeros and gains. The volts factors stay. Readings use
 defaults until you calibrate again.

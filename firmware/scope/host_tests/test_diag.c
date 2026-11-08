@@ -409,7 +409,7 @@ static void test_bodies(void)
   mock.life.power_on = 12;
 
   //1.28 (fw-capmetric): the channel's last capture stage training, 364..431; none since boot: zeros
-  T_EQ(PC_CAL_RESP_LEN, 432);
+  T_EQ(PC_CAL_RESP_LEN, 460);
   {
     static const uint8_t zero[68];
 
@@ -495,7 +495,7 @@ static void test_report(void)
   T_EQ(strlen(mock.report), written);
 
   has("FNIRSI-1013D-AI diagnostics report\r\n");
-  has("Firmware running: " PC_FW_VERSION ", protocol 1.28, git 0x00000000 of 2026-10-19 12:00:00 UTC");
+  has("Firmware running: " PC_FW_VERSION ", protocol 1.29, git 0x00000000 of 2026-10-19 12:00:00 UTC");
   has("Card image (sector 750): unknown");
   has("FPGA: version word 0x153f, variant 2, ring 8192 words, caps 0x");
   has("; firmware built for 0x153f\r\n");
@@ -519,6 +519,26 @@ static void test_report(void)
   has("Bus-level events (last ");
   has("Full-rate capture check: FPGA read 0x33, 0x33 at boot 0xf6 (convention 1, B first), last none; 0 checked, 0 bad, 0 recovered\r\n");
   T_TRUE(strstr(mock.report, "[report truncated]") == NULL);
+
+  //1.29 (fw-xzero): the other channel's relays per range under a channel's v3 block; without a table "not measured"
+  {
+    pc_hw_channel *c = &mock.ch[1];
+    uint32_t       r;
+
+    c->cal2_loaded = 1;
+    for(r=0;r<ACAL_RANGES;r++)
+      c->cal2.pwm[r] = c->cal_offset[r];
+    acal_gain_carry(0, &c->cal2);
+    T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
+    has("    other channel's relays, zero shift codes per range (0 / 2 on): not measured (calibrate)\r\n");
+    c->cal2.xz[0][0] = -16; c->cal2.xz[0][2] = 14; c->cal2.xz[5][0] = -2; c->cal2.xz_valid = 1;
+    c->range = 0; mock.ch[0].range = 2;
+    T_EQ(pc_save_report(&S, ws, sizeof(ws) - 56, &written, name, sizeof(name)), 0);
+    has("    other channel's relays, zero shift codes per range (0 / 2 on): -1.000/0.875 0.000/0.000 0.000/0.000 "
+        "0.000/0.000 0.000/0.000 -0.125/0.000; now 0.875 (other channel at range 2, 2 on)\r\n");
+  }
+  mock_reset(PC_FW_FPGA_VERSION);
+  pc_session_init(&S);
 
   //fw 0.2.62 (1.19): the check line after captures, and the mismatch line
   mock_reset(PC_FW_FPGA_VERSION);

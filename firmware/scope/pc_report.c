@@ -714,6 +714,29 @@ static void sec_cal_channel(pc_text *t, const uint8_t *c)
     pc_text_fix(t, (int32_t)g16(b + 142), 16, 2);
     pc_text_str(t, " codes");
     pc_text_nl(t);
+
+    //1.29 (fw-xzero): the zero shift per range for the other channel's relays (0 / 2 coils on; 1 = the zeros above)
+    pc_text_str(t, "    other channel's relays, zero shift codes per range (0 / 2 on):");
+    if(c[432] & 0x01)
+    {
+      for(r=0;r<ACAL_RANGES;r++)
+      {
+        pc_text_str(t, " ");
+        pc_text_fix(t, (int8_t)c[440 + 3 * r], 16, 3);
+        pc_text_str(t, "/");
+        pc_text_fix(t, (int8_t)c[440 + 3 * r + 2], 16, 3);
+      }
+      pc_text_str(t, "; now ");
+      pc_text_fix(t, (int16_t)g16(c + 436), 16, 3);
+      pc_text_str(t, " (other channel at range ");
+      pc_text_udec(t, c[433]);
+      pc_text_str(t, ", ");
+      pc_text_udec(t, c[434]);
+      pc_text_str(t, " on)");
+    }
+    else
+      pc_text_str(t, " not measured (calibrate)");
+    pc_text_nl(t);
   }
 
   pc_text_str(t, "    v4 tracking: A-B offset ");

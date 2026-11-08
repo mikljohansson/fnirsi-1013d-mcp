@@ -32,6 +32,8 @@ extern FONTDATA font_5;
 #define C_TRK      256            //u8 flags (bit 0 data, bit 5 class probe data), d, e, q, age, records, ...
 #define C_PROV     288            //u8 state, then 292.. the 56 stored bytes
 #define C_ONS      348            //u32 power-ons since the calibration
+#define C_XZ       432            //1.29 (fw-xzero): u8 flags (bit 0 table), ..., 440 i8[range][class] 1/16 code
+#define C_XZ_TAB   440
 
 #define F_LOADED     0x01
 #define F_BOUND      0x02
@@ -1144,24 +1146,27 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
 
   ud_boxa(pg, x, y, UD_CB_W, UD_CB_H, 0);
   ud_txt(pg, x0, y + 6, 40, UD_F_BODY, ch ? UD_C_CH2 : UD_C_CH1, ch ? "CH2" : "CH1");
-  ud_txt(pg, x0 + 44, y + 8, 318, UD_F_SMALL, UD_C_DIM, "per hardware range (V/div); zeros in codes, core A / B");
+  ud_txt(pg, x0 + 44, y + 8, 318, UD_F_SMALL, UD_C_DIM, "per range (V/div), codes: zeros A/B, other ch 0/2 on");
 
+  //fw-xzero: the columns closer, the zero shift for the other channel's relays last (0 / 2 coils on against the 1 the
+  //zeros were measured with; adc_cal.h acal_xz_class)
   yy = y + 30;
-  ud_txt(pg, x0, yy, 52, UD_F_SMALL, UD_C_DIM, "Range");
-  ud_txt_r(pg, x0 + 86, yy, 34, UD_F_SMALL, UD_C_DIM, "PWM");
-  ud_txt_r(pg, x0 + 144, yy, 52, UD_F_SMALL, UD_C_DIM, "Volts");
-  ud_txt(pg, x0 + 156, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero gated");
-  ud_txt(pg, x0 + 260, yy, 100, UD_F_SMALL, UD_C_DIM, "Zero full");
+  ud_txt(pg, x0, yy, 50, UD_F_SMALL, UD_C_DIM, "Range");
+  ud_txt_r(pg, x0 + 80, yy, 30, UD_F_SMALL, UD_C_DIM, "PWM");
+  ud_txt_r(pg, x0 + 132, yy, 48, UD_F_SMALL, UD_C_DIM, "Volts");
+  ud_txt(pg, x0 + 138, yy, 72, UD_F_SMALL, UD_C_DIM, "Zero gated");
+  ud_txt(pg, x0 + 212, yy, 72, UD_F_SMALL, UD_C_DIM, "Zero full");
+  ud_txt(pg, x0 + 286, yy, 76, UD_F_SMALL, UD_C_DIM, "Other ch");
 
   for(r=0;r<ACAL_RANGES;r++)
   {
     int32_t pwm = (int32_t)g16(c + C_OFFSET + 2 * r), vf = (int32_t)g32(c + C_VOLTS + 4 * r), dv = 0, def;
 
     yy = y + 46 + 15 * (int)r;
-    ud_txt(pg, x0, yy, 52, UD_F_SMALL, UD_C_SOFT, ud_range_names[r]);
+    ud_txt(pg, x0, yy, 50, UD_F_SMALL, UD_C_SOFT, ud_range_names[r]);
 
     s_uint(t, (uint32_t)pwm);
-    ud_txt_r(pg, x0 + 86, yy, 34, UD_F_SMALL, ((pwm < 860 - UD_LIM_PWM_DEV) || (pwm > 860 + UD_LIM_PWM_DEV)) ?
+    ud_txt_r(pg, x0 + 80, yy, 30, UD_F_SMALL, ((pwm < 860 - UD_LIM_PWM_DEV) || (pwm > 860 + UD_LIM_PWM_DEV)) ?
              UD_C_WARN : UD_C_TEXT, t);
 
     def = in->volts_default ? in->volts_default[r] : 0;
@@ -1171,7 +1176,7 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
       dv = (int32_t)(((int64_t)(vf - def) * 1000) / def);
       p = s_fix(t, dv, 10, 1, 1);
       s_str(p, " %");
-      ud_txt_r(pg, x0 + 144, yy, 56, UD_F_SMALL, ((dv > UD_LIM_VOLTS_TENTHS) || (dv < -UD_LIM_VOLTS_TENTHS)) ?
+      ud_txt_r(pg, x0 + 132, yy, 48, UD_F_SMALL, ((dv > UD_LIM_VOLTS_TENTHS) || (dv < -UD_LIM_VOLTS_TENTHS)) ?
                UD_C_WARN : UD_C_TEXT, t);
     }
 
@@ -1187,14 +1192,26 @@ static void ud_cal_channel(ud_page *pg, const ud_input *in, uint32_t ch)
         {
           p = s_fix(p, (int16_t)g16(b + B_ZERO + 2 * (12 * cls + 6 * k + r)), 16, 1, 0);
           if(!k)
-            p = s_str(p, " / ");
+            p = s_str(p, "/");
         }
       }
       else
         s_str(t, "-");
 
-      ud_txt(pg, x0 + 156 + 104 * (int)m, yy, 100, UD_F_SMALL, loaded ? UD_C_TEXT : UD_C_DIM, t);
+      ud_txt(pg, x0 + 138 + 74 * (int)m, yy, 72, UD_F_SMALL, loaded ? UD_C_TEXT : UD_C_DIM, t);
     }
+
+    //fw-xzero: the shift with 0 and with 2 of the other channel's relays on
+    if(loaded && (c[C_XZ] & 0x01))
+    {
+      p = s_fix(t, (int8_t)c[C_XZ_TAB + 3 * r], 16, 1, 1);
+      p = s_str(p, "/");
+      s_fix(p, (int8_t)c[C_XZ_TAB + 3 * r + 2], 16, 1, 1);
+    }
+    else
+      s_str(t, "-");
+
+    ud_txt(pg, x0 + 286, yy, 76, UD_F_SMALL, (loaded && (c[C_XZ] & 0x01)) ? UD_C_TEXT : UD_C_DIM, t);
   }
 
   yy = y + 46 + 15 * ACAL_RANGES + 8;

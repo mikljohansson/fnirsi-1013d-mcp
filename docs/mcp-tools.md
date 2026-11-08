@@ -628,7 +628,7 @@ cm, ages, `in_words`) and from 1.16 `calibration_provenance` (which firmware bui
 wrote, the date with a clock module, power-ons and operating hours since), from 1.24 `capture_stages` (the stored
 FPGA capture stages) and from 1.28 `capture_training` per channel (the last capture stage training since boot: per
 core A / B its quiet stages (on FPGA 0x153F the chip's set, the same for both cores), the residual metric q and the 0x36
-outlier sums at stages 2..5, whether core B used the A encode (never on 0x153F), whether it failed; null when the wizard has not trained that channel since boot), plus the per-unit file.
+outlier sums at stages 2..5, whether core B used the A encode (never on 0x153F), whether it failed; null when the wizard has not trained that channel since boot), from 1.29 `other_channel_relays` per channel (the zero shift in codes per range with none / two of the other channel's range relays on, the other channel's range and relays now, the shift applied now; `measured` false for a calibration saved before fw-xzero), plus the per-unit file. Conversions of raw codes and 16-bit samples add that shift for the other channel's range of the capture.
 
 **`read_calibration`** (tier 0). Per channel: offset centres, gain factors per range, core A/B
 compensation, derived volts per code per range. Caveat: "Calibration is done on the scope's UI; these values

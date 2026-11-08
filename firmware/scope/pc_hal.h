@@ -55,6 +55,7 @@ typedef struct
   acal_channel cal2;            //the channel's v3 data (zeros when not loaded)
   acal_track   trk;             //1.14: calibration v4 A - B tracker of the channel (snapshot, acal_live.c)
   acal_cm      cm;              //1.14: full-class common mode from the class probe (snapshot)
+  uint8_t  xrange;              //1.29 (fw-xzero): the other channel's range at the read (its relays shift this zero)
 } pc_hw_channel;
 
 void     pc_hal_channel_read(int ch, pc_hw_channel *c);

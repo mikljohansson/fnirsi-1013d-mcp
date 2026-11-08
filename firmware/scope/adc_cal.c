@@ -106,6 +106,10 @@ int acal_unpack(const uint8_t *block, acal_channel ch[2])
     ch[c].gain_lever = (uint16_t)get16(p);
     p += 2;
 
+    //fw-xzero: the table is not in the block (acal_xz_unpack after it)
+    for(r=0;r<ACAL_RANGES;r++) for(k=0;k<ACAL_XZ_CLASSES;k++) ch[c].xz[r][k] = 0;
+    ch[c].xz_valid = 0;
+
     //A single-class block (fw 0.2.105 on the full-rate 0x153D, slot 1 written 0): the gated class takes the full one's
     //values until the next calibration (adc_cal.h ACAL_GAIN_FULL_ONLY)
     if(classes == 1)
@@ -126,6 +130,133 @@ int acal_unpack(const uint8_t *block, acal_channel ch[2])
     }
   }
 
+  return ACAL_OK;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------------
+//fw-xzero: the other channel's relays
+
+uint8_t acal_xz_class(uint8_t range)
+{
+  uint32_t v = (range > ACAL_RANGES - 1) ? ACAL_RANGES - 1 : range;
+
+  //coils on: relayX_1 (v bit 0) on while low, relayX_2 / relayX_3 (inverted bits 1 / 2) on while the bit is set
+  return (uint8_t)(((v & 1) ^ 1) + ((v >> 1) & 1) + ((v >> 2) & 1));
+}
+
+uint8_t acal_xz_range(uint8_t cls)
+{
+  static const uint8_t r[ACAL_XZ_CLASSES] = { 1, 0, 2 };
+
+  return r[(cls < ACAL_XZ_CLASSES) ? cls : ACAL_XZ_REF];
+}
+
+//The check of a stored table: the low 16 bits of zlib.crc32 over 'X', 'Z', the version, 0, the v3 block's CRC-32 (its
+//last 4 bytes) and the 18 table bytes
+static uint32_t acal_xz_check(const uint8_t *block, const uint8_t *tab)
+{
+  uint8_t  b[4 + 4 + ACAL_XZ_BYTES - 2];
+  uint32_t i;
+
+  b[0] = 'X';
+  b[1] = 'Z';
+  b[2] = ACAL_XZ_VERSION;
+  b[3] = 0;
+
+  for(i=0;i<4;i++)
+    b[4 + i] = block[ACAL_BLOCK_BYTES - 4 + i];
+  for(i=0;i<ACAL_XZ_BYTES - 2;i++)
+    b[8 + i] = tab[i];
+
+  return acal_crc32(b, sizeof(b)) & 0xFFFF;
+}
+
+//The 24 stored values in order: channel, range, class 0 then class 2; six bits each (1/8 code, two's complement),
+//least significant bit first
+#define ACAL_XZ_VALUES  (2 * ACAL_RANGES * 2)
+
+void acal_xz_pack(const acal_channel ch[2], const uint8_t *block, uint8_t *out)
+{
+  uint32_t i, c, r, j, bit, v;
+
+  for(i=0;i<ACAL_XZ_BYTES;i++)
+    out[i] = 0;
+
+  if(!ch[0].xz_valid || !ch[1].xz_valid)
+    return;
+
+  for(i=0, c=0;c<2;c++)
+    for(r=0;r<ACAL_RANGES;r++)
+      for(j=0;j<2;j++, i++)
+      {
+        v = (uint32_t)(((int32_t)ch[c].xz[r][j ? 2 : 0] / 2) & 0x3F);
+
+        for(bit=0;bit<6;bit++)
+          if(v & (1u << bit))
+            out[2 + (6 * i + bit) / 8] |= (uint8_t)(1u << ((6 * i + bit) % 8));
+      }
+
+  v = acal_xz_check(block, out + 2);
+  out[0] = (uint8_t)v;
+  out[1] = (uint8_t)(v >> 8);
+}
+
+int acal_xz_unpack(const uint8_t *in, const uint8_t *block, acal_channel ch[2])
+{
+  uint32_t i, c, r, j, bit, v, any = 0;
+
+  for(c=0;c<2;c++)
+  {
+    for(r=0;r<ACAL_RANGES;r++)
+      for(j=0;j<ACAL_XZ_CLASSES;j++)
+        ch[c].xz[r][j] = 0;
+
+    ch[c].xz_valid = 0;
+  }
+
+  for(i=0;i<ACAL_XZ_BYTES;i++)
+    any |= in[i];
+
+  if(!any || (get16(in) != acal_xz_check(block, in + 2)))
+    return 0;
+
+  for(i=0, c=0;c<2;c++)
+    for(r=0;r<ACAL_RANGES;r++)
+      for(j=0;j<2;j++, i++)
+      {
+        for(v=0, bit=0;bit<6;bit++)
+          if(in[2 + (6 * i + bit) / 8] & (1u << ((6 * i + bit) % 8)))
+            v |= 1u << bit;
+
+        ch[c].xz[r][j ? 2 : 0] = (int8_t)(2 * ((v & 0x20) ? (int32_t)v - 64 : (int32_t)v));
+      }
+
+  ch[0].xz_valid = ch[1].xz_valid = 1;
+  return 1;
+}
+
+int acal_xz_store(const int32_t m16[4], uint32_t clipped, acal_channel *c, uint8_t r)
+{
+  //the reference interpolated to the times of points 1 and 2 (thirds of the way from point 0 to point 3)
+  int32_t s0 = m16[1] - rdiv(2 * m16[0] + m16[3], 3);
+  int32_t s2 = m16[2] - rdiv(m16[0] + 2 * m16[3], 3);
+
+  if(clipped)
+    return ACAL_E_CLIP;
+
+  if(iabs(m16[3] - m16[0]) > ACAL_MAX_DRIFT16)
+    return ACAL_E_DRIFT;
+
+  //1/8 code, the stored resolution
+  s0 = 2 * rdiv(s0, 2);
+  s2 = 2 * rdiv(s2, 2);
+
+  if((iabs(s0) > ACAL_XZ_MAX16) || (iabs(s2) > ACAL_XZ_MAX16) || (r >= ACAL_RANGES))
+    return ACAL_E_XZERO;
+
+  c->xz[r][0]           = (int8_t)s0;
+  c->xz[r][ACAL_XZ_REF] = 0;
+  c->xz[r][2]           = (int8_t)s2;
   return ACAL_OK;
 }
 
@@ -247,6 +378,13 @@ static int32_t acal_off16(int32_t slope, int32_t dcoffset)
 void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
                      int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, acal_corr *out)
 {
+  acal_correction_xz(c, cal_offset, range, divider, dcoffset, dc_shift_value, atlan_a, atlan_b, ACAL_XZ_NONE, out);
+}
+
+void acal_correction_xz(const acal_channel *c, const uint16_t *cal_offset, uint8_t range, uint32_t divider,
+                        int16_t dcoffset, int32_t dc_shift_value, int16_t atlan_a, int16_t atlan_b, uint8_t xrange,
+                        acal_corr *out)
+{
   uint32_t hr  = (range < ACAL_RANGES) ? range : ACAL_RANGES - 1;
   uint32_t cls = divider ? ACAL_GATED : ACAL_FULL;
   int32_t  t16, zc16, zf16[2], d16, k;
@@ -258,16 +396,22 @@ void acal_correction(const acal_channel *c, const uint16_t *cal_offset, uint8_t 
 
   out->shift = dc_shift_value ? ((int32_t)dcoffset * 100) / dc_shift_value : 0;
   out->cls   = (uint8_t)cls;
+  out->xcls  = (xrange == ACAL_XZ_NONE) ? ACAL_XZ_NONE : acal_xz_class(xrange);
+  out->xz16  = 0;
 
   if(c && acal_bound(c, cal_offset))
   {
     t16 = (128 - out->shift) * 16;
 
+    //fw-xzero: the other channel's relays move both cores' zeros alike, in both clock classes
+    if(c->xz_valid && (out->xcls != ACAL_XZ_NONE))
+      out->xz16 = c->xz[hr][out->xcls];
+
     for(k=0;k<2;k++)
     {
       //0 V of core k in this clock class and in the full class (16-bit path), 1/16 code
-      zc16    = c->zero[cls][k][hr] + acal_off16(c->slope[cls][k][hr], dcoffset);
-      zf16[k] = c->zero[ACAL_FULL][k][hr] + acal_off16(c->slope[ACAL_FULL][k][hr], dcoffset);
+      zc16    = c->zero[cls][k][hr] + acal_off16(c->slope[cls][k][hr], dcoffset) + out->xz16;
+      zf16[k] = c->zero[ACAL_FULL][k][hr] + acal_off16(c->slope[ACAL_FULL][k][hr], dcoffset) + out->xz16;
 
       //8-bit readout: mean code = T + G (raw - z) = (raw x gain + off) / 65536
       g       = acal_gain16(c, cls, k);
@@ -922,6 +1066,7 @@ const char *acal_reason_text(int reason)
     case ACAL_E_GAIN_CLASS: return "gain: clock classes";
     case ACAL_E_TIMING:     return "ADC timing: FPGA race";
     case ACAL_E_READOUT:    return "ADC readout near 128";
+    case ACAL_E_XZERO:      return "other channel shifts";
     default:                return "no calibration data";
   }
 }

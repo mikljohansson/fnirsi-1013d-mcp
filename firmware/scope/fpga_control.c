@@ -688,6 +688,17 @@ uint8  fpga_read_settle;
 uint8  fpga_read_prestrobe;
 static uint32 fpga_dither = 1;
 
+//fw-xzero: the range of the other channel of CH1 / CH2 (its relays shift this channel's zero, adc_cal.h); ACAL_XZ_NONE
+//for any other settings (the calibration's scratch channel)
+static uint8 fpga_other_range(PCHANNELSETTINGS settings)
+{
+  if(settings == &scopesettings.channel1)
+    return scopesettings.channel2.samplevoltperdiv;
+  if(settings == &scopesettings.channel2)
+    return scopesettings.channel1.samplevoltperdiv;
+  return ACAL_XZ_NONE;
+}
+
 void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
 {
   const acal_channel *cal = 0;
@@ -700,8 +711,9 @@ void fpga_channel_correction(PCHANNELSETTINGS settings, acal_corr *c)
       cal = &adc_cal[1];
   }
 
-  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, fpga_divider, settings->dcoffset,
-                  settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
+  acal_correction_xz(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, fpga_divider, settings->dcoffset,
+                     settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation,
+                     fpga_other_range(settings), c);
 
   //Calibration v4 (CH1 / CH2, v3 bound): the full-class common mode and the tracked A - B split (acal_live.c)
   acal_live_apply(settings, c);
@@ -721,8 +733,9 @@ void fpga_channel_correction_full(PCHANNELSETTINGS settings, acal_corr *c)
       cal = &adc_cal[1];
   }
 
-  acal_correction(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, 0, settings->dcoffset,
-                  settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation, c);
+  acal_correction_xz(cal, settings->dc_calibration_offset, settings->samplevoltperdiv, 0, settings->dcoffset,
+                     settings->dc_shift_value, settings->adc1compensation, settings->adc2compensation,
+                     fpga_other_range(settings), c);
   acal_live_apply(settings, c);
 }
 

@@ -21,8 +21,19 @@ published as pre-releases.
   information and is VALID while its high and low times are at least two samples and its edges span 1000 samples (a
   50 % signal up to fs / 4, 20 kSa/s and faster at the 100 ms gate). A signal above fs / 2 reads as its alias there,
   as it does in the trace (d27da9d).
+- The calibration corrects each channel's zero for the other channel's range: the other channel's range relays moved
+  it by about -1 / 0 / +1 code (bench 2026-11-08). The wizard's zero step measures the shift per range for each number
+  of the other channel's relay coils on (about 4 s more, the other channel's relays click), stores it in sector 708 and
+  every readout applies it (8-bit and 16-bit paths, the 16-bit trigger level, peak detect). A calibration saved before
+  works as before, without the correction, until Calibrate is run again. Diagnostics > Calibration shows it in the
+  "Other ch" column; GET_CAL 460 bytes, protocol 1.29 (94a64d0).
 
 ### Host (`mcp`)
+
+- Protocol 1.29: `CalResp` decodes GET_CAL 432..459 (`xz_*`, `has_xz`, `xz16`, `describe_xz`); READ_RAW and 16-bit
+  conversions add the zero shift for the other channel's range the capture was taken with (`channel_scale(...,
+  other_range)`, GET_CAPTURE_INFO's ranges); `scope_calibration_info` reports `other_channel_relays`; the simulator models
+  it (`SimConfig.xzero`) (07ac53e).
 
 - `scope_self_test_loopback` judges medians over many captures, at 1 V/div, Filter Off: duty and swing at 10 kHz only, T4 by the
   fold method over 200 captures (d = +1), T5 against the pretrigger word + 1 +- 1, T7 reported as skipped on a build without

@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range, stored in sector 708 bytes 108..127, applied at every readout; GET_CAL 460 bytes; not benched; section 99.**
 **Branch fw-153f (2026-11-07): fw 0.2.105, protocol 1.28 unchanged: built for FPGA 0x153F (both cores of a chip captured at one instant), the capture-stage training, tie pass and guard per chip (the stages quiet on both cores), the reference pass gone, power-on 0x06DB; the legacy EXT shift 12 at dividers 1..3 in its own last commit; not benched; section 97.**
 **Branch fw-legacy2 (2026-10-27): fw 0.2.105, protocol 1.28 unchanged: the last multi-bitstream code (capture-stage version argument, the pre-0x153A Bode reason 8 rule, the per-variant geometry fields and ring arguments, stale comments); behaviour on 0x153D unchanged; section 93.**
 **Branch fw-capmetric (2026-10-22): fw 0.2.105, protocol 1.28 (row 68): the capture-stage training parks at the carries 63.5..191.5 and keeps only the quiet stages (0 outliers and the 3-sample-median residual within 25 % + 4 of the core's best); GET_CAL 432 bytes with the last training; section 92.**
@@ -7469,3 +7470,59 @@ pytest and ruff (CI selection) clean.
    caveat; Anti-alias on: 201 kHz. Report if it reads anything else.
 6. `fnirsi1013d-battery --port COM10`: the counter and rates groups as on 0.3.0.
 Regression signs: "Long" anywhere on the screen, a raw divider surviving a UI rate tap, VALID at 10 kSa/s on 100 ms.
+
+## 99. fw-xzero: the other channel's relays in the calibration (after fw 0.3.0, protocol 1.29, row 71)
+
+Branch `fw-xzero` from main 1cb15b4. Brief (coordinator, 2026-11-08): the bench of 10:20 found each channel's zero moving
+with the other channel's range (-1 / 0 / +1 code); fix it in the calibration model. No hardware, no version bump. Commits
+94a64d0 (firmware, protocol 1.29, vectors), 07ac53e (mcp), then the docs. **Nothing benched, nothing flashed.** Full
+description: firmware/README.md 6.6; wire: docs/protocol.md row 71.
+
+**Classes, derived from the relays** (not from the table): 0x33 / 0x36 value v drives relayX_1 = bit 0, relayX_2 = ~bit 1,
+relayX_3 = ~bit 2 (zaklad.v); PNP drivers from 3V3, a coil on while its pin is low (inference; the partition does not
+depend on it). Coils on: range 1 none, 0 / 3 / 5 / 6 one, 2 / 4 two = the bench's three classes, each about a code
+apart, CH2 -1.0 / +0.88, CH1 -0.55 / +0.93 against one coil. Consistent with the wizard's order (CH1 calibrated with CH2
+on the UI's range in class 2, CH2 with CH1 left at range 5 in class 1). Coupling = a photo-MOSFET, no coil: matches.
+Whether the shift depends on the own range is not known (one own range benched), so the wizard measures it per range.
+
+**What changed**: `acal_xz_class` / `acal_xz_range`, `acal_xz_store` (drift-cancelling, 1/8 code, ACAL_E_XZERO over 3.5
+codes), `acal_xz_pack` / `acal_xz_unpack` (sector 708 bytes 108..127, u16 check bound to the v3 block's CRC, 24 six-bit
+values), `acal_correction_xz` (the shift on both cores' zeros, both classes); `acal_channel.xz` / `xz_valid` (not in the
+v3 block: `acal_unpack` clears them); `fpga_channel_correction(_full)` and the class probe pass the other channel's
+`samplevoltperdiv`; `pc_hw_channel.xrange` (snapshot at arm); wizard: `cal_xz_other` (reference = range 0 for the whole
+step), `cal_xzero` after each range (4 points x (60 ms + 8 gated conversions), about 0.35 s per range, 4 s per run, 18
+relay switches of the other channel per channel); CAL_PROBE mode 0 sets the reference too. GET_CAL 460 (432 flags, 433
+other range, 434 class, 436 i16 shift applied, 440 i8[6][3] table), `PC_PROTO_MINOR` 29; Diagnostics > Calibration column
+"Other ch" (the zero columns lost their spaces, "131.0/136.6", to make room; widths checked by test_ui_diag); report line.
+Storage choice: the 20 free bytes after Atlan's DC shift fields were the only free run in 708 (the v3 block, provenance
+and capture trailers fill 128..511); 6-bit values at 1/8 code fit 24 values plus the check there. An older calibration
+(zeros there) loads with no shift, exactly as before; a save by 0.3.0 or older clears the table (the block stays).
+
+**Checks**: `make gcc10`, `make`, `make PC_DEBUG=1 BUILD=build-dbg`: no warnings in the changed files, 823,808 / 847,360 /
+847,872 bytes; `make -C host_tests test` green (test_adc_cal 68244 with `test_xzero`, test_session 73350, test_ui_diag
+15170, test_diag 494, check_vectors 169 incl. `adc_cal_xz` against acal_xz_pack); mcp pytest and ruff (CI selection)
+clean, `tests/test_xzero.py` (the vector, the host conversion per class, a capture converted with its own other range,
+the simulator's `xzero` model end to end in READ_RAW, 16-bit and READ_TRACE).
+
+**Bench (coordinator / owner; FEL load of this branch's `make gcc10`, FPGA 0x153F; back up SD sectors 700-710 first,
+Save writes 708 and 709; run 30 minutes after power-on)**
+1. Before the wizard (the 0.3.0 calibration on the card): GET_CAL both channels 460 bytes, byte 432 = 0, 436 = 0;
+   Diagnostics > Calibration "Other ch" all "-"; one cell of the table below reads as on 2026-11-08 (no change without a
+   table).
+2. Probes and USB unplugged, Calibrate: the zero step about 12 s; three relay clicks of the other channel per range after
+   each range's zero; both channels pass; the gain screens as usual; Save.
+3. GET_CAL: 432 = 3 on both channels; 440..457 per range class 0 / class 2: on range 2 expect about CH1 -9 / +15 and CH2
+   -16 / +14 sixteenths (the 10:20 numbers); record all six ranges (they say whether the shift depends on the own
+   range). 433 / 434 / 436 follow the other channel's range at once. Diagnostics shows the same in codes; the report's
+   "other channel's relays" line.
+4. The 10:20 table again (Filter Off, 1 MSa/s, probes unplugged, mean corrected code of 5 captures x 3000 samples): CH2
+   at range 2 with CH1 at 0..6, CH1 at range 2 with CH2 at 0..6, then both rows with range 5 (100 mV/div) in place of 2.
+   **Pass: every cell within 0.3 code of 128.** Then one row each at 200 MSa/s and with CIC2 at 1 MSa/s (the full class
+   and the 16-bit path take the same shift: the gated-only measurement is an inference): within 0.3 code of the 1 MSa/s
+   row.
+5. Optional, old firmware: FEL-load 0.3.0 with the new card: it boots with the calibration (108..119 are inside its
+   checksum and it computes the same sum); a 0.3.0 save of 708 (DC shift trim End) clears the table: back on this branch
+   432 = 0 and readings as in step 1.
+Regression signs: a cell moving by about 1 code with the other channel's range after step 2 (a class wrong: check 434
+against the range), a whole row off by the same amount (the reference: the zeros were not taken at one coil on), the
+wizard failing "zero still moving" on the shift points (raise CAL_XZ_SETTLE_MS), ACAL_E_XZERO on a healthy unit.

@@ -196,6 +196,16 @@ def main():
     elif args.adc_cal_checker:
         fail("adc_cal_v3 section missing")
 
+    # 6b. fw-xzero (1.29): the other channel's relays, sector 708 bytes 108..127, acal_xz_pack against the Python layout
+    if args.adc_cal_checker and "adc_cal_xz" in data:
+        out = subprocess.run([args.adc_cal_checker, "--xz"], capture_output=True, text=True, check=True).stdout.strip()
+        if out != data["adc_cal_xz"]["table_hex"]:
+            fail(f"adc_cal_xz table: C packs {out}, expected {data['adc_cal_xz']['table_hex']}")
+        else:
+            print("adc_cal_xz: sector table identical to acal_xz_pack")
+    elif args.adc_cal_checker:
+        fail("adc_cal_xz section missing")
+
     # 7. diagnostics layouts (1.16): life record words, calibration provenance, image identity against the C packers
     if args.diag_checker and "diag_layouts" in data:
         out = subprocess.run([args.diag_checker, "--layouts"], capture_output=True, text=True, check=True).stdout

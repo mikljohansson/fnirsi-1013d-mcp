@@ -171,7 +171,7 @@ static void test_info(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, PC_INFO_LEN);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 28); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 29); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), PC_FW_FPGA_VERSION); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   caps = pc_get_u32(r.p + 20);
   //The capability word is the firmware's (PC_FW_FPGA_VERSION), never derived from the version word read
@@ -300,7 +300,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.28,fpga=0x153f");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.29,fpga=0x153f");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -694,6 +694,13 @@ static void test_capture_and_raw(void)
   T_EQ(pc_get_u32(r.p + 28), 2000); T_EQ(pc_get_u32(r.p + 32), 16000);
   T_EQ(r.p[36], 1); T_EQ(r.p[37], 5); T_EQ(pc_get_u16(r.p + 42), 1050); T_EQ(pc_get_u32(r.p + 44), 927734);
   T_EQ(r.p[52 + 1], 5);
+  //fw-xzero: the snapshot carries each channel's view of the other one's range at the arm (its relays shift the zero);
+  //a later range change does not reach it, and GET_CAPTURE_INFO keeps the capture's ranges for the host
+  T_EQ(S.cap.ch[0].xrange, S.cap.ch[1].range); T_EQ(S.cap.ch[1].xrange, S.cap.ch[0].range);
+  mock.ch[1].range = 1;
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[52 + 1], 5); T_EQ(S.cap.ch[0].xrange, 5);
+  mock.ch[1].range = 5;
 
   //Duplicate request (same seq + cmd) is answered from the cache: ARM is not executed twice
   {
@@ -1078,6 +1085,7 @@ static void test_cal_battery_pattern(void)
   uint8_t p[8];
   resp_t r;
   uint32_t i, x;
+  uint8_t  xr0;
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_CAL, "\1", 1);
@@ -1165,6 +1173,60 @@ static void test_cal_battery_pattern(void)
     //GET_CHANNEL zero_q8 follows the v3 zero
     r = req(PC_CMD_GET_CHANNEL, "", 1);
     T_EQ((int32_t)pc_get_u32(r.p + 20), 103 * 256);
+
+    //1.29 (fw-xzero): no table: flags 0, no shift, the numbers above unchanged whatever CH1's range
+    xr0 = mock.ch[0].range;
+    mock.ch[0].range = 1;
+    r = req(PC_CMD_GET_CAL, "\1", 1);
+    T_EQ(r.p[432], 0); T_EQ(r.p[433], 1); T_EQ(r.p[434], 0); T_EQ(pc_get_u16(r.p + 436), 0);
+    T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9); T_EQ((int32_t)pc_get_u32(r.p + 84), -20);
+    T_EQ(r.p[440], 0); T_EQ(r.p[457], 0);
+
+    //A table: range 3 moves -1 code with CH1's relays all off (range 1), +0.875 with two on (ranges 2, 4)
+    c->cal2.xz[3][0] = -16; c->cal2.xz[3][2] = 14; c->cal2.xz[5][0] = 4; c->cal2.xz_valid = 1;
+    r = req(PC_CMD_GET_CAL, "\1", 1);
+    T_EQ(r.p[432], 1 | 2); T_EQ(r.p[433], 1); T_EQ(r.p[434], 0); T_EQ((int16_t)pc_get_u16(r.p + 436), -16);
+    T_EQ((int8_t)r.p[440 + 9], -16); T_EQ(r.p[440 + 10], 0); T_EQ(r.p[440 + 11], 14); T_EQ(r.p[440 + 15], 4);
+    //A 1671 - 16 = 1655, to 1648: -7 = -1 code + 9; B 1594 - 16 = 1578: +70 = 4 + 6; 16-bit 1648 - (1668 + 1635) / 2 =
+    //-3.5 -> -4; the 0 V code stays T
+    T_EQ((int16_t)pc_get_u16(r.p + 74), -1); T_EQ(r.p[78], 9);
+    T_EQ((int16_t)pc_get_u16(r.p + 76), 4); T_EQ(r.p[79], 6);
+    T_EQ((int32_t)pc_get_u32(r.p + 84), -4);
+    T_EQ((int32_t)pc_get_u32(r.p + 100), 4096 * -7); T_EQ((int32_t)pc_get_u32(r.p + 104), 4096 * 70);
+    T_EQ((int32_t)pc_get_u32(r.p + 80), 103 * 256);
+    r = req(PC_CMD_GET_CHANNEL, "\1", 1);
+    T_EQ((int32_t)pc_get_u32(r.p + 20), 103 * 256);
+    //two on: A 1671 + 14 = 1685: -37 = -3 + 11
+    for(j=2;j<=4;j+=2)
+    {
+      mock.ch[0].range = (uint8_t)j;
+      r = req(PC_CMD_GET_CAL, "\1", 1);
+      T_EQ(r.p[434], 2); T_EQ((int16_t)pc_get_u16(r.p + 436), 14);
+      T_EQ((int16_t)pc_get_u16(r.p + 74), -3); T_EQ(r.p[78], 11);
+    }
+    //one on (ranges 0, 3, 5 and the zoom 6): the reference class, no shift
+    for(j=0;j<=6;j++)
+    {
+      if((j == 1) || (j == 2) || (j == 4))
+        continue;
+      mock.ch[0].range = (uint8_t)j;
+      r = req(PC_CMD_GET_CAL, "\1", 1);
+      T_EQ(r.p[434], 1); T_EQ(pc_get_u16(r.p + 436), 0);
+      T_EQ((int16_t)pc_get_u16(r.p + 74), -2); T_EQ(r.p[78], 9); T_EQ((int32_t)pc_get_u32(r.p + 84), -20);
+    }
+    //the channel's own range picks the row: range 5 with CH1 at range 1, +0.25 code
+    mock.ch[0].range = 1;
+    c->range = 5;
+    r = req(PC_CMD_GET_CAL, "\1", 1);
+    T_EQ((int16_t)pc_get_u16(r.p + 436), 4);
+    c->range = 3;
+    //a block that is not bound: version 1, the table reported (bit 0) but not applied
+    c->cal_offset[2]++;
+    r = req(PC_CMD_GET_CAL, "\1", 1);
+    T_EQ(r.p[72], 1); T_EQ(r.p[432], 1); T_EQ(pc_get_u16(r.p + 436), 0); T_EQ((int16_t)pc_get_u16(r.p + 74), 2);
+    c->cal_offset[2]--;
+    memset(c->cal2.xz, 0, sizeof(c->cal2.xz)); c->cal2.xz_valid = 0;
+    mock.ch[0].range = xr0;
 
     //1.14: calibration v4 state in the channel snapshot (acal_live.c on the scope). Gated divider: the tracker is not
     //applied and cm only moves corr16 (the 16-bit path is the full class)
@@ -2259,7 +2321,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 28);
+  T_EQ(r.p[1], 29);
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -2765,7 +2827,7 @@ static void test_fel_reset_stall(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 28);
+  T_EQ(r.p[1], 29);
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -3272,7 +3334,7 @@ static void test_decim_fir_protocol(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 28);
+  T_EQ(r.p[1], 29);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -3379,7 +3441,7 @@ static void test_seq_segments(void)
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 28);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 29);
   r = status();
   //features: bits 0-8 of 1.26, bit 9 PEAK (fw-c6), bit 10 COUNTER (fw-c7), bit 11 LOGGER (fw-d4); 12 / 13 reserved
   T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x0FFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
@@ -3652,7 +3714,7 @@ static void test_capture_stages(void)
   mock.cap.trailer = CS_T_VALID; mock.cap.stored = 0x0924; mock.cap.stored_fpga = 0x153A; mock.cap.value = 0x0924;
   mock.cap.flags |= PC_CAPF_TRAINED;
   r = req(PC_CMD_GET_CAL, (const uint8_t *)"\x01", 1);
-  T_EQ(r.len, 432); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
+  T_EQ(r.len, 460); T_EQ(r.p[356], CS_T_VALID); T_EQ(r.p[357], PC_CAPF_HAS | PC_CAPF_TRAINED);
   T_EQ(pc_get_u16(r.p + 358), 0x0924); T_EQ(pc_get_u16(r.p + 360), 0x153A); T_EQ(pc_get_u16(r.p + 362), 0x0924);
 
   //EXT shifts: legacy 12 samples at dividers 0..3 (fw-153f, 0x153F: core A one word earlier at 1..3) and 14 from 4 up
@@ -4381,7 +4443,7 @@ static void test_logger(void)
 
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_LOGGER, PC_CAP_LOGGER);
-  T_EQ(r.p[1], 28);
+  T_EQ(r.p[1], 29);
   r = status();
   T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_LOGGER, PC_FEAT_W_LOGGER);
 
