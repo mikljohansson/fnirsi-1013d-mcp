@@ -2150,3 +2150,12 @@ Newest entries at the bottom. Format: date, who, what, result.
   (2) Power-off with the key (the build saved the generator at 12.5 MHz), power-on: the card's 0.3.1 rejected 709 as
   expected (no on-screen notice in 0.3.1, defaults), FEL load of 0649683 again: **709 valid at boot**, power-on #48, the
   generator 12.5 MHz and every other setting kept. Generator set back to 1 kHz so 0.3.1 can boot. Sector 708 byte-identical.
+- 2026-11-09 09:05-09:3x (lead, owner present): **release image v0.3.2** (70da4ca, image
+  bcfa6aa74cf616f49b608f5fea02bca1e8d776b62143b5d8acfce3a1e20d4fc0), backup `backups/sdcard/sd_700-710_20261109-090500.bin`
+  (read twice, identical), FEL load with the hash checked: `#VER` fw=0.3.2. The ladder rebuilt by the owner (1 kOhm,
+  15 nF, 1 kOhm, 15 nF). First battery run 178 PASS, 5 FAIL: CH1 was on the first node (coreorder needs it on the ladder
+  input; the lead's wiring instruction) and CH2 carried the owner's saved trace position (offset -3.45 div), so its low
+  level clipped at -0.97 V and every averaged capture was rejected (A1, A2, A4). CH2 offset set to 0, CH1 on the ladder
+  input: **`fnirsi1013d-battery` 207 PASS, 0 FAIL, 2 SKIP** (A17 outside the Spectrum view, O0c CH2 on the second node),
+  `backups/battery-0.3.2/release2/`. After it: 0 of 14182 full-rate captures flagged, encode check 4 re-taken of 26933
+  (all recovered), sector 708 byte-identical.

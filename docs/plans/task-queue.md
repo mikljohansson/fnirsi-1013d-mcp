@@ -294,6 +294,9 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
+- **The battery leaves the trace offsets as saved** (bench 2026-11-09 09:1x): `fnirsi1013d-battery` sets range,
+  coupling and filter but not `offset_div`; a saved CH2 position of -3.45 div clipped the ladder's low level and failed
+  A1, A2, A4. Set both offsets to 0 in the bench setup (and restore them at the end).
 - [x] (Done 2026-11-08: (3) RUN 62, STOP 64 steps / s without polls, docs/mcp-tools.md; (4) the mask test does not judge the time tolerance at the record ends.) **Battery follow-ups** (mcp-battery, 2026-11-06). (1) **Done, fw-031 101e056, bench section 98.** Firmware: GET_TIMEBASE should report the divider the FPGA
   holds (`pc_hal_divider_now`) while a host's raw divider runs, not drop it when acq_view_fit snaps the UI's time/div
   after a SET_TRIGGER total (finding 3; the host now corrects it from GET_DECIM, `Scope._held_timebase`). The spectrum
