@@ -2142,3 +2142,11 @@ Newest entries at the bottom. Format: date, who, what, result.
   backup `backups/sdcard/sd_709-710_20261108-201744.bin`, read back identical), then ENTER_FEL so the RAM build left
   without a power-off save, power cycle by the owner. Card 0.3.1 boots: power-on #45, sector 709 valid at boot, life
   record found, stages 0x06D2 in effect, capture clean. Still to do: the wizard (restores 0x06DB).
+- 2026-11-08 21:14-21:22 (lead, owner present): **fw-genlimit (0649683) benched: pass.** Backup
+  `backups/sdcard/sd_700-710_20261108-211418.bin` (read twice, identical), 708 copy `708_before_genlimit.bin`. FEL load.
+  (1) CH1 x1 on the post, generator 12.5 MHz (library), CH1 100 mV/div AC, 200 MSa/s, the RUN loop 2 minutes: **0 of 2292
+  full-rate captures flagged**, counts 0 on every core (735d82a: 17 of 305). Counter 12,500,000 Hz over 100 one-second
+  gates, spread 0.125 Hz (the running mcp server predates the host fix, so `firmware_frequency_hz` still showed 4294970).
+  (2) Power-off with the key (the build saved the generator at 12.5 MHz), power-on: the card's 0.3.1 rejected 709 as
+  expected (no on-screen notice in 0.3.1, defaults), FEL load of 0649683 again: **709 valid at boot**, power-on #48, the
+  generator 12.5 MHz and every other setting kept. Generator set back to 1 kHz so 0.3.1 can boot. Sector 708 byte-identical.

@@ -11,6 +11,10 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-08
+
+A maintenance release on the same FPGA bitstream, 0x153F. User-facing notes: `docs/release-notes/0.3.2.md`.
+
 ### Firmware
 
 - Only the calibration dialog writes calibration data (owner decision): the ADC capture self-check's runtime guard,
