@@ -2159,3 +2159,10 @@ Newest entries at the bottom. Format: date, who, what, result.
   input: **`fnirsi1013d-battery` 207 PASS, 0 FAIL, 2 SKIP** (A17 outside the Spectrum view, O0c CH2 on the second node),
   `backups/battery-0.3.2/release2/`. After it: 0 of 14182 full-rate captures flagged, encode check 4 re-taken of 26933
   (all recovered), sector 708 byte-identical.
+- 2026-11-09 09:2x-09:4x (lead, owner present): **v0.3.2 released.** CI green on main 9ae2cd4. Dry run `v0.3.2-rc1` on 70da4ca:
+  release.yml green, 8 assets, SHA256SUMS 7 of 7, firmware bcfa6aa7... = the benched image; rc removed; tag `v0.3.2` on 70da4ca,
+  release.yml green, published as the latest release (not a pre-release),
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.2. The published `fnirsi_1013d-fw-0.3.2.bin` persisted
+  to the card (backup `backups/sdcard/sd_750-2362_20261109-094044.bin` = the 0.3.1 image f54ce4cd..., 1609 sectors compared
+  identical, checksum 0xFAC6F249); power cycle: fw 0.3.2 70da4ca2 from the card, 709 valid at boot (power-on #52), stages
+  0x06D2 until the owner's wizard run (expected 0x06DB). The owner's saved CH2 trace position was set to 0 for the battery.
