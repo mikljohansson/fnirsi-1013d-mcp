@@ -11,6 +11,12 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-12
+
+A maintenance release on the same FPGA bitstream, 0x153F, from an agent's bench session on a power board (protocol
+1.30). User-facing notes: `docs/release-notes/0.3.3.md`. Per-branch history: `firmware/AGENTS.md` sections 103 and 104,
+`mcp/AGENTS.md` "mcp-notes".
+
 ### Firmware
 
 - The screen's times follow the sample rate a capture was really taken at: when a computer sets its own rate over USB
