@@ -157,6 +157,182 @@ def frequency(v: np.ndarray, dt: float) -> dict[str, Any]:
     return {"frequency": 1.0 / period if period > 0 else None, "period": period, "duty": duty}
 
 
+#: frequency_or_fft: the FFT line must have this many periods in the record; a slope or a part of one slow period
+#: (the battery's RC output at 200 MSa/s, finding 4a) puts its strongest "line" in the first bins
+FFT_FALLBACK_MIN_PERIODS = 4
+
+
+def frequency_or_fft(v: np.ndarray, dt: float) -> dict[str, Any]:
+    """``frequency`` with a fallback: when the crossings are irregular (switching spikes on a ripple, a burst), the
+    strongest spectral line (``dominant_frequency``) of the same record, ``method`` 'fft_peak' with the bin width as
+    ``resolution`` and the crossing ``reason`` kept, when that line has at least FFT_FALLBACK_MIN_PERIODS periods
+    in the record; duty is None then. ``method`` is 'crossings' for a crossing
+    estimate and None when there is no frequency."""
+    fr = frequency(v, dt)
+    if fr["frequency"] is not None:
+        return {**fr, "method": "crossings"}
+    if str(fr.get("reason", "")).startswith("irregular crossings"):
+        f = dominant_frequency(v, dt)
+        n = np.asarray(v).size
+        if f is not None and f * n * dt >= FFT_FALLBACK_MIN_PERIODS:
+            return {"frequency": f, "period": 1.0 / f, "duty": None, "method": "fft_peak",
+                    "resolution": 1.0 / (n * dt), "reason": fr["reason"]}
+        fr = {**fr, "reason": fr["reason"] + "; no spectral line stands out either"}
+    return {**fr, "method": None}
+
+
+def moving_average(v: np.ndarray, n: int) -> np.ndarray:
+    """Centred moving average over ``n`` samples (made odd); the window shrinks symmetrically at the record ends."""
+    v = np.asarray(v, dtype=np.float64)
+    n = int(n)
+    if n <= 1 or v.size < 3:
+        return v.copy()
+    h = min(n // 2, (v.size - 1) // 2)
+    c = np.concatenate([[0.0], np.cumsum(v)])
+    i = np.arange(v.size)
+    hw = np.minimum(np.minimum(i, v.size - 1 - i), h)
+    return (c[i + hw + 1] - c[i - hw]) / (2 * hw + 1)
+
+
+#: level_crossings: hysteresis in units of the (smoothed) sample noise, and how close (in noise sigmas) a level may lie
+#: to the record's extremes before its crossings count as noise-dominated
+CROSS_HYST_SIGMA = 3.0
+CROSS_NEAR_SIGMA = 4.0
+
+
+def _interp_cross(v: np.ndarray, i: int, level: float) -> float:
+    a, b = v[i], v[i + 1]
+    return i + ((level - a) / (b - a) if b != a else 0.5)
+
+
+def hysteresis_crossings(v: np.ndarray, level: float, edge: str, hyst: float) -> list[tuple[float, float, float]]:
+    """Crossings of ``level`` in one direction with hysteresis: armed once ``v`` is beyond level -/+ ``hyst`` on the
+    start side, confirmed once it is beyond level +/- ``hyst`` on the far side. Between the two, noise may cross the
+    level several times: the crossing is the midpoint of the first and the last of those (fractional sample indices,
+    linear interpolation), which a noisy slope does not bias towards either end. Returns (mid, first, last)."""
+    v = np.asarray(v, dtype=np.float64)
+    s = 1.0 if edge == "rising" else -1.0
+    u = s * (v - level)  # rising: from below (u < 0) to above (u > 0)
+    out = []
+    armed = False
+    first = -1.0
+    last = -1.0
+    for i in range(v.size - 1):
+        if not armed:
+            if u[i] >= -hyst:
+                continue
+            armed = True
+        if u[i] < 0 <= u[i + 1]:
+            x = _interp_cross(v, i, level)
+            if first < 0:
+                first = x
+            last = x
+        if first >= 0 and u[i + 1] > hyst:
+            out.append((0.5 * (first + last), first, last))
+            armed, first, last = False, -1.0, -1.0
+    return out
+
+
+def level_crossings(t: np.ndarray, v: np.ndarray, levels: Sequence[float], edge: str = "either", smooth: int = 1,
+                    max_per_level: int = 16, lsb: float | None = None,
+                    between: tuple[float, float] | None = None) -> dict[str, Any]:
+    """The times (on ``t``'s axis, interpolated between samples) at which ``v`` crosses each level.
+
+    ``edge``: 'rising', 'falling' or 'either'. ``smooth``: a centred moving average over that many samples first.
+    The hysteresis is ``CROSS_HYST_SIGMA`` x the smoothed record's sample noise (at least half an ``lsb``): a crossing
+    is the midpoint of the noise's crossings between leaving level -/+ hysteresis and passing level +/- hysteresis
+    (``hysteresis_crossings``), so noise on a slow edge gives one unbiased crossing, not a burst. Each crossing carries
+    the slope (over a span wide enough to stand out of the noise) and ``t_sigma``: the larger of noise / |slope| and
+    half the span of the noise's crossings. At most ``max_per_level`` crossings per level are returned (``count`` has
+    them all). ``between`` = (from, to): the time from the first crossing of ``from`` to the first crossing of ``to``
+    after it. Returns ``levels`` (one dict per level), ``noise`` (volts, smoothed), ``hysteresis``, ``smooth`` and
+    ``caveats``."""
+    t = np.asarray(t, dtype=np.float64)
+    v = np.asarray(v, dtype=np.float64)
+    if v.size < 3 or t.size != v.size:
+        raise ValueError("level crossings need a record of at least 3 samples with its time axis")
+    if edge not in ("rising", "falling", "either"):
+        raise ValueError(f"edge must be rising, falling or either (got {edge!r})")
+    dt = float(t[1] - t[0])
+    smooth = max(1, int(smooth))
+    if smooth % 2 == 0:
+        smooth += 1
+    vs = moving_average(v, smooth)
+    sigma = noise_sigma(v) / math.sqrt(smooth)
+    if lsb:
+        sigma = max(sigma, lsb / math.sqrt(12 * smooth))
+    hyst = max(CROSS_HYST_SIGMA * sigma, 0.5 * lsb if lsb else 0.0)
+    lo, hi = float(vs.min()), float(vs.max())
+    idx = np.arange(t.size)
+    edges = ("rising", "falling") if edge == "either" else (edge,)
+
+    def find(lv: float) -> list[tuple[float, float, float, str]]:
+        f = [(m, a, b, e) for e in edges for m, a, b in hysteresis_crossings(vs, lv, e, hyst)]
+        f.sort()
+        return f
+
+    def slope_at(x: float) -> float:
+        i = int(x)
+        w = max(1, smooth // 2)
+        while True:
+            a, b = max(0, i - w), min(v.size - 1, i + 1 + w)
+            if abs(vs[b] - vs[a]) >= 6 * sigma or (a == 0 and b == v.size - 1) or w > v.size // 8:
+                return float((vs[b] - vs[a]) / ((b - a) * dt))
+            w *= 2
+
+    caveats: list[str] = []
+    out_levels = []
+    found_by: dict[float, list[tuple[float, float, float, str]]] = {}
+    for lv in levels:
+        lv = float(lv)
+        found = found_by[lv] = find(lv)
+        rows = []
+        for m, a, b, e in found[:max_per_level]:
+            slope = slope_at(m)
+            ts = max(sigma / abs(slope) if slope else math.inf, 0.5 * (b - a) * dt)
+            rows.append({"t": float(np.interp(m, idx, t)), "edge": e, "slope_v_per_s": slope,
+                         "t_sigma": ts if math.isfinite(ts) else None})
+        d: dict[str, Any] = {"level": lv, "count": len(found), "crossings": rows,
+                             "first": rows[0]["t"] if rows else None}
+        if len(found) > max_per_level:
+            d["truncated"] = True
+        out_levels.append(d)
+        if not found:
+            if lv < lo or lv > hi:
+                caveats.append(f"level {lv:.6g} V is never reached: the record spans {lo:.6g} .. {hi:.6g} V")
+            else:
+                caveats.append(f"level {lv:.6g} V is not crossed{'' if edge == 'either' else ' ' + edge} beyond the "
+                               f"hysteresis ({hyst:.3g} V)")
+        elif len(found) > 1:
+            caveats.append(f"level {lv:.6g} V is crossed {len(found)} times"
+                           f"{f' (the first {max_per_level} returned)' if len(found) > max_per_level else ''}: "
+                           "ringing, noise or a periodic signal; smooth more or narrow the edge direction")
+        if found and (lv - lo < CROSS_NEAR_SIGMA * sigma or hi - lv < CROSS_NEAR_SIGMA * sigma):
+            caveats.append(f"level {lv:.6g} V lies within {CROSS_NEAR_SIGMA:g} noise sigmas ({sigma:.3g} V) of the "
+                           "record's extreme: its crossing time is set by the noise; see t_sigma")
+    res: dict[str, Any] = {"levels": out_levels, "noise": sigma, "hysteresis": hyst, "smooth": smooth,
+                           "caveats": caveats}
+    if between is not None:
+        a_lv, b_lv = float(between[0]), float(between[1])
+        for lv in (a_lv, b_lv):
+            if lv not in found_by:
+                found_by[lv] = find(lv)
+        bt: dict[str, Any] = {"from_level": a_lv, "to_level": b_lv, "t_from": None, "t_to": None, "interval": None}
+        if found_by[a_lv]:
+            bt["t_from"] = float(np.interp(found_by[a_lv][0][0], idx, t))
+            later = [float(np.interp(m, idx, t)) for m, *_ in found_by[b_lv]]
+            later = [x for x in later if x >= bt["t_from"]]
+            if later:
+                bt["t_to"] = later[0]
+                bt["interval"] = later[0] - bt["t_from"]
+            else:
+                bt["reason"] = f"no crossing of {b_lv:.6g} V after the first crossing of {a_lv:.6g} V"
+        else:
+            bt["reason"] = f"{a_lv:.6g} V is not crossed"
+        res["between"] = bt
+    return res
+
+
 def transition_time(v: np.ndarray, dt: float, edge: str = "rising") -> float | None:
     """10-90 % rise (or 90-10 % fall) time of the first full edge."""
     v = np.asarray(v, dtype=np.float64)
