@@ -36,13 +36,19 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
 ## Take data
 
 - `scope_capture` = one host capture; the screen shows it and the scope stays in STOP. When done:
-  `scope_acquisition_control(action='run')` gives the person a live screen back.
+  `scope_acquisition_control(action='run')` gives the person a live screen back. `preview_points=0` when only the
+  statistics and the `.npz` matter (17 kB -> 2 kB for two channels); `window` = the span the statistics cover, the file
+  keeps the whole record.
+- A one-shot event the person causes: `scope_wait_for_event` (channel, edge, level, pre / post, `timeout_s` up to
+  3600 s with progress, `levels` for crossing times); on timeout the scope is in STOP with that trigger.
+- Polling: `scope_status` is compact; `detail=true` for features, battery and link statistics.
 - `scope_fetch_waveform` = what the scope shows now, with the settings of that capture; changes nothing. Check
   `capture_source`: `host_kept` (your own armed single), `latest`, or `screen_trace` (the screen's processed trace when
   the raw words are gone; read its caveat).
-- An event the person causes: `scope_set_trigger` (normal), `scope_acquisition_control(action='arm')`, tell the person,
-  end your turn; later `scope_fetch_waveform` returns that single even after RUN / STOP at the scope (protocol 1.30;
-  `scope_status` `host_capture_kept`). Do not arm again before fetching it. Guide section 3 has the details.
+- Arm and leave instead (your turn must end before the event): `scope_set_trigger` (normal),
+  `scope_acquisition_control(action='arm')`, tell the person; later `scope_fetch_waveform` returns that single even
+  after RUN / STOP at the scope (protocol 1.30; `scope_status` `host_capture_kept`). Do not arm again before fetching
+  it. Guide section 3 has the details.
 - Noise below ~2 LSB or fits: `scope_averaged_capture` (n 16-64 quick, 256+ for fits; `align='edge'` on the TX gate;
   `hardware=true` on a 0x1536 bitstream averages in the FPGA, fast, hardware alignment only, not yet benched).
 - Many triggers with timestamps (pulse trains, per-pulse PI decays): `scope_capture_segments` (0x1536; set the record
@@ -55,7 +61,9 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
 - Frequency, period, width, duty at 5 ns resolution without a capture: `scope_counter` (caps `COUNTER`; quote its
   `resolution`; set `level` mid-swing; vmin / vmax include noise peaks). Glitches shorter than the sample period
   at slow rates: `scope_capture(peak=true)` (caps `PEAK_DETECT`; min / max envelopes, no averaging with it).
-- Quick numbers: `scope_measure`. Voltmeter-style readings over several captures: `scope_dvm` (quote its
+- Quick numbers: `scope_measure` (also on a saved `.npz` with `source`; `levels` gives crossing times relative to
+  the trigger and the time between two levels; `frequency_method` `fft_peak` = the strongest spectral line, used when
+  the crossings are irregular). Voltmeter-style readings over several captures: `scope_dvm` (quote its
   `statement`: range, volts per code, noise, uncertainty and digits; absolute accuracy is the calibration's).
 - Serial bus: `scope_decode(protocol='uart'|'spi'|'i2c')` on the last / a saved / a fresh capture (guide section 3:
   lines on CH1 (+CH2), >= 4 samples per bit, 8 per I2C SCL period; report frames, errors and the measured baud).

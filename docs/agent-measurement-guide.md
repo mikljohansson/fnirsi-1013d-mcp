@@ -19,7 +19,8 @@ descriptions are authoritative. Server setup: `mcp/README.md`.
    block (version 1) the readings use the 1.00o5 compensations until it is run.
 3. `scope_status`: `mode` collaborative (shared with the person at the scope) or exclusive (legacy firmware),
    `display_mode` (`scope`, `spectrum`, `waterfall`, `density` or `phosphor`, protocol modes 0-4), `run_state`,
-   `settings_seq`.
+   `settings_seq`. It is compact (cheap to poll: acq_state, capture_id, capture_origin, settings_seq); `detail=true`
+   adds the bitstream's `features`, the UI averaging, battery and the link statistics.
 4. `scope_get_config`: the live settings. Do not assume your last settings still hold: the person may have changed
    them.
 
@@ -50,7 +51,14 @@ means another program has the port: ask the person, do not retry in a loop.
 ## 3. Taking data
 
 - `scope_capture`: one host capture. The scope screen shows it and the scope stays in STOP afterwards; resume with
-  `scope_acquisition_control(action='run')` when you are done, so the person gets a live screen back.
+  `scope_acquisition_control(action='run')` when you are done, so the person gets a live screen back. Pass
+  `preview_points=0` when you need only the statistics and the `.npz` (a two-channel record costs about 17 kB of
+  result with the default preview, 2 kB without); `window` limits the statistics and the inline samples to a span
+  (`stats_span`), the file always holds the whole record.
+- `scope_wait_for_event`: one-shot events a person causes ("I arm, you switch it on"): channel, edge, level, `pre` /
+  `post`, `timeout_s` up to 3600 s with progress notifications; returns the statistics, the `.npz` and, with `levels`,
+  the crossing times. On timeout the scope is in STOP with that trigger. Tell the person to go ahead once it is armed
+  (the first progress message); if your client stops waiting after 60 s, use shorter timeouts and call it again.
 - `scope_fetch_waveform`: what the scope captured last (also its own RUN captures), converted with the settings of
   that capture (`capture_settings`). Changes nothing. Check `capture_source` and `capture_id`: `host_kept` is your own
   armed single, `latest` the screen's newest capture, `screen_trace` the screen's processed trace when that capture's
@@ -84,7 +92,12 @@ means another program has the port: ask the person, do not retry in a loop.
   `phosphor` view, which has no spectrum). Cheap, takes no capture, single shot, firmware scaling. Use it to
   talk about the same picture the person sees; use `scope_capture_and_fft` for averaging, other windows or the
   per-unit calibration. `cross_check=true` confirms both agree on the same capture.
-- `scope_measure`: vpp, rms, frequency, duty, rise time, CH1->CH2 delay on the last capture (or a fresh one).
+- `scope_measure`: vpp, rms, frequency, duty, rise time, CH1->CH2 delay on the last capture, a fresh one or a saved
+  `.npz` (`source`). A frequency with `frequency_method` `fft_peak` came from the strongest spectral line because the
+  crossings were irregular (switching spikes on a ripple): quote its `frequency_resolution` and say it is the
+  strongest line, which need not be the fundamental. `levels=[...]` adds `crossings`: when each level is crossed
+  relative to the trigger (`edge`, `smooth` against noise), with `t_sigma`, and `between` = the time between two levels
+  (a rise / fall time between any levels you choose); do not compute these by hand from the `.npz`.
 - **Decoding a serial bus**: `scope_decode(protocol='uart'|'spi'|'i2c')` on a saved capture (`source`), the last
   capture, or a fresh one (`capture=true`). Put the lines on the channels it expects (UART: data on CH1; SPI: clock on
   CH1, MOSI or MISO on CH2; I2C: SCL on CH1, SDA on CH2; or name them in `channels`), a range where the logic swing
@@ -340,7 +353,8 @@ Every waveform is saved as `.npz` (path in `file`); load with `numpy.load(path)`
 | mask_test | `t`, `upper`, `lower`, `reference`, `<CH>_volts` (the first failing capture, else the last), `fail_mask`; per-capture results in `meta_json`; the mask file (`mask.file`) holds `t`, `upper`, `lower`, `reference` |
 | dvm | `capture_t_s`, `<CH>_mean`, `_ac_rms`, `_rms`, `_min`, `_max`, `_frequency` per capture; the combined readings in `meta_json` |
 
-Results with up to 2000 points also carry the samples inline; longer ones a 500-point min/max preview.
+Results with up to 2000 points also carry the samples inline; longer ones a 250-bin min/max preview
+(`preview_points` sets the size, 0 none; `scope_wait_for_event` has none by default).
 `scope_export_csv` turns any of these files into CSV (header with the settings and caveats, one row per sample).
 
 ## 7. Reporting numbers

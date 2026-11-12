@@ -1,4 +1,4 @@
-# mcp/ handoff for agents (fw-hostkeep, 2026-11-12: protocol 1.30, the host's kept single (`Scope.read_kept_capture`, `scope_fetch_waveform(capture=)` / `capture_source`, the screen-trace fallback `_read_latest`, `scope_status` `host_capture_kept`, simulator `Device.kept` / `ui_rearm`, tests/test_hostkeep.py); fw-genlimit, 2026-11-08: `CAP_THRESHOLD_SELF_CHECK` 48 / `CAP_THRESHOLD_TRAIN` 32 mirror cap_stage.h, `describe_capture` `counts_note`; fw-csbusy, 2026-11-08: `cap_flagged` flags a core only against a partner that counted at most 8, `cap_busy` (both cores over 8: not checkable; a 0.3.1 flag on a busy signal is `flag_from_busy_signal`, no recalibrate advice), `CAPF_MOVED` retired (the firmware's runtime guard is gone, owner: only the calibration dialog writes calibration data), the counter's saturated freq_mHz is None and a band under 24 codes gets a caveat, tests/test_csbusy.py; fw-xzero, 2026-11-08: protocol 1.29, the zero shift for the other channel's relays in the volts model; mcp-031, 2026-11-07: the loopback self-test over many captures, the fold in the battery, the Nth edge's idle time; mcp-battery, 2026-11-06: fnirsi1013d-battery and the battery's findings; fw-nopat, 2026-10-21: the pattern feature cut, the square kept; mcp-d6, 2026-10-21: protocol 1.27 logger / the generator on P16 / H16 / Bode on P; mcp-c8 / mcp-c8b: protocol 1.26 trigger types / hold-off / peak detect / counter; mcp-soft: decode / mask / CSV / DVM; mcp-gen7: idle port close)
+# mcp/ handoff for agents (mcp-notes, 2026-11-12: `preview_points` / `_inline_waveform`, `window` = the stats span (`_window_view`, `stats_span`, the file keeps the record), `scope_measure` crossings / `source` / the FFT fallback (`A.frequency_or_fft`, `A.level_crossings`), compact `scope_status` (`detail`), `scope_wait_for_event`; section "mcp-notes" below; fw-hostkeep, 2026-11-12: protocol 1.30, the host's kept single (`Scope.read_kept_capture`, `scope_fetch_waveform(capture=)` / `capture_source`, the screen-trace fallback `_read_latest`, `scope_status` `host_capture_kept`, simulator `Device.kept` / `ui_rearm`, tests/test_hostkeep.py); fw-genlimit, 2026-11-08: `CAP_THRESHOLD_SELF_CHECK` 48 / `CAP_THRESHOLD_TRAIN` 32 mirror cap_stage.h, `describe_capture` `counts_note`; fw-csbusy, 2026-11-08: `cap_flagged` flags a core only against a partner that counted at most 8, `cap_busy` (both cores over 8: not checkable; a 0.3.1 flag on a busy signal is `flag_from_busy_signal`, no recalibrate advice), `CAPF_MOVED` retired (the firmware's runtime guard is gone, owner: only the calibration dialog writes calibration data), the counter's saturated freq_mHz is None and a band under 24 codes gets a caveat, tests/test_csbusy.py; fw-xzero, 2026-11-08: protocol 1.29, the zero shift for the other channel's relays in the volts model; mcp-031, 2026-11-07: the loopback self-test over many captures, the fold in the battery, the Nth edge's idle time; mcp-battery, 2026-11-06: fnirsi1013d-battery and the battery's findings; fw-nopat, 2026-10-21: the pattern feature cut, the square kept; mcp-d6, 2026-10-21: protocol 1.27 logger / the generator on P16 / H16 / Bode on P; mcp-c8 / mcp-c8b: protocol 1.26 trigger types / hold-off / peak detect / counter; mcp-soft: decode / mask / CSV / DVM; mcp-gen7: idle port close)
 
 Python host library, device simulator, MCP server and bench CLIs for the FNIRSI 1013D open firmware's USB protocol.
 Read first: `../AGENTS.md` (repo rules, bench coordination), `../docs/protocol.md` (wire spec; **section 14 is how
@@ -54,7 +54,7 @@ path. |
 | `decode.py` | mcp-soft: serial decoders on volts arrays: `to_logic` (mid-level threshold, 5 % hysteresis, interpolated edges; levels = the record's extremes so a 1 % duty line still counts), `decode_uart` (`auto_baud` from the shortest pulse snapped to `STANDARD_BAUDS`), `decode_spi` (CPOL / CPHA, gap framing, no chip select), `decode_i2c` (a bit sampled in the SCL-high phase of a START / STOP is dropped). Limits: `MIN_SAMPLES_PER_BIT` 4 (caveat), `HARD_MIN_SAMPLES_PER_BIT` 2 (refuse), I2C 8 / 6 per SCL period. Loops are per frame / event, never per sample. |
 | `export.py` | mcp-soft: `write_csv` (scope_export_csv): the x axis (`t` / `f` / `f_actual` / `capture_t_s`) plus every 1-D array of its length as columns, 2-D arrays long with a `segment` column, `#` header from `meta_json` (`header_lines`), units by name / suffix (`unit_of`). Half-length per-core raw arrays are left out. |
 | `simulator.py` | `Device` (protocol state machine, FPGA ring, shared mode, legacy mode, SD card, EXT trigger, event log) + `SimServer` (TCP) with test hooks. CLI `fnirsi1013d-sim`. mcp-soft: serial signal kinds `uart`, `spi_clk` / `spi_data`, `i2c_scl` / `i2c_sda` (`SERIAL_KINDS`, `serial_timeline`: a cached piecewise-constant timeline per period; `parse_signal` keeps `text=` as a string; `companion_signal` gives the data line for a clock on CH1). |
-| `server.py` | FastMCP server `fnirsi1013d-mcp`, 39 tools up to tier 3, 41 with tier 4 (mcp-d6 added `scope_log`, `scope_log_status`, `scope_log_stop`, `scope_sweep`; fw-nopat removed `scope_pattern`; mcp-c8 added `scope_counter`; mcp-soft added `scope_decode`, `scope_mask_test`, `scope_export_csv`, `scope_dvm`; the shared capture-source helper is `_capture_for_analysis`, the file-source helpers `_resolve_source` / `_load_waveforms`) (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
+| `server.py` | FastMCP server `fnirsi1013d-mcp`, 40 tools up to tier 3, 42 with tier 4 (mcp-notes added `scope_wait_for_event`; mcp-d6 added `scope_log`, `scope_log_status`, `scope_log_stop`, `scope_sweep`; fw-nopat removed `scope_pattern`; mcp-c8 added `scope_counter`; mcp-soft added `scope_decode`, `scope_mask_test`, `scope_export_csv`, `scope_dvm`; the shared capture-source helper is `_capture_for_analysis`, the file-source helpers `_resolve_source` / `_load_waveforms`) (list with tiers in README.md); `--list-tools` prints them with the data dir and audit log without opening a port. |
 | `logfile.py` | mcp-d6 (protocol 1.27): the streaming logger on the host: `plan_log` (format / divider / filter from a rate within the tiers), `decode_chunk`, `volts_model` (linear a x code + b per channel and lane from the calibration at the start), `LogRun` (LOG_START, the pump thread taking the session lock per LOG_READ, raw files + `log.json`, the end, the restore, `write_summary` = the kind 'log' `.npz`), `load_log` (time with the gaps, volts). |
 | `paths.py` | Per-user home (`FNIRSI_MCP_HOME`, default `~/.fnirsi1013d`: `data/`, `logs/audit.jsonl`) and the checkout detection (`checkout()`, `checkout_path()` only when the file exists, `checkout_dir()`): the CLIs default to repository files only when run from a checkout, else the argument is required. |
 | `flash.py` | `fnirsi1013d-flash`: ENTER_FEL (3 attempts, FEL-device check between), usbipd, sunxi-fel RAM load, `#VER`; `--persist` / `--persist-only` / `--restore` (SD sector 750 via the firmware). |
@@ -148,6 +148,38 @@ path. |
   event log. Summary: requests, failures, drops, device restarts, longest gap, latency, counter deltas
   (incl. usb_irq_polled). Exit 0 clean / 1 failure, drop or restart / 2 cannot start. Tested on the simulator
   only; the lead runs it on the bench.
+
+## mcp-notes (2026-11-12): output shape, crossings, the FFT fallback, the event wait
+
+From an agent's bench session (task queue "Usage notes from the induction-imager session"). All simulator only.
+
+- **Inline waveform**: `_inline_waveform(t, arrays, preview_points, inline_max)` is the one rule (capture, fetch,
+  averaged_capture, wait_for_event): None = the old behaviour (in full up to `inline_max_points` 2000, else 250 bins),
+  0 = none, N = in full up to 2N, else N bins. Measured on the simulator, two channels of 10000 samples: 17.2 kB default,
+  5.0 kB at 50, 2.0 kB at 0. The default was kept (the brief preferred no change); 0 is the documented choice for
+  numbers-only work. A smaller default (e.g. 100 bins) would lose nothing the tools themselves use (the stats come from
+  the full record), only what an agent reads by eye; that is the lead's call.
+- **Window**: `scope_capture` / `scope_fetch_waveform` read and save the whole record; `_capture_result(window=)` cuts a
+  view (`_window_view` -> `_slice_capture`, which now also cuts samples16 / min / max and drops raw_a / raw_b) for the
+  statistics, caveats and the inline waveform, and reports `stats_span`. `scope_averaged_capture`'s window still limits
+  the read (speed per capture; its description says the file holds only the window); decay_fit's is internal.
+- **Frequency**: `A.frequency_or_fft` falls back to `A.dominant_frequency` only for the "irregular crossings" reason and
+  only when the line has `FFT_FALLBACK_MIN_PERIODS` (4) periods in the record: without that the battery's R0b (CH2 =
+  part of one RC period at 200 MSa/s) read 66.7 kHz = the first bin (finding 4a). `_freq_fields` gives the result fields
+  (`frequency_method`, `frequency_resolution`, FFT_PEAK_CAVEAT) for capture results and scope_measure.
+- **Crossings**: `A.hysteresis_crossings` (armed beyond level -/+ h, confirmed beyond +/- h, the midpoint of the noise
+  crossings in between: unbiased on a noisy slope) and `A.level_crossings` (moving average, h = 3 x the smoothed
+  noise, at least lsb / 2; slope over a span with 6 sigma of change; t_sigma; caveats; `between`). Server helper
+  `_crossings_result` (`smooth` int samples or a time string, `_smooth_samples`). `scope_measure(source=)` reads a
+  saved `.npz` through `_load_waveforms`.
+- **scope_status**: compact by default (no GET_BATTERY / GET_LINK_STATS requests); `detail=true` for the rest. Tests
+  that read features / ui_averaging / trigger_status / battery pass `detail=True`.
+- **scope_wait_for_event**: `_Held` lock for the whole wait, WAIT chunks of `ServerConfig.event_poll_s` (2 s) with a
+  progress notification after each; timeout = final GET_STATUS, then STOP, then a capture that completed in between is
+  recognised by capture_id moved on with origin host (the firmware's h_stop sets ABORTED unconditionally) and read;
+  cancel = shielded STOP. Simulator hook `Device.event(ch, signal)` (swap a channel's signal and re-run a pending host
+  capture's trigger search from now); signal kind `buck` (ripple + ringing switching spikes) for the FFT case. Limits
+  and why: docs/mcp-tools.md `wait_for_event`. Tests: `tests/test_mcp_notes.py`.
 
 ## Protocol support (host = simulator = vectors): 1.30 (fw-hostkeep), on 1.27 fw-d4 + fw-d5 (FPGA 0x153D)
 

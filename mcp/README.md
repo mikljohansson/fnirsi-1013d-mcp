@@ -226,18 +226,19 @@ name in docs/mcp-tools.md section 4 (`set_channel` there is `scope_set_channel` 
 |---|---|---|
 | `scope_info` | 0 | firmware, protocol, FPGA variant, serial, capabilities, memory limits |
 | `scope_profile` | 0 | static capability profile, live values, unverified facts, standing caveats |
-| `scope_status` | 0 | mode, display_mode (scope / spectrum / waterfall / density / phosphor / bode), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state, battery, link statistics; from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / mcu / hardware, `ui_averaging_records`); features `enc_check` (1.19), `bode` (1.20), `capture_stages` (1.24), `trig_types` / `peak` / `counter` (1.26), `logger` (1.27); from 1.26 `trigger_status` (the qualifier's words) |
+| `scope_status` | 0 | compact for polling: mode, display_mode (scope / spectrum / waterfall / density / phosphor / bode), run_state (RUN/STOP/SINGLE), settings_seq, latest capture id and origin, host capture state; `detail=true` adds battery, link statistics and from protocol 1.17 the bitstream's features and the acquisition menu's Average (`ui_averaging` off / mcu / hardware, `ui_averaging_records`); features `enc_check` (1.19), `bode` (1.20), `capture_stages` (1.24), `trig_types` / `peak` / `counter` (1.26), `logger` (1.27); from 1.26 `trigger_status` (the qualifier's words) |
 | `scope_get_config` | 0 | channels, timebase, trigger and generator in physical units |
 | `scope_read_calibration` | 0 | offset centres, gains, A/B compensation, volts per code per range |
 | `scope_screenshot` | 0 | PNG of the 800x480 screen |
 | `scope_fetch_waveform` | 0 | the latest capture (what the screen shows) with the settings it was taken under, without capturing |
-| `scope_measure` | 0 / 1 with `capture=true` | vpp, vmin, vmax, mean, rms, ac_rms, frequency, period, duty, rise/fall time, CH1->CH2 delay |
+| `scope_measure` | 0 / 1 with `capture=true` | vpp, vmin, vmax, mean, rms, ac_rms, frequency (the FFT peak when the crossings are irregular: `frequency_method`), period, duty, rise/fall time, CH1->CH2 delay, level `crossings` (times relative to the trigger, the time between two levels); on the last capture, a fresh one or a saved `.npz` (`source`) |
 | `scope_set_timebase` | 1 | sample rate, window or raw divider |
 | `scope_set_decimation` | 1 | decimation filter off / boxcar / CIC2 / CIC3, with `+fir` the compensation FIR: effective filter, N, shift, codes per count, effective bits; captures then read 16-bit samples; `peak` (protocol 1.26) = peak detect, every stored sample the min and max of its window (averaging refused while on) |
 | `scope_set_trigger` | 1 | source (CH1 / CH2 / EXT), edge, level (volts or code), mode, pre-trigger, total samples, auto timeout; protocol 1.26 (caps TRIG_TYPES): `type` edge / pulse_width / nth_edge / timeout with `polarity`, `width`, `longer`, `n`, `idle` in seconds (converted to trigger-stream samples, clamps named), `hold_off` (5 ns steps) |
-| `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics, file, inline samples or preview; `peak=true` (caps PEAK_DETECT) takes it with peak detect and returns min / max envelopes |
+| `scope_capture` | 1 | host single capture (the screen shows it, the scope stays in STOP); statistics (over `window` if given), file (the whole record), inline samples or preview (`preview_points`, 0 = none); `peak=true` (caps PEAK_DETECT) takes it with peak detect and returns min / max envelopes |
 | `scope_counter` | 0 / 1 when it configures | the hardware counter (protocol 1.26, caps COUNTER): frequency, period, positive width, duty, raw min / max (volts for CH1 / CH2) over a 10 ms / 100 ms / 1 s gate at 5 ns resolution; `gate`, `source`, `level`, `hysteresis` configure it (the scope's measurement cards follow), `readings` takes several gates |
-| `scope_acquisition_control` | 1 | arm / wait / force / stop / run (RUN/STOP shared with the scope's button) |
+| `scope_acquisition_control` | 1 | arm / wait (up to 60 s) / force / stop / run (RUN/STOP shared with the scope's button) |
+| `scope_wait_for_event` | 1 | sets an edge trigger and the record (pre / post), arms and waits up to 3600 s with progress notifications for an event a person causes; statistics, file, level crossings; STOP with that trigger on timeout |
 | `scope_averaged_capture` | 1 | n captures averaged, hardware or edge alignment, on-device averaging when available; `hardware=true` sums the n records in the FPGA in one run (bitstream 0x1536, fw >= 0.2.58; records up to 2046 words, n <= 257 with 8-bit samples); restarts when a setting is changed at the scope |
 | `scope_capture_segments` | 1 | segmented capture (bitstream 0x1536, fw >= 0.2.58): the FPGA re-arms after every trigger and keeps `count` records with 5 ns trigger timestamps (or refills them until `timeout_s` with `circular`); per segment time, interval, triggered, min / max / mean / Vpp; `.npz` with every record |
 | `scope_capture_and_fft` | 1 | averaged amplitude spectrum, peaks in dBV and dBc, noise floor, THD |
@@ -293,8 +294,8 @@ legacy firmware the port stays open while the host holds REMOTE (the release abo
 Confirmation tokens are bound to the exact
 arguments, single-use, and expire after 120 s. Waveforms of any length go to `.npz` (`t`, volts, codes, clip
 flags, `meta_json`; decimated captures add `CH<n>_samples16`, the stored u16 filter outputs, and
-`meta_json["decimation"]`); results up to 2000 points also carry the samples inline, longer ones a 500-point min/max
-preview.
+`meta_json["decimation"]`); results up to 2000 points also carry the samples inline, longer ones a 250-bin min/max
+preview (`preview_points` sets it, 0 = none).
 
 Physical units: volts are converted per ADC core. With the scope's own calibration v3 in use (firmware >= 0.2.45,
 protocol 1.12, GET_CAL version 3 after a base calibration at the scope), each core's 0 V code and gain come from the

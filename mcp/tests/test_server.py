@@ -25,7 +25,7 @@ ALL_TOOLS = {
     "scope_decay_fit", "scope_measure", "scope_generator", "scope_self_test_loopback", "scope_bode_sweep",
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel", "scope_report", "scope_cal_probe", "scope_decode", "scope_export_csv", "scope_mask_test",
-    "scope_dvm", "scope_counter", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop",
+    "scope_dvm", "scope_counter", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop", "scope_wait_for_event",
 }
 
 
@@ -124,7 +124,7 @@ async def test_info_profile_status_config_cal(client):
     prof = await client.call("scope_profile")
     assert "200 MS/s" in prof["static"]["max_sample_rate"] and prof["live"]["max_total_samples"] == 16382
     assert any("T3" in u for u in prof["unverified"])
-    st = await client.call("scope_status")
+    st = await client.call("scope_status", detail=True)
     assert st["control"] == "SHARED" and st["mode"] == "collaborative" and st["run_state"] == "RUN"
     assert st["battery_level"] == 18
     cfg = await client.call("scope_get_config")
@@ -322,7 +322,13 @@ async def test_capture_inline_window_and_file(client):
     meta = json.loads(str(data["meta_json"]))
     assert meta["pretrigger_samples"] == 5000
     w = await client.call("scope_capture", channels=["CH1"], window=["-100us", "100us"])
-    assert w["n_samples"] <= 2000 and "samples" in w and abs(w["t_start"] + 100e-6) < 2e-6
+    # mcp-notes: the window sets what the statistics and the inline samples cover; the file keeps the whole record
+    sp = w["stats_span"]
+    assert w["n_samples"] == 10000 and not sp["whole_record"] and sp["n_samples"] <= 202
+    assert abs(sp["t_start"] + 100e-6) < 2e-6 and abs(sp["t_end"] - 100e-6) < 2e-6
+    assert len(w["samples"]["t"]) == sp["n_samples"] and abs(w["samples"]["t"][0] + 100e-6) < 2e-6
+    assert np.load(w["file"])["t"].size == 10000
+    assert r["stats_span"]["whole_record"] and r["stats_span"]["n_samples"] == 10000
     p = await client.call("scope_capture", channels=["CH1"], processed=True)
     assert p["n_samples"] == 10000
 

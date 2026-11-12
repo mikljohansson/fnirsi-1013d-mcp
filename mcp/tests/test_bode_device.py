@@ -293,7 +293,7 @@ def test_bode_tool_device_mode(sim_factory, tmp_path):
             assert dev["ok"] and dev["where"] == "device" and dev["points"] == 6
             assert dev["device"]["state"] == "done" and dev["device"]["view_shown"]
             assert "_bode_device" in dev["files"]["json"] and Path(dev["files"]["npz"]).is_file()
-            st = await c.call("scope_status")
+            st = await c.call("scope_status", detail=True)
             assert st["display_mode"] == "bode" and "bode" in st["features"]
             cap = await c.call("scope_capture", channels=["CH1"])
             assert any("Bode plot" in x for x in cap["caveats"])

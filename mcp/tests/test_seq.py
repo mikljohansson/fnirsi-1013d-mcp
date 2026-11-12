@@ -289,7 +289,7 @@ def test_segment_and_hardware_averaging_tools(sim_factory, tmp_path):
 
     async def main():
         async with client_for(srv, tmp_path) as c:
-            st = await c.call("scope_status")
+            st = await c.call("scope_status", detail=True)
             assert st["features"] == ["ext_trigger", "decim", "fir", "segments", "hw_average", "enc_check", "bode",
                                       "capture_stages", "trig_types", "peak", "counter", "logger"]
             assert st["ui_averaging"] == "off" and st["hardware_averaging"] is False

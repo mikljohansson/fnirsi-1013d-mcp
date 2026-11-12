@@ -32,6 +32,19 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
   and nobody read it yet; `capture='latest'` / `'host'` choose explicitly. When the screen's capture has no raw words
   left (RUN waiting for a trigger, or STOP after it) it returns the processed trace the screen draws with a caveat
   instead of failing (also on older firmware). `scope_status` shows `host_capture_kept` (8df21bc).
+- `preview_points` on `scope_capture`, `scope_fetch_waveform` and `scope_averaged_capture` sets the inline waveform
+  (0 = none: a two-channel capture's result drops from 17 kB to 2 kB; the default is unchanged). `window` on
+  `scope_capture` / `scope_fetch_waveform` now sets the span of the statistics (`stats_span`); the `.npz` holds the
+  whole record (fbfbcf0).
+- `scope_measure`: level `crossings` (times relative to the trigger with hysteresis and optional smoothing, t_sigma,
+  the time between two levels), `source` = a saved `.npz`, and a frequency from the FFT peak when the crossings are
+  irregular (`frequency_method` `fft_peak`, `frequency_resolution`; a buck ripple with switching spikes read null
+  before) (4edb8cd, fbfbcf0).
+- `scope_status` is compact by default (no battery or link statistics; `detail=true` gives them) (fbfbcf0).
+- New `scope_wait_for_event`: set an edge trigger and the record, arm and wait up to an hour with progress
+  notifications for an event a person causes; returns statistics, the file and level crossings, leaves the scope in
+  STOP on timeout and keeps a capture that completed at the timeout. `scope_acquisition_control(wait)` accepts up to
+  60 s (fbfbcf0; simulator: `buck` signal, `Device.event`, 4750819).
 
 ## [0.3.2] - 2026-11-08
 
