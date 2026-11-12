@@ -366,8 +366,9 @@ NaN). Fails with a hint when the screen is in the scope view or shows no spectru
 it twice on the host: `fft` is the on-scope FFT model (codes minus the zero code, same window and N; expect
 < 0.1 dB within 60 dB of the peak), `volts` is `scope_capture_and_fft`'s computation on the calibrated volts
 (its `median_diff_db` is the scaling difference: the scope uses the firmware's volts per code, the host the
-per-unit calibration when there is one). Caveats: 8-bit SFDR, firmware scaling, and "a host capture with a raw
-divider is labelled with the UI time base's rate" (known firmware limit).
+per-unit calibration when there is one). Caveats: 8-bit SFDR and firmware scaling. The header's `divider` and
+`sample_rate` are those of the record on screen, a raw divider's capture included (fw-hostdt, after fw 0.3.2; up to
+0.3.2 such a capture was labelled with the UI time base's rate).
 
 **`measure`** (tier 0 on an existing capture, 1 if it captures). Items: `vpp`, `vmin`, `vmax`, `mean`,
 `rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay` (CH1 -> CH2). Computed on the

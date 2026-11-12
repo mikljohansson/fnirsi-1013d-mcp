@@ -11,6 +11,19 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Firmware
+
+- The screen's times follow the sample rate a capture was really taken at: when a computer sets its own rate over USB
+  (a raw divider), the ACQ chip shows that rate and what one division of the drawn trace lasts (for example 20MSa/s and
+  5us/div under a 500KSa/s, 200us/div setting), and the time cursors, the Freq / Period / Width cards, the spectrum
+  view and saved waveforms read the record's real times. Before, such captures, and the scope's own captures while that
+  rate ran, were measured with the scope's setting (a 483 kHz signal read 76 us per period at 20 MSa/s) (f0afc17).
+
+### Host (mcp)
+
+- `scope_spectrum` no longer carries the caveat that a raw divider's capture is labelled with the UI time base's rate:
+  the firmware reports the record's divider (ad5cbd2).
+
 ## [0.3.2] - 2026-11-08
 
 A maintenance release on the same FPGA bitstream, 0x153F. User-facing notes: `docs/release-notes/0.3.2.md`.

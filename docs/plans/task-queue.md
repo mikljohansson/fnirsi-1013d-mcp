@@ -6,7 +6,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
-- **Screen time axis ignores a host's raw divider** (induction-imager session 2026-11-12, fw 0.3.2 on 0x153F; dispatched
+- [x] (Done on branch fw-hostdt, f0afc17: every readout notes the record's divider and N (disp_rate.c); the ACQ chip shows
+  the record's rate and what a drawn division lasts, the time cursors, the Freq / Period / Width cards, the spectrum and
+  saved waveforms use the record's period; the "known limit" texts removed; firmware/AGENTS.md section 103; bench
+  pending.) **Screen time axis ignores a host's raw divider** (induction-imager session 2026-11-12, fw 0.3.2 on 0x153F; dispatched
   as fw-hostdt). UI time base 500 kSa/s (divider 399, index 20); `scope_set_timebase(sample_rate=20e6)` gave divider 9,
   `window='20us'` divider 0, both `ui_timeperdiv_index` null. The screen shows the host capture, but time/div, cursors
   and the frequency still assume the UI's 2 us per sample: a 483 kHz ripple read 76 us per period at 20 MSa/s and 824 us

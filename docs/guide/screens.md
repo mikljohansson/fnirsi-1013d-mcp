@@ -19,6 +19,11 @@ program on the PC has the scope's serial port open or has sent it a request in t
   at this rate. While stopped, a tapped sample rate is the setting for the next RUN: it shows green and in the ACQ chip,
   the record on screen keeps the rate it was taken at (its trace, cursors and measurements), and RUN starts at the new
   rate. The white time/divs are then those both the record and the new rate can show. In roll mode the rates are grey.
+  A computer that sets its own sample rate over USB (any rate 200 MHz / n) leaves your time base as it was: while its rate
+  runs, the ACQ chip shows that rate and what one division of the drawn trace lasts (for example 20MSa/s and 5us/div
+  where your setting says 500KSa/s and 200us/div; or an uneven value such as 2.5us/div), and the time cursors, the
+  Freq, Period and Width cards and the spectrum read the record's real times. A sample rate set on the scope (a rate
+  box, or a time/div that brings its own rate) ends the computer's rate.
 - **Filter** (the third box of the row): below 200 MSa/s the FPGA filters the 200 MSa/s samples down to the rate
   instead of skipping them, and the record holds 16-bit samples. A tap steps **Off** -> **Hi-Res** -> **Anti-alias**
   -> Off; green means a filter is on. **Hi-Res** (as Tektronix and Rigol call it; Keysight's High Resolution) is the
