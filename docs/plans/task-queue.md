@@ -6,6 +6,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **READ_TRACE REREAD after a rate change rebuilds with the current rate** (found by fw-hostdt and fw-hostkeep,
+  2026-11-12; firmware/AGENTS.md sections 103 and 104): a REREAD of a host single while stopped rebuilds the trace with
+  the divider and decimation the FPGA holds now, not the capture's, and notes that divider for the screen's labels
+  (`disp_rate_note`). Fix: build from the capture's own decim and divider (`s->cap`) and note those.
 - [x] (Done on branch fw-hostdt, f0afc17: every readout notes the record's divider and N (disp_rate.c); the ACQ chip shows
   the record's rate and what a drawn division lasts, the time cursors, the Freq / Period / Width cards, the spectrum and
   saved waveforms use the record's period; the "known limit" texts removed; firmware/AGENTS.md section 103; bench
