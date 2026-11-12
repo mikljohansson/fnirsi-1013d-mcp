@@ -49,6 +49,32 @@ def buck_record(fs: float, n: int = 16382, seed: int = 1) -> np.ndarray:
 # --- item 4: the frequency's FFT fallback ------------------------------------------------------------------------
 
 
+def test_crossings_that_disagree_with_the_spectrum_give_the_fft_peak():
+    """Bench 2026-11-12 (retest): the ripple at 20 MSa/s read 509.7 kHz from crossings, 5.4 % high, with no caveat:
+    the spikes added crossings but the interval spread stayed under FREQ_MAX_INTERVAL_CV. Here: a 483.6 kHz sine
+    with a spike that adds a crossing in about every 18th period."""
+    fs, f0, n = 20e6, 483.6e3, 16382
+    t = np.arange(n) / fs
+    v = np.sin(2 * np.pi * f0 * t)
+    period = fs / f0
+    for k in range(3, int(n / period) - 1, 18):  # a dip through the mid level and the hysteresis near the crest
+        i = int((k + 0.25) * period)
+        v[i:i + 6] = -0.6
+    v += np.random.default_rng(3).normal(0, 0.01, n)
+    old = A.frequency(v, 1 / fs)
+    assert old["frequency"] is not None and old["frequency"] > 1.03 * f0  # accepted, and high
+    assert A.FREQ_CHECK_MIN_CV < old["interval_cv"] < A.FREQ_MAX_INTERVAL_CV
+    new = A.frequency_or_fft(v, 1 / fs)
+    assert new["method"] == "fft_peak" and abs(new["frequency"] - f0) <= new["resolution"]
+    assert new["crossings_frequency"] == pytest.approx(old["frequency"])
+    assert new["reason"].startswith("crossings disagree with the spectrum")
+    # a clean square keeps its crossing estimate and its duty
+    sq = np.where((t * 1e5) % 1 < 0.3, 1.0, 0.0) + np.random.default_rng(4).normal(0, 0.01, n)
+    r = A.frequency_or_fft(sq, 1 / fs)
+    assert r["method"] == "crossings" and r["frequency"] == pytest.approx(1e5, rel=1e-3)
+    assert r["duty"] == pytest.approx(0.3, abs=0.01) and "interval_cv" not in r
+
+
 @pytest.mark.parametrize("fs", [20e6, 200e6])
 def test_buck_ripple_frequency_falls_back_to_the_fft_peak(fs):
     v = buck_record(fs)

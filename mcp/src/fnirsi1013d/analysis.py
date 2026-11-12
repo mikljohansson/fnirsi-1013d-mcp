@@ -154,22 +154,42 @@ def frequency(v: np.ndarray, dt: float) -> dict[str, Any]:
             highs.append(nxt[0] - x)
     if highs and period > 0:
         duty = float(np.clip(np.mean(highs) * dt / period, 0, 1))
-    return {"frequency": 1.0 / period if period > 0 else None, "period": period, "duty": duty}
+    return {"frequency": 1.0 / period if period > 0 else None, "period": period, "duty": duty,
+            "interval_cv": float(np.std(iv) / np.mean(iv)) if iv.size > 1 else 0.0}
 
 
 #: frequency_or_fft: the FFT line must have this many periods in the record; a slope or a part of one slow period
 #: (the battery's RC output at 200 MSa/s, finding 4a) puts its strongest "line" in the first bins
 FFT_FALLBACK_MIN_PERIODS = 4
+#: frequency_or_fft: a crossing estimate is checked against the strongest spectral line when its intervals are not as
+#: regular as a clean periodic signal's (every real square is below 0.004, see FREQ_MAX_INTERVAL_CV) and the two differ
+#: by more than this share of the line's frequency (and two bins). Bench 2026-11-12: a 483.6 kHz buck ripple with
+#: switching spikes at 20 MSa/s read 509.7 kHz from crossings (spread under 0.2, so accepted), 483.6 kHz in the FFT
+FREQ_CHECK_MIN_CV = 0.02
+FREQ_CHECK_MAX_DIFF = 0.02
 
 
 def frequency_or_fft(v: np.ndarray, dt: float) -> dict[str, Any]:
     """``frequency`` with a fallback: when the crossings are irregular (switching spikes on a ripple, a burst), the
     strongest spectral line (``dominant_frequency``) of the same record, ``method`` 'fft_peak' with the bin width as
     ``resolution`` and the crossing ``reason`` kept, when that line has at least FFT_FALLBACK_MIN_PERIODS periods
-    in the record; duty is None then. ``method`` is 'crossings' for a crossing
+    in the record; duty is None then. The same line replaces a crossing estimate whose intervals are uneven
+    (FREQ_CHECK_MIN_CV) and which differs from it (FREQ_CHECK_MAX_DIFF); ``crossings_frequency`` keeps the crossing
+    value. ``method`` is 'crossings' for a crossing
     estimate and None when there is no frequency."""
     fr = frequency(v, dt)
     if fr["frequency"] is not None:
+        cv = fr.pop("interval_cv", 0.0)
+        if cv > FREQ_CHECK_MIN_CV:
+            f = dominant_frequency(v, dt)
+            n = np.asarray(v).size
+            res = 1.0 / (n * dt)
+            if (f is not None and f * n * dt >= FFT_FALLBACK_MIN_PERIODS and
+                    abs(fr["frequency"] - f) > max(FREQ_CHECK_MAX_DIFF * f, 2 * res)):
+                return {"frequency": f, "period": 1.0 / f, "duty": None, "method": "fft_peak", "resolution": res,
+                        "crossings_frequency": fr["frequency"],
+                        "reason": f"crossings disagree with the spectrum: they give {fr['frequency']:.6g} Hz with an "
+                                  f"interval spread of {cv:.2f} of the mean (extra or missing crossings)"}
         return {**fr, "method": "crossings"}
     if str(fr.get("reason", "")).startswith("irregular crossings"):
         f = dominant_frequency(v, dt)

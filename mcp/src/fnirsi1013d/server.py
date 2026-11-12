@@ -1025,6 +1025,8 @@ def _freq_fields(name: str, v: np.ndarray, dt: float, cav: list[str] | None = No
         out["frequency_reason"] = fr["reason"]
     if fr["method"] == "fft_peak":
         out["frequency_resolution"] = _r6(fr["resolution"])
+        if fr.get("crossings_frequency"):
+            out["frequency_crossings"] = _r6(fr["crossings_frequency"])
         if cav is not None:
             cav.append(FFT_PEAK_CAVEAT.format(ch=name, why=fr["reason"].split(":")[0],
                                               res=fmt_si(fr["resolution"], "Hz")))
