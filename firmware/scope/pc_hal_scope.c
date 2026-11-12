@@ -50,6 +50,7 @@
 #include "fpga_counter.h"     //C7 counter
 #include "ui_meas.h"
 #include "roll.h"           //fw-roll
+#include "disp_rate.h"      //fw-hostdt
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
@@ -1029,6 +1030,11 @@ void pc_glue_decim_read(void *settings, uint32 start)
 
   pc_dec_raw_n[ch]    = 0;
   pc_dec_raw_peak[ch] = 0;
+
+  //fw-hostdt (disp_rate.h): the sample period of the record going into the trace buffers, for every time and frequency
+  //the screen shows of it: the divider the FPGA holds (a host's raw divider too: a UI arm writes no 0x0D) and the
+  //decimation N the arm wrote (every UI and host readout of CH1 / CH2 passes here, right after its capture)
+  disp_rate_note(pc_hal_divider_now(), pc_dec_cur.k ? pc_dec_cur.n : 0);
 
   //UI averaging: the corrected codes of the mean (the hardware run's lane sums or the MCU's sums), both passes from
   //memory as for the 16-bit path
@@ -2073,6 +2079,21 @@ static void pc_run_follow(void)
   pc_draw_end(&save);
 }
 
+//fw-hostdt (firmware/AGENTS.md section 103): the ACQ chip follows the record on screen: a record noted at another sample
+//period (a host's raw divider: pc_glue_decim_read) or back at the UI's redraws it with the texts that describe it. Not in
+//the file viewer (it draws its screen after loading the file's time scale).
+static void pc_acq_chip_follow(void)
+{
+  DISPLAYDATA save;
+
+  if((viewactive != VIEW_NOT_ACTIVE) || !scope_acq_chip_stale())
+    return;
+
+  pc_draw_begin(&save);
+  scope_acqusition_settings(0);
+  pc_draw_end(&save);
+}
+
 static void pc_right_bar_follow(void)
 {
   DISPLAYDATA save;
@@ -2788,6 +2809,7 @@ void pc_glue_ui_service(void)
   pc_right_bar_follow();
   pc_dec_follow_mode();
   pc_run_follow();
+  pc_acq_chip_follow();
 
   //Calibration v4 class probe (acal_live.c): only in the scope and spectrum views (the phosphor view's record rate would
   //see the gap; not while Diagnostics shows), never while a host capture is armed or triggered (the probe resets the sample system) or the host

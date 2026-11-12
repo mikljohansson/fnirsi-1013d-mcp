@@ -103,6 +103,10 @@
 #define CALIBRATION_SETTING_OFFSET_C     184   // 8 all, used  4*16bit 
 #define FPGA_SETTING_OFFSET              192   //16 all, used 12*16bit 
                                        //208 next  max is VIEW_NUMBER_OF_SETTINGS
+//fw-hostdt: waveform files only (viewfilesetupdata): words 208..210 = marker, the record's 0x0D divider, its decimation N
+//(0 legacy) when the record ran at another sample period than the file's time/div and rate say (disp_rate.h)
+#define WAVEFORM_RATE_WORD             208
+#define WAVEFORM_RATE_MARKER           0x44525431    //"DRT1"
                                                 
 #define SETTING_SECTOR_VERSION_HIGH  0x0100    // 0x0100    //load default settings
 #define SETTING_SECTOR_VERSION_LOW   0x0015    //>0x0002    //nova verzia ma ma 2 na 709 sector

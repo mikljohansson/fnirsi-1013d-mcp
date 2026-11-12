@@ -1536,8 +1536,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 out["spectrum"] = {"f": A._r(f[band]), "level_db": [None if np.isnan(x) else round(float(x), 2)
                                                                     for x in lv[band]]}
             cav = ["8-bit ADC: SFDR around 45-50 dBc at best; spurs below that are not trustworthy.",
-                   "levels use the firmware's volts per code (gain_db); the per-unit calibration is not applied",
-                   "a host capture with a raw divider is labelled with the UI time base's rate (known firmware limit)"]
+                   "levels use the firmware's volts per code (gain_db); the per-unit calibration is not applied"]
             if cross_check:
                 out["cross_check"] = _spectrum_cross_check(s, channel, sp)
                 cav += out["cross_check"]["notes"]

@@ -34,6 +34,7 @@
 #include "settings_check.h"
 #include "generator.h"
 #include "adc_cal.h"
+#include "disp_rate.h"
 /*
 //sinx
 #include <stdio.h>
@@ -3224,6 +3225,25 @@ void scope_display_cursor_measurements(void)
       //Get the time calculation data for this time base setting.
       PSCREENTIMECALCDATA tcd = (PSCREENTIMECALCDATA)&screen_time_calc_data[scopesettings.timeperdiv];
 
+      //fw-hostdt: a record taken at another sample period than the UI's pair (a host's raw divider) is drawn with the
+      //UI's pixels per sample; the pixel distance is converted with the record's period (disp_rate.h)
+      if(scope_rate_foreign())
+      {
+        int32  d   = (int32)delta;                                     //cursor 2 left of cursor 1: negative, as 1.00o5
+        uint64 ps  = disp_rate_scale_ps((uint64)((d < 0) ? -d : d) * scope_ui_tdiv_ps() / 50, scope_ui_divider());
+        uint32 sc  = 1;
+        int32  v   = scope_rate_h(ps / 10, &sc);
+
+        scope_print_value(displaytext, (d < 0) ? -v : v, sc, "T ", "s");
+        display_text(30, 50, displaytext);
+
+        sc = 4;
+        v  = scope_rate_h(ps ? 100000000000000ull / ps : 0, &sc);      //hundredths of Hz: 1e14 / ps
+        scope_print_value(displaytext, (d < 0) ? -v : v, sc, "F ", "Hz");
+        display_text(30, 66, displaytext);
+      }
+      else
+      {
       //For the time multiply with the scaling factor and display based on the time scale
       delta *= tcd->mul_factor;
 
@@ -3238,6 +3258,7 @@ void scope_display_cursor_measurements(void)
       //Format the frequency for displaying
       scope_print_value(displaytext, delta, tcd->freq_scale, "F ", "Hz");
       display_text(30, 66, displaytext);//10 68
+      }
     }
 
     //Check if volt cursor is enabled
@@ -3529,9 +3550,51 @@ void scope_display_vp(PCHANNELSETTINGS settings)
 //fw 0.2.51: the timing measurements with four significant digits (ui_fmt_sig4); with fewer than three crossings in the
 //record they read "no period" (was "xxxHz" / "xxxs" / "xx%")
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//fw-hostdt (firmware/AGENTS.md section 103): the UI's pair and the record on screen. The trace is drawn with the UI's
+//time/div and rate; a record taken at another sample period (a host's raw divider, also the UI's own captures while it
+//runs) has its times and frequencies computed from its own period (disp_rate.h, noted at every readout).
+
+uint32 scope_ui_divider(void)
+{
+  return (scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32))) ? sample_rate_settings[scopesettings.samplerate] : 0;
+}
+
+//The UI's time per division in ps (short mode; 0 off the table)
+uint64 scope_ui_tdiv_ps(void)
+{
+  return (scopesettings.timeperdiv < 35) ? 1000000000000ull / frequency_per_div[scopesettings.timeperdiv] : 0;
+}
+
+//1 when the record on screen ran at another sample period than the UI's pair (never in roll: its own plan labels it)
+int scope_rate_foreign(void)
+{
+  return !scopesettings.long_mode && disp_rate_foreign(scope_ui_divider());
+}
+
+//A value in hundredths of the unit at prefix *scale (ui_fmt.h), the prefix stepped up until it fits an int32
+int32 scope_rate_h(uint64 v, uint32 *scale)
+{
+  while(v > 0x7FFFFFFFull)
+  {
+    v = (v + 500) / 1000;
+    (*scale)++;
+  }
+
+  return (int32)v;
+}
+
+//A live channel's record (not a reference trace, which keeps the 1.00o5 rule)
+static int scope_rate_live(PCHANNELSETTINGS settings)
+{
+  return ((settings == &scopesettings.channel1) || (settings == &scopesettings.channel2)) && scope_rate_foreign();
+}
+
 void scope_display_freq(PCHANNELSETTINGS settings)
 {
-  if(settings->frequencyvalid)
+  if(settings->frequencyvalid && scope_rate_live(settings))
+    ui_fmt_mhz(measurementtext, disp_rate_freq_mhz(settings->periodtime));
+  else if(settings->frequencyvalid)
     ui_fmt_sig4(measurementtext, settings->frequency, freq_calc_data[scopesettings.samplerate].freq_scale, "Hz");
   else
     strcpy(measurementtext, UI_MEAS_NO_PERIOD);
@@ -3542,7 +3605,9 @@ void scope_display_freq(PCHANNELSETTINGS settings)
 //A time in samples (Q16) with the sample rate's time scale
 static void scope_display_time(PCHANNELSETTINGS settings, uint32 samples_q16)
 {
-  if(settings->frequencyvalid)
+  if(settings->frequencyvalid && scope_rate_live(settings))
+    ui_fmt_ps(measurementtext, disp_rate_samples_ps(samples_q16));
+  else if(settings->frequencyvalid)
     ui_fmt_sig4(measurementtext, (int32)(((uint64)samples_q16 * time_calc_data[scopesettings.samplerate].mul_factor) >> 16),
                 time_calc_data[scopesettings.samplerate].time_scale, "s");
   else
@@ -3899,7 +3964,19 @@ void scope_prepare_setup_for_file(void)
        ptr[index++] = scopesettings.measuresstate[channel][measurement];
     }
   }
-  
+
+  //fw-hostdt: the record's own divider and decimation N when it ran at another sample period than the UI's pair (a
+  //host's raw divider), so the viewer shows its time scale; a file without the marker is described by its pair
+  if(scope_rate_foreign())
+  {
+    uint32 d, n;
+
+    disp_rate_noted(&d, &n);
+    ptr[WAVEFORM_RATE_WORD]     = WAVEFORM_RATE_MARKER;
+    ptr[WAVEFORM_RATE_WORD + 1] = d;
+    ptr[WAVEFORM_RATE_WORD + 2] = n;
+  }
+
   //Calculate a checksum over the settings data
   for(index=1;index<VIEW_NUMBER_OF_SETTINGS;index++)
   {
@@ -4045,6 +4122,12 @@ void scope_restore_setup_from_file(void)
       scopesettings.measuresstate[channel][measurement] = ptr[index++];
     }
   }
+
+  //fw-hostdt: the record's own time scale when the file has one, else the file's pair describes it
+  if(ptr[WAVEFORM_RATE_WORD] == WAVEFORM_RATE_MARKER)
+    disp_rate_note(ptr[WAVEFORM_RATE_WORD + 1], ptr[WAVEFORM_RATE_WORD + 2]);
+  else
+    disp_rate_forget();
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

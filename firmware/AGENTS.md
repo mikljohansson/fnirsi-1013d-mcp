@@ -4,6 +4,7 @@
 step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards, warnings in every variant, top bar chips;
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
+**Branch fw-hostdt (2026-11-12): after fw 0.3.2 (no bump), protocol 1.29 unchanged: the screen's time scale follows the divider the record on screen ran at (disp_rate.c, noted at every CH1 / CH2 readout): with a host's raw divider the ACQ chip shows the record's rate and what one drawn division lasts, the time cursors, the Freq / Period / Width cards, the spectrum (READ_SPECTRUM's divider) and saved waveforms use the record's period; the trace keeps the UI's pixels per sample; GET_TIMEBASE unchanged; not benched; section 103.**
 **Branch fw-genlimit (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: one generator limit (SET_GEN's 25 MHz) for the generator menu and the settings check, so a host's 12.5 MHz no longer gets sector 709 refused at boot (every SET_* field audited, no other mismatch); the capture self-check counts at 0x64 = 48, the training keeps 32; not benched; section 102.**
 **Branch fw-csbusy (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: owner decision "only the calibration dialog writes calibration data": the capture-stage runtime guard and its sector 708 write are removed, the self-check is a diagnostic that flags a core only against a partner that counted at most 8 (else not checkable); REPEAT is advice only; not benched; section 101.**
 **Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range and clock class, stored in sector 708, applied at every readout; GET_CAL 480 bytes; gated class benched (10fa8d3), per-class not benched; sections 99 and 100.**
@@ -753,7 +754,8 @@ section 14 rows 44 (FFT_BENCH) and 45 (READ_SPECTRUM, GET_STATUS byte 43).
   `spec.wait` until a capture at the new rate; fw 0.2.77 replaced this with the span ladder, section 52); Auto is a 3-stage state machine (`spec_auto_start` / `spec_auto_step`);
   Average field (`spec_acc`, keyed restart); waterfall rows RGB565, density count + last-hit capture index (no fading
   pass). Persisted at power-off: FFT length, window, scale (word 208), ref + averaging (word 209); not the mode.
-  A host capture with a raw divider is labelled with the UI rate (row 45).
+  fs is the divider the record on screen ran at since fw-hostdt (`spec_divider` = `disp_rate_divider`, section 103); up
+  to fw 0.3.2 a host capture with a raw divider was labelled with the UI rate (row 45).
 - Maintainer verdicts so far: spectrum view works, harmonics within 0.4 dB; waterfall "very nice"; density band fixed in
   0.2.35 (verdict pending); 0.2.35-0.2.40 UX items pending on the screen (header layout, gestures, Auto, averaging).
 - Firmware auto trigger mode (0.2.41): README section 5 "Firmware auto trigger mode", protocol section 7.5. The
@@ -7757,3 +7759,87 @@ check_vectors OK); mcp ruff clean, pytest 595 passed; `fnirsi1013d.vectors --che
 5. Quiet input (probes off, USB away, 30 minutes after power-on): Calibrate, Save (expected 0x06DB; the training at 32 as
    before: GET_CAL 364.. sums as in earlier trainings), then 200 MSa/s captures with the inputs open: "capture clean",
    `captures_flagged` 0.
+
+## 103. fw-hostdt: the screen's time scale follows the divider the record ran at (after fw 0.3.2, protocol 1.29 unchanged)
+
+Branch `fw-hostdt` from main 618b45f. Commits: f0afc17 (firmware and host tests), ad5cbd2 (mcp: the spectrum caveat), then
+the docs commit with this section. `PC_FW_VERSION` not bumped. **Not benched, nothing flashed.**
+
+**What (bench report 2026-11-12, fw 0.3.2 on 0x153F).** UI time base 500 kSa/s (divider 399, index 20, 200 us/div); a host
+set divider 9 (20 MSa/s), later 0 (200 MSa/s) with SET_TIMEBASE mode 1. GET_TIMEBASE answered 0xFF / 0xFF (right), but the
+screen drew and measured every such record with the UI's 2 us per sample: 76 us per period of a 483 kHz signal at 20 MSa/s,
+824 us between peaks at 200 MSa/s (824 us x 5 ns / 2 us = 2.06 us). The same root as row 45's known limit (the spectrum).
+
+**Why it happened.** The raw path (`pc_hal_timebase_write(t, 1)`) writes 0x0D and `fpga_divider` only: the UI's pair
+(`scopesettings.timeperdiv` / `samplerate`) stays, and every screen consumer derives times from that pair. A UI arm writes
+no 0x0D either (`scope_acquire_trace_data` only takes a rate tapped in STOP), so **the UI's own records in RUN also run at
+the raw divider** (code read, and modelled in test_session: the readout after `ui_capture` sees `pc_hal_divider_now` = the
+raw divider) and were mislabelled the same way.
+
+**The design: the record carries its period, the drawing keeps the UI's pair.**
+- `disp_rate.c` / `.h` (pure, integer, host-tested): `disp_rate_note(divider, n)` stores the sample period of the record in
+  the trace buffers in 5 ns units (N with the decimation filter, else D + 1); `disp_rate_foreign(ui_divider)` = noted and
+  different from the UI pair's period; `disp_rate_scale_ps` (a time on the UI's scale as the record's), `disp_rate_samples_ps`
+  / `disp_rate_freq_mhz` (Q16 sample counts to ps / mHz, exact in u64 up to divider 2^20 and 16384 samples),
+  `disp_rate_tdiv_text` / `disp_rate_rate_text` (the chip's spelling, three significant digits: the table's own texts for
+  its 24 time/divs and 18 rates, "2.5us/div", "66.7MSa/s"; the chip's text column holds 65 px, "200ms/div" is 61).
+- **Where it is noted**: `pc_glue_decim_read` (pc_hal_scope.c), which every CH1 / CH2 readout into the trace buffers passes
+  (the UI's conversion, a host capture's `pc_hal_trace_build`, the averaging feed, auto set, the Bode engine), with
+  `pc_hal_divider_now()` and `pc_dec_cur` (what the arm wrote). Calibration and the class probe read into their own
+  settings structs and do not note. Waveform files: words 208..210 = marker 0x44525431, divider, N when the record was
+  foreign (`scope_prepare_setup_for_file`); `scope_restore_setup_from_file` notes them or forgets (an older file: its pair).
+- **Why not move the UI's pair**: a raw divider is any of 2^20 values, the pair is 18 rates and 24 time/divs; moving it
+  would change the saved settings (protocol: mode 1 changes no saved word, section 102's audit), end the raw divider in
+  `pc_settings_track` (the index would move with the FPGA holding the raw value) and still leave off-table dividers wrong.
+  Keeping the UI's pixels per sample also keeps the trace window, the slider and the stopped zoom exactly as they were.
+- **Every consumer of the UI rate** (scope_functions.c, menu.c, spectrum.c, phosphor.c, acq_view.c, ref_and_math.c,
+  roll_view.c, test.c, ui_diag_view.c were read):
+  - Changed, foreign records only (a record at the UI's period keeps the 1.00o5 table paths, byte for byte):
+    - the ACQ chip (`scope_acqusition_settings`): the record's rate (a rate tapped in STOP stays the setting, as fw-stoprate)
+      and what one drawn division lasts, UI time/div x record period / UI period (5us/div for the bench case, 500ns/div at
+      divider 0); `pc_acq_chip_follow` (pc_glue_ui_service) redraws it when its key (foreign, period, pair, rate setting,
+      long mode) moved, so a new record or a host write shows without a UI action; not in the file viewer;
+    - the time cursors (`scope_display_cursor_measurements`): the pixel time scaled, T and F through `scope_print_value`;
+    - the Freq / Period / +Width / -Width cards of CH1 / CH2 (`scope_display_freq`, `scope_display_time`): from the Q16
+      sample counts and the record's period (`ui_fmt_mhz` / `ui_fmt_ps`, four digits); duty cards are ratios (unchanged);
+    - the spectrum (`spec_divider` = `disp_rate_divider`): fs, the axis, bins, cards, Capture time and READ_SPECTRUM's
+      header divider / rate / bin width follow the record (row 45 note);
+    - the phosphor key (`phos_xkey`): the record's period, so records of two periods never share a persistence.
+  - Left on purpose: the trace's x scaling (`disp_xpos_per_sample`, `tbv_window`, the slider: the design keeps the UI's pixels
+    per sample); the ACQ menu's grids (they are the settings the user edits; a tap writes the table divider and ends the
+    raw one); reference traces' cards (they keep no rate of their own: the 1.00o5 rule, the live pair); roll mode (its own
+    plan and labels; `scope_rate_foreign` is 0 in long mode); the counter cards (the FPGA counter measures real time, the
+    gated rule already uses `pc_hal_divider_now`); auto set's internal maths (it sets its own pair); test.c's debug page.
+  - Not touched (another agent's area): a READ_TRACE REREAD rebuild after a rate change notes the divider the FPGA holds,
+    not the capture's (pc_cmds.c `h_read_trace`; the rebuild already converts with the current decimation, a pre-existing
+    limit). fw-hostkeep reworks the capture bookkeeping there: a trace built from a kept copy must call `disp_rate_note`
+    with the copy's divider and N.
+- Protocol: unchanged (1.29, vectors unchanged): GET_TIMEBASE keeps 0xFF / 0xFF and the held divider, GET_CAPTURE_INFO its
+  divider / index 0xFF; only READ_SPECTRUM's header now carries the record's divider (row 45). mcp: the `scope_spectrum`
+  caveat "labelled with the UI time base's rate" is gone; the simulator already reported the capture's divider there.
+
+**Checks**: `make gcc10`, `make`, `make PC_DEBUG=1 BUILD=build-dbg` 0 warnings: 827,904 / 851,456 / 851,968 bytes; `make -C
+host_tests test` green (test_ui 1818997 with `test_disp_rate`: the table texts, the bench case, off-table dividers, the
+filter's N, the 64-bit extremes, the chip width in font_2; test_session 73414 / 73416 debug with `test_screen_raw_divider`:
+UI index 20, raw 9 and 0, a UI capture while it runs, a raw write in STOP keeping the shown record's scale, the filter at
+divider 4 (N 6, 33.3MSa/s, 3us/div), back to the UI's index; check_vectors OK); mcp ruff clean, pytest 595 passed; `release_meta.py --check-changelog` ok.
+
+**Bench (owner; FEL load of this branch's `make gcc10`, FPGA 0x153F, CH1 x1 on the post, 1 V/div DC, trigger CH1 rising,
+Filter Off, UI time base 200 us/div at 500 kSa/s)**
+1. Generator 1 kHz 50 %: the chip reads 500KSa/s / 200us/div, Freq 1.000kHz, Period 1.000ms (the table path, as 0.3.2).
+2. Generator 100 kHz; `scope_set_timebase(divider=9)`, `scope_capture`: the chip reads 20MSa/s / 5us/div, a period spans two
+   divisions, Freq 100.0kHz, Period 10.00us, +Width about 5.000us; T cursors two divisions (100 px) apart read T 10.0us,
+   F 100kHz. GET_TIMEBASE 0xFF / 0xFF, divider 9; the ACQ menu still marks 500KSa/s and 200us/div.
+3. RUN on the screen: the UI's own records read the same (the raw divider holds); the chip does not flicker.
+4. Generator 1 MHz; `divider=0`: 200MSa/s / 500ns/div, Freq 1.000MHz, Period 1.000us, cursors 100 px = 1.00us. (The
+   owner's 483 kHz ripple: about 2.07 us per period, where 0.3.2 said 824 us.)
+5. `divider=4` (40 MSa/s, off the table), generator 1 MHz: 40MSa/s / 2.5us/div, Freq 1.000MHz. With Filter Anti-alias
+   (N 6): 33.3MSa/s / 3us/div, Freq 1.000MHz.
+6. Spectrum view at divider 9, generator 100 kHz: the peak card at 100.0kHz, the axis to 10 MHz; `scope_spectrum`
+   `sample_rate` 20000000, `divider` 9, the 100 kHz peak (0.3.2: 500 kSa/s and the peak at 2.5 kHz).
+7. STOP, SAVE WAVE; Saved waveforms, open it: 20MSa/s / 5us/div and the cards of step 2. A file saved by 0.3.2 opens as before.
+8. Phosphor variant at divider 9, then `divider=0`: the persistence restarts at the change.
+9. Tap 1MSa/s in the ACQ menu (RUN): the chip shows the table's 1MSa/s and its time/div, GET_TIMEBASE the UI's index again.
+Regression signs: a chip text cut at the right edge or flickering every pass; generic text for a table rate record (e.g.
+"200.0us/div"); a raw-divider record read with 2 us per sample anywhere; the chip drawn over an open menu; a 0.3.2
+waveform file opening with a foreign label.

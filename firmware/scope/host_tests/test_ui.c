@@ -14,6 +14,7 @@
 #include "ui_ctrl.h"
 #include "ui_meas.h"
 #include "bode_ui.h"
+#include "disp_rate.h"
 #include "test_util.h"
 
 extern FONTDATA font_2, font_3, font_5;
@@ -2576,8 +2577,118 @@ static void test_acq_row(void)
   T_EQ(p, 9);
 }
 
+//----------------------------------------------------------------------------------------------------------------------------------
+//fw-hostdt (firmware/AGENTS.md section 103): the time scale of the record on screen. The device's short-mode tables
+//(variables.c), copied: time/div 11..34 with their 1 / time per div, the rates 0..17 with their dividers and texts.
+
+static const unsigned dr_fpd[24] =
+{ 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000,
+  5000000, 10000000, 20000000, 50000000, 100000000, 200000000 };
+static const char *dr_tdiv[24] =
+{ "200ms/div", "100ms/div", "50ms/div", "20ms/div", "10ms/div", "5ms/div", "2ms/div", "1ms/div", "500us/div",
+  "200us/div", "100us/div", "50us/div", "20us/div", "10us/div", "5us/div", "2us/div", "1us/div", "500ns/div",
+  "200ns/div", "100ns/div", "50ns/div", "20ns/div", "10ns/div", "5ns/div" };
+static const unsigned dr_div[18] = { 0, 1, 3, 9, 19, 39, 99, 199, 399, 999, 1999, 3999, 9999, 19999, 39999, 99999, 199999,
+                                     399999 };
+static const char *dr_rate[18] =
+{ "200MSa/s", "100MSa/s", "50MSa/s", "20MSa/s", "10MSa/s", "5MSa/s", "2MSa/s", "1MSa/s", "500KSa/s", "200KSa/s",
+  "100KSa/s", "50KSa/s", "20KSa/s", "10KSa/s", "5KSa/s", "2KSa/s", "1KSa/s", "500Sa/s" };
+
+static void test_disp_rate(void)
+{
+  char     t[32];
+  unsigned i;
+  uint64   ps;
+  uint32   d, n;
+
+  //The generic texts are the tables' texts for the tables' values (the chip does not change shape for them)
+  for(i = 0; i < 24; i++)
+  {
+    disp_rate_tdiv_text(t, 1000000000000ull / dr_fpd[i]);
+    T_STR(t, dr_tdiv[i]);
+  }
+
+  for(i = 0; i < 18; i++)
+  {
+    disp_rate_note(dr_div[i], 0);
+    disp_rate_rate_text(t);
+    T_STR(t, dr_rate[i]);
+    T_EQ(disp_rate_p5(), dr_div[i] + 1);
+    T_FALSE(disp_rate_foreign(dr_div[i]));             //a record at the UI's own rate: the table paths
+    T_TRUE(disp_rate_foreign(dr_div[i] + 2));
+  }
+
+  //Nothing noted: the UI's pair describes the record
+  disp_rate_forget();
+  T_EQ(disp_rate_p5(), 0);
+  T_FALSE(disp_rate_foreign(399));
+  T_EQ(disp_rate_divider(399), 399);
+  T_EQ(disp_rate_scale_ps(200000000ull, 399), 200000000ull);
+  T_EQ(disp_rate_freq_mhz(65536), 0);
+  disp_rate_rate_text(t);                               T_STR(t, "--");
+  T_FALSE(disp_rate_noted(&d, &n));
+
+  //The bench report (2026-11-12): the UI at 500 kSa/s, 200 us/div (index 20, divider 399); the host's divider 9
+  //(20 MSa/s). A division of the drawn trace (100 samples) lasts 5 us; a 483 kHz signal's period, 41.41 samples,
+  //reads 2.071 us and 483.0 kHz (the screen said 76 us: the UI's 2 us per sample)
+  disp_rate_note(9, 0);
+  T_TRUE(disp_rate_foreign(399));
+  T_EQ(disp_rate_divider(399), 9);
+  ps = disp_rate_scale_ps(1000000000000ull / 5000, 399);
+  T_EQ(ps, 5000000ull);
+  disp_rate_tdiv_text(t, ps);                           T_STR(t, "5us/div");
+  disp_rate_rate_text(t);                               T_STR(t, "20MSa/s");
+  ui_fmt_ps(t, disp_rate_samples_ps(2713846u));         T_STR(t, "2.071us");      //41.41 samples in Q16
+  ui_fmt_mhz(t, disp_rate_freq_mhz(2713846u));          T_STR(t, "483.0kHz");
+  //The time cursors: 19 px apart on the UI's 200 us/div (76 us) is 1.9 us of this record
+  ui_fmt_ps(t, disp_rate_scale_ps(19 * (1000000000000ull / 5000) / 50, 399));  T_STR(t, "1.900us");
+  T_TRUE(disp_rate_noted(&d, &n)); T_EQ(d, 9); T_EQ(n, 0);
+
+  //Then divider 0 (200 MSa/s): 500 ns per division; 824 us between the peaks the owner read is 2.06 us
+  disp_rate_note(0, 0);
+  ps = disp_rate_scale_ps(1000000000000ull / 5000, 399);
+  disp_rate_tdiv_text(t, ps);                           T_STR(t, "500ns/div");
+  disp_rate_rate_text(t);                               T_STR(t, "200MSa/s");
+  ui_fmt_ps(t, disp_rate_scale_ps(824000000ull, 399));  T_STR(t, "2.060us");
+
+  //A divider off the table (4: 40 MSa/s) and a time/div off the 1-2-5 steps: computed, not looked up
+  disp_rate_note(4, 0);
+  disp_rate_rate_text(t);                               T_STR(t, "40MSa/s");
+  disp_rate_tdiv_text(t, disp_rate_scale_ps(1000000000000ull / 5000, 399));  T_STR(t, "2.5us/div");
+  disp_rate_note(2, 0);
+  disp_rate_rate_text(t);                               T_STR(t, "66.7MSa/s");
+  T_TRUE(ui_text_width(&font_2, t) <= 103 - 38 - 2);                       //the ACQ chip's text column (menu.c)
+  disp_rate_tdiv_text(t, disp_rate_scale_ps(1000000000000ull / 5000, 399));  T_STR(t, "1.5us/div");
+  disp_rate_note(6, 0);                                                    //28.57 MSa/s: 35 ns x 100 samples
+  disp_rate_rate_text(t);                               T_STR(t, "28.6MSa/s");
+  disp_rate_tdiv_text(t, disp_rate_scale_ps(1000000000000ull / 5000, 399));  T_STR(t, "3.5us/div");
+  disp_rate_note(4, 0);
+  disp_rate_tdiv_text(t, 1428571ull);                   T_STR(t, "1.43us/div");
+  T_TRUE(ui_text_width(&font_2, t) <= 103 - 38 - 2);
+  disp_rate_tdiv_text(t, 123456789000ull);              T_STR(t, "123ms/div");
+  T_TRUE(ui_text_width(&font_2, t) <= 103 - 38 - 2);
+
+  //The decimation filter at an even divider: N = 2 (floor(D / 2) + 1), the record's period is N x 5 ns (pc_decim.h)
+  disp_rate_note(4, 6);
+  T_EQ(disp_rate_p5(), 6);
+  T_EQ(disp_rate_divider(399), 4);
+  disp_rate_rate_text(t);                               T_STR(t, "33.3MSa/s");
+  T_TRUE(disp_rate_noted(&d, &n)); T_EQ(d, 4); T_EQ(n, 6);
+  //An odd divider's N equals D + 1: the legacy period, not foreign at the UI's own divider
+  disp_rate_note(399, 400);
+  T_FALSE(disp_rate_foreign(399));
+
+  //The extremes stay inside 64 bits: the largest divider, 800 px at 200 ms/div, a 16384-sample period
+  disp_rate_note(1048575, 0);
+  T_EQ(disp_rate_scale_ps(800ull * 200000000000ull / 50, 0), 800ull * 200000000000ull / 50 * 1048576ull);
+  T_EQ(disp_rate_samples_ps(16384u << 16), 16384ull * 1048576ull * 5000ull);
+  T_EQ(disp_rate_freq_mhz(16384u << 16), (13107200000000000ull + (16384ull << 16) * 1048576ull / 2) / ((16384ull << 16) * 1048576ull));
+  disp_rate_forget();
+}
+
 int main(void)
 {
+  test_disp_rate();
   test_acq_grid();
   test_acq_filter();
   test_acq_row();
