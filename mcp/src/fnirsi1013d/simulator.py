@@ -52,6 +52,7 @@ Run: ``fnirsi1013d-sim --port 5555 --signal decay:tau=80us`` (``--variant al3`` 
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import math
 import random
@@ -984,6 +985,10 @@ class Device:
         self.ui_done = -1  # the first poll in RUN produces a capture
         #: the ring holds capture ``capture_id`` (False after an ARM until the next capture finishes)
         self.ring_valid = False
+        #: protocol 1.30 (fw-hostkeep): the host's last single capture, kept until the next host ARM: its ring (the array
+        #: the capture wrote; the model never mutates a ring in place), geometry, decimation, GET_CAPTURE_INFO and the
+        #: flags ``copy`` (a later sampling reset happened: the firmware serves its copy) and ``read``; None = nothing kept
+        self.kept: dict | None = None
         #: test hook: called as on_arm(device) at the start of every host ARM (e.g. a UI change mid-run)
         self.on_arm: Callable[["Device"], None] | None = None
         #: test hook: the next n host captures are one saturated value on every core (the FPGA 0x153A first record
@@ -1973,6 +1978,8 @@ class Device:
     def _complete(self, pc: dict, origin: int = P.CaptureOrigin.HOST, n: int = 1) -> None:
         """A capture reached DONE. ``origin``: host (acq_state DONE) or UI (acq_state unchanged); ``n``: captures
         counted (the UI may have finished several since the last poll; only the latest is in the ring)."""
+        if origin != P.CaptureOrigin.HOST or self._internal:
+            self._kept_pre_reset()
         self.ring = pc["ring"]
         R = RING_WORDS
         self.trigger_addr = pc["trigger_addr"]
@@ -2009,6 +2016,45 @@ class Device:
             self._pending_capture = None
             if self.shared:
                 self.run_state = P.RunState.STOP  # a host single leaves the UI in STOP (collaborative plan)
+            if self.shared and not self._internal:  # 1.30: a single is kept (sequencer runs are not)
+                self.kept = None if self.run is not None else {
+                    "id": self.capture_id & 0xFFFFFFFF, "ring": self.ring, "trigger_addr": self.trigger_addr,
+                    "capture_start_word": self.capture_start_word, "decim": self.capture_decim,
+                    "info": self.capture_info(), "copy": False, "read": False}
+
+    def _kept_pre_reset(self) -> None:
+        """1.30: a sampling reset other than a host ARM (the UI's RUN, a Bode capture, the logger): the firmware copies
+        the kept capture's ring first (fpga_arm_reset's hook)."""
+        if self.kept is not None:
+            self.kept["copy"] = True
+
+    def ui_rearm(self) -> None:
+        """Test hook: the scope's UI arms its next conversion (RUN after a capture, normal mode: it waits for a trigger).
+        As fpga_do_conversion: the kept host capture is copied first, a host single in flight is aborted, the ring no
+        longer holds the latest capture."""
+        with self.lock:
+            self._kept_pre_reset()
+            if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+                self.acq_state = P.AcqState.ABORTED
+                self._pending_capture = None
+            self.ring_valid = False
+
+    def _kept_latest_copied(self) -> bool:
+        """1.30: the latest capture is the kept host single and a later arm overwrote the FPGA ring (the firmware answers
+        a plain READ_RAW from its copy instead of E_STATE 1 / E_BUSY 1)."""
+        k = self.kept
+        return self.proto_minor >= P.KEPT_MINOR and k is not None and k["copy"] and \
+            k["id"] == self.capture_id & 0xFFFFFFFF
+
+    def _kept_flags(self, capture_id: int) -> int:
+        k = self.kept
+        if self.proto_minor < P.KEPT_MINOR or k is None or k["id"] != capture_id:
+            return 0
+        return P.KEPT_F_IS | (P.KEPT_F_COPY if k["copy"] else 0) | (P.KEPT_F_READ if k["read"] else 0)
+
+    def _kept_mark_read(self, capture_id: int) -> None:
+        if self.kept is not None and self.kept["id"] == capture_id:
+            self.kept["read"] = True
 
     def cap_boot(self) -> None:
         """fw 0.2.79 at boot: 0x63 = the stored value when it was trained on this bitstream (the word the FPGA
@@ -2170,6 +2216,10 @@ class Device:
         if self.on_arm is not None:
             self.on_arm(self)
         now = self.now()
+        if self._internal:  # 1.30: the Bode engine's arm is not a host ARM: the kept capture is copied, not dropped
+            self._kept_pre_reset()
+        else:
+            self.kept = None
         self.ring_valid = False
         if self.shared:
             self.run_state = P.RunState.SINGLE
@@ -2312,6 +2362,7 @@ class Device:
             capture_start_word=self.capture_start_word, ms_since_arm=int((now - self.arm_time) * 1000) & 0xFFFFFFFF,
             uptime_ms=int((now - self.t_boot) * 1000) & 0xFFFFFFFF, watchdog_remaining_s=0xFFFF, battery_level=18,
             exit_reason=0, pass_ms=self.pass_ms, pass_max_ms=self.pass_max_ms, settings_seq=self.settings_seq,
+            kept_capture_id=self.kept["id"] if self.kept is not None and self.proto_minor >= P.KEPT_MINOR else 0,
             capture_settings_seq=self.capture_settings_seq if self.capture_id else P.SEQ_INVALID,
             run_state=int(self.run_state), capture_origin=self.capture_origin if self.capture_id else 0,
             ext_flags=self._ext_flags(now), display_mode=int(self.display_mode), features=int(self.features),
@@ -2452,13 +2503,15 @@ class Device:
 
     # --- readout --------------------------------------------------------------------------------------
 
-    def read_ring(self, core: int, start: int, count: int, *, lag_applied: int | None = None) -> np.ndarray:
-        """READ_RAW semantics: exact addresses when the firmware's read_lag equals the FPGA's."""
+    def read_ring(self, core: int, start: int, count: int, *, lag_applied: int | None = None,
+                  ring: np.ndarray | None = None) -> np.ndarray:
+        """READ_RAW semantics: exact addresses when the firmware's read_lag equals the FPGA's. ``ring``: another ring
+        than the FPGA's (the kept host capture's, protocol 1.30)."""
         R = RING_WORDS
         fw = self.cfg.fw_read_lag if lag_applied is None else lag_applied
         shift = fw - self.cfg.hw_read_lag
         idx = (start + shift + np.arange(count)) % R
-        return self.ring[core, idx]
+        return (self.ring if ring is None else ring)[core, idx]
 
     def _ui_capture_if_local(self) -> None:
         if self.control == P.Control.LOCAL:
@@ -3347,9 +3400,19 @@ class Device:
         return self._ok(req, self.status_bytes())
 
     def _cmd_get_capture_info(self, req: P.Frame) -> P.Frame:
-        if self.capture_id == 0:
+        flags = req.payload[0] if req.payload and self.proto_minor >= P.KEPT_MINOR else 0
+        if flags & ~P.CAPINFO_REQ_KEPT:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "flags")
+        if flags & P.CAPINFO_REQ_KEPT:  # 1.30: the host's kept single
+            if self.kept is None:
+                raise _DevErr(P.Status.E_STATE, P.STATE_NO_KEPT, "no host capture kept")
+            ci = copy.deepcopy(self.kept["info"])
+        elif self.capture_id == 0:
             raise _DevErr(P.Status.E_STATE, 0, "no capture since boot")
-        return self._ok(req, self.capture_info().pack())
+        else:
+            ci = self.capture_info()
+        ci.header.kept_flags = self._kept_flags(ci.header.capture_id)
+        return self._ok(req, ci.pack())
 
     def _check_capture_readable(self, flags: int = 0) -> None:
         """Shared mode: the latest finished capture of any origin is readable unless a host single is
@@ -3360,10 +3423,14 @@ class Device:
             raise _DevErr(P.Status.E_STATE, 0, "not done")
         if not self.ring_valid:
             if self.run_state != P.RunState.RUN:
+                if self._kept_latest_copied():  # 1.30: the firmware's copy of the kept host single
+                    return
                 raise _DevErr(P.Status.E_STATE, 1 if self.capture_id else 0,
                               "ring overwritten" if self.capture_id else "no capture")
             # firmware: hold the request until the UI capture in flight is DONE (at most 1 s)
             if not self.ui_run_capture():
+                if self._kept_latest_copied():
+                    return
                 raise _DevErr(P.Status.E_BUSY, 1, "UI capture running")
         if self.capture_id == 0:
             raise _DevErr(P.Status.E_STATE, 0, "no capture")
@@ -3396,15 +3463,36 @@ class Device:
             raise _DevErr(P.Status.E_BAD_ARG, 0, f"core_mask 0x{r.core_mask:X}")
         if r.layout > (3 if self.trig26_on else 2):
             raise _DevErr(P.Status.E_BAD_ARG, 2, f"layout {r.layout}")
-        if r.layout == P.ReadRawReq.LAYOUT_PEAK and not self.capture_decim.peak:
+        kept_req = self.shared and self.proto_minor >= P.KEPT_MINOR and bool(r.flags & P.ReadRawReq.KEPT)
+        if r.layout == P.ReadRawReq.LAYOUT_PEAK and not self.capture_decim.peak and not kept_req:
             raise _DevErr(P.Status.E_BAD_ARG, 2, "layout 3 needs a peak-detect record")
-        if r.layout == P.ReadRawReq.LAYOUT_WIDE and self.capture_decim.peak:
+        if r.layout == P.ReadRawReq.LAYOUT_WIDE and self.capture_decim.peak and not kept_req:
             raise _DevErr(P.Status.E_BAD_ARG, 2, "a peak-detect record: READ_RAW layout 3")
         if r.layout >= 1:
             for ch in (0, 1):
                 bits = (r.core_mask >> (2 * ch)) & 3
                 if bits not in (0, 3):
                     raise _DevErr(P.Status.E_BAD_ARG, 0, "layout 1 needs both cores of each selected channel")
+        kept = None
+        if self.shared:
+            allowed = P.ReadRawReq.ALLOW_NOT_DONE | (P.ReadRawReq.KEPT if self.proto_minor >= P.KEPT_MINOR else 0)
+            if r.flags & ~allowed:
+                raise _DevErr(P.Status.E_BAD_ARG, 3, "flags")
+            if r.flags & P.ReadRawReq.KEPT:  # 1.30: the host's kept single, never a segment run
+                if r.addr_mode == P.ReadRawReq.ADDR_SEGMENT:
+                    raise _DevErr(P.Status.E_BAD_ARG, 1, "addr_mode 3 with KEPT")
+                if self.kept is None:
+                    raise _DevErr(P.Status.E_STATE, P.STATE_NO_KEPT, "no host capture kept")
+                kept = self.kept
+                if r.layout == P.ReadRawReq.LAYOUT_PEAK and not kept["decim"].peak:
+                    raise _DevErr(P.Status.E_BAD_ARG, 2, "layout 3 needs a peak-detect record")
+                if r.layout == P.ReadRawReq.LAYOUT_WIDE and kept["decim"].peak:
+                    raise _DevErr(P.Status.E_BAD_ARG, 2, "a peak-detect record: READ_RAW layout 3")
+        if kept is not None:
+            if not 1 <= r.count <= R:
+                raise _DevErr(P.Status.E_BAD_ARG, 8, f"count {r.count} not in 1..{R}")
+            base = {0: 0, 1: kept["capture_start_word"], 2: kept["trigger_addr"]}[r.addr_mode]
+            return self._read_raw_reply(req, r, (base + r.address) % R, kept["ring"], kept["id"])
         if r.addr_mode == P.ReadRawReq.ADDR_SEGMENT:
             return self._read_raw_segment(req, r)
         if r.addr_mode in (1, 2) and self._segment_run_latest():
@@ -3419,10 +3507,16 @@ class Device:
         elif self.acq_state != P.AcqState.DONE and not (r.flags & P.ReadRawReq.ALLOW_NOT_DONE):
             raise _DevErr(P.Status.E_STATE, 0, f"state {P.AcqState(self.acq_state).name}, not DONE")
         start = self._resolve_start(r.addr_mode, r.address)
+        return self._read_raw_reply(req, r, start, self.ring, self.capture_id)
+
+    def _read_raw_reply(self, req: P.Frame, r: P.ReadRawReq, start: int, ring: np.ndarray, capture_id: int) -> P.Frame:
+        """READ_RAW's data from ``ring`` (the FPGA ring, or the kept host capture's, protocol 1.30)."""
+        R = RING_WORDS
         blocks = []
         clip = [False, False]
         cores = [c for c in range(4) if r.core_mask & (1 << c)]
-        data = {c: self.read_ring(c, start, r.count) for c in cores}
+        data = {c: self.read_ring(c, start, r.count, ring=ring) for c in cores}
+        self._kept_mark_read(capture_id & 0xFFFFFFFF)
         for c in cores:
             if np.any((data[c] == 0) | (data[c] == 255)):
                 clip[c // 2] = True
@@ -3449,7 +3543,7 @@ class Device:
                     il[1::2] = data[2 * ch]
                     blocks.append(il.tobytes())
         self.overload = clip
-        hdr = P.ReadRawHeader(self.capture_id, start, R, r.count, r.core_mask, r.layout, int(self.acq_state),
+        hdr = P.ReadRawHeader(capture_id, start, R, r.count, r.core_mask, r.layout, int(self.acq_state),
                               self.cfg.fw_read_lag)
         return self._ok(req, hdr.pack() + b"".join(blocks))
 
@@ -3462,9 +3556,13 @@ class Device:
         origin = 0
         s = self.settings
         if self.shared:
-            self._check_capture_readable()
+            # the firmware never waits (protocol row 36): the trace buffers of the latest capture (the UI's own for a UI
+            # capture), which a UI re-arm does not overwrite
+            if self.capture_id == 0:
+                raise _DevErr(P.Status.E_STATE, 0, "no capture")
             if self._segment_run_latest():
                 raise _DevErr(P.Status.E_STATE, 5, "the latest capture is a segment run (no trace)")
+            self._kept_mark_read(self.capture_id & 0xFFFFFFFF)
             origin = self.capture_origin  # 1.3: the CaptureOrigin codes
             s = self.capture_settings
         elif self.control == P.Control.LOCAL:

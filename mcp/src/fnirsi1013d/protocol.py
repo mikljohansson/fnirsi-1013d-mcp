@@ -58,7 +58,13 @@ PROTO_MAJOR = 1
 #: quiet sets, the residual metric q and the 0x36 sums per core and stage)
 #: 1.29 (after fw 0.3.0, fw-xzero, row 71): GET_CAL 480 bytes (460 in 10fa8d3), 432..479 the channel's zero shift
 #: for the other channel's range relays (per clock class, range and relay class) and the shift applied now
-PROTO_MINOR = 29
+#: 1.30 (fw-hostkeep, row 72): the host's last single capture is kept until the next host ARM, whatever the scope's UI
+#: does meanwhile: GET_STATUS 24 its capture_id (``kept_capture_id``), READ_RAW flags bit 1 ``ReadRawReq.KEPT``,
+#: GET_CAPTURE_INFO request byte 0 bit 0 (``CAPINFO_REQ_KEPT``) and response byte 25 (``kept_flags``, ``KEPT_F_*``),
+#: E_STATE detail ``STATE_NO_KEPT`` when nothing is kept
+PROTO_MINOR = 30
+#: 1.30: the first protocol minor with the kept host capture
+KEPT_MINOR = 30
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -940,8 +946,8 @@ class StatusResp(Payload):
 
     FIELDS = [("control", "B"), ("acq_state", "B"), ("flags", "B"), ("ui_busy", "B"), ("capture_id", "I"),
               ("trigger_addr", "H"), ("capture_start_word", "H"), ("ms_since_arm", "I"), ("uptime_ms", "I"),
-              ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"), ("reserved", "I"),
-              ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
+              ("watchdog_remaining_s", "H"), ("battery_level", "B"), ("exit_reason", "B"),
+              ("kept_capture_id", "I"), ("pass_ms", "H"), ("pass_max_ms", "H"), ("settings_seq", "I"), ("capture_settings_seq", "I"),
               ("run_state", "B"), ("capture_origin", "B"), ("ext_flags", "B"), ("display_mode", "B"),
               ("features", "H"), ("ui_average", "B"), ("ui_average_log2n", "B"),
               ("fpga_37", "B"), ("fpga_34", "B"), ("edges_left", "H")]
@@ -957,7 +963,9 @@ class StatusResp(Payload):
     watchdog_remaining_s: int = 0xFFFF
     battery_level: int = 0
     exit_reason: int = 0
-    reserved: int = 0
+    #: 1.30: the host's kept single capture (readable with READ_RAW KEPT until the next host ARM), 0 = none; reserved
+    #: (0) before 1.30
+    kept_capture_id: int = 0
     #: 1.1: interval between the last two main-loop polls, and its maximum since the previous GET_STATUS
     pass_ms: int = 0
     pass_max_ms: int = 0
@@ -1022,6 +1030,18 @@ class SetAcqStateReq(Payload):
     state: int = 0
 
 
+#: 1.30 (row 72): GET_CAPTURE_INFO request byte 0 bit 0: the host's kept capture instead of the latest one
+CAPINFO_REQ_KEPT = 0x01
+#: 1.30: GET_CAPTURE_INFO byte 25: this capture is the host's kept one / its words come from the firmware's copy (the
+#: FPGA ring was overwritten by a later arm) / READ_RAW or READ_TRACE returned it since its DONE
+KEPT_F_IS = 0x01
+KEPT_F_COPY = 0x02
+KEPT_F_READ = 0x04
+#: 1.30: E_STATE detail of READ_RAW KEPT / GET_CAPTURE_INFO KEPT with nothing kept (no host single since boot, or a host
+#: ARM since)
+STATE_NO_KEPT = 6
+
+
 @dataclass
 class CaptureInfoHeader(Payload):
     """GET_CAPTURE_INFO response, first 36 bytes (protocol 1.3): the settings the last DONE capture (any
@@ -1029,8 +1049,8 @@ class CaptureInfoHeader(Payload):
 
     FIELDS = [("capture_id", "I"), ("settings_seq", "I"), ("origin", "B"), ("flags", "B"), ("trigger_addr", "H"),
               ("capture_start_word", "H"), ("_r0", "2x"), ("divider", "I"), ("timeperdiv_index", "B"),
-              ("trig_source", "B"), ("trig_edge", "B"), ("trig_level", "B"), ("trig_mode", "B"), ("_r1", "3x"),
-              ("pretrigger_samples", "I"), ("total_samples", "I")]
+              ("trig_source", "B"), ("trig_edge", "B"), ("trig_level", "B"), ("trig_mode", "B"),
+              ("kept_flags", "B"), ("_r1", "2x"), ("pretrigger_samples", "I"), ("total_samples", "I")]
     capture_id: int = 0
     settings_seq: int = 0
     origin: int = 0
@@ -1045,6 +1065,9 @@ class CaptureInfoHeader(Payload):
     trig_mode: int = 0
     pretrigger_samples: int = 0
     total_samples: int = 0
+    #: 1.30 (byte 25; declared last so positional construction keeps its order): KEPT_F_* (0 unless this capture is the
+    #: host's kept one; 0 before 1.30)
+    kept_flags: int = 0
 
     F_TRIGGERED: ClassVar[int] = 0x01
     F_AUTO_TIMEOUT: ClassVar[int] = 0x02
@@ -2041,6 +2064,8 @@ class ReadRawReq(Payload):
 
     #: protocol <= 1.2: read while ARMED; 1.3 ("ANY"): read the ring as it is, whatever it holds
     ALLOW_NOT_DONE: ClassVar[int] = 0x01
+    #: 1.30: the host's kept single capture (from the ring or the firmware's copy), not the latest capture
+    KEPT: ClassVar[int] = 0x02
     ADDR_ABSOLUTE: ClassVar[int] = 0
     ADDR_CAPTURE: ClassVar[int] = 1
     ADDR_TRIGGER: ClassVar[int] = 2
