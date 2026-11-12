@@ -242,10 +242,28 @@ samples the record stays legacy (GET_DECIM why 2 / 3) and the firmware does not 
 0x00).
 
 **`fetch_waveform`** (tier 0 in LOCAL, 1 in REMOTE). Reads the current capture without re-arming (the UI's
-last trace in LOCAL). Same returns as `capture`.
+last trace in LOCAL). Same returns as `capture`, plus `capture_source`.
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `capture` | `"auto"`, `"latest"`, `"host"` | `"auto"` | collaborative firmware: which capture (below) |
+
+Collaborative firmware, which capture it returns (fw-hostkeep, protocol 1.30, docs/protocol.md row 72):
+- `host_kept`: the host's own last single (`acquisition_control(action='arm')` or `capture`), which the firmware keeps
+  until the next host ARM whatever the person does at the scope (RUN, more captures, STOP). `auto` returns it while
+  the screen shows a newer capture and no host has read the kept one yet (GET_CAPTURE_INFO 25 bit 2), with a caveat
+  naming both ids; `host` returns it again at any time (an error when nothing is kept or the firmware is older).
+- `latest`: READ_RAW of the newest capture of any origin, converted with its own settings.
+- `screen_trace`: the newest capture's raw words are gone (RUN armed the next capture in normal mode and no trigger
+  came: E_BUSY detail 1 after the firmware's 1 s hold; or a STOP at the scope aborted that armed capture: E_STATE
+  detail 1), so the processed trace the screen draws is returned (READ_TRACE never waits): 8-bit codes after the
+  scope's own per-core calibration (16-bit samples with the filter on), no raw per-core codes, with a caveat.
+On firmware before 1.30 only `latest` and `screen_trace` occur. `scope_status` shows `host_capture_kept` (id, fetched,
+still in the sample memory) from 1.30.
 
 **`acquisition_control`** (tier 1). Low-level control for agents that want to arm, do something else (e.g.
-fire the detector), then wait.
+fire the detector, or let the person cause the event), then wait. From protocol 1.30 the armed single, once done,
+stays readable with `fetch_waveform` until the next `arm`, even if the person presses RUN or STOP meanwhile.
 
 | Param | Type | Notes |
 |---|---|---|

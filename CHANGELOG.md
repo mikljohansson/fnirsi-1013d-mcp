@@ -11,6 +11,21 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Firmware
+
+- A host's single capture that completed while the agent was away is no longer lost when the person presses RUN or
+  STOP at the scope: the firmware keeps it until the next host ARM (copying the sample memory once, about 10 ms, when
+  something else arms first) and READ_RAW / GET_CAPTURE_INFO read it with a KEPT flag; GET_STATUS says which capture is
+  kept. Protocol 1.30. A plain read of the screen's last capture is served from that copy when it is the host's,
+  instead of "UI capture running" or "ring overwritten" (e84c000).
+
+### Host
+
+- `scope_fetch_waveform` returns the host's own armed single (capture_source `host_kept`) while the screen has moved on
+  and nobody read it yet; `capture='latest'` / `'host'` choose explicitly. When the screen's capture has no raw words
+  left (RUN waiting for a trigger, or STOP after it) it returns the processed trace the screen draws with a caveat
+  instead of failing (also on older firmware). `scope_status` shows `host_capture_kept` (a34a0a0).
+
 ## [0.3.2] - 2026-11-08
 
 A maintenance release on the same FPGA bitstream, 0x153F. User-facing notes: `docs/release-notes/0.3.2.md`.

@@ -37,7 +37,12 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
 
 - `scope_capture` = one host capture; the screen shows it and the scope stays in STOP. When done:
   `scope_acquisition_control(action='run')` gives the person a live screen back.
-- `scope_fetch_waveform` = what the scope shows now, with the settings of that capture; changes nothing.
+- `scope_fetch_waveform` = what the scope shows now, with the settings of that capture; changes nothing. Check
+  `capture_source`: `host_kept` (your own armed single), `latest`, or `screen_trace` (the screen's processed trace when
+  the raw words are gone; read its caveat).
+- An event the person causes: `scope_set_trigger` (normal), `scope_acquisition_control(action='arm')`, tell the person,
+  end your turn; later `scope_fetch_waveform` returns that single even after RUN / STOP at the scope (protocol 1.30;
+  `scope_status` `host_capture_kept`). Do not arm again before fetching it. Guide section 3 has the details.
 - Noise below ~2 LSB or fits: `scope_averaged_capture` (n 16-64 quick, 256+ for fits; `align='edge'` on the TX gate;
   `hardware=true` on a 0x1536 bitstream averages in the FPGA, fast, hardware alignment only, not yet benched).
 - Many triggers with timestamps (pulse trains, per-pulse PI decays): `scope_capture_segments` (0x1536; set the record
