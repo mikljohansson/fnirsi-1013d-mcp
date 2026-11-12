@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            29   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            30   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -66,6 +66,9 @@
                                         //      (fw-capmetric): GET_CAL 432 bytes (364..431 the last training)
                                         //1.29 (provisional numbering): the other channel's relays (fw-xzero): GET_CAL
                                         //      460 bytes (432..459 the zero shift table and the shift applied)
+                                        //1.30 (fw-hostkeep): the host's last single is kept until the next host
+                                        //      ARM: READ_RAW flags bit 1 KEPT, GET_CAPTURE_INFO request byte 0 bit 0
+                                        //      KEPT and byte 25 (kept flags), GET_STATUS 24 the kept capture_id
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4

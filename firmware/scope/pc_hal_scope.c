@@ -1946,6 +1946,13 @@ void pc_glue_ring_taken(void)
     pc_sess.ring_valid = 0;
 }
 
+//1.30 (fw-hostkeep): every sampling reset (fpga_arm_reset's hook): the host's kept capture leaves the ring first
+static void pc_glue_ring_pre_reset(void)
+{
+  if(pc_ready)
+    pc_ring_pre_reset(&pc_sess);
+}
+
 int  pc_glue_phosphor_on(void)          { return phosphor_owns_traces(); }
 void pc_glue_phosphor_draw(void)        { phosphor_draw(); }
 int  pc_glue_phosphor_xy(uint32 index)  { return phosphor_xy(index); }
@@ -2385,6 +2392,7 @@ void pc_glue_init(void)
     ui_ms_counter_register();
   }
   pc_session_init(&pc_sess);
+  fpga_arm_pre_reset = pc_glue_ring_pre_reset;
   pc_ready = 1;
   pc_ui_fix_settings();
 

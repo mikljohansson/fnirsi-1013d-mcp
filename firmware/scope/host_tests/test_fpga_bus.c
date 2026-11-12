@@ -278,6 +278,37 @@ static void test_ready_bound(void)
   (void)idles;
 }
 
+//1.30 (fw-hostkeep): the pre-reset hook runs once per arm, before the first bus write (the ring still holds the previous
+//capture; the PC session copies the host's kept capture there)
+static uint32_t hook_calls, hook_trace;
+
+static void hook_pre_reset(void)
+{
+  hook_calls++;
+  hook_trace = fm.ntrace;
+}
+
+static void test_pre_reset_hook(void)
+{
+  fpga_arm_cfg c;
+
+  fm_reset(0x153F, 0, 9);
+  fm.ntrace = 0;
+  memset(&c, 0, sizeof(c));
+  c.pre_words = 10;
+  c.total_words = 100;
+  c.max_polls = 1000;
+
+  hook_calls = 0;
+  hook_trace = 99;
+  fpga_arm_pre_reset = hook_pre_reset;
+  T_EQ(fpga_arm_reset(&c), 0);
+  T_EQ(hook_calls, 1); T_EQ(hook_trace, 0);
+  fpga_arm_pre_reset = 0;
+  T_EQ(fpga_arm_reset(&c), 0);
+  T_EQ(hook_calls, 1);
+}
+
 //The UI record start (pc_glue_ui_read_start): exact at every trigger address, where 1.00o5's constants were not
 static void test_ring_start(void)
 {
@@ -2077,6 +2108,7 @@ int main(void)
   test_arm_order();
   test_arm_trace();
   test_ready_bound();
+  test_pre_reset_hook();
   test_decim_write();
   test_timeout_records();
   test_force_deadline();

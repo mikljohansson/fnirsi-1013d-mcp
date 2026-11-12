@@ -933,6 +933,41 @@ def build():
         "[class 0, 1, 2]: -64 0 62, -62 0 60, ..), 460 the full table (-56 0 54, ..)",
         [decoded(CMDS["GET_CAL"], 99, cb, flags=FLAG_RESPONSE)])
 
+    # 5l. Protocol 1.30 (fw-hostkeep, section 14 row 72): the host's last single is kept until the next host ARM. GET_STATUS
+    # 24 u32 = its capture_id (0 none; reserved 0 before 1.30); GET_CAPTURE_INFO request byte 0 bit 0 KEPT selects it,
+    # response byte 25 = kept flags (bit 0 this is the kept capture, bit 1 served from the firmware's copy, bit 2 read
+    # since its DONE); READ_RAW flags bit 1 KEPT; E_STATE detail 6 when nothing is kept. The host's request vectors
+    # (host_req_read_raw_kept, host_req_get_capture_info_kept) are mcp's (vectors.py --merge)
+    st = bytearray(52)
+    st[0], st[1] = 2, 3
+    st[4:8] = struct.pack("<I", 885)
+    st[24:28] = struct.pack("<I", 877)
+    st[40], st[41] = 1, 1
+    st = bytes(st)
+    f = frame(CMDS["GET_STATUS"], 100, st, flags=FLAG_RESPONSE)
+    add("resp_get_status_1_30", f, [],
+        "1.30 GET_STATUS (52 bytes, the bench case of 2026-11-12): shared, acq_state 3 DONE, capture_id 885 (the "
+        "screen's RUN capture: run_state 1, origin 1 ui_run), 24 u32 the host's kept capture 877 (0 = none)",
+        [decoded(CMDS["GET_STATUS"], 100, st, flags=FLAG_RESPONSE)])
+    ci = bytearray(112)
+    ci[0:4] = struct.pack("<I", 877)
+    ci[8] = 0
+    ci[9] = 0x01
+    ci[25] = 0x03
+    ci = bytes(ci)
+    f = frame(CMDS["GET_CAPTURE_INFO"], 101, ci, flags=FLAG_RESPONSE)
+    add("resp_get_capture_info_1_30_kept", f, [],
+        "1.30 GET_CAPTURE_INFO with request byte 0 = 1 (KEPT; 112 bytes, the rest zero here): capture 877, origin 0 "
+        "host, triggered, 25 kept flags 0x03 (the kept capture, served from the copy: the ring was overwritten; bit 2 "
+        "clear: not read yet)",
+        [decoded(CMDS["GET_CAPTURE_INFO"], 101, ci, flags=FLAG_RESPONSE)])
+    ep = struct.pack("<H", 6) + b"no host capture kept"
+    f = frame(CMDS["READ_RAW"], 102, ep, status=8, flags=FLAG_RESPONSE)
+    add("resp_read_raw_e_state_no_kept", f, [],
+        "1.30 READ_RAW with flags bit 1 (KEPT) and nothing kept (no host single since boot, or a host ARM since): E_STATE "
+        "detail 6; GET_CAPTURE_INFO KEPT answers the same",
+        [decoded(CMDS["READ_RAW"], 102, ep, status=8, flags=FLAG_RESPONSE)])
+
     # 6. ASCII probe (section 10)
     add("ascii_ver", b"#VER\n", [{"event": "ascii", "line": "VER"}], "#VER probe")
     add("ascii_local_crlf", b"#LOCAL\r\n", [{"event": "ascii", "line": "LOCAL"}], "#LOCAL with CR LF (the LF is junk)")
