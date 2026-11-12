@@ -1060,6 +1060,91 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
     return out
 
 
+#: scope_fetch_waveform(capture=...): which capture to read on collaborative firmware
+CAPTURE_SOURCES = ("auto", "latest", "host")
+
+
+def _kept_choice(s: Scope, st: P.StatusResp, capture: str) -> P.CaptureInfo | None:
+    """Protocol 1.30 (fw-hostkeep): the host's kept single when it is the one to read: always for ``capture='host'``;
+    for 'auto' while the screen has moved on to another capture and no host has read the kept one yet (an agent armed,
+    the person caused the event and pressed RUN / STOP before the agent came back). None: read the latest capture."""
+    if capture == "latest" or not st.shared:
+        return None
+    if not s.has_kept:
+        if capture == "host":
+            raise ToolError(f"capture='host': this firmware does not keep the host's capture (protocol 1.{P.KEPT_MINOR} "
+                            f"needed, it speaks 1.{s.info.proto_minor}); use capture='latest'")
+        return None
+    if not st.kept_capture_id or (capture == "auto" and st.kept_capture_id == st.capture_id):
+        if capture == "host" and not st.kept_capture_id:
+            raise ToolError("capture='host': no host capture is kept (none since the scope booted, or a host ARM "
+                            "since); scope_capture or scope_acquisition_control(action='arm') takes one")
+        return None
+    kci = s.kept_capture_info()
+    if kci is None:
+        if capture == "host":
+            raise ToolError("capture='host': no host capture is kept (a host ARM since)")
+        return None
+    if capture == "auto" and kci.header.kept_flags & P.KEPT_F_READ:
+        return None
+    return kci
+
+
+def _kept_note(kci: P.CaptureInfo, st: P.StatusResp) -> str:
+    h = kci.header
+    note = (f"this is the host's own single capture {h.capture_id} (protocol 1.{P.KEPT_MINOR}: the firmware keeps it until "
+            "the next host ARM, whatever the scope does meanwhile)")
+    if st.capture_id != h.capture_id:
+        note += (f"; the screen has moved on to capture {st.capture_id} "
+                 f"({P.CaptureOrigin(st.capture_origin).name.lower()}), which capture='latest' reads")
+    return note
+
+
+def _screen_trace_note(cap: Capture, e: DeviceError) -> str:
+    why = ("the scope's RUN loop armed its next capture (normal trigger mode, no trigger within 1 s), which is writing "
+           "the sample memory" if e.status == P.Status.E_BUSY else
+           "a STOP at the scope aborted the capture it had armed, which had already overwritten the sample memory")
+    if cap.decim is not None and cap.decim.k:
+        what = "the filter's 16-bit samples as the FPGA stored them (WIDE), converted on the host"
+    else:
+        what = ("8-bit codes after the scope's own per-core calibration (one rounded code per sample, no per-core raw "
+                "codes, clipping judged on the corrected codes 0 / 255), volts converted from those codes")
+    return (f"capture {cap.capture_id} ({cap.origin}) is the one the screen shows, but its raw words are gone ({why}); "
+            f"this is the scope's processed trace of it (READ_TRACE, what the screen draws): {what}, with the "
+            "capture's settings")
+
+
+def _read_latest(s: Scope, chans: list[str], start: int = 0, count: int | None = None) -> tuple[Capture, str]:
+    """Collaborative firmware: the latest capture (READ_RAW), source 'latest'. When its raw words are gone (E_BUSY
+    detail 1: RUN armed the next capture and no trigger came; E_STATE detail 1: STOP aborted that armed capture), the
+    trace the screen shows (READ_TRACE never waits), source 'screen_trace', with a caveat; ``start`` / ``count`` are
+    then applied on the host."""
+    try:
+        return s.read_capture(chans, start, count), "latest"
+    except DeviceError as e:
+        if not ((e.status == P.Status.E_BUSY and e.detail == P.BusyDetail.CAPTURE) or
+                (e.status == P.Status.E_STATE and e.detail == 1)):
+            raise
+        cap = s.read_trace_capture(chans)
+        if start or count is not None:
+            cap = _slice_capture(cap, start, cap.total_samples - start if count is None else count)
+        cap.notes.append(_screen_trace_note(cap, e))
+        return cap, "screen_trace"
+
+
+def _read_shared(s: Scope, st: P.StatusResp, chans: list[str], capture: str = "auto", start: int = 0,
+                 count: int | None = None) -> tuple[Capture, str]:
+    """The capture a read without a new capture returns on collaborative firmware, and its source: 'host_kept' (the
+    host's own single, protocol 1.30, ``_kept_choice``), 'latest' (READ_RAW of the newest capture) or 'screen_trace'
+    (its processed trace when the raw words are gone)."""
+    kci = _kept_choice(s, st, capture)
+    if kci is not None:
+        cap = s.read_kept_capture(chans, start, count, ci=kci)
+        cap.notes.append(_kept_note(kci, st))
+        return cap, "host_kept"
+    return _read_latest(s, chans, start, count)
+
+
 def _capture_for_analysis(sess: Session, s: Scope, chans: list[str], capture: bool, timeout_s: float,
                           notes: list[str], tool: str) -> Capture:
     """The capture a host-side analysis tool (scope_measure, scope_decode) works on: a fresh host capture with
@@ -1075,8 +1160,8 @@ def _capture_for_analysis(sess: Session, s: Scope, chans: list[str], capture: bo
     cap = sess.last_capture
     if cap is None or any(c not in cap.channels for c in chans):
         st = s.status()
-        if st.shared and st.capture_id:
-            cap = s.read_capture(chans)
+        if st.shared and (st.capture_id or st.kept_capture_id):
+            cap, _ = _read_shared(s, st, chans)
         elif st.control != P.Control.REMOTE and not st.shared:
             cap = s.read_trace_capture(chans)
         elif st.acq_state == P.AcqState.DONE:
@@ -1251,7 +1336,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         mean of ui_averaging_records records, summed by the MCU or by one FPGA run; hardware_averaging says which),
         from 1.26 trigger_status (the qualifier: type, hold-off running, counting, pulse began, edges left),
         run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
-        the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
+        the latest capture's id and origin (host / ui_run / ui_single), from 1.30 host_capture_kept (the host's last
+        single, readable with scope_fetch_waveform until the next host ARM: its id, whether a host fetched it yet), the
+        host capture state, trigger address,
         battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
@@ -1277,6 +1364,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 extra = {"mode": "collaborative", "display_mode": disp, "run_state": P.RunState(st.run_state).name,
                          "settings_seq": st.settings_seq, "capture_settings_seq": st.capture_settings_seq,
                          "capture_origin": P.CaptureOrigin(st.capture_origin).name.lower()}
+                if s.has_kept:  # 1.30: the host's last single, readable until the next host ARM
+                    kci = s.kept_capture_info() if st.kept_capture_id else None
+                    extra["host_capture_kept"] = None if kci is None else {
+                        "capture_id": kci.header.capture_id,
+                        "fetched": bool(kci.header.kept_flags & P.KEPT_F_READ),
+                        "still_in_sample_memory": not kci.header.kept_flags & P.KEPT_F_COPY}
                 if s.info.proto_minor >= 17:  # 1.17: the bitstream's features and the acquisition menu's Average
                     extra["features"] = P.feature_names(st.features)
                     extra["ui_averaging"] = P.UI_AVERAGE_NAMES.get(st.ui_average, st.ui_average)
@@ -2175,25 +2268,48 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                                                       "trigger")] = None,
         processed: Annotated[bool, Field(description="read the firmware's processed trace (what the screen "
                                                      "draws) instead of raw reads")] = False,
+        capture: Annotated[Literal["auto", "latest", "host"], Field(
+            description="collaborative firmware: 'auto' = the host's own armed single when the scope has moved on "
+                        "since and no host read it yet (protocol 1.30), else the latest capture; 'latest' = what the "
+                        "screen shows now; 'host' = the host's last single again (kept until the next host ARM)")]
+        = "auto",
     ) -> dict[str, Any]:
-        """Read the latest capture without taking a new one: what the scope screen shows. Collaborative
-        firmware: the newest finished capture of any origin (the scope's RUN loop, a single at the scope, or a
-        host capture), converted with the settings it was taken under (reported as capture_settings; they may
-        differ from the live ones). Legacy firmware: the UI's last trace in LOCAL, the last remote capture in
-        REMOTE. Tier 0: changes nothing (in RUN mode, if the capture keeps being replaced during a chunked read,
-        RUN is paused for that one read and the caveats say so). Same result format as scope_capture."""
-        args = {"channels": channels, "window": window, "processed": processed}
+        """Read a capture without taking a new one. Collaborative firmware: by default the newest finished capture
+        of any origin (the scope's RUN loop, a single at the scope, or a host capture), converted with the settings
+        it was taken under (reported as capture_settings; they may differ from the live ones). Exception (protocol
+        1.30): after scope_acquisition_control(action='arm') the host's single stays readable until the next host
+        ARM, whatever the person does at the scope meanwhile (RUN, more captures, STOP); while no host has read it,
+        this returns it, not the screen's newer capture (capture_source 'host_kept', a caveat names both ids). When
+        the latest capture's raw words are gone (RUN armed again in normal mode and no trigger came, or STOP aborted
+        that armed capture) the result is the trace the screen draws (capture_source 'screen_trace', with its
+        limits in the caveats). In RUN a chunked read that keeps being replaced is retried, then read with RUN
+        paused for that one read (caveat). Legacy firmware: the UI's last trace in LOCAL, the last remote capture in
+        REMOTE. Tier 0: changes nothing else. Same result format as scope_capture, plus capture_source."""
+        args = {"channels": channels, "window": window, "processed": processed, "capture": capture}
 
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             chans = _channels_arg(channels, ["CH1"])
             st = s.status()
             w = _window_arg(window)
-            if st.shared and not processed:
+            source = "latest"
+            kci = _kept_choice(s, st, capture) if st.shared else None
+            if kci is not None:
+                cap = s.read_kept_capture(chans, ci=kci)
+                cap.notes.append(_kept_note(kci, st))
+                if processed:
+                    cap.notes.append("processed=true: the scope has no processed trace of a kept host capture once "
+                                     "it moved on; these are its raw words, compensated on the host")
+                source = "host_kept"
+                if w is not None:
+                    a = max(0, int(math.floor(w[0] / cap.dt)) + cap.pretrigger_samples)
+                    b = min(cap.total_samples, int(math.ceil(w[1] / cap.dt)) + cap.pretrigger_samples + 1)
+                    cap = _slice_capture(cap, a, b - a)
+            elif st.shared and not processed:
                 if st.capture_id == 0:
                     raise ToolError("scope_fetch_waveform: no capture since the scope booted; press RUN on the "
                                     "scope or call scope_capture")
-                cap = s.read_capture(chans)
+                cap, source = _read_shared(s, st, chans, "latest")
                 if w is not None:
                     a = max(0, int(math.floor(w[0] / cap.dt)) + cap.pretrigger_samples)
                     b = min(cap.total_samples, int(math.ceil(w[1] / cap.dt)) + cap.pretrigger_samples + 1)
@@ -2211,7 +2327,9 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                     f"{P.AcqState(st.acq_state).name}); call scope_capture first")
                 a, n = _sample_window(s, w)
                 cap = s.read_capture(chans, a, n, st=st)
-            return _capture_result(sess, cap, "fetch")
+            out = _capture_result(sess, cap, "fetch")
+            out["capture_source"] = source
+            return out
         return await run("scope_fetch_waveform", 0, args, go)
 
     @register(1, title="Arm / wait / force / stop")
@@ -2221,9 +2339,11 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                         "loop), or run (resume the scope's own continuous acquisition)")],
         timeout_s: Annotated[float, Field(gt=0, le=10, description="for wait")] = 2.0,
     ) -> dict[str, Any]:
-        """Low-level control for agents that want to arm, do something else (e.g. fire the detector), then wait
-        and read with scope_fetch_waveform; and the scope's RUN/STOP state, shared with the person at the scope
-        (either side can press RUN or STOP; 'run' needs collaborative firmware).
+        """Low-level control for agents that want to arm, do something else (e.g. fire the detector, or let the person
+        cause the event), then wait and read with scope_fetch_waveform; and the scope's RUN/STOP state, shared with
+        the person at the scope (either side can press RUN or STOP; 'run' needs collaborative firmware). From
+        protocol 1.30 the armed single, once done, stays readable with scope_fetch_waveform until the next 'arm',
+        even if the person presses RUN or STOP at the scope in between.
 
         'force' is only available once verified on this FPGA variant (capability FORCE_TRIGGER, bench test T7);
         otherwise use trigger mode 'auto'."""

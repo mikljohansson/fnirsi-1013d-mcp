@@ -144,6 +144,20 @@ def build_host_vectors() -> list[dict[str, Any]]:
     v += build_host_vectors_1_27()
     v += build_host_vectors_153e()
     v += build_host_vectors_153f()
+    v += build_host_vectors_1_30()
+    return v
+
+
+def build_host_vectors_1_30() -> list[dict[str, Any]]:
+    """Protocol 1.30 (fw-hostkeep, row 72): the host's requests for its kept single capture."""
+    v = []
+    v.append(_vec("host_req_read_raw_kept", _f(P.Cmd.READ_RAW, 70, P.ReadRawReq(0x0F, 1, 0, P.ReadRawReq.KEPT, 0,
+                                                                                   1024).pack()).encode(),
+                  "1.30 READ_RAW of the host's kept single: all four cores, addr_mode 1 (its capture start), layout 0, "
+                  "flags 0x02 KEPT, 1024 words"))
+    v.append(_vec("host_req_get_capture_info_kept", _f(P.Cmd.GET_CAPTURE_INFO, 71,
+                                                       bytes([P.CAPINFO_REQ_KEPT, 0, 0, 0])).encode(),
+                  "1.30 GET_CAPTURE_INFO of the host's kept single: request byte 0 = 1 (KEPT), 1..3 zero"))
     return v
 
 

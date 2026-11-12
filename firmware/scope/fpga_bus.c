@@ -69,9 +69,15 @@ static void fpga_arm_geometry(const fpga_arm_cfg *c)
   fpga_write_short(c->total_words);
 }
 
+void (*fpga_arm_pre_reset)(void) = 0;
+
 int fpga_arm_reset(const fpga_arm_cfg *c)
 {
   uint32_t n = 0;
+
+  //Before anything is written: the ring still holds the previous capture (fpga_bus.h)
+  if(fpga_arm_pre_reset)
+    fpga_arm_pre_reset();
 
   //Before the reset: the write clock edges the 0x05 poll waits for load 0x0B into the trigger read address
   fpga_arm_geometry(c);

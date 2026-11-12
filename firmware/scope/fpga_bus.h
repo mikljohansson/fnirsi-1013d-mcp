@@ -58,6 +58,10 @@ typedef struct
 //0x01 = 0. 0 = released, -1 = ready never came
 int  fpga_arm_reset(const fpga_arm_cfg *c);
 
+//Called first by every fpga_arm_reset, while the ring still holds the previous capture (0 = none). Protocol 1.30
+//(fw-hostkeep): the PC session copies the host's kept capture out of the ring here (pc_ring_pre_reset, pc_cmds.h)
+extern void (*fpga_arm_pre_reset)(void);
+
 //End a running capture now (fw-small): 0x0E = 0, then 0x1A = 0. The FPGA stops in auto mode only on ~trigger_mode &&
 //time_base_cnt > 0x0E (zaklad.v); 0x1A = 0 alone left an explicit auto_timeout (0x0E = the host's count) running up to
 //twice the deadline. On 0x153B+ the stop latches the newest total words (fpga/al3/README.md section 11, change 1) and a

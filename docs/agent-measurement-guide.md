@@ -52,7 +52,18 @@ means another program has the port: ask the person, do not retry in a loop.
 - `scope_capture`: one host capture. The scope screen shows it and the scope stays in STOP afterwards; resume with
   `scope_acquisition_control(action='run')` when you are done, so the person gets a live screen back.
 - `scope_fetch_waveform`: what the scope captured last (also its own RUN captures), converted with the settings of
-  that capture (`capture_settings`). Changes nothing.
+  that capture (`capture_settings`). Changes nothing. Check `capture_source` and `capture_id`: `host_kept` is your own
+  armed single, `latest` the screen's newest capture, `screen_trace` the screen's processed trace when that capture's
+  raw words are gone (read the caveat: 8-bit corrected codes, no raw cores).
+- **Waiting for an event a person causes** (a button press, a detector pass): `scope_set_trigger` (mode `normal`,
+  the source and level of the event), then `scope_acquisition_control(action='arm')`, tell the person what to do and
+  end your turn. Later `scope_fetch_waveform` returns that capture (`capture_source` `host_kept`, `origin` `host`)
+  even if the person pressed RUN or STOP at the scope in between or caused the event several times (firmware with
+  protocol 1.30; the first event that triggered is the one kept, later ones only reach the screen). `scope_status`
+  `host_capture_kept` tells whether it completed (its id) and whether you fetched it already; `acq_state` ARMED means
+  no event came yet. Do not arm again before you fetched it: the next `arm` (and `scope_capture`) replaces it. On
+  older firmware the event is lost once the scope's RUN loop captures again: ask the person not to touch the scope
+  until you have read it.
 - `scope_averaged_capture`: when the noise matters (signal features below ~2 LSB, decay tails): averaging n captures
   lowers random noise by about sqrt(n). `align='edge'` with `align_channel` on the TX gate removes trigger jitter.
   16-64 for a quick look, 256+ for fits. It reports drops (no trigger, clipped) and `restarts`. `hardware=true`

@@ -16,7 +16,10 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   between peaks at 200 MSa/s (824 us x 5 ns / 2 us = 2.06 us: the factor is the UI dt over the capture dt). The known
   limit "a raw divider is labelled with the UI rate" (protocol row 45, the spectrum view) is the same root. Wanted: the
   time scale of what is displayed follows the divider the capture ran at, or the screen says the scale is unknown.
-- **A finished host single is lost when the UI arms again** (same session; dispatched as fw-hostkeep). ARM (CH2 falling,
+- [x] (Done on branch fw-hostkeep, e7934d4 firmware / 8df21bc mcp: protocol 1.30, the kept single (READ_RAW / GET_CAPTURE_INFO
+  KEPT, selected by a flag rather than by capture_id; the host can read the kept id from GET_STATUS 24), dropped only by
+  the next host ARM; the screen-trace fallback in the host; firmware/AGENTS.md section 104; bench pending.) **A finished
+  host single is lost when the UI arms again** (same session; dispatched as fw-hostkeep). ARM (CH2 falling,
   normal, single) gave capture 877 ARMED; the owner repeated the event at the scope, RUN ran on (capture 885, ui_run);
   READ_RAW then answered E_BUSY detail 1 twice (the RUN loop sat armed in normal mode, no trigger coming), and after STOP
   E_STATE "ring overwritten". Wanted: the last completed host capture stays readable until the host fetched it or armed

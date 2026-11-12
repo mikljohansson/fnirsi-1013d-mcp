@@ -335,6 +335,40 @@ static void pc_capture_finish(pc_session *s, pc_capture *c, uint16_t trigger_add
   s->ring_valid    = 1;
 }
 
+//1.30 (fw-hostkeep): the words of the host's kept capture once the ring no longer holds them, per core (0x20..0x23)
+static uint8_t pc_kept_ring[4][PC_FPGA_RING_WORDS];
+
+//A host single capture is DONE: it is kept (its words stay in the ring until the next sampling reset). Sequencer runs are
+//not kept (their data are the segment table and the sums, not one record)
+static void pc_kept_take(pc_session *s)
+{
+  if(s->cap.seq_mode)
+  {
+    s->kept_state = PC_KEPT_NONE;
+    return;
+  }
+
+  s->kept       = s->cap;
+  s->kept_state = PC_KEPT_RING;
+  s->kept_read  = 0;
+}
+
+//The sampling reset of any arm (fpga_arm_reset's hook; host ARMs drop the kept capture before theirs): the whole ring,
+//all four lanes, is copied once while it still holds the kept capture. 4 x 8192 bytes at about 0.3 us per byte on the
+//bus: about 10 ms, paid at most once per host capture and only when something else arms before the next host ARM
+void pc_ring_pre_reset(pc_session *s)
+{
+  uint8_t core;
+
+  if(s->kept_state != PC_KEPT_RING)
+    return;
+
+  for(core=0;core<4;core++)
+    pc_hal_read_core(core, 0, PC_FPGA_RING_WORDS, pc_kept_ring[core], 1);
+
+  s->kept_state = PC_KEPT_COPY;
+}
+
 //UI hooks. They run in main-loop code outside pc_poll; in_poll keeps the timer-tick poll out meanwhile.
 void pc_ui_pass_mark(pc_session *s, int n)
 {
@@ -474,6 +508,7 @@ static uint32_t pc_status_body(pc_session *s, uint8_t *p)
   pc_put_u16(p + 20, 0xFFFF);                   //no watchdog in 1.3
   p[22] = level;
   p[23] = 0;                                    //no exit reasons in 1.3
+  pc_put_u32(p + 24, s->kept_state ? s->kept.capture_id : 0);  //1.30: the host's kept capture (0 none)
   //Protocol 1.1 appends the main-loop pass time (interval between main-loop polls), last and maximum since the
   //previous GET_STATUS, in ms
   pc_put_u16(p + 28, s->pass_ms);
@@ -1547,6 +1582,7 @@ static int h_arm(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp,
   //untriggered segments are recorded as such, and averaging skips untriggered records; the firmware auto time-out would
   //end the whole run
   s->ring_valid = 0;
+  s->kept_state = PC_KEPT_NONE;                       //1.30: a host ARM ends the kept capture (before the reset's hook)
   s->seq_stop   = 0;
   s->arm_dc     = dc;
   s->arm_seq    = s->seq;
@@ -1668,15 +1704,36 @@ static int h_set_acq_state(pc_session *s, const uint8_t *req, uint32_t len, uint
   return PC_OK;
 }
 
-//GET_CAPTURE_INFO (1.3): the settings the latest finished capture (any origin) was taken with
+//1.30: GET_CAPTURE_INFO byte 25 for capture c (PC_KEPT_F_*): 0 unless c is the host's kept capture
+static uint8_t pc_kept_flags(const pc_session *s, const pc_capture *c)
+{
+  if(!s->kept_state || (c->capture_id != s->kept.capture_id))
+    return 0;
+
+  return (uint8_t)(PC_KEPT_F_IS | ((s->kept_state == PC_KEPT_COPY) ? PC_KEPT_F_COPY : 0) |
+                   (s->kept_read ? PC_KEPT_F_READ : 0));
+}
+
+//GET_CAPTURE_INFO (1.3): the settings the latest finished capture (any origin) was taken with. 1.30: request byte 0
+//bit 0 (KEPT) selects the host's kept capture instead
 static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
 {
   const pc_capture *c = &s->cap;
   uint32_t i;
 
-  (void)req; (void)len;
+  (void)len;
 
-  if(s->capture_id == 0)
+  if(req[0] & ~PC_CI_F_KEPT)
+    return pc_error(s, PC_E_BAD_ARG, 0, "flags");
+
+  if(req[0] & PC_CI_F_KEPT)
+  {
+    if(!s->kept_state)
+      return pc_error(s, PC_E_STATE, PC_STATE_NO_KEPT, "no host capture kept");
+
+    c = &s->kept;
+  }
+  else if(s->capture_id == 0)
     return pc_error(s, PC_E_STATE, 0, "no capture");
 
   memset(resp, 0, PC_CAPTURE_INFO_LEN);
@@ -1692,6 +1749,7 @@ static int h_get_capture_info(pc_session *s, const uint8_t *req, uint32_t len, u
   resp[22] = c->edge;
   resp[23] = c->level;
   resp[24] = c->mode;
+  resp[25] = pc_kept_flags(s, c);                 //1.30
   pc_put_u32(resp + 28, c->pretrigger);
   pc_put_u32(resp + 32, c->total);
 
@@ -1767,11 +1825,22 @@ static int h_wait(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp
   return PC_DEFERRED;
 }
 
-//One core of READ_RAW: the ring (slot_len 0), or a segment slot of slot_len words at slot_base, wrapping at its end
+//One core of READ_RAW: the ring (slot_len 0), or a segment slot of slot_len words at slot_base, wrapping at its end.
+//copy (1.30): the kept host capture's copy of the ring instead of the FPGA (slot_len 0 only)
 static void pc_raw_core(uint8_t core, uint32_t start, uint32_t count, uint8_t *dst, uint32_t stride,
-                        uint32_t slot_base, uint32_t slot_len)
+                        uint32_t slot_base, uint32_t slot_len, int copy)
 {
   uint32_t n;
+
+  if(copy)
+  {
+    const uint8_t *src = pc_kept_ring[core];
+
+    for(n=0;n<count;n++)
+      dst[n * stride] = src[(start + n) % PC_FPGA_RING_WORDS];
+
+    return;
+  }
 
   if(!slot_len)
   {
@@ -1808,12 +1877,14 @@ static int pc_seq_held(pc_session *s, uint8_t mode)
 }
 
 //C6: the record READ_RAW reads is a peak record (its shift byte's peak bit): the capture in flight while armed (ALLOW_NOT_DONE),
-//else the latest capture; no capture yet = legacy
-static int pc_raw_peak(const pc_session *s)
+//else the latest capture; no capture yet = legacy. 1.30: kept = the host's kept capture
+static int pc_raw_peak(const pc_session *s, int kept)
 {
   const pc_capture *c;
 
-  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+  if(kept)
+    c = &s->kept;
+  else if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
     c = &s->cap_next;
   else if(s->capture_id)
     c = &s->cap;
@@ -1836,19 +1907,32 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   uint32_t slot_base = 0, slot_len = 0;
   int64_t  base;
   uint8_t *d;
+  int      kept = (flags & PC_RAW_F_KEPT) != 0;
+  int      copy = 0;
+  const pc_capture *c = &s->cap;                      //the capture served (header, addr_mode 1 / 2 bases)
 
   (void)len;
 
   if((mask == 0) || (mask & 0xF0)) return pc_error(s, PC_E_BAD_ARG, 0, "core_mask");
   if(mode > 3)                     return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode");
   if(layout > 3)                   return pc_error(s, PC_E_BAD_ARG, 2, "layout");
-  if(flags & ~0x01)                return pc_error(s, PC_E_BAD_ARG, 3, "flags");
+  if(flags & ~(PC_RAW_F_ANY | PC_RAW_F_KEPT)) return pc_error(s, PC_E_BAD_ARG, 3, "flags");
   if((count == 0) || (count > ring)) return pc_error(s, PC_E_BAD_ARG, 8, "count 1..ring_words");
+
+  //1.30 KEPT: the host's kept single, from the ring while it still holds it, else from the copy; never a segment run
+  if(kept)
+  {
+    if(mode == 3)                  return pc_error(s, PC_E_BAD_ARG, 1, "addr_mode 3 with KEPT");
+    if(!s->kept_state)             return pc_error(s, PC_E_STATE, PC_STATE_NO_KEPT, "no host capture kept");
+
+    c    = &s->kept;
+    copy = (s->kept_state == PC_KEPT_COPY);
+  }
 
   //C6 peak records (1.26): layout 3 = per channel the minima then the maxima; a 16-bit layout 2 of a peak record would
   //hand a 1.24 host { max, min } pairs as filter samples, and layout 3 of any other record has no pairs to split
-  if((layout == 3) && !pc_raw_peak(s)) return pc_error(s, PC_E_BAD_ARG, 2, "layout 3 needs a peak-detect record");
-  if((layout == 2) && pc_raw_peak(s))  return pc_error(s, PC_E_BAD_ARG, 2, "peak-detect record: layout 3");
+  if((layout == 3) && !pc_raw_peak(s, kept)) return pc_error(s, PC_E_BAD_ARG, 2, "layout 3 needs a peak-detect record");
+  if((layout == 2) && pc_raw_peak(s, kept))  return pc_error(s, PC_E_BAD_ARG, 2, "peak-detect record: layout 3");
 
   //1.17 addr_mode 3: segment-relative, address = segment << 16 | word offset from that segment's record start
   if(mode == 3)
@@ -1876,7 +1960,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     start     = (pc_seq_seg_word(sc.m, seg, e.offset, s->cap.seq_pre_words, (uint32_t)addr & 0xFFFF)) - slot_base;
     ring      = slot_len;
   }
-  else if(!(flags & 0x01) && (mode != 0) && pc_seq_held(s, PC_SEQ_SEGMENTS))
+  else if(!(flags & 0x01) && !kept && (mode != 0) && pc_seq_held(s, PC_SEQ_SEGMENTS))
     return pc_error(s, PC_E_STATE, 4, "segment run: addr_mode 3");
 
   if((layout >= 1) && ((((mask & 0x03) != 0) && ((mask & 0x03) != 0x03)) || (((mask & 0x0C) != 0) && ((mask & 0x0C) != 0x0C))))
@@ -1884,10 +1968,12 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
 
   //1.3: the latest finished capture of any origin, while the ring still holds it. flags bit 0 (ANY) reads the ring as
   //it is. In RUN the UI has usually armed the next capture already: wait for it (at most PC_HOLD_MS) and keep the UI
-  //from re-arming until this request is answered.
-  if(!(flags & 0x01) && (mode != 3))
+  //from re-arming until this request is answered. 1.30: when the latest capture is the host's kept one and the ring no
+  //longer holds it, its copy answers (stopped at once, in RUN after the hold when no newer capture finished)
+  if(!(flags & 0x01) && !kept && (mode != 3))
   {
     pc_hw_ui u;
+    int      latest_copied = s->capture_id && (s->kept_state == PC_KEPT_COPY) && (s->cap.capture_id == s->kept.capture_id);
 
     pc_hal_ui_read(&u);
 
@@ -1902,20 +1988,28 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     if(!s->ring_valid)
     {
       if(!u.run)
-        return pc_error(s, PC_E_STATE, s->capture_id ? 1 : 0, s->capture_id ? "ring overwritten" : "no capture");
-
-      if(!s->hold_active)
       {
-        s->hold_active   = 1;
-        s->ui_hold       = 1;
-        s->hold_deadline = pc_hal_ms() + PC_HOLD_MS;
-        return PC_HOLD;
+        if(!latest_copied)
+          return pc_error(s, PC_E_STATE, s->capture_id ? 1 : 0, s->capture_id ? "ring overwritten" : "no capture");
+      }
+      else
+      {
+        if(!s->hold_active)
+        {
+          s->hold_active   = 1;
+          s->ui_hold       = 1;
+          s->hold_deadline = pc_hal_ms() + PC_HOLD_MS;
+          return PC_HOLD;
+        }
+
+        if((int32_t)(pc_hal_ms() - s->hold_deadline) < 0)
+          return PC_HOLD;
+
+        if(!latest_copied)
+          return pc_error(s, PC_E_BUSY, PC_BUSY_CAPTURE, "UI capture running");
       }
 
-      if((int32_t)(pc_hal_ms() - s->hold_deadline) < 0)
-        return PC_HOLD;
-
-      return pc_error(s, PC_E_BUSY, PC_BUSY_CAPTURE, "UI capture running");
+      copy = 1;
     }
 
     if(s->capture_id == 0)
@@ -1934,11 +2028,21 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   //the header is the absolute word, ring_words the slot length)
   if(mode != 3)
   {
-    base  = (mode == 0) ? 0 : ((mode == 1) ? s->capture_start : s->trigger_addr);
+    if(kept || copy)
+      base = (mode == 0) ? 0 : ((mode == 1) ? c->capture_start : c->trigger_addr);
+    else
+      base = (mode == 0) ? 0 : ((mode == 1) ? s->capture_start : s->trigger_addr);
+
     start = pc_ring_mod(base + addr, ring);
   }
 
-  pc_put_u32(resp, s->capture_id);
+  //1.30: the host has read its kept capture (GET_CAPTURE_INFO 25 bit 2): served as KEPT or from the copy, or the ring
+  //read as the latest capture while it is the kept one
+  if(s->kept_state && ((kept || copy) ? (c->capture_id == s->kept.capture_id) :
+                                         (s->ring_valid && (s->capture_id == s->kept.capture_id))))
+    s->kept_read = 1;
+
+  pc_put_u32(resp, (kept || copy) ? c->capture_id : s->capture_id);
   pc_put_u16(resp + 4, (uint16_t)(slot_base + start));
   pc_put_u16(resp + 6, (uint16_t)ring);
   pc_put_u32(resp + 8, count);
@@ -1956,7 +2060,7 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (1 << i))
       {
-        pc_raw_core((uint8_t)i, start, count, d, 1, slot_base, slot_len);
+        pc_raw_core((uint8_t)i, start, count, d, 1, slot_base, slot_len, copy);
         d += count;
       }
     }
@@ -1969,8 +2073,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (3 << (2 * i)))
       {
-        pc_raw_core((uint8_t)(2 * i),     start, count, d,     2, slot_base, slot_len);
-        pc_raw_core((uint8_t)(2 * i + 1), start, count, d + 1, 2, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i),     start, count, d,     2, slot_base, slot_len, copy);
+        pc_raw_core((uint8_t)(2 * i + 1), start, count, d + 1, 2, slot_base, slot_len, copy);
         d += 2 * count;
       }
     }
@@ -1983,8 +2087,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
     {
       if(mask & (3 << (2 * i)))
       {
-        pc_raw_core((uint8_t)(2 * i),     start, count, d,         1, slot_base, slot_len);
-        pc_raw_core((uint8_t)(2 * i + 1), start, count, d + count, 1, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i),     start, count, d,         1, slot_base, slot_len, copy);
+        pc_raw_core((uint8_t)(2 * i + 1), start, count, d + count, 1, slot_base, slot_len, copy);
         d += 2 * count;
       }
     }
@@ -1996,8 +2100,8 @@ static int h_read_raw(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
       if(mask & (3 << (2 * i)))
       {
         //core A = 2i (0x20/0x22), core B = 2i + 1 (0x21/0x23); B first (PC_INTERLEAVE_ORDER 0)
-        pc_raw_core((uint8_t)(2 * i + 1), start, count, d,     2, slot_base, slot_len);
-        pc_raw_core((uint8_t)(2 * i),     start, count, d + 1, 2, slot_base, slot_len);
+        pc_raw_core((uint8_t)(2 * i + 1), start, count, d,     2, slot_base, slot_len, copy);
+        pc_raw_core((uint8_t)(2 * i),     start, count, d + 1, 2, slot_base, slot_len, copy);
         d += 2 * count;
       }
     }
@@ -2175,6 +2279,10 @@ static int h_read_trace(pc_session *s, const uint8_t *req, uint32_t len, uint8_t
 
     d += count;
   }
+
+  //1.30: the trace of the host's kept capture was read (GET_CAPTURE_INFO 25 bit 2)
+  if(s->kept_state && s->capture_id && (s->capture_id == s->kept.capture_id))
+    s->kept_read = 1;
 
   *rl = total;
   return PC_OK;
@@ -4116,6 +4224,7 @@ static void pc_acq_service(pc_session *s)
     s->auto_timeout_hit = !trig;                                                     //BENCH: T6
     s->acq_state        = PC_ACQ_DONE;
     pc_capture_finish(s, &s->cap_next, addr, trig);
+    pc_kept_take(s);
     s->trace_capture_id = s->capture_id;
     s->trace_mask       = mask;
   }

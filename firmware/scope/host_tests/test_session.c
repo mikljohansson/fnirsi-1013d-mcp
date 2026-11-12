@@ -137,9 +137,11 @@ static void set_trigger(uint16_t mask, uint8_t src, uint8_t edge, uint8_t level,
   *out = req(PC_CMD_SET_TRIGGER, p, 24);
 }
 
-//One UI capture through the hooks the 1.00o5 code calls: fpga_do_conversion, 0x14 read, readout done
+//One UI capture through the hooks the 1.00o5 code calls: fpga_do_conversion (its sampling reset calls the 1.30 ring hook
+//first, fpga_bus.c), 0x14 read, readout done
 static void ui_capture(uint16_t addr)
 {
+  pc_ring_pre_reset(&S);
   pc_ui_capture_start(&S);
   mock.ui_armed = 1;
   pc_ui_capture_addr(&S, addr);
@@ -173,7 +175,7 @@ static void test_info(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, PC_INFO_LEN);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 29); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 30); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), PC_FW_FPGA_VERSION); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   caps = pc_get_u32(r.p + 20);
   //The capability word is the firmware's (PC_FW_FPGA_VERSION), never derived from the version word read
@@ -302,7 +304,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.29,fpga=0x153f");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.30,fpga=0x153f");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -2078,6 +2080,202 @@ static void test_read_raw_hold(void)
   mock.long_mode = 0;
 }
 
+//1.30 (fw-hostkeep): one host single armed, done, then RUN / UI captures / STOP at the scope before the host reads it
+static void host_single(void)
+{
+  resp_t r;
+
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  mock.polls_to_done = 3;
+  r = wait_done(1000);
+  T_EQ(r.h.status, 0); T_EQ(r.p[1], PC_ACQ_DONE);
+}
+
+//The UI's sampling reset overwrites the ring (the mock keeps its words otherwise)
+static void ui_overwrite_ring(void)
+{
+  uint32_t c, a;
+
+  for(c=0;c<4;c++)
+    for(a=0;a<8192;a++)
+      mock.ring[c][a] = (uint8_t)(mock.ring[c][a] ^ 0xA5);
+}
+
+static void test_host_keep(void)
+{
+  static uint8_t want[4][8192];
+  uint8_t p[16], ci[4];
+  resp_t r;
+  uint32_t c, i, kept_id;
+  uint16_t seq;
+  int bad;
+
+  setup(PC_FW_FPGA_VERSION);
+  set_trigger(0x3B, 0, 0, 128, 1, 2000, 16000, 0, 0, &r);
+  memset(ci, 0, 4); ci[0] = PC_CI_F_KEPT;
+
+  //Nothing kept before the first host capture: GET_STATUS 24 = 0, KEPT reads E_STATE detail 6
+  r = status();
+  T_EQ(pc_get_u32(r.p + 24), 0);
+  memset(p, 0, 16); p[0] = 0x0F; p[1] = 1; p[3] = PC_RAW_F_KEPT; pc_put_u32(p + 8, 8192);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_STATE_NO_KEPT);
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_STATE_NO_KEPT);
+
+  //Bad arguments: an unknown READ_RAW flag, KEPT with addr_mode 3, an unknown GET_CAPTURE_INFO flag
+  p[3] = 0x04;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 3);
+  p[1] = 3; p[3] = PC_RAW_F_KEPT;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 1);
+  p[1] = 1;
+  ci[0] = 0x02;
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(pc_get_u16(r.p), 0);
+  ci[0] = PC_CI_F_KEPT;
+
+  //The bench case (2026-11-12): the host arms a single; the event comes; nobody reads it yet
+  mock.ui_run = 1;
+  host_single();
+  kept_id = S.capture_id;
+  r = status();
+  T_EQ(pc_get_u32(r.p + 24), kept_id); T_EQ(r.p[41], PC_ORIGIN_HOST);
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id); T_EQ(r.p[8], PC_ORIGIN_HOST);
+  T_EQ(r.p[25], PC_KEPT_F_IS);                                         //in the ring, not read
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(r.p[25], PC_KEPT_F_IS);                                         //the latest is the kept one
+  for(c=0;c<4;c++)
+    for(i=0;i<8192;i++)
+      want[c][i] = mock.ring[c][(7292 + i) % 8192];
+
+  //...the owner presses RUN: the first UI sampling reset copies the ring (once), then the UI overwrites it, several
+  //captures finish and the last one is armed with no trigger coming
+  pc_hal_ui_set_run(1);
+  pc_ring_pre_reset(&S);
+  ui_overwrite_ring();
+  pc_ui_capture_start(&S);
+  pc_ui_capture_addr(&S, 3000);
+  pc_ui_capture_done(&S);
+  ui_capture(4000);
+  ui_capture(5000);
+  pc_ring_pre_reset(&S);
+  pc_ui_capture_start(&S);
+  mock.ui_armed = 1;
+  T_EQ(S.kept_state, PC_KEPT_COPY);
+
+  r = status();
+  T_EQ(pc_get_u32(r.p + 4), kept_id + 3); T_EQ(r.p[41], PC_ORIGIN_UI_RUN); T_EQ(pc_get_u32(r.p + 24), kept_id);
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id); T_EQ(r.p[8], PC_ORIGIN_HOST);
+  T_EQ(pc_get_u16(r.p + 12), 7292); T_EQ(pc_get_u32(r.p + 28), 2000); T_EQ(pc_get_u32(r.p + 32), 16000);
+  T_EQ(r.p[25], PC_KEPT_F_IS | PC_KEPT_F_COPY);
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p), kept_id + 3); T_EQ(r.p[25], 0);
+
+  //KEPT answers at once in RUN (no hold): the event's words, all four cores, relative to its capture start
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_RAW, seq, p, 16);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r));
+  T_EQ(r.h.status, 0); T_EQ(r.len, 16 + 4 * 8192);
+  T_EQ(pc_get_u32(r.p), kept_id); T_EQ(pc_get_u16(r.p + 4), 7292); T_EQ(pc_get_u16(r.p + 6), 8192);
+  bad = 0;
+  for(c=0;c<4;c++)
+    for(i=0;i<8192;i++)
+      if(r.p[16 + c * 8192 + i] != want[c][i]) bad++;
+  T_EQ(bad, 0);
+  T_EQ(pc_ui_arm_allowed(&S), 1);
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.p[25], PC_KEPT_F_IS | PC_KEPT_F_COPY | PC_KEPT_F_READ);
+
+  //Interleaved CH2 relative to the trigger (B before A) and the 16-bit layout (low byte core A) from the copy
+  memset(p, 0, 16); p[0] = 0x0C; p[1] = 2; p[2] = 1; p[3] = PC_RAW_F_KEPT; pc_put_u32(p + 4, (uint32_t)-150);
+  pc_put_u32(p + 8, 300);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p + 4), 8142);
+  bad = 0;
+  for(i=0;i<300;i++)
+    if((r.p[16 + 2 * i] != want[3][850 + i]) || (r.p[16 + 2 * i + 1] != want[2][850 + i])) bad++;
+  T_EQ(bad, 0);
+  p[0] = 0x03; p[1] = 1; p[2] = 2; pc_put_u32(p + 4, 8000); pc_put_u32(p + 8, 400);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u16(r.p + 4), (7292 + 8000) % 8192); T_EQ(r.len, 16 + 800);
+  bad = 0;
+  for(i=0;i<400;i++)
+    if(pc_get_u16(r.p + 16 + 2 * i) != (uint16_t)(want[0][(8000 + i) % 8192] | (want[1][(8000 + i) % 8192] << 8))) bad++;
+  T_EQ(bad, 0);
+
+  //The latest UI capture, as before: the plain READ_RAW holds in RUN, E_BUSY detail 1 when nothing finishes
+  memset(p, 0, 16); p[0] = 0x01; p[1] = 1; pc_put_u32(p + 8, 8);
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_RAW, seq, p, 16);
+  pc_poll(&S, PC_CTX_MAIN);
+  mock.now += PC_HOLD_MS;
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, PC_E_BUSY); T_EQ(pc_get_u16(r.p), PC_BUSY_CAPTURE);
+
+  //STOP at the scope with that UI capture armed: plain reads "ring overwritten", KEPT still has the event
+  pc_hal_ui_set_run(0);
+  mock.ui_armed = 0;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 1);
+  p[3] = PC_RAW_F_KEPT;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id); T_EQ(r.p[16], want[0][0]);
+
+  //A host STOP keeps it too; only the next host ARM drops it
+  r = req(PC_CMD_STOP, 0, 0);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id);
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0);
+  T_EQ(pc_get_u32(r.p + 24), 0); T_EQ(S.kept_state, PC_KEPT_NONE);
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_STATE_NO_KEPT);
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_STATE_NO_KEPT);
+
+  //The new single is kept in its place; a plain read marks it read; no copy while nothing else arms
+  mock.polls_to_done = 3;
+  r = wait_done(1000);
+  T_EQ(r.p[1], PC_ACQ_DONE); kept_id = S.capture_id;
+  T_EQ(pc_get_u32(r.p + 24), kept_id); T_EQ(S.kept_state, PC_KEPT_RING);
+  p[3] = 0;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id);
+  r = req(PC_CMD_GET_CAPTURE_INFO, ci, 4);
+  T_EQ(r.p[25], PC_KEPT_F_IS | PC_KEPT_F_READ);
+  memcpy(want[0], mock.ring[0], 8192);
+
+  //Fault (b) when the screen's last capture is the kept host capture: RUN arms a UI capture that never finishes, then
+  //STOP. The plain read is served from the copy (stopped: at once; in RUN: after the hold)
+  pc_hal_ui_set_run(1);
+  pc_ring_pre_reset(&S);
+  ui_overwrite_ring();
+  pc_ui_capture_start(&S);
+  mock.ui_armed = 1;
+  mock_clear_resps();
+  seq = next_seq++;
+  push_frame(PC_CMD_READ_RAW, seq, p, 16);
+  pc_poll(&S, PC_CTX_MAIN);
+  T_EQ(mock_nresps, 0);
+  mock.now += PC_HOLD_MS;
+  pc_poll(&S, PC_CTX_MAIN);
+  T_TRUE(find_resp(seq, &r)); T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id);
+  T_EQ(pc_get_u16(r.p + 4), 7292); T_EQ(r.p[16], want[0][7292]);
+  T_EQ(pc_ui_arm_allowed(&S), 1);
+  pc_hal_ui_set_run(0);
+  mock.ui_armed = 0;
+  r = req(PC_CMD_READ_RAW, p, 16);
+  T_EQ(r.h.status, 0); T_EQ(pc_get_u32(r.p), kept_id); T_EQ(r.p[16], want[0][7292]);
+}
+
 //MCP chip: steady while DTR is up or traffic within 2 s (no pulse)
 static void test_indicator(void)
 {
@@ -2339,7 +2537,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 29);
+  T_EQ(r.p[1], 30);
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -2845,7 +3043,7 @@ static void test_fel_reset_stall(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 29);
+  T_EQ(r.p[1], 30);
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -3352,7 +3550,7 @@ static void test_decim_fir_protocol(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 29);
+  T_EQ(r.p[1], 30);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -3459,7 +3657,7 @@ static void test_seq_segments(void)
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 29);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 30);
   r = status();
   //features: bits 0-8 of 1.26, bit 9 PEAK (fw-c6), bit 10 COUNTER (fw-c7), bit 11 LOGGER (fw-d4); 12 / 13 reserved
   T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x0FFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
@@ -3519,6 +3717,7 @@ static void test_seq_segments(void)
   T_EQ(r.p[1], PC_ACQ_DONE); T_EQ(mock.forces, 0);
   T_EQ(r.p[2] & 0x05, 0x01);                                      //triggered (it holds triggered segments), no time-out
   T_EQ(mock.trace_builds, 0);                                     //no single record to show
+  T_EQ(pc_get_u32(r.p + 24), 0); T_EQ(S.kept_state, PC_KEPT_NONE);  //1.30: a run is not kept as a single
 
   r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
   T_EQ(r.len, PC_CAPTURE_INFO_LEN); T_EQ(r.p[76], 1); T_EQ(r.p[77], 0); T_EQ(r.p[78], 7); T_EQ(r.p[79], 0);
@@ -4571,7 +4770,7 @@ static void test_logger(void)
 
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_LOGGER, PC_CAP_LOGGER);
-  T_EQ(r.p[1], 29);
+  T_EQ(r.p[1], 30);
   r = status();
   T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_LOGGER, PC_FEAT_W_LOGGER);
 
@@ -4843,6 +5042,7 @@ int main(void)
   test_settings_seq();
   test_ui_capture();
   test_read_raw_hold();
+  test_host_keep();
   test_indicator();
   test_sd();
   test_sd_window();

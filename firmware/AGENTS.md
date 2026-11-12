@@ -5,6 +5,7 @@ step 2: CTRL page with fold-outs, strips and spectrum header out, spectrum cards
 section 33) and fw-seq (FPGA 0x1536 segmented capture and hardware averaging, SET_SEQ / GET_SEQ / READ_SEQ, protocol row 56;
 section 35, with the 0x1536 flash session plan). Still running: fw-ui4 (step 4, section 34), fpga-gen6.
 **Branch fw-hostdt (2026-11-12): after fw 0.3.2 (no bump), protocol 1.29 unchanged: the screen's time scale follows the divider the record on screen ran at (disp_rate.c, noted at every CH1 / CH2 readout): with a host's raw divider the ACQ chip shows the record's rate and what one drawn division lasts, the time cursors, the Freq / Period / Width cards, the spectrum (READ_SPECTRUM's divider) and saved waveforms use the record's period; the trace keeps the UI's pixels per sample; GET_TIMEBASE unchanged; not benched; section 103.**
+**Branch fw-hostkeep (2026-11-12): after fw 0.3.2 (no bump), protocol 1.30 (row 72): the host's last single is kept until the next host ARM whatever the UI does (the first other sampling reset copies the ring, 32 KiB, about 10 ms, via fpga_arm_reset's pre-reset hook); READ_RAW flags bit 1 / GET_CAPTURE_INFO byte 0 KEPT, GET_STATUS 24 its id, GET_CAPTURE_INFO 25 kept / copied / read; a kept latest capture is served from the copy instead of E_STATE 1 / E_BUSY 1; mcp fetch prefers the unread kept single and falls back to the screen trace; not benched; section 104.**
 **Branch fw-genlimit (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: one generator limit (SET_GEN's 25 MHz) for the generator menu and the settings check, so a host's 12.5 MHz no longer gets sector 709 refused at boot (every SET_* field audited, no other mismatch); the capture self-check counts at 0x64 = 48, the training keeps 32; not benched; section 102.**
 **Branch fw-csbusy (2026-11-08): after fw 0.3.1 (no bump), protocol 1.29 unchanged: owner decision "only the calibration dialog writes calibration data": the capture-stage runtime guard and its sector 708 write are removed, the self-check is a diagnostic that flags a core only against a partner that counted at most 8 (else not checkable); REPEAT is advice only; not benched; section 101.**
 **Branch fw-xzero (2026-11-08): after fw 0.3.0 (no bump), protocol 1.29 (row 71): each channel's zero shift for the other channel's range relays (three classes = the coils on), measured by the wizard's zero step per range and clock class, stored in sector 708, applied at every readout; GET_CAL 480 bytes; gated class benched (10fa8d3), per-class not benched; sections 99 and 100.**
@@ -7843,3 +7844,104 @@ Filter Off, UI time base 200 us/div at 500 kSa/s)**
 Regression signs: a chip text cut at the right edge or flickering every pass; generic text for a table rate record (e.g.
 "200.0us/div"); a raw-divider record read with 2 us per sample anywhere; the chip drawn over an open menu; a 0.3.2
 waveform file opening with a foreign label.
+
+## 104. fw-hostkeep: the host's last single is kept until the next host ARM (after fw 0.3.2, protocol 1.30, row 72)
+
+Branch `fw-hostkeep` from main 618b45f (v0.3.2, the task queue's induction-imager items). Commits: e7934d4 (firmware, host tests, vectors),
+8df21bc (mcp: protocol, simulator, client, server, tests), then the docs commit with this section. `PC_FW_VERSION`
+not bumped (after 0.3.2). **Not benched, nothing flashed.**
+
+**What went wrong (bench 2026-11-12, fw 0.3.2, mcp 0.3.2).** An agent armed a host single (`scope_set_trigger` CH2
+falling 8 V normal, pretrigger 0.3; `scope_acquisition_control(arm)`: ARMED, capture_id 877) and ended its turn. The
+owner caused the event several times and touched the scope. Back: run_state RUN, origin ui_run, capture 885, READ_RAW
+E_BUSY detail 1 twice (the RUN loop had armed its next capture in normal mode; no trigger came within PC_HOLD_MS), then
+after STOP E_STATE detail 1 "ring overwritten". Two faults: (a) the host's completed single was gone the moment the UI
+armed (`pc_ui_capture_start` cleared `ring_valid`, `s->cap` was replaced by the next UI capture); (b) with the UI armed
+and no trigger, or after a STOP that aborted it, nothing of the screen's capture was readable through READ_RAW.
+
+**1. The kept capture (pc_cmds.c, pc_cmds.h, fpga_bus.c / .h, pc_hal_scope.c).**
+- At a host single's DONE (`pc_acq_service`, after `pc_capture_finish`) `pc_kept_take` copies `s->cap` into `s->kept`,
+  `kept_state` PC_KEPT_RING, `kept_read` 0. Sequencer runs (segments, hardware averaging) are not kept (`seq_mode`).
+- **Where the copy happens: lazily, in the sampling reset.** `fpga_arm_reset` calls the new hook `fpga_arm_pre_reset`
+  first, before any bus write; pc_hal_scope.c sets it to `pc_glue_ring_pre_reset` -> `pc_ring_pre_reset` at session init.
+  With PC_KEPT_RING it reads the whole ring, all four lanes (`pc_hal_read_core`, 4 x 8192 bytes) into the static
+  `pc_kept_ring[4][8192]` (32 KiB .bss) and sets PC_KEPT_COPY. Every arm goes through `fpga_arm_reset` (the UI's
+  `fpga_do_conversion` incl. the wizard and auto set, `pc_hal_arm` incl. the Bode engine, `fpga_log_start` = the logger
+  and the roll), so no path can overwrite the ring before the copy. Why not at DONE: a host capture loop (averaging, the
+  battery) would pay 10 ms per capture for nothing; this way the copy is paid at most once per host capture, only when
+  something else arms before the next host ARM. Why the whole ring and all lanes: READ_RAW's address modes and all four
+  layouts (8-bit per core, interleaved, 16-bit = core A low / core B high, peak pairs) are rearrangements of the four
+  lanes, so the copy serves them all unchanged; a 16-bit record needs no special case.
+- **Cost (bound, not measured):** 32768 bytes at 0.30-0.35 us per byte (protocol 8.4) = 10-11.5 ms, in the main loop pass
+  of the first UI arm after the host capture (GET_STATUS `pass_max_ms` shows it; the bench procedure checks it).
+- **Dropped** only by the next host ARM (`h_arm`, `kept_state` = NONE before `pc_arm_hw`, so the host's own reset does
+  not copy). STOP, SET_ACQ_STATE, the screen's RUN / STOP, LOG_START, Bode, a link reset or DTR drop (the MCP server's
+  idle close after 30 s) keep it: the agent comes back on a new connection.
+- **Selection rule (explicit, backwards compatible):** READ_RAW flags bit 1 KEPT (`PC_RAW_F_KEPT`) reads the kept
+  capture (addr_mode 0..2 relative to its own capture_start / trigger_addr, layouts 0..3, the peak checks on its shift
+  byte; never holds); GET_CAPTURE_INFO request byte 0 bit 0 KEPT returns its settings. E_STATE detail 6
+  (`PC_STATE_NO_KEPT`) when nothing is kept; KEPT with addr_mode 3 E_BAD_ARG 1; other flag bits E_BAD_ARG 3 as before
+  (so fw 0.3.2 refuses KEPT: hosts check proto_minor >= 30). GET_STATUS 24 (reserved 0) = the kept capture_id;
+  GET_CAPTURE_INFO 25 (0) = kept flags of the capture described: bit 0 it is the kept one, bit 1 served from the copy,
+  bit 2 READ_RAW or READ_TRACE returned it since DONE (`kept_read`, the host's "already fetched" test). A host without
+  the flags sees the latest capture exactly as before.
+- **Fault (b), firmware part:** a plain READ_RAW whose latest capture IS the kept one and whose ring was overwritten is
+  served from the copy: stopped at once (was E_STATE 1), in RUN after the 1000 ms hold when nothing newer finished (was
+  E_BUSY 1). When the latest capture is a UI capture whose words are gone the answers are unchanged; READ_TRACE never
+  waited (row 36: the UI's trace buffers survive the UI's re-arm) and is the host's fallback (below).
+- **Not done:** READ_TRACE has no KEPT selector (the trace buffers belong to the screen; once the UI moved on the kept
+  capture has raw words only; the host converts them as for any READ_RAW).
+
+**2. mcp (8df21bc).** `P.PROTO_MINOR` 30 / `KEPT_MINOR`, `StatusResp.kept_capture_id` (was `reserved`),
+`CaptureInfoHeader.kept_flags`, `ReadRawReq.KEPT`, `CAPINFO_REQ_KEPT`, `KEPT_F_*`, `STATE_NO_KEPT`; `Scope.has_kept`,
+`capture_info(kept=)`, `kept_capture_info()`, `read_kept_capture()`, `read_raw(kept=)` (through `_read_capture` /
+`_read_capture16` / `_read_capture_peak`). Server: `scope_fetch_waveform(capture='auto'|'latest'|'host')` and
+`capture_source` in the result: 'host_kept' (auto while the screen moved on and no host read the kept capture: GET_CAPTURE_INFO
+25 bit 2), 'latest', 'screen_trace' (READ_RAW E_BUSY 1 / E_STATE 1 -> READ_TRACE of the screen's capture with a caveat
+on its limits: 8-bit codes after the scope's own per-core correction, no raw cores, clipping on corrected codes; the
+filter's 16-bit samples with the filter on). `_capture_for_analysis` (measure, decode, ...) uses the same selection.
+`scope_status` `host_capture_kept` {capture_id, fetched, still_in_sample_memory} (1.30 only). The fetch tool's text no
+longer promises a paused RUN for the no-trigger case. Simulator: `Device.kept`, `ui_rearm()` (the UI's arm: copy, abort a
+host single, ring invalid), copy on every non-host `_complete` and on the Bode engine's arm, READ_TRACE without the
+READ_RAW hold (as the firmware).
+
+**fw-hostdt (section 103) at the merge:** nothing here fills the UI trace buffers from the copy (READ_TRACE has no KEPT
+selector), so no `disp_rate_note` is needed for the kept capture. **Open (not in this path):** READ_TRACE REREAD of a
+host single after a rate change while stopped rebuilds from the ring with the decimation and divider the FPGA holds now
+(`pc_hal_trace_build`), not the capture's; with fw-hostdt it also notes the current divider for the labels. Fix: build
+with `s->cap`'s decim / divider and note those.
+
+**Checks:** GCC 10, GCC 13 and PC_DEBUG builds, 0 warnings; `make test` green (test_session `test_host_keep`: nothing
+kept, bad flags, the bench sequence (host single, RUN with three UI captures, the UI armed with no trigger: KEPT served at
+once from the copy, all four cores, interleaved CH2 and the 16-bit layout against the ring at DONE, plain READ_RAW
+E_BUSY 1; STOP: plain E_STATE 1, KEPT served; host STOP keeps it; next ARM drops it, E_STATE 6), the kept-latest copy
+served after the hold and when stopped, read flag, segment run not kept; test_fpga_bus `test_pre_reset_hook`: once per
+arm, before the first bus write); check_vectors OK (3 new firmware vectors, 2 host); mcp ruff clean, pytest 604 passed (tests/test_hostkeep.py 9).
+
+**Bench procedure (owner; nothing written to the card, FEL load only)**
+1. `make gcc10`, `fnirsi1013d-flash` (FEL). `#VER` says `proto=1.30`.
+2. Setup: CH1 x1 on the calibration post, generator off, 1 V/div DC, 10 MSa/s, trigger CH1 rising normal at 1 V,
+   pretrigger 0.3. `scope_status`: `host_capture_kept` null.
+3. `scope_acquisition_control(arm)`: ARMED. Switch the generator on at the scope (1 kHz): the single completes
+   (`scope_status` acq_state DONE, origin host, `host_capture_kept` {capture_id N, fetched false,
+   still_in_sample_memory true}).
+4. Press RUN at the scope, let it run 5 s, then set the trigger level above the square (5 V) so RUN waits in normal mode
+   with no trigger. `scope_status`: run_state RUN, origin ui_run, capture_id > N, `host_capture_kept`
+   still_in_sample_memory false, main_loop_pass_max_ms at least about 10 ms above its usual value right after RUN
+   (the copy; read it with `detail=true` if the compact status hides it).
+5. `scope_fetch_waveform`: capture_source host_kept, capture_id N, origin host, the 1 kHz square with its edge at the
+   trigger (0.3 of the record), caveat "the screen has moved on to capture M". A second call: capture_source
+   screen_trace, capture_id M, the caveat "RUN loop armed ...".
+6. Press STOP at the scope. `scope_fetch_waveform(capture='host')`: capture N again, same samples as step 5 (compare
+   the .npz files). `scope_fetch_waveform`: screen_trace with the "STOP at the scope" caveat.
+7. `scope_acquisition_control(arm)` with the level back at 1 V: the new single is kept, `host_capture_kept` its id,
+   fetched false; `scope_fetch_waveform(capture='host')` of the old N is no longer possible (only the new one).
+8. Latest = kept (fault b, firmware): arm, let it complete, press RUN with the level at 5 V (no trigger), then a raw
+   READ_RAW (`Scope.read_raw(0x03, count=8)`) answers capture N after about 1 s (not E_BUSY); press STOP: answers at once.
+9. Regression: `fnirsi1013d-battery` groups session / capture / averaging unchanged; a 64-capture `scope_averaged_capture`
+   takes as long as on 0.3.2 (no copy inside a host loop).
+
+**Regression signs:** E_BAD_ARG detail 3 on READ_RAW from a 1.30 host (old image loaded); `host_capture_kept` null after a
+completed host single (DONE not taken: sequencer setting left on?); the kept samples differ between steps 5 and 6 (the
+copy taken after a write); a UI stall of tens of ms at every RUN capture (the hook copying more than once: kept_state not
+moving to COPY); the screen trace returned in place of the host's unread single.

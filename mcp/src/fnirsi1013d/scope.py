@@ -572,9 +572,52 @@ class Scope:
         state = P.RunState.RUN if run else P.RunState.STOP
         return self._status(self._req(P.Cmd.SET_ACQ_STATE, P.SetAcqStateReq(int(state)).pack()))
 
-    def capture_info(self) -> P.CaptureInfo:
-        """GET_CAPTURE_INFO: the settings the latest finished capture (any origin) was taken with."""
+    def capture_info(self, kept: bool = False) -> P.CaptureInfo:
+        """GET_CAPTURE_INFO: the settings the latest finished capture (any origin) was taken with. ``kept`` (protocol
+        1.30): the host's kept single capture instead (DeviceError E_STATE detail ``P.STATE_NO_KEPT`` when none)."""
+        if kept:
+            self._need_kept()
+            return P.CaptureInfo.unpack(self._req(P.Cmd.GET_CAPTURE_INFO, bytes([P.CAPINFO_REQ_KEPT, 0, 0, 0])))
         return P.CaptureInfo.unpack(self._req(P.Cmd.GET_CAPTURE_INFO))
+
+    @property
+    def has_kept(self) -> bool:
+        """Protocol 1.30 (fw-hostkeep): the firmware keeps the host's last single until the next host ARM."""
+        return self.shared and self.info.proto_minor >= P.KEPT_MINOR
+
+    def _need_kept(self) -> None:
+        if not self.has_kept:
+            raise ScopeError(f"the kept host capture needs protocol 1.{P.KEPT_MINOR} (this firmware speaks "
+                             f"1.{self.info.proto_minor})")
+
+    def kept_capture_info(self) -> P.CaptureInfo | None:
+        """The host's kept single capture's GET_CAPTURE_INFO (``header.kept_flags``: copied, read), or None when nothing
+        is kept or the firmware is older than protocol 1.30."""
+        if not self.has_kept:
+            return None
+        try:
+            return self.capture_info(kept=True)
+        except DeviceError as e:
+            if e.status == P.Status.E_STATE and e.detail == P.STATE_NO_KEPT:
+                return None
+            raise
+
+    def read_kept_capture(self, channels: Iterable[int | str] = ("CH1",), start_sample: int = 0,
+                          count: int | None = None, keep_raw: bool = False,
+                          ci: P.CaptureInfo | None = None) -> Capture:
+        """Protocol 1.30: the host's own last single capture (READ_RAW KEPT), whatever the scope's UI did since (RUN,
+        further captures, STOP): it stays readable until the next host ARM. Converted with the settings it was taken
+        under. ``ci``: its GET_CAPTURE_INFO (KEPT) if already read."""
+        ci = ci or self.capture_info(kept=True)
+        h = ci.header
+        chans = [channel_index(c) for c in channels]
+        cfgs = {c: ci.channel_config(c) for c in chans}
+        st = P.StatusResp(acq_state=P.AcqState.DONE, capture_id=h.capture_id, capture_settings_seq=h.settings_seq,
+                          capture_origin=h.origin,
+                          flags=(P.StatusFlags.FPGA_TRIGGERED if h.flags & h.F_TRIGGERED else 0) |
+                                (P.StatusFlags.AUTO_TIMEOUT if h.flags & h.F_AUTO_TIMEOUT else 0))
+        return self._read_capture(chans, start_sample, count, keep_raw, st, ci.trigger(), ci.timebase(), cfgs, ci,
+                                  expect_id=h.capture_id, dec=ci.decim, kept=True)
 
     def capture_context(self, attempts: int = 5) -> CaptureContext:
         """Read the live trigger, timebase and both channels and prove they belong to one settings_seq (status
@@ -1096,10 +1139,15 @@ class Scope:
                 return st
 
     def read_raw(self, core_mask: int = 0x0F, *, addr_mode: int = 1, address: int = 0, count: int | None = None,
-                 layout: int = 0, allow_not_done: bool = False) -> tuple[P.ReadRawHeader, dict[int, np.ndarray]]:
+                 layout: int = 0, allow_not_done: bool = False,
+                 kept: bool = False) -> tuple[P.ReadRawHeader, dict[int, np.ndarray]]:
         """READ_RAW. Returns the header and, for layout 0, {core_bit_index: uint8 array}; for layout 1,
         {channel_index: interleaved uint8 array}. Split into several requests when the response would exceed
-        ``response_limit``; the returned header then describes the whole read."""
+        ``response_limit``; the returned header then describes the whole read. ``kept`` (protocol 1.30): the host's
+        kept single capture instead of the latest capture."""
+        if kept:
+            self._need_kept()
+        flags = (P.ReadRawReq.ALLOW_NOT_DONE if allow_not_done else 0) | (P.ReadRawReq.KEPT if kept else 0)
         if count is None:
             count = self.get_trigger().total_words
         ncores = bin(core_mask & 0x0F).count("1") or 1
@@ -1109,8 +1157,7 @@ class Scope:
         done = 0
         while done < count:
             n = min(per, count - done)
-            req = P.ReadRawReq(core_mask, addr_mode, layout, P.ReadRawReq.ALLOW_NOT_DONE if allow_not_done else 0,
-                               address + done, n)
+            req = P.ReadRawReq(core_mask, addr_mode, layout, flags, address + done, n)
             data = self._req(P.Cmd.READ_RAW, req.pack())
             hdr = P.ReadRawHeader.unpack(data)
             if first is not None and hdr.capture_id != first.capture_id:
@@ -1365,24 +1412,26 @@ class Scope:
     def _read_capture(self, chans: list[int], start_sample: int, count: int | None, keep_raw: bool,
                       st: P.StatusResp | None, trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig],
                       ci: P.CaptureInfo | None, expect_id: int | None = None,
-                      dec: P.DecimConfig | None = None, seg: int | None = None) -> Capture:
-        """``seg`` (1.17): read segment ``seg`` of the held segment run (READ_RAW addr_mode 3) instead of the capture."""
+                      dec: P.DecimConfig | None = None, seg: int | None = None, kept: bool = False) -> Capture:
+        """``seg`` (1.17): read segment ``seg`` of the held segment run (READ_RAW addr_mode 3) instead of the capture.
+        ``kept`` (1.30): the host's kept single (READ_RAW KEPT)."""
         total = trig.total_samples
         if count is None:
             count = total - start_sample
         if start_sample < 0 or count <= 0 or start_sample + count > total:
             raise ValueError(f"sample window {start_sample}+{count} outside 0..{total}")
         if dec is not None and dec.k and dec.peak:
-            return self._read_capture_peak(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg)
+            return self._read_capture_peak(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg,
+                                           kept)
         if dec is not None and dec.k:
-            return self._read_capture16(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg)
+            return self._read_capture16(chans, start_sample, count, st, trig, tb, cfgs, ci, expect_id, dec, seg, kept)
         w0 = start_sample // 2
         w1 = (start_sample + count + 1) // 2
         mask = 0
         for c in chans:
             mask |= 3 << (2 * c)
         mode, base = (P.ReadRawReq.ADDR_CAPTURE, 0) if seg is None else (P.ReadRawReq.ADDR_SEGMENT, seg << 16)
-        hdr, cores = self.read_raw(mask, addr_mode=mode, address=base | w0, count=w1 - w0)
+        hdr, cores = self.read_raw(mask, addr_mode=mode, address=base | w0, count=w1 - w0, kept=kept)
         if expect_id is not None and hdr.capture_id != expect_id:
             raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
         if st is None:
@@ -1428,14 +1477,15 @@ class Scope:
 
     def _read_capture16(self, chans: list[int], start_sample: int, count: int, st: P.StatusResp | None,
                         trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig], ci: P.CaptureInfo | None,
-                        expect_id: int | None, dec: P.DecimConfig, seg: int | None = None) -> Capture:
+                        expect_id: int | None, dec: P.DecimConfig, seg: int | None = None,
+                        kept: bool = False) -> Capture:
         """1.9: a decimated capture through READ_RAW layout 2 (one u16 sample per word, words = samples)."""
         mask = 0
         for c in chans:
             mask |= 3 << (2 * c)
         mode, base = (P.ReadRawReq.ADDR_CAPTURE, 0) if seg is None else (P.ReadRawReq.ADDR_SEGMENT, seg << 16)
         hdr, data = self.read_raw(mask, addr_mode=mode, address=base | start_sample, count=count,
-                                  layout=P.ReadRawReq.LAYOUT_WIDE)
+                                  layout=P.ReadRawReq.LAYOUT_WIDE, kept=kept)
         if expect_id is not None and hdr.capture_id != expect_id:
             raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
         if st is None:
@@ -1468,14 +1518,14 @@ class Scope:
     def _read_capture_peak(self, chans: list[int], start_sample: int, count: int, st: P.StatusResp | None,
                            trig: P.Trigger, tb: P.Timebase, cfgs: dict[int, P.ChannelConfig],
                            ci: P.CaptureInfo | None, expect_id: int | None, dec: P.DecimConfig,
-                           seg: int | None = None) -> Capture:
+                           seg: int | None = None, kept: bool = False) -> Capture:
         """1.26: a peak-detect record through READ_RAW layout 3 (per channel ``count`` minima then maxima)."""
         mask = 0
         for c in chans:
             mask |= 3 << (2 * c)
         mode, base = (P.ReadRawReq.ADDR_CAPTURE, 0) if seg is None else (P.ReadRawReq.ADDR_SEGMENT, seg << 16)
         hdr, data = self.read_raw(mask, addr_mode=mode, address=base | start_sample, count=count,
-                                  layout=P.ReadRawReq.LAYOUT_PEAK)
+                                  layout=P.ReadRawReq.LAYOUT_PEAK, kept=kept)
         if expect_id is not None and hdr.capture_id != expect_id:
             raise CaptureChanged(f"expected capture {expect_id}, READ_RAW returned {hdr.capture_id}")
         if st is None:

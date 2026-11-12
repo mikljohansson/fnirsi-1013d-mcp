@@ -18,11 +18,20 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
   5us/div under a 500KSa/s, 200us/div setting), and the time cursors, the Freq / Period / Width cards, the spectrum
   view and saved waveforms read the record's real times. Before, such captures, and the scope's own captures while that
   rate ran, were measured with the scope's setting (a 483 kHz signal read 76 us per period at 20 MSa/s) (f0afc17).
+- A host's single capture that completed while the agent was away is no longer lost when the person presses RUN or
+  STOP at the scope: the firmware keeps it until the next host ARM (copying the sample memory once, about 10 ms, when
+  something else arms first) and READ_RAW / GET_CAPTURE_INFO read it with a KEPT flag; GET_STATUS says which capture is
+  kept. Protocol 1.30. A plain read of the screen's last capture is served from that copy when it is the host's,
+  instead of "UI capture running" or "ring overwritten" (e7934d4).
 
 ### Host (mcp)
 
 - `scope_spectrum` no longer carries the caveat that a raw divider's capture is labelled with the UI time base's rate:
   the firmware reports the record's divider (ad5cbd2).
+- `scope_fetch_waveform` returns the host's own armed single (capture_source `host_kept`) while the screen has moved on
+  and nobody read it yet; `capture='latest'` / `'host'` choose explicitly. When the screen's capture has no raw words
+  left (RUN waiting for a trigger, or STOP after it) it returns the processed trace the screen draws with a caveat
+  instead of failing (also on older firmware). `scope_status` shows `host_capture_kept` (8df21bc).
 
 ## [0.3.2] - 2026-11-08
 

@@ -108,6 +108,22 @@ uint32_t pc_auto_deadline_ms(uint32_t samples, uint32_t divider);
 //READ_RAW of a UI capture in RUN waits at most this long for the capture in flight
 #define PC_HOLD_MS        1000
 
+//1.30 (fw-hostkeep): the host's last single capture is kept until the next host ARM, whatever the UI does meanwhile.
+//At its DONE only its pc_capture is kept (the words stay in the FPGA ring); the first sampling reset after it (any arm:
+//the UI's RUN, a Bode capture, the logger or roll start; fpga_arm_reset's hook, pc_ring_pre_reset) first copies the
+//whole ring, all four lanes (4 x PC_FPGA_RING_WORDS bytes, about 10 ms on the bus), into a static buffer. READ_RAW flags
+//bit 1 (KEPT) and GET_CAPTURE_INFO request byte 0 bit 0 (KEPT) select it; GET_STATUS 24 carries its capture_id.
+#define PC_KEPT_NONE      0
+#define PC_KEPT_RING      1     //the FPGA ring still holds it (no sampling reset since its DONE)
+#define PC_KEPT_COPY      2     //served from the firmware's copy (pc_kept_ring in pc_cmds.c)
+#define PC_RAW_F_ANY      0x01  //READ_RAW flags: read the ring as it is (ALLOW_NOT_DONE)
+#define PC_RAW_F_KEPT     0x02  //1.30: the host's kept capture (E_STATE detail PC_STATE_NO_KEPT when there is none)
+#define PC_CI_F_KEPT      0x01  //1.30: GET_CAPTURE_INFO request byte 0
+#define PC_STATE_NO_KEPT  6     //1.30: E_STATE detail: no host capture kept (none since boot, or a host ARM since)
+#define PC_KEPT_F_IS      0x01  //1.30: GET_CAPTURE_INFO byte 25: this capture is the host's kept capture
+#define PC_KEPT_F_COPY    0x02  //  its words are served from the firmware's copy (the ring was overwritten)
+#define PC_KEPT_F_READ    0x04  //  READ_RAW or READ_TRACE returned it since its DONE
+
 //MCP indicator: steady while DTR is up or a frame came within this time (owner: no pulse); redrawn this often, since
 //UI top-bar redraws paint over it
 #define PC_HOST_ACTIVE_MS 2000
@@ -255,6 +271,10 @@ typedef struct
   pc_capture cap;
   pc_capture cap_next;
   uint8_t    ring_valid;        //the FPGA ring still holds capture cap (no arm since its DONE)
+  //1.30 (fw-hostkeep): the host's last single capture, kept until the next host ARM (PC_KEPT_*)
+  pc_capture kept;
+  uint8_t    kept_state;
+  uint8_t    kept_read;         //READ_RAW / READ_TRACE returned it since its DONE (GET_CAPTURE_INFO 25 bit 2)
   uint8_t    ui_started;        //a UI conversion started and has not been counted yet
   uint8_t    ext_flags;         //FPGA 0x28 at the last MAIN poll (EXT_TRIGGER only): bit0 level, bit1 gen on, bit2 edge
   uint8_t    trig_st[4];        //1.26: FPGA 0x37 and the 3 bytes of 0x34, read at every MAIN poll while a host capture is
@@ -401,6 +421,8 @@ void     pc_ui_host_stop(pc_session *s);                  //fw 0.2.68: the scree
 void     pc_ui_capture_start(pc_session *s);              //fpga_do_conversion started a conversion
 void     pc_ui_capture_addr(pc_session *s, uint16_t addr);//0x14 read of the finished UI capture
 void     pc_ui_capture_done(pc_session *s);               //the UI read and processed it
+void     pc_ring_pre_reset(pc_session *s);                //1.30: a sampling reset is about to overwrite the ring
+                                                          //(fpga_arm_reset's hook): the kept host capture is copied
 void     pc_ui_pass_mark(pc_session *s, int n);            //main loop stage n (0..3) reached, kept for the first pass
 int      pc_ui_yield_pending(const pc_session *s);        //1.23: 1 while a request waits for the modal UI to close
 int      pc_ui_modal_pending(const pc_session *s);        //fw 0.2.94: 1 while a read-only request waits for a yield check
