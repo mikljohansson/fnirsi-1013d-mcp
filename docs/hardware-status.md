@@ -2186,3 +2186,20 @@ Newest entries at the bottom. Format: date, who, what, result.
     the MCP tools on the unit (`capture_source`, `scope_wait_for_event`: this session's server ran the old host code),
     the 64-capture average time, a real triggered event.
   - Left: RUN, trigger auto at code 129, raw divider 399 (the UI's rate). Image in RAM until the next power-off.
+- 2026-11-12 11:5x-12:0x (induction-imager session, owner at the scope; same RAM image c2eed0f8..., its MCP server
+  reconnected): **retest on the board.** Buck 483.6 kHz on CH1 (AC, 50 mV/div, about 43 mV rms, 0.34 to 0.42 Vpp spikes),
+  CH2 on the disconnect FET's drain (DC, 5 V/div, offset -3 div), x1.
+  - Screen time scale PASS on the signal: the owner read "500 kHz, 2 us peak to peak" after a host capture at 20 MSa/s
+    and "485 kHz, 2.06 us" at 200 MSa/s (FFT 483.6 kHz / 2.07 us); nothing odd in the traces. Which readout (card or
+    cursors) was not stated.
+  - Arm and leave PASS: ARM (CH2 falling, 8 V, normal, pretrigger 0.3), the owner pulled the lead, pressed RUN, waited,
+    pressed STOP; `scope_fetch_waveform` returned c5478, origin host, fired, 16382 samples, the edge in it (17.3 V to
+    0 V in about 20 us). `capture_source` was `latest`: RUN in normal mode completed no capture of its own, so the kept
+    copy was not exercised by the tool (the 11:41 entry did it with the client library). Open: the same with auto mode.
+  - `scope_wait_for_event` PASS: returned after 11.4 s, fired, 6530 samples, crossings of 14 / 8 / 1.6 V at -5.13,
+    +2.80, +10.28 us, between 15.4 us. Not tested beyond 60 s. Compact `scope_status` PASS.
+  - `scope_measure` frequency: 482511 Hz (`fft_peak`) at 200 MSa/s; **509721 Hz from crossings at 20 MSa/s, 5.4 % high,
+    no caveat.** Fixed on the host in 0aa0758 (the crossing estimate is checked against the FFT peak); not rerun on
+    the board.
+  - The client session kept the old schemas of the existing tools after the reconnect (no `preview_points`,
+    `capture=`, `crossings`): those parameters are untested on the unit.

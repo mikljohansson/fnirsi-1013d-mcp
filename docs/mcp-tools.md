@@ -429,7 +429,10 @@ irregular (spread of the intervals over 0.2 of the mean, e.g. switching spikes o
 dominant_frequency`, parabolic peak, at least 6x the median bin) is returned with `frequency_method` `fft_peak`,
 `frequency_resolution` = the bin width fs / N, `frequency_reason` = why the crossings failed, duty null, and the caveat
 that it is the strongest line, not necessarily the fundamental. Other failures (no swing out of the noise, under a
-period) stay null with the reason.
+period) stay null with the reason. A crossing estimate whose intervals are uneven (spread over 0.02; every real square
+is below 0.004) is compared with that line: when they differ by more than 2 % and two bins the line is returned
+(`fft_peak`, `frequency_reason` "crossings disagree with the spectrum", `frequency_crossings` = the crossing value).
+Bench 2026-11-12: the same ripple at 20 MSa/s read 509.7 kHz from crossings (483.6 kHz true) with a spread under 0.2.
 
 Crossings (mcp-notes, `analysis.level_crossings`): `levels` (volts at the tip), `edge` (`rising` / `falling` /
 `either`), `smooth` (a centred moving average: samples as an int or a time such as `'0.5us'`), `between` ([from, to];

@@ -166,7 +166,13 @@ From an agent's bench session (task queue "Usage notes from the induction-imager
 - **Frequency**: `A.frequency_or_fft` falls back to `A.dominant_frequency` only for the "irregular crossings" reason and
   only when the line has `FFT_FALLBACK_MIN_PERIODS` (4) periods in the record: without that the battery's R0b (CH2 =
   part of one RC period at 200 MSa/s) read 66.7 kHz = the first bin (finding 4a). `_freq_fields` gives the result fields
-  (`frequency_method`, `frequency_resolution`, FFT_PEAK_CAVEAT) for capture results and scope_measure.
+  (`frequency_method`, `frequency_resolution`, FFT_PEAK_CAVEAT) for capture results and scope_measure. Since 0aa0758
+  (bench retest 2026-11-12: 509.7 kHz from crossings on the 483.6 kHz ripple at 20 MSa/s, spread under 0.2) a crossing
+  estimate with `interval_cv` over `FREQ_CHECK_MIN_CV` (0.02) that differs from the line by `FREQ_CHECK_MAX_DIFF` (2 %,
+  and two bins) gives the line, `crossings_frequency` kept. Not checked on the real record (measure saves no file).
+- **Tool schemas in a running client** (same retest): after a server reconnect a client session showed the new tool
+  (`scope_wait_for_event`) but kept the old schemas of the existing tools, so new parameters could not be passed; the
+  server-side behaviour was new. New parameters on existing tools need a fresh client session.
 - **Crossings**: `A.hysteresis_crossings` (armed beyond level -/+ h, confirmed beyond +/- h, the midpoint of the noise
   crossings in between: unbiased on a noisy slope) and `A.level_crossings` (moving average, h = 3 x the smoothed
   noise, at least lsb / 2; slope over a span with 6 sigma of change; t_sigma; caveats; `between`). Server helper

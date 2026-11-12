@@ -39,7 +39,9 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 - `scope_measure`: level `crossings` (times relative to the trigger with hysteresis and optional smoothing, t_sigma,
   the time between two levels), `source` = a saved `.npz`, and a frequency from the FFT peak when the crossings are
   irregular (`frequency_method` `fft_peak`, `frequency_resolution`; a buck ripple with switching spikes read null
-  before) (4edb8cd, fbfbcf0).
+  before) (4edb8cd, fbfbcf0). A crossing frequency with uneven intervals that differs from the FFT peak by more than
+  2 % gives the FFT peak too, with the crossing value in `frequency_crossings` (the ripple read 5.4 % high at
+  20 MSa/s on the bench) (0aa0758).
 - `scope_status` is compact by default (no battery or link statistics; `detail=true` gives them) (fbfbcf0).
 - New `scope_wait_for_event`: set an edge trigger and the record, arm and wait up to an hour with progress
   notifications for an event a person causes; returns statistics, the file and level crossings, leaves the scope in
