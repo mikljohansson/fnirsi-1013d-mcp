@@ -2203,3 +2203,15 @@ Newest entries at the bottom. Format: date, who, what, result.
     the board.
   - The client session kept the old schemas of the existing tools after the reconnect (no `preview_points`,
     `capture=`, `crossings`): those parameters are untested on the unit.
+- 2026-11-12 12:5x-13:12 (lead, owner present): **v0.3.3 released and on the card.** Release commit c9558b5 (main pushed:
+  fw-hostdt, fw-hostkeep, mcp-notes, the frequency cross-check 0aa0758), CI green, the CI image be350b69d1ff9c61... = the
+  local `make gcc10`. Dry run `v0.3.3-rc1`: release.yml green, 8 assets, SHA256SUMS 7 of 7, firmware be350b69...; rc removed.
+  The rc's `fnirsi_1013d-fw-0.3.3.bin` FEL-loaded by hand (ENTER_FEL from the RAM build, `sunxi-fel -p write 0x7FFFFFE0`,
+  read back, `exe`): the 827,872 bytes from 0x80000000 identical, the 32 header bytes at 0x7FFFFFE0 read back as zeros
+  (below the DDR; 20 non-zero bytes differ). `#VER` / GET_INFO: fw 0.3.3, build c9558b57 = the tag commit, proto 1.30,
+  fpga 0x153F. Persisted with `fnirsi1013d-flash --persist-only` (hash checked): backup
+  `backups/sdcard/sd_750-2367_20261112-130114.bin` (the 0.3.2 image), 1617 sectors compared identical, eGON checksum
+  0xFD970C75. Tag `v0.3.3` on c9558b5: release.yml green, published as the latest release,
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.3, its firmware hash be350b69... = the image on the card.
+  **Not done: the hardware battery on the release image** (docs/releasing.md 4.6; the scope was on the induction-imager
+  board, not on the ladder) and a power cycle from the card. Calibration wizard still pending (stages 0x06D2).
