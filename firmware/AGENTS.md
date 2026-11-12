@@ -7762,8 +7762,8 @@ check_vectors OK); mcp ruff clean, pytest 595 passed; `fnirsi1013d.vectors --che
 
 ## 104. fw-hostkeep: the host's last single is kept until the next host ARM (after fw 0.3.2, protocol 1.30, row 72)
 
-Branch `fw-hostkeep` from main 618b45f (v0.3.2, the task queue's induction-imager items). Commits: e84c000 (firmware, host tests, vectors),
-a34a0a0 (mcp: protocol, simulator, client, server, tests), then the docs commit with this section. `PC_FW_VERSION`
+Branch `fw-hostkeep` from main 618b45f (v0.3.2, the task queue's induction-imager items). Commits: e7934d4 (firmware, host tests, vectors),
+8df21bc (mcp: protocol, simulator, client, server, tests), then the docs commit with this section. `PC_FW_VERSION`
 not bumped (after 0.3.2). **Not benched, nothing flashed.**
 
 **What went wrong (bench 2026-11-12, fw 0.3.2, mcp 0.3.2).** An agent armed a host single (`scope_set_trigger` CH2
@@ -7807,7 +7807,7 @@ and no trigger, or after a STOP that aborted it, nothing of the screen's capture
 - **Not done:** READ_TRACE has no KEPT selector (the trace buffers belong to the screen; once the UI moved on the kept
   capture has raw words only; the host converts them as for any READ_RAW).
 
-**2. mcp (a34a0a0).** `P.PROTO_MINOR` 30 / `KEPT_MINOR`, `StatusResp.kept_capture_id` (was `reserved`),
+**2. mcp (8df21bc).** `P.PROTO_MINOR` 30 / `KEPT_MINOR`, `StatusResp.kept_capture_id` (was `reserved`),
 `CaptureInfoHeader.kept_flags`, `ReadRawReq.KEPT`, `CAPINFO_REQ_KEPT`, `KEPT_F_*`, `STATE_NO_KEPT`; `Scope.has_kept`,
 `capture_info(kept=)`, `kept_capture_info()`, `read_kept_capture()`, `read_raw(kept=)` (through `_read_capture` /
 `_read_capture16` / `_read_capture_peak`). Server: `scope_fetch_waveform(capture='auto'|'latest'|'host')` and
