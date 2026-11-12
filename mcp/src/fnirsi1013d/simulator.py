@@ -150,6 +150,19 @@ class Signal:
             hi = ph < self.p("duty", 0.5)
             a = self.p("amp", 0.3)
             return self.p("offset", 0.0) + np.where(hi, a, -a)
+        if k == "buck":
+            # mcp-notes: a buck converter's output ripple: a triangle of ``rms`` volts (rising while the switch is on,
+            # ``duty``) plus a damped ring of ``spike`` volts at ``ring`` Hz, time constant ``spike_tau``, after each
+            # switching edge (the turn-off ring 0.8 x and inverted)
+            f, duty = self.p("freq", 483e3), self.p("duty", 0.3)
+            vpk = self.p("rms", 13e-3) * math.sqrt(3)
+            ph = np.mod(t * f, 1.0)
+            on = ph < duty
+            tri = np.where(on, -vpk + 2 * vpk * ph / duty, vpk - 2 * vpk * (ph - duty) / (1 - duty))
+            x = np.where(on, ph, ph - duty) / f
+            spike, ring, tau = self.p("spike", 0.12), self.p("ring", 60e6), self.p("spike_tau", 15e-9)
+            sp = spike * np.exp(-x / tau) * np.sin(2 * np.pi * ring * x) * np.where(on, 1.0, -0.8)
+            return self.p("offset", 0.0) + tri + sp
         if k in ("decay", "gate"):
             period = self.p("period", 1e-3)
             width = self.p("width", 200e-6)
@@ -369,7 +382,7 @@ def _spi_words(msg: bytes, nbits: int) -> list[int]:
     return [(total >> (nbits * (nwords - 1 - i))) & ((1 << nbits) - 1) for i in range(nwords)]
 
 
-SIGNAL_KINDS = ("zero", "dc", "sine", "square", "decay", "gate", "gen", "dut_in", "dut_out") + SERIAL_KINDS
+SIGNAL_KINDS = ("zero", "dc", "sine", "square", "buck", "decay", "gate", "gen", "dut_in", "dut_out") + SERIAL_KINDS
 
 
 def parse_signal(spec: str) -> Signal:
@@ -2226,6 +2239,19 @@ class Device:
     def force(self) -> None:
         pc = self.simulate_capture(self.settings, forced=True)
         self._complete(pc)
+
+    def event(self, ch: int, sig: "Signal") -> None:
+        """Test hook (mcp-notes): an event while a host single waits (a person switching something on): channel ``ch``
+        carries ``sig`` from now on and a pending capture searches its trigger again, counted from now."""
+        with self.lock:
+            sigs = list(self.cfg.signals)
+            sigs[ch] = sig
+            self.cfg.signals = (sigs[0], sigs[1])
+            if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED) and self._pending_capture is not None \
+                    and "run" not in self._pending_capture:
+                self._pending_capture = self.simulate_capture(self.settings)
+                self.arm_time = self.now()
+            self.tick()
 
     def go_remote(self, flags: int, watchdog_s: int) -> None:
         if self.shared:
