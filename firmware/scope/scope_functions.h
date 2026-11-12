@@ -86,6 +86,12 @@ void scope_display_voltage(PCHANNELSETTINGS settings, int32 value);
 
 void scope_print_value(char *buffer, int32 value, uint32 scale, char *header, char *sign);
 
+//fw-hostdt (disp_rate.h): the UI's pair and whether the record on screen ran at another sample period
+uint32 scope_ui_divider(void);
+uint64 scope_ui_tdiv_ps(void);
+int    scope_rate_foreign(void);
+int32  scope_rate_h(uint64 v, uint32 *scale);
+
 char *scope_print_decimal(char *buffer, int32 value, uint32 decimalplace, uint32 negative);
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -22,6 +22,7 @@
 #include "pc_hooks.h"
 #include "ui_ctrl.h"
 #include "peak_bars.h"
+#include "disp_rate.h"
 
 #include <string.h>
 
@@ -150,6 +151,7 @@ static uint32 phos_xkey(int32 dx)
   h = fnv(h, (uint32)disp_xend);
   h = fnv(h, scopesettings.timeperdiv);
   h = fnv(h, scopesettings.samplerate);
+  h = fnv(h, disp_rate_p5());                                  //fw-hostdt: records at another period do not mix
   h = fnv(h, (uint32)scopesettings.triggerhorizontalposition);
   h = fnv(h, fpgasettings.totalsamples);
   h = fnv(h, fpgasettings.settriggerpoint);

@@ -77,6 +77,7 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode);
 void scope_channel_dcshift_value(void);
 
 void scope_acqusition_settings(int mode);
+int  scope_acq_chip_stale(void);       //fw-hostdt: the chip's texts no longer match the record on screen / the settings
 void scope_move_speed(int mode);
 
 void watchdog_reset_now(void);

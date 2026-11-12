@@ -28,6 +28,7 @@
 #include "pc_hal.h"
 #include "fpga_control.h"
 #include "scope_functions.h"
+#include "disp_rate.h"
 #include "ui_ctrl.h"
 #include "fpga_bus.h"
 #include "menu.h"
@@ -300,12 +301,12 @@ static void text_center(uint32 xc, uint32 y, char *s) { display_text(xc - text_w
 //----------------------------------------------------------------------------------------------------------------------------------
 // Settings derived from the scope
 
+//fw-hostdt (firmware/AGENTS.md section 103): the divider the record on screen ran at (disp_rate.h, noted at every
+//readout), so a host's raw divider gives the axis, the bins, the cards and READ_SPECTRUM's header the record's rate; the
+//UI table's before the first readout. Was the UI time base's divider (a raw divider's record labelled with the UI rate)
 static uint32 spec_divider(void)
 {
-  if(scopesettings.samplerate < (sizeof(sample_rate_settings) / sizeof(uint32)))
-    return sample_rate_settings[scopesettings.samplerate];
-
-  return 0;
+  return disp_rate_divider(scope_ui_divider());
 }
 
 //Largest FFT length the record holds

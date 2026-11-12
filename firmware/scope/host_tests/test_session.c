@@ -12,6 +12,8 @@
 #include "cap_stage.h"
 #include "gen_pat.h"
 #include "mock_hal.h"
+#include "disp_rate.h"
+#include "ui_fmt.h"
 #include "test_util.h"
 
 static pc_session S;
@@ -3700,6 +3702,116 @@ static void test_decim_held_divider(void)
   T_EQ(r.p[0], mock.tb.timeperdiv); T_EQ(pc_get_u32(r.p + 4), 199); T_EQ(S.tb_raw, 0);
 }
 
+//fw-hostdt (firmware/AGENTS.md section 103; bench report 2026-11-12): the screen's time scale under a host's raw
+//divider. The UI at 200 us/div, 500 kSa/s (index 20, divider 399); the host's divider 9, then 0. The record each readout
+//puts into the trace buffers carries the period it ran at (disp_rate.h; mock_hal's trace build notes it as
+//pc_glue_decim_read does), so what the screen computes from it (scope_functions.c, menu.c, spectrum.c) is the record's:
+//5 us and 500 ns per division of the trace drawn with the UI's pair. GET_TIMEBASE and the saved UI words are untouched.
+static void dr_tdiv(const char *want)
+{
+  char t[32];
+
+  disp_rate_tdiv_text(t, disp_rate_scale_ps(1000000000000ull / 5000, 399));     //the UI's 200 us/div
+  T_STR(t, want);
+}
+
+static void dr_rate(const char *want)
+{
+  char t[32];
+
+  disp_rate_rate_text(t);
+  T_STR(t, want);
+}
+
+//The UI pair's divider, as the device's scope_ui_divider reads it (sample_rate_settings[scopesettings.samplerate]; the
+//mock's tb.divider follows a raw write, the device's table index does not)
+static uint32_t dr_ui(void)
+{
+  return mock_sr_div(mock.tb.samplerate);
+}
+
+static void test_screen_raw_divider(void)
+{
+  resp_t  r;
+  uint8_t p[8];
+
+  setup(PC_FW_FPGA_VERSION);
+  memset(p, 0, 8); pc_put_u32(p + 4, 20);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(dr_ui(), 399);
+
+  //A host capture at the UI's own rate: nothing foreign, the 1.00o5 table paths
+  r = enc_capture();
+  T_EQ(disp_rate_divider(0), 399);
+  T_FALSE(disp_rate_foreign(dr_ui()));
+
+  //The raw divider 9 (20 MSa/s): the UI's pair and GET_TIMEBASE's 0xFF / 0xFF as before
+  enc_divider(9);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], 0xFF); T_EQ(r.p[1], 0xFF); T_EQ(pc_get_u32(r.p + 4), 9);
+  T_EQ(mock.tb.timeperdiv, 20); T_EQ(mock.tb.samplerate, 8); T_EQ(dr_ui(), 399);
+  //Not captured yet: the screen still shows the 500 kSa/s record
+  T_FALSE(disp_rate_foreign(dr_ui()));
+
+  r = enc_capture();
+  r = req(PC_CMD_GET_CAPTURE_INFO, 0, 0);
+  T_EQ(pc_get_u32(r.p + 16), 9); T_EQ(r.p[20], 0xFF);
+  T_TRUE(disp_rate_foreign(dr_ui()));
+  T_EQ(disp_rate_divider(dr_ui()), 9);                             //the spectrum's fs and READ_SPECTRUM's divider
+  dr_tdiv("5us/div");
+  dr_rate("20MSa/s");
+  {
+    char t[32];
+    //A 483 kHz signal: 41.41 samples per period (Q16) is 2.071 us and 483.0 kHz, not 82.8 us (2 us per sample)
+    ui_fmt_ps(t, disp_rate_samples_ps(2713846u));  T_STR(t, "2.071us");
+    ui_fmt_mhz(t, disp_rate_freq_mhz(2713846u));   T_STR(t, "483.0kHz");
+  }
+
+  //The UI's own captures in RUN while the raw divider runs: a UI arm writes no 0x0D, the readout sees the raw divider
+  ui_capture(100);
+  disp_rate_note(pc_hal_divider_now(), 0);                         //what pc_glue_decim_read notes for that readout
+  T_TRUE(disp_rate_foreign(dr_ui()));
+  dr_tdiv("5us/div");
+
+  //Divider 0 (200 MSa/s)
+  enc_divider(0);
+  r = enc_capture();
+  dr_tdiv("500ns/div");
+  dr_rate("200MSa/s");
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.p[0], 0xFF); T_EQ(r.p[1], 0xFF);
+
+  //A raw divider set while the 200 MSa/s record is on screen (STOP): the screen keeps that record's scale until a
+  //capture at the new divider is read out
+  enc_divider(19);
+  dr_rate("200MSa/s");
+  r = enc_capture();
+  dr_rate("10MSa/s");
+  dr_tdiv("10us/div");
+
+  //The decimation filter at an even raw divider: the record's period is N x 5 ns, N = 2 (floor(D / 2) + 1) = 6
+  set_trigger(0x30, 0, 0, 0, 0, 0, 4096, 0, 0, &r);
+  T_EQ(r.h.status, 0);
+  memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
+  r = req(PC_CMD_SET_DECIM, p, 4);
+  T_EQ(r.h.status, 0);
+  enc_divider(4);
+  r = enc_capture();
+  T_EQ(mock.decim_cur.k, 2); T_EQ(mock.decim_cur.n, 6);
+  T_EQ(disp_rate_p5(), 6);
+  dr_rate("33.3MSa/s");
+  dr_tdiv("3us/div");
+
+  //The UI selects its time base again (mode 0, as a time/div tap writes the table's divider): the next record is the
+  //UI pair's and every table path is back
+  memset(p, 0, 8); pc_put_u32(p + 4, 20);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0);
+  r = enc_capture();
+  T_FALSE(disp_rate_foreign(dr_ui()));
+  T_EQ(disp_rate_divider(dr_ui()), 399);
+}
+
 //fw 0.2.79 (protocol 1.24): the capture stages: caps bit 19 and features bit 7, the EXT shifts 4 / 3 words later, 0x53
 //bits 3 / 4 kept 0, GET_HEALTH 104..123, GET_CAL 356..363, 0x36 read after full-rate host captures
 static void test_capture_stages(void)
@@ -4753,6 +4865,7 @@ int main(void)
   test_enc_check();
   test_capture_stages();
   test_decim_held_divider();
+  test_screen_raw_divider();
   test_peak_math();
   test_peak_protocol();
   test_bode();

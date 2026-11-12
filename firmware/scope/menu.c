@@ -38,6 +38,7 @@
 #include "slider_ov_draw.h"
 #include "acq_view.h"
 #include "trig_ui.h"
+#include "disp_rate.h"
 
 #include <string.h>
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -1990,9 +1991,35 @@ void scope_channel_settings(PCHANNELSETTINGS settings, int mode)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//fw-hostdt: what the ACQ chip's texts were drawn from, so a record noted at another sample period redraws it
+//(pc_hal_scope.c pc_acq_chip_follow, every main loop pass): the record's period, the UI's pair, the rate setting
+static uint32 acq_chip_drawn = 0xFFFFFFFF;
+
+static uint32 scope_acq_chip_key(void)
+{
+  uint32 h = 2166136261u;
+
+  if(bode_view_active())
+    return 1;
+
+  h = (h ^ (uint32)scope_rate_foreign()) * 16777619u;
+  h = (h ^ (scope_rate_foreign() ? disp_rate_p5() : 0)) * 16777619u;
+  h = (h ^ scopesettings.samplerate) * 16777619u;
+  h = (h ^ scopesettings.timeperdiv) * 16777619u;
+  h = (h ^ scopesettings.long_mode) * 16777619u;
+  return (h ^ acq_view_rate_setting()) * 16777619u;
+}
+
+int scope_acq_chip_stale(void)
+{
+  return scope_acq_chip_key() != acq_chip_drawn;
+}
+
 void scope_acqusition_settings(int mode)
 {
   const char *line2;
+
+  acq_chip_drawn = scope_acq_chip_key();
 
   //Clear the area first
   display_set_fg_color(BLACK_COLOR);
@@ -2035,6 +2062,26 @@ void scope_acqusition_settings(int mode)
   {
     //Active, black text
     display_set_fg_color(BLACK_COLOR);
+  }
+
+  //fw-hostdt (firmware/AGENTS.md section 103): the record on screen ran at another sample period than the UI's pair (a
+  //host's raw divider): its rate, and what one division of the trace drawn with the UI's pair lasts. A rate tapped in
+  //STOP for the next RUN is the setting and shows as before.
+  if(scope_rate_foreign())
+  {
+    char t[24];
+
+    if(acq_view_rate_setting() != scopesettings.samplerate)
+      display_text(ACQ_BUTTON_XPOS + 38, ACQ_BUTTON_YPOS + 3, (int8 *)acquisition_speed_texts[acq_view_rate_setting()]);
+    else
+    {
+      disp_rate_rate_text(t);
+      display_text(ACQ_BUTTON_XPOS + 38, ACQ_BUTTON_YPOS + 3, (int8 *)t);
+    }
+
+    disp_rate_tdiv_text(t, disp_rate_scale_ps(scope_ui_tdiv_ps(), scope_ui_divider()));
+    display_text(ACQ_BUTTON_XPOS + 38, ACQ_BUTTON_YPOS + 19, (int8 *)t);
+    return;
   }
 
   //The rate setting (fw-stoprate: in STOP a rate tapped for the next RUN; the record on screen keeps its own)

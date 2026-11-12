@@ -10,6 +10,7 @@
 #include "pc_cmds.h"
 #include "cap_stage.h"
 #include "gen_pat.h"
+#include "disp_rate.h"
 
 mock_state mock;
 mock_resp  mock_resps[MOCK_MAX_RESP];
@@ -73,6 +74,7 @@ void mock_reset(uint16_t fpga_version)
   mock_clear_resps();
   memset(&mock, 0, sizeof(mock));
   mock_log_reset();                                  //D4 logger
+  disp_rate_forget();                                //fw-hostdt: no record on screen yet
   mock.now        = 5000;
   mock.version    = fpga_version;
   mock.ring_words = 8192;
@@ -470,6 +472,10 @@ int32_t pc_hal_trace_build(uint32_t start_word, uint32_t total_samples, uint32_t
   uint32_t ch, k;
 
   mock.trace_builds++;
+
+  //fw-hostdt: the record's sample period for the screen, as pc_glue_decim_read notes it at every readout
+  if(ch_mask & 0x03)
+    disp_rate_note(mock.fpga_divider, mock.decim_cur.k ? mock.decim_cur.n : 0);
 
   for(ch=0;ch<2;ch++)
   {
