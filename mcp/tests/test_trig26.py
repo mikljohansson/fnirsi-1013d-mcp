@@ -659,7 +659,7 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             r = await c.call("scope_set_trigger", type="edge", edge="rising", hold_off="2.5ms")
             assert r["applied"]["holdoff"] == 500000 and r["applied"]["holdoff_s"] == pytest.approx(2.5e-3)
             assert r["applied"]["type"]["type"] == "edge"
-            st = await c.call("scope_status")
+            st = await c.call("scope_status", detail=True)
             assert "trig_types" in st["features"] and st["trigger_status"]["type"] == "pulse_width"  # the last arm's
             assert "later FPGA bitstream" in await c.fails("scope_set_trigger", type="runt")
             assert "pulse_width" in await c.fails("scope_set_trigger", type="nth_edge", width="1us")
@@ -716,7 +716,7 @@ def test_tools_trigger_types_counter_peak(sim_factory, tmp_path):
             # status: the one UI Average behaviour
             srv.device.ui_average = True
             await c.call("scope_set_trigger", source="CH1", mode="auto", total_samples=3000)
-            st = await c.call("scope_status")
+            st = await c.call("scope_status", detail=True)
             assert st["ui_averaging"] in ("mcu", "hardware") and st["ui_averaging_records"] >= 2
     anyio.run(main)
 

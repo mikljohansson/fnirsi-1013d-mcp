@@ -84,6 +84,8 @@ class ServerConfig:
     #: collaborative firmware reports ui_busy 2 (STARTING) until its first main-loop pass; wait this long
     starting_wait_s: float = 10.0
     inline_max_points: int = 2000
+    #: scope_wait_for_event: one WAIT request (and one progress notification) per this many seconds
+    event_poll_s: float = 2.0
     #: cap on one response payload; larger reads are split (None = the device's max_response_payload)
     max_response: int | None = None
     #: per-unit voltage calibration file; None: <data_dir>/cal/<serial>.json (loaded if present)
@@ -964,14 +966,80 @@ def _capture_caveats(cap: Capture, freq: dict[str, float | None]) -> list[str]:
     return cav
 
 
-def _channel_result(cap: Capture, name: str, inline_max: int) -> dict[str, Any]:
+#: the inline waveform of a result when the caller gives no preview_points: the whole record up to
+#: ServerConfig.inline_max_points samples, else this many min / max bins per channel
+PREVIEW_POINTS_DEFAULT = 250
+PREVIEW_POINTS_MAX = 1000
+PREVIEW_POINTS_DESC = (
+    "size of the inline waveform: 0 = none (statistics and the .npz path only: the right choice when only numbers "
+    "are needed); N = up to 2N samples inline, longer records as N min / max bins per channel. Default: up to 2000 "
+    "samples inline, else 250 bins (a two-channel capture: about 1500 numbers, some 17 kB of text; 0 leaves about 2 kB)")
+#: scope_wait_for_event's longest wait (the scope is held for the whole wait; see the tool's description)
+EVENT_MAX_S = 3600.0
+FFT_PEAK_CAVEAT = ("{ch}: the crossings are irregular ({why}); frequency is the strongest spectral line of the record "
+                   "(Hann window, resolution {res}), which need not be the fundamental, and duty is not measured")
+
+
+def _inline_waveform(t: np.ndarray, arrays: dict[str, np.ndarray], preview_points: int | None,
+                     inline_max: int) -> tuple[str | None, dict[str, Any]]:
+    """('samples', t and every array in full) for a short record, ('preview', a min / max preview per array) for a long
+    one, (None, {}) for preview_points 0. ``preview_points`` None keeps the old rule: in full up to ``inline_max``
+    samples, else PREVIEW_POINTS_DEFAULT bins."""
+    if preview_points == 0:
+        return None, {}
+    limit = inline_max if preview_points is None else 2 * preview_points
+    if t.size <= limit:
+        return "samples", {"t": A._r(t), **{k: A._r(v) for k, v in arrays.items()}}
+    pts = PREVIEW_POINTS_DEFAULT if preview_points is None else preview_points
+    return "preview", {k: A.preview(t, v, pts) for k, v in arrays.items()}
+
+
+def _window_view(cap: Capture, w: tuple[float, float] | None) -> tuple[Capture, dict[str, Any]]:
+    """The part of ``cap`` inside the time window ``w`` (seconds relative to the trigger; the samples of
+    ``_sample_window``) as a capture of its own, and the span it covers. The record itself is not changed."""
+    if w is None:
+        view = cap
+    else:
+        a = max(cap.start_sample, int(math.floor(w[0] / cap.dt)) + cap.pretrigger_samples)
+        b = min(cap.start_sample + cap.n, int(math.ceil(w[1] / cap.dt)) + cap.pretrigger_samples + 1)
+        if b - a < 2:
+            t0 = float(cap.t[0]) if cap.n else 0.0
+            t1 = float(cap.t[-1]) if cap.n else 0.0
+            raise ValueError(f"window {w[0]:.4g}..{w[1]:.4g} s is outside the capture, which spans {t0:.4g}..{t1:.4g} s "
+                             "around the trigger; change the window or set_trigger/set_timebase")
+        view = _slice_capture(cap, a, b - a)
+    span = {"whole_record": w is None, "t_start": _r6(float(view.t[0])) if view.n else None,
+            "t_end": _r6(float(view.t[-1])) if view.n else None, "n_samples": view.n}
+    return view, span
+
+
+def _freq_fields(name: str, v: np.ndarray, dt: float, cav: list[str] | None = None) -> dict[str, Any]:
+    """frequency / period / duty of a channel through ``A.frequency_or_fft`` as result fields; the FFT fallback adds
+    ``frequency_method`` 'fft_peak', ``frequency_resolution`` and (into ``cav``) FFT_PEAK_CAVEAT."""
+    fr = A.frequency_or_fft(v, dt)
+    out: dict[str, Any] = {"frequency": _r6(fr["frequency"]) if fr["frequency"] else None,
+                           "period": _r6(fr["period"]) if fr["period"] else None,
+                           "duty": _r6(fr["duty"]) if fr["duty"] is not None else None,
+                           "frequency_method": fr["method"]}
+    if fr.get("reason"):
+        out["frequency_reason"] = fr["reason"]
+    if fr["method"] == "fft_peak":
+        out["frequency_resolution"] = _r6(fr["resolution"])
+        if cav is not None:
+            cav.append(FFT_PEAK_CAVEAT.format(ch=name, why=fr["reason"].split(":")[0],
+                                              res=fmt_si(fr["resolution"], "Hz")))
+    return out
+
+
+def _channel_result(cap: Capture, name: str, inline_max: int, cav: list[str] | None = None) -> dict[str, Any]:
     ch = cap.channels[name]
     st = A.stats(ch.volts)
-    fr = A.frequency(ch.volts, cap.dt)
+    fr = _freq_fields(name, ch.volts, cap.dt, cav)
     out: dict[str, Any] = {k: _r6(v) for k, v in st.items()}
-    out.update({"frequency": _r6(fr["frequency"]) if fr["frequency"] else None,
-                "duty": _r6(fr["duty"]) if fr["duty"] is not None else None,
-                **({"frequency_reason": fr["reason"]} if fr.get("reason") else {}),
+    out.update({"frequency": fr["frequency"], "duty": fr["duty"],
+                **({"frequency_reason": fr["frequency_reason"]} if "frequency_reason" in fr else {}),
+                **({"frequency_method": "fft_peak", "frequency_resolution": fr["frequency_resolution"]}
+                   if fr["frequency_method"] == "fft_peak" else {}),
                 "clipped_samples": int(ch.clipped.sum()), "volts_per_lsb": _r6(ch.volts_per_lsb),
                 "scaling": ch.scale.source if ch.scale is not None else "firmware"})
     if ch.peak:  # 1.26: the envelope's extremes and width
@@ -1016,13 +1084,18 @@ def _save_capture(sess: Session, cap: Capture, kind: str, extra_meta: dict[str, 
     return sess.save_npz(kind, arrays, meta)
 
 
-def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
+def _capture_result(sess: Session, cap: Capture, kind: str, *, window: tuple[float, float] | None = None,
+                    preview_points: int | None = None) -> dict[str, Any]:
+    """Save the whole record ``cap`` and describe it: statistics, caveats and the inline waveform cover ``window``
+    (the whole record when None; ``stats_span`` says which), ``preview_points`` sets the inline waveform's size."""
+    view, span = _window_view(cap, window)
     path = _save_capture(sess, cap, kind)
     sess.last_capture, sess.last_capture_file = cap, path
     freq = {}
     chans = {}
-    for name in cap.channels:
-        r = _channel_result(cap, name, sess.cfg.inline_max_points)
+    fcav: list[str] = []
+    for name in view.channels:
+        r = _channel_result(view, name, sess.cfg.inline_max_points, fcav)
         freq[name] = r["frequency"]
         chans[name] = r
     out: dict[str, Any] = {
@@ -1030,19 +1103,16 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
         "trigger": "fired" if cap.triggered else ("auto_timeout" if cap.auto_timeout else "none"),
         "dt": _r6(cap.dt), "sample_rate": _r6(cap.sample_rate), "n_samples": cap.n,
         "t_start": _r6(float(cap.t[0])) if cap.n else None, "t_end": _r6(float(cap.t[-1])) if cap.n else None,
-        "channels": chans, "file": path,
+        "stats_span": span, "channels": chans, "file": path,
     }
-    if cap.peak:  # 1.26: the envelope, not the midpoint
-        if cap.n <= sess.cfg.inline_max_points:
-            out["samples"] = {"t": A._r(cap.t), **{f"{n}_min": A._r(c.min_volts) for n, c in cap.channels.items()},
-                              **{f"{n}_max": A._r(c.max_volts) for n, c in cap.channels.items()}}
-        else:
-            out["preview"] = {**{f"{n}_min": A.preview(cap.t, c.min_volts) for n, c in cap.channels.items()},
-                              **{f"{n}_max": A.preview(cap.t, c.max_volts) for n, c in cap.channels.items()}}
-    elif cap.n <= sess.cfg.inline_max_points:
-        out["samples"] = {"t": A._r(cap.t), **{n: A._r(c.volts) for n, c in cap.channels.items()}}
+    if view.peak:  # 1.26: the envelope, not the midpoint
+        arrays = {**{f"{n}_min": c.min_volts for n, c in view.channels.items()},
+                  **{f"{n}_max": c.max_volts for n, c in view.channels.items()}}
     else:
-        out["preview"] = {n: A.preview(cap.t, c.volts) for n, c in cap.channels.items()}
+        arrays = {n: c.volts for n, c in view.channels.items()}
+    key, wave = _inline_waveform(view.t, arrays, preview_points, sess.cfg.inline_max_points)  # type: ignore[arg-type]
+    if key is not None:
+        out[key] = wave
     if cap.settings_seq is not None:
         out["settings_seq"] = cap.settings_seq
     if cap.capture_info is not None:
@@ -1056,7 +1126,40 @@ def _capture_result(sess: Session, cap: Capture, kind: str) -> dict[str, Any]:
                              "codes_per_count": _r6(d.code_per_count)}
     if cap.peak:
         out["peak"] = True
-    out["caveats"] = list(cap.notes) + _capture_caveats(cap, freq) + STANDING_CAVEATS
+    out["caveats"] = list(cap.notes) + _capture_caveats(view, freq) + fcav + STANDING_CAVEATS
+    return out
+
+
+def _smooth_samples(smooth: int | str | None, dt: float) -> int:
+    """A smoothing argument as samples: an int is samples, a string a time ('2us')."""
+    if smooth is None:
+        return 1
+    if isinstance(smooth, int):
+        return max(1, smooth)
+    secs = parse_quantity(smooth, "s")
+    return max(1, int(round(secs / dt)))
+
+
+def _crossings_result(t: np.ndarray, v: np.ndarray, levels: list[float | str], edge: str, smooth: int | str | None,
+                      between: list[float | str] | None, lsb: float | None, max_per_level: int) -> dict[str, Any]:
+    """``A.level_crossings`` as a tool result: seconds relative to the trigger, rounded; ``caveats`` for the caller."""
+    lv = [parse_quantity(x, "V") for x in levels]
+    bt = (parse_quantity(between[0], "V"), parse_quantity(between[1], "V")) if between else \
+        ((lv[0], lv[-1]) if len(lv) >= 2 else None)
+    r = A.level_crossings(t, v, lv, edge=edge, smooth=_smooth_samples(smooth, float(t[1] - t[0])),
+                          max_per_level=max_per_level, lsb=lsb, between=bt)
+    out: dict[str, Any] = {
+        "edge": edge, "smooth_samples": r["smooth"], "noise_volts": _r6(r["noise"]), "hysteresis_volts":
+        _r6(r["hysteresis"]),
+        "levels": [{"level": _r6(d["level"]), "count": d["count"], "first": _r6(d["first"]) if d["first"] is not None
+                    else None, **({"truncated": True} if d.get("truncated") else {}),
+                    "crossings": [{"t": _r6(c["t"]), "edge": c["edge"], "slope_v_per_s": _r6(c["slope_v_per_s"]),
+                                   "t_sigma": _r6(c["t_sigma"]) if c["t_sigma"] is not None else None}
+                                  for c in d["crossings"]]} for d in r["levels"]],
+        "caveats": r["caveats"]}
+    if "between" in r:
+        b = r["between"]
+        out["between"] = {k: (_r6(x) if isinstance(x, float) else x) for k, x in b.items()}
     return out
 
 
@@ -1241,22 +1344,26 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         return await run("scope_profile", 0, {}, go)
 
     @register(0, title="Scope status", read_only=True)
-    async def scope_status() -> dict[str, Any]:
-        """Mode ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with
-        LOCAL/REMOTE), display_mode (what the trace area shows: scope, spectrum, waterfall, density (protocol
-        1.7, the spectrum view and its sub-views), phosphor (1.13) or bode (1.20, the scope's Bode plot); a number for
-        a mode this host does not know), from protocol 1.17 the bitstream's features (ext_trigger, decim, fir,
-        segments, hw_average; enc_check 1.19; bode 1.20; capture_stages 1.24; trig_types, peak, counter 1.26) and the
-        acquisition menu's Average (ui_averaging off / mcu / hardware: since fw 0.2.103 every displayed record is the
-        mean of ui_averaging_records records, summed by the MCU or by one FPGA run; hardware_averaging says which),
-        from 1.26 trigger_status (the qualifier: type, hold-off running, counting, pulse began, edges left),
-        run_state (RUN / STOP / SINGLE), settings_seq (changes whenever anyone changes a setting),
-        the latest capture's id and origin (host / ui_run / ui_single), the host capture state, trigger address,
-        battery, and on legacy firmware the watchdog and exit_reason. Cheap; use it to poll."""
+    async def scope_status(
+        detail: Annotated[bool, Field(description="also the bitstream's features, the UI averaging, the trigger "
+                                                  "qualifier's status, battery, uptime, main-loop times, ring addresses "
+                                                  "and the host / device link counters (1-3 kB more)")] = False,
+    ) -> dict[str, Any]:
+        """Compact by default, for polling ("has my capture finished, did anyone change a setting"): mode
+        ('collaborative': shared with the person at the scope; 'exclusive' on legacy firmware with LOCAL/REMOTE),
+        display_mode (scope, spectrum, waterfall, density, phosphor, bode; a number for one this host does not know),
+        run_state (RUN / STOP / SINGLE), acq_state of the host single (IDLE / ARMED / TRIGGERED / DONE / ABORTED) with
+        its flags (triggered, done, auto_timeout), ms_since_arm, the latest capture's capture_id and capture_origin
+        (host / ui_run / ui_single), settings_seq (changes whenever anyone changes a setting) and
+        capture_settings_seq, control, ui_busy, the EXT pin state with caps EXT_TRIGGER, and exit_reason on legacy
+        firmware. detail=true adds from protocol 1.17 the bitstream's features (ext_trigger, decim, fir, segments,
+        hw_average; enc_check 1.19; bode 1.20; capture_stages 1.24; trig_types, peak, counter 1.26) and the
+        acquisition menu's Average (ui_averaging off / mcu / hardware, ui_averaging_records, hardware_averaging),
+        from 1.26 trigger_status (the qualifier: type, hold-off running, counting, pulse began, edges left), trigger
+        address, battery, uptime, the legacy watchdog and the link statistics. Cheap; use it to poll."""
         def go() -> dict[str, Any]:
             s = sess.get_scope()
             st = s.status()
-            b = s.battery()
             flags = [f.name for f in P.StatusFlags if st.flags & f]
             extra: dict[str, Any] = {}
             if s.profile().has(P.Caps.EXT_TRIGGER):
@@ -1277,27 +1384,33 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 extra = {"mode": "collaborative", "display_mode": disp, "run_state": P.RunState(st.run_state).name,
                          "settings_seq": st.settings_seq, "capture_settings_seq": st.capture_settings_seq,
                          "capture_origin": P.CaptureOrigin(st.capture_origin).name.lower()}
-                if s.info.proto_minor >= 17:  # 1.17: the bitstream's features and the acquisition menu's Average
+                if detail and s.info.proto_minor >= 17:  # 1.17: the bitstream's features, the acquisition menu's Average
                     extra["features"] = P.feature_names(st.features)
                     extra["ui_averaging"] = P.UI_AVERAGE_NAMES.get(st.ui_average, st.ui_average)
                     extra["hardware_averaging"] = st.ui_average == 2
                     if st.ui_average in (1, 2):
                         extra["ui_averaging_records"] = 1 << st.ui_average_log2n
-                if s.info.proto_minor >= 26:  # 1.26: the trigger qualifier's status words (0x37, 0x34)
+                if detail and s.info.proto_minor >= 26:  # 1.26: the trigger qualifier's status words (0x37, 0x34)
                     extra["trigger_status"] = st.trigger_status()
             else:
                 extra = {"mode": "exclusive (legacy firmware)"}
-            return {"ok": True, **extra, **extra_ext, "control": _control_name(st),
-                    "acq_state": P.AcqState(st.acq_state).name,
-                    "flags": flags, "ui_busy": bool(st.ui_busy), "capture_id": st.capture_id,
-                    "trigger_addr": st.trigger_addr, "capture_start_word": st.capture_start_word,
-                    "ms_since_arm": st.ms_since_arm, "uptime_s": st.uptime_ms / 1000,
-                    "watchdog_remaining_s": None if st.watchdog_remaining_s == 0xFFFF else st.watchdog_remaining_s,
-                    "main_loop_pass_ms": st.pass_ms or None, "main_loop_pass_max_ms": st.pass_max_ms or None,
-                    "battery_level": b.level, "charging": bool(b.charging),
-                    "exit_reason": P.ExitReason(st.exit_reason).name if st.exit_reason else None,
-                    "link_stats": vars(s.t.stats), "device_link_stats": s.link_stats()}
-        return await run("scope_status", 0, {}, go)
+            out = {"ok": True, **extra, **extra_ext, "control": _control_name(st),
+                   "acq_state": P.AcqState(st.acq_state).name,
+                   "flags": flags, "ui_busy": bool(st.ui_busy), "capture_id": st.capture_id,
+                   "ms_since_arm": st.ms_since_arm}
+            if st.exit_reason or not st.shared:
+                out["exit_reason"] = P.ExitReason(st.exit_reason).name if st.exit_reason else None
+            if detail:
+                b = s.battery()
+                out.update({"trigger_addr": st.trigger_addr, "capture_start_word": st.capture_start_word,
+                            "uptime_s": st.uptime_ms / 1000,
+                            "watchdog_remaining_s": None if st.watchdog_remaining_s == 0xFFFF
+                            else st.watchdog_remaining_s,
+                            "main_loop_pass_ms": st.pass_ms or None, "main_loop_pass_max_ms": st.pass_max_ms or None,
+                            "battery_level": b.level, "charging": bool(b.charging),
+                            "link_stats": vars(s.t.stats), "device_link_stats": s.link_stats()})
+            return out
+        return await run("scope_status", 0, {"detail": detail}, go)
 
     @register(0, title="Read configuration", read_only=True, idempotent=True)
     async def scope_get_config() -> dict[str, Any]:
@@ -2096,8 +2209,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                                                 "channels")] = None,
         timeout_s: Annotated[float, Field(gt=0, le=60, description="normal mode waits this long for a "
                                                                    "trigger")] = 2.0,
-        window: Annotated[list[float | str] | None, Field(description="[t0, t1] seconds relative to the trigger; "
-                                                                      "reads only this part (faster)")] = None,
+        window: Annotated[list[float | str] | None, Field(description="[t0, t1] seconds relative to the trigger: the "
+                                                                      "statistics, caveats and inline waveform cover "
+                                                                      "this span (stats_span); the file holds the whole "
+                                                                      "record")] = None,
         raw: Annotated[bool, Field(description="also store raw codes per ADC core in the file")] = False,
         processed: Annotated[bool, Field(description="use the firmware's processed trace (slower, matches the "
                                                      "screen) instead of raw reads plus host compensation")] = False,
@@ -2105,22 +2220,25 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                                 "every sample is the min and max of its window of raw 200 MSa/s "
                                                 "samples, so glitches shorter than 1 / fs show; returns min / max "
                                                 "envelopes; the previous Filter setting is restored afterwards")] = False,
+        preview_points: Annotated[int | None, Field(ge=0, le=PREVIEW_POINTS_MAX,
+                                                     description=PREVIEW_POINTS_DESC)] = None,
     ) -> dict[str, Any]:
         """Take one host single capture with the live settings: arm, wait for the trigger, read. The scope
         screen shows it and the scope stays in STOP afterwards (resume with scope_acquisition_control(action=
-        'run')). Returns per channel min, max, mean, rms, Vpp, frequency estimate and clipped-sample count; the
-        trigger outcome ('fired', 'auto_timeout', 'none'), capture_id, settings_seq, dt, sample count, the .npz
-        file path (t, volts, codes, clipped flags, metadata) and either the samples inline (<= 2000 points) or a
-        decimated min/max preview. With peak detect (peak=true, or the Filter set to 'peak') the per-channel result
+        'run')). Returns per channel min, max, mean, rms, Vpp, frequency estimate (from the crossings, or the FFT
+        peak when they are irregular: frequency_method) and clipped-sample count; the trigger outcome ('fired',
+        'auto_timeout', 'none'), capture_id, settings_seq, dt, sample count, the .npz file path (t, volts, codes,
+        clipped flags, metadata) and the inline waveform (preview_points). With peak detect (peak=true, or the Filter set to 'peak') the per-channel result
         adds `envelope`, the samples / preview are `<ch>_min` and `<ch>_max`, and the .npz carries `<ch>_min_volts`,
         `<ch>_max_volts`, `<ch>_min_codes`, `<ch>_max_codes` (volts / codes are the midpoint).
 
         Dynamic caveats report clipping, unsynchronised auto-trigger data, likely aliasing and content above the
         analog bandwidth."""
         args = {"channels": channels, "timeout_s": timeout_s, "window": window, "raw": raw, "processed": processed,
-                "peak": peak}
+                "peak": peak, "preview_points": preview_points}
 
         def go() -> dict[str, Any]:
+            w = _window_arg(window)
             notes = sess.ensure_control()
             s = sess.get_scope()
             chans = _channels_arg(channels, [CHANNEL_NAMES[c] for c in (0, 1) if s.get_channel(c).enable] or ["CH1"])
@@ -2141,27 +2259,26 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                         raise ToolError(f"scope_capture(peak=true): peak detect does not apply here: "
                                         f"{P.DECIM_WHY[st_d.why]} (it needs a rate below 200 MSa/s)")
             try:
-                w = _window_arg(window)
-                a, n = _sample_window(s, w)
+                _sample_window(s, w)  # a window outside the record fails before the arm
                 s.arm()
                 st = s.wait(timeout_s)
                 if st.acq_state != P.AcqState.DONE:
                     s.stop()
                     return {"ok": False, "trigger": "none", "acq_state": P.AcqState(st.acq_state).name,
                             "caveats": notes + [f"no trigger within {timeout_s} s: check the trigger level/source "
-                                                "with scope_get_config, use mode='auto', or raise timeout_s"]}
+                                                "with scope_get_config, use mode='auto', or raise timeout_s (or "
+                                                "scope_wait_for_event for a longer wait)"]}
                 if processed:
                     cap = s.read_trace_capture(chans)
-                    if w is not None:
-                        cap = _slice_capture(cap, a, n)
                 else:
-                    cap = s.read_capture(chans, a, n, keep_raw=raw, st=st)
+                    cap = s.read_capture(chans, keep_raw=raw, st=st)
             finally:
                 if restore is not None:
                     s.set_decim(restore)
                     notes.append(f"peak detect was switched on for this capture and the Filter set back to "
                                  f"'{restore}'")
-            out = _capture_result(sess, cap, "peak" if cap.peak else "capture")
+            out = _capture_result(sess, cap, "peak" if cap.peak else "capture", window=w,
+                                  preview_points=preview_points)
             if s.shared:
                 notes.append("the scope screen shows this capture and the scope is now in STOP; "
                              "scope_acquisition_control(action='run') resumes its own acquisition")
@@ -2172,10 +2289,14 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     @register(0, title="Fetch the current waveform", read_only=True)
     async def scope_fetch_waveform(
         channels: Annotated[list[str] | None, Field(description="channels to read, default ['CH1']")] = None,
-        window: Annotated[list[float | str] | None, Field(description="[t0, t1] seconds relative to the "
-                                                                      "trigger")] = None,
+        window: Annotated[list[float | str] | None, Field(description="[t0, t1] seconds relative to the trigger: the "
+                                                                      "statistics and inline waveform cover this span "
+                                                                      "(stats_span); the file holds the whole "
+                                                                      "record")] = None,
         processed: Annotated[bool, Field(description="read the firmware's processed trace (what the screen "
                                                      "draws) instead of raw reads")] = False,
+        preview_points: Annotated[int | None, Field(ge=0, le=PREVIEW_POINTS_MAX,
+                                                     description=PREVIEW_POINTS_DESC)] = None,
     ) -> dict[str, Any]:
         """Read the latest capture without taking a new one: what the scope screen shows. Collaborative
         firmware: the newest finished capture of any origin (the scope's RUN loop, a single at the scope, or a
@@ -2183,7 +2304,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         differ from the live ones). Legacy firmware: the UI's last trace in LOCAL, the last remote capture in
         REMOTE. Tier 0: changes nothing (in RUN mode, if the capture keeps being replaced during a chunked read,
         RUN is paused for that one read and the caveats say so). Same result format as scope_capture."""
-        args = {"channels": channels, "window": window, "processed": processed}
+        args = {"channels": channels, "window": window, "processed": processed, "preview_points": preview_points}
 
         def go() -> dict[str, Any]:
             s = sess.get_scope()
@@ -2195,24 +2316,14 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     raise ToolError("scope_fetch_waveform: no capture since the scope booted; press RUN on the "
                                     "scope or call scope_capture")
                 cap = s.read_capture(chans)
-                if w is not None:
-                    a = max(0, int(math.floor(w[0] / cap.dt)) + cap.pretrigger_samples)
-                    b = min(cap.total_samples, int(math.ceil(w[1] / cap.dt)) + cap.pretrigger_samples + 1)
-                    cap = _slice_capture(cap, a, b - a)
             elif st.control != P.Control.REMOTE or processed:
                 cap = s.read_trace_capture(chans)
-                if w is not None:
-                    tb = cap.dt
-                    a = max(0, int(math.floor(w[0] / tb)) + cap.pretrigger_samples)
-                    b = min(cap.total_samples, int(math.ceil(w[1] / tb)) + cap.pretrigger_samples + 1)
-                    cap = _slice_capture(cap, a, b - a)
             else:
                 if st.acq_state != P.AcqState.DONE:
                     raise ToolError("scope_fetch_waveform: no completed remote capture (state "
                                     f"{P.AcqState(st.acq_state).name}); call scope_capture first")
-                a, n = _sample_window(s, w)
-                cap = s.read_capture(chans, a, n, st=st)
-            return _capture_result(sess, cap, "fetch")
+                cap = s.read_capture(chans, st=st)
+            return _capture_result(sess, cap, "fetch", window=w, preview_points=preview_points)
         return await run("scope_fetch_waveform", 0, args, go)
 
     @register(1, title="Arm / wait / force / stop")
@@ -2220,7 +2331,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         action: Annotated[Literal["arm", "wait", "force", "stop", "run"], Field(
             description="arm a host single capture, wait for it, force it to end, stop (also stops the scope's RUN "
                         "loop), or run (resume the scope's own continuous acquisition)")],
-        timeout_s: Annotated[float, Field(gt=0, le=10, description="for wait")] = 2.0,
+        timeout_s: Annotated[float, Field(gt=0, le=60, description="for wait (sent as WAIT requests of at most "
+                                                                   "10 s each)")] = 2.0,
     ) -> dict[str, Any]:
         """Low-level control for agents that want to arm, do something else (e.g. fire the detector), then wait
         and read with scope_fetch_waveform; and the scope's RUN/STOP state, shared with the person at the scope
@@ -2256,6 +2368,192 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 out["run_state"] = P.RunState(st.run_state).name
             return out
         return await run("scope_acquisition_control", 1, args, go)
+
+    @register(1, title="Wait for an event")
+    async def scope_wait_for_event(
+        ctx: Context,
+        channel: Annotated[Literal["CH1", "CH2", "EXT"], Field(description="the trigger source")] = "CH1",
+        edge: Annotated[Literal["rising", "falling"], Field(description="the trigger edge")] = "rising",
+        level: Annotated[float | str | None, Field(description="trigger level in volts at the probe tip (CH1 / CH2); "
+                                                               "default: keep the current level")] = None,
+        pre: Annotated[float | str | None, Field(description="time to keep before the trigger, e.g. '50us' "
+                                                             "(sets the pre-trigger samples at the current rate)")] = None,
+        post: Annotated[float | str | None, Field(description="time to keep after the trigger, e.g. '2ms' (sets the "
+                                                              "record length with pre)")] = None,
+        pretrigger_fraction: Annotated[float | None, Field(ge=0, le=1, description="alternative to pre / post: the "
+                                                           "share of the current record before the trigger")] = None,
+        channels: Annotated[list[str] | None, Field(description="channels to read; default: the enabled "
+                                                                "channels")] = None,
+        timeout_s: Annotated[float, Field(gt=0, le=EVENT_MAX_S, description="how long to wait for the event; on "
+                                          "timeout the scope is left in STOP")] = 300.0,
+        levels: Annotated[list[float | str] | None, Field(description="also return when these levels are crossed "
+                                                                      "(as scope_measure's crossings)")] = None,
+        crossing_edge: Annotated[Literal["rising", "falling", "either"] | None, Field(
+            description="direction counted for levels; default: the trigger edge")] = None,
+        crossings_channel: Annotated[Literal["CH1", "CH2"] | None, Field(description="channel the levels apply to; "
+                                     "default: the trigger channel (CH1 for EXT)")] = None,
+        smooth: Annotated[int | str | None, Field(description="levels: moving average in samples (int) or as a "
+                                                              "time ('2us')")] = None,
+        between: Annotated[list[float | str] | None, Field(description="levels: [from, to] for the time between two "
+                                                                       "levels (default the first and last)")] = None,
+        preview_points: Annotated[int, Field(ge=0, le=PREVIEW_POINTS_MAX, description="inline waveform size: 0 = "
+                                             "none (default), N = up to 2N samples or N min / max bins")] = 0,
+    ) -> dict[str, Any]:
+        """Arm for one event and wait until it happens: for "I arm, the person causes the event, give me the result".
+        Sets the trigger (channel, edge, level, mode normal, and the record from pre / post or pretrigger_fraction),
+        arms one host single and waits up to timeout_s (at most 3600 s), sending a progress notification every few
+        seconds. Returns the statistics per channel, the .npz path (the whole record), the waited time, the level
+        crossings when levels are given, and no inline waveform unless preview_points is set.
+
+        On timeout: ok false, trigger 'none', the scope in STOP with the trigger as set here; a capture that
+        completed in the last moment is still read and returned. If the person presses RUN at the scope the wait
+        ends (aborted). Other scope tools wait while this one runs. Long waits need a client that allows long tool
+        calls: many stop after 60 s unless progress resets their timeout (MCP_TOOL_TIMEOUT in Claude Code,
+        tool_timeout_sec in Codex); a cancelled call leaves the scope in STOP."""
+        args = {"channel": channel, "edge": edge, "level": level, "pre": pre, "post": post,
+                "pretrigger_fraction": pretrigger_fraction, "channels": channels, "timeout_s": timeout_s,
+                "levels": levels, "crossing_edge": crossing_edge, "crossings_channel": crossings_channel,
+                "smooth": smooth, "between": between, "preview_points": preview_points}
+        tool = "scope_wait_for_event"
+        if between is not None and len(between) != 2:
+            raise ToolError(f"{tool}: between is [from, to], two levels")
+        if pretrigger_fraction is not None and (pre is not None or post is not None):
+            raise ToolError(f"{tool}: give pre / post or pretrigger_fraction, not both")
+
+        def setup() -> tuple[list[str], P.StatusResp, dict[str, Any], list[str]]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            prof = s.profile()
+            cav: list[str] = []
+            src = P.TRIG_SOURCE_NAMES.index(channel)
+            if src == 2 and not prof.has(P.Caps.EXT_TRIGGER):
+                raise ToolError(f"{tool}: EXT needs the external trigger input (caps EXT_TRIGGER); trigger on CH2")
+            chans = _channels_arg(channels, [CHANNEL_NAMES[c] for c in (0, 1) if s.get_channel(c).enable] or ["CH1"])
+            cur = s.get_trigger(cached=False)
+            code = None
+            if level is not None and src <= 1:
+                v = parse_quantity(level, "V")
+                raw = round(s.scale(src, s.get_channel(src, cached=False)).raw_a_for_volts(v))
+                if not 0 <= raw <= 255:
+                    raise ToolError(f"{tool}: level {v:g} V is outside {channel}'s range (raw code {raw}): the event "
+                                    "could never trigger; change volts_per_div or the offset with scope_set_channel")
+                code = int(raw)
+            elif level is not None:
+                cav.append("level is ignored for EXT (3.3 V logic input)")
+            dt = s.get_timebase(cached=False).dt
+            info = prof.info
+            pre_n, total = None, None
+            if pre is not None or post is not None:
+                pre_n = 2 * int(round(parse_quantity(pre, "s") / dt / 2)) if pre is not None else cur.pretrigger_samples
+                if post is not None:
+                    total = pre_n + 2 * int(math.ceil(parse_quantity(post, "s") / dt / 2))
+                else:
+                    total = max(cur.total_samples, pre_n + 2)
+                total = max(total, info.min_total_samples)
+                if total > info.max_total_samples:
+                    raise ToolError(f"{tool}: pre + post = {fmt_si(total * dt, 's')} is {total} samples at "
+                                    f"{fmt_si(1 / dt, 'Sa/s')}, more than the {info.max_total_samples} a record holds "
+                                    f"({fmt_si(info.max_total_samples * dt, 's')}); lower the sample rate with "
+                                    "scope_set_timebase or shorten pre / post")
+            elif pretrigger_fraction is not None:
+                pre_n = min(int(round(pretrigger_fraction * cur.total_samples / 2)) * 2, cur.total_samples - 2)
+            s.set_trigger(source=src, edge=P.EDGES.index(edge), level=code, mode=P.TRIG_MODES.index("normal"),
+                          pretrigger_samples=pre_n, total_samples=total)
+            if cur.trigger2 is not None and cur.trigger2.type != P.TRIG_EDGE:
+                s.set_trigger2(type=P.TRIG_EDGE)
+                cav.append(f"the trigger type was {cur.trigger2.type_name}: set to edge for this wait")
+            if src == 2:
+                cav.append(EXT_NOTE)
+            applied = _trigger_summary(s)
+            return notes + cav, s.arm(), applied, chans
+
+        held = _Held(sess)
+        s: Scope | None = None
+        try:
+            try:
+                await anyio.to_thread.run_sync(held.acquire)
+                notes, st0, applied, chans = await anyio.to_thread.run_sync(setup)
+                s = sess.get_scope()
+                t0 = time.monotonic()
+                st = st0
+                outcome = "timeout"
+                await _progress(ctx, 0, timeout_s, f"armed: waiting for {channel} {edge}")
+                while True:
+                    left = timeout_s - (time.monotonic() - t0)
+                    if left <= 0:
+                        break
+                    st = await anyio.to_thread.run_sync(s.wait, min(left, cfg.event_poll_s))
+                    if st.acq_state == P.AcqState.DONE:
+                        outcome = "fired"
+                        break
+                    if st.acq_state not in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+                        outcome = "aborted"
+                        break
+                    el = time.monotonic() - t0
+                    await _progress(ctx, el, timeout_s, f"armed: waiting for {channel} {edge}, {el:.0f} of "
+                                                        f"{timeout_s:g} s")
+                late = False
+                if outcome == "timeout":
+                    st = await anyio.to_thread.run_sync(s.status)
+                    if st.acq_state == P.AcqState.DONE:
+                        outcome = "fired"
+                    else:
+                        st = await anyio.to_thread.run_sync(s.stop)
+                        # a capture that completed between the last WAIT and the STOP is kept by the scope (the
+                        # firmware marks the host single ABORTED, but capture_id moved on and the ring holds it)
+                        if st.acq_state == P.AcqState.DONE or (s.shared and st.capture_id != st0.capture_id and
+                                                               st.capture_origin == P.CaptureOrigin.HOST):
+                            outcome, late = "fired", True
+                waited = time.monotonic() - t0
+                if outcome != "fired":
+                    run_state = P.RunState(st.run_state).name if st.shared else None
+                    cav = notes + ([f"no {channel} {edge} trigger within {timeout_s:g} s: the scope is in STOP with "
+                                    "this trigger (normal mode); check the level with scope_get_config or wait "
+                                    "again"] if outcome == "timeout" else
+                                   ["the wait was ended at the scope (RUN or STOP pressed there): the host single was "
+                                    "aborted"])
+                    sess.audit(tool, 1, args, outcome)
+                    return {"ok": False, "trigger": "none", "outcome": outcome, "waited_s": _r6(waited),
+                            "acq_state": P.AcqState(st.acq_state).name, "run_state": run_state, "applied": applied,
+                            "caveats": cav}
+                cap = await anyio.to_thread.run_sync(
+                    lambda: s.read_capture(chans, st=st if st.acq_state == P.AcqState.DONE else None))  # type: ignore[union-attr]
+            finally:
+                held.release()
+        except BaseException as e:
+            if isinstance(e, (anyio.get_cancelled_exc_class(), KeyboardInterrupt)) and s is not None:
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await anyio.to_thread.run_sync(s.stop)
+                    except Exception:  # noqa: BLE001
+                        pass
+            if isinstance(e, TransportError):
+                sess.drop_connection()
+            if isinstance(e, (DeviceError, TransportError, ValueError, ScopeError)):
+                sess.audit(tool, 1, args, f"error: {e}")
+                raise ToolError(_err_text(tool, e)) from e
+            raise
+        out = _capture_result(sess, cap, "event", preview_points=preview_points)
+        out["waited_s"] = _r6(waited)
+        out["applied"] = applied
+        cav = list(notes)
+        if late:
+            cav.append("the event came as the wait ended: the capture was read after the STOP")
+        if levels:
+            cch = crossings_channel or (channel if channel != "EXT" else "CH1")
+            if cch not in cap.channels:
+                cav.append(f"levels: {cch} was not read (channels {list(cap.channels)})")
+            else:
+                ch = cap.channels[cch]
+                cr = _crossings_result(cap.t, ch.volts, levels, crossing_edge or edge, smooth, between,
+                                       ch.volts_per_lsb, 16)
+                cav.extend(f"{cch}: {x}" for x in cr.pop("caveats"))
+                out["crossings"] = {"channel": cch, **cr}
+        cav.append("the scope screen shows this capture and the scope is now in STOP with this trigger (normal mode); "
+                   "scope_acquisition_control(action='run') resumes its own acquisition")
+        out["caveats"] = cav + out["caveats"]
+        sess.audit(tool, 1, args, "ok", {"file": out["file"], "waited_s": out["waited_s"]})
+        return out
 
     # ---- tier 1: derived ---------------------------------------------------------------------------------
 
@@ -2515,7 +2813,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         n: Annotated[int, Field(ge=1, le=4096, description="number of captures to average")] = 64,
         channels: Annotated[list[str] | None, Field(description="channels to average, default ['CH1']")] = None,
         window: Annotated[list[float | str] | None, Field(description="[t0, t1] seconds relative to the trigger; "
-                                                                      "only this part is read and averaged")] = None,
+                                                                      "only this part is read and averaged (unlike "
+                                                                      "scope_capture: reading less per capture is what "
+                                                                      "makes averaging fast), so the file holds only "
+                                                                      "it")] = None,
         align: Annotated[Literal["hardware", "edge"], Field(description="'hardware': trust the trigger point "
                          "(2-sample jitter); 'edge': per capture find the crossing of align_channel at align_level "
                          "with linear interpolation and shift by the sub-sample offset")] = "hardware",
@@ -2532,6 +2833,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                             "run sums n records without reading each one, so it is much faster; align='hardware' "
                             "only, records up to 2046 words, n <= 257 with 8-bit samples (65536 with the decimation "
                             "filter); no per-sample std. Not yet verified on the unit")] = False,
+        preview_points: Annotated[int | None, Field(ge=0, le=PREVIEW_POINTS_MAX,
+                                                     description=PREVIEW_POINTS_DESC)] = None,
     ) -> dict[str, Any]:
         """Average n triggered captures: the main tool for detector work. Returns per channel statistics of the
         mean waveform, the per-sample standard deviation, n_used, n_dropped with reasons, noise per sample
@@ -2547,7 +2850,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         and what changed (gives up after 5 restarts). The scope screen shows the host captures."""
         args = {"n": n, "channels": channels, "window": window, "align": align, "align_channel": align_channel,
                 "align_level": align_level, "timeout_s": timeout_s, "reject_clipped": reject_clipped,
-                "on_device": on_device, "hardware": hardware}
+                "on_device": on_device, "hardware": hardware, "preview_points": preview_points}
         try:
             chans = _channels_arg(channels, ["CH1"])
             w = _window_arg(window)
@@ -2586,10 +2889,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             es = res["edge_shifts"]
             out["edge_shift_samples"] = {"mean": _r6(float(es.mean())), "std": _r6(float(es.std())),
                                          "min": _r6(float(es.min())), "max": _r6(float(es.max()))}
-        if res["t"].size <= sess.cfg.inline_max_points:
-            out["mean"] = {"t": A._r(res["t"]), **{c: A._r(res["mean"][c]) for c in chans}}
-        else:
-            out["preview"] = {c: A.preview(res["t"], res["mean"][c]) for c in chans}
+        key, wave = _inline_waveform(res["t"], {c: res["mean"][c] for c in chans}, preview_points,
+                                     sess.cfg.inline_max_points)
+        if key is not None:
+            out["mean" if key == "samples" else "preview"] = wave
         cav = list(res["notes"])
         cav.append("Averaging reduces random noise by sqrt(n) but not the A/B interleave mismatch, the 8-bit "
                    "quantisation of a noise-free signal, or trigger jitter (up to 2 / fs with hardware alignment).")
@@ -2914,38 +3217,84 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
     @register(0, title="Measure")
     async def scope_measure(
         items: Annotated[list[Literal["vpp", "vmin", "vmax", "mean", "rms", "ac_rms", "frequency", "period", "duty",
-                                      "rise_time", "fall_time", "delay"]] | None,
+                                      "rise_time", "fall_time", "delay", "crossings"]] | None,
                          Field(description="measurements; 'delay' = CH1 -> CH2 at the first rising mid-level "
-                                           "crossing. Default: all")] = None,
+                                           "crossing; 'crossings' = when each of `levels` is crossed. Default: all "
+                                           "(with crossings when levels are given)")] = None,
         channels: Annotated[list[str] | None, Field(description="default: channels of the last capture")] = None,
         capture: Annotated[bool, Field(description="take a new capture first (tier 1); otherwise use the last "
                                                    "capture of this server, or the UI trace in LOCAL")] = False,
         timeout_s: Annotated[float, Field(gt=0, le=10)] = 2.0,
+        source: Annotated[str | None, Field(description="measure a saved capture instead: the .npz path a tool "
+                                                        "returned or 'latest'")] = None,
+        levels: Annotated[list[float | str] | None, Field(description="crossings: volts at the probe tip, e.g. "
+                                                                      "[15.3, 14, 8, 1.6]")] = None,
+        edge: Annotated[Literal["rising", "falling", "either"], Field(description="crossings: the direction "
+                                                                                  "counted")] = "either",
+        smooth: Annotated[int | str | None, Field(description="crossings: a centred moving average first, in "
+                                                              "samples (int) or as a time ('2us')")] = None,
+        between: Annotated[list[float | str] | None, Field(description="crossings: [from, to] levels: the time from "
+                                                                       "the first crossing of `from` to the first "
+                                                                       "crossing of `to` after it (default: the first "
+                                                                       "and last of `levels`)")] = None,
+        max_crossings: Annotated[int, Field(ge=1, le=200, description="crossings returned per level (all are "
+                                                                      "counted)")] = 16,
     ) -> dict[str, Any]:
         """Measurements computed on the host from raw data with calibration: vpp, vmin, vmax, mean, rms, ac_rms,
-        frequency, period, duty, rise_time, fall_time, delay (CH1 -> CH2). Tier 0 on an existing capture, tier 1 if
-        capture=true. Frequency, period and duty need a swing well above the sample noise, a whole period in the record
-        and regular crossings; otherwise they are null and `frequency_reason` says why.
+        frequency, period, duty, rise_time, fall_time, delay (CH1 -> CH2) and level crossings. Tier 0 on an existing
+        capture or a saved .npz (source), tier 1 if capture=true.
+
+        Frequency: from regular mid-level crossings (frequency_method 'crossings'); when the crossings are irregular
+        (switching spikes on a ripple) from the strongest FFT line of the same record ('fft_peak', with
+        frequency_resolution = the bin width; it need not be the fundamental, and duty is then null); otherwise null
+        and `frequency_reason` says why.
+
+        Crossings: per level the times relative to the trigger (interpolated between samples; with hysteresis, so a
+        noisy slope counts once), the edge, the slope and t_sigma (the timing error from the noise), and `between`
+        = the time between two levels (a rise / fall time between any two levels). Caveats name levels never crossed,
+        crossed several times, or within the noise.
 
         Rise times below ~12 ns (0.35 / 30 MHz) measure the scope, not the signal."""
         all_items = ["vpp", "vmin", "vmax", "mean", "rms", "ac_rms", "frequency", "period", "duty", "rise_time",
                      "fall_time", "delay"]
-        sel = items or all_items
-        args = {"items": sel, "channels": channels, "capture": capture}
+        sel = list(items or all_items + (["crossings"] if levels else []))
+        args = {"items": sel, "channels": channels, "capture": capture, "source": source, "levels": levels,
+                "edge": edge, "smooth": smooth, "between": between}
         if capture:
             need_tier(1, "scope_measure(capture=true)")
+        if "crossings" in sel and not levels:
+            raise ToolError("scope_measure: 'crossings' needs levels, e.g. levels=[15.3, 14, 8, 1.6]")
+        if between is not None and len(between) != 2:
+            raise ToolError("scope_measure: between is [from, to], two levels")
 
         def go() -> dict[str, Any]:
-            s = sess.get_scope()
             notes: list[str] = []
             chans = _channels_arg(channels, ["CH1", "CH2"] if "delay" in sel else ["CH1"])
-            cap = _capture_for_analysis(sess, s, chans, capture, timeout_s, notes, "scope_measure")
+            lsb: dict[str, float | None] = {}
+            if source is not None:
+                if capture:
+                    raise ToolError("scope_measure: give either source (a saved file) or capture=true, not both")
+                t, volts, fmeta, src = _load_waveforms(source, chans, "scope_measure")
+                if t.size < 4:
+                    raise ToolError("scope_measure: the file holds fewer than 4 samples")
+                dt = float(t[1] - t[0])
+                cid = fmeta.get("capture_id")
+                lsb = {c: None for c in chans}
+                if fmeta.get("auto_timeout"):
+                    notes.append("the capture ended on the auto time-out: not synchronised to the signal")
+            else:
+                s = sess.get_scope()
+                cap = _capture_for_analysis(sess, s, chans, capture, timeout_s, notes, "scope_measure")
+                t, dt, cid = cap.t, cap.dt, cap.capture_id
+                volts = {c: cap.channels[c].volts for c in chans}
+                lsb = {c: cap.channels[c].volts_per_lsb for c in chans}
             res: dict[str, Any] = {}
             for c in chans:
-                v = cap.channels[c].volts
+                v = volts[c]
                 st_ = A.stats(v)
-                fr = A.frequency(v, cap.dt)
                 m: dict[str, Any] = {}
+                if any(it in sel for it in ("frequency", "period", "duty")):
+                    fr = _freq_fields(c, v, dt, notes)
                 for it in sel:
                     if it == "vmin":
                         m[it] = _r6(st_["min"])
@@ -2954,18 +3303,26 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     elif it in ("vpp", "mean", "rms", "ac_rms"):
                         m[it] = _r6(st_[it])
                     elif it in ("frequency", "period", "duty"):
-                        m[it] = _r6(fr[it]) if fr[it] is not None else None
-                        if fr[it] is None and fr.get("reason"):
-                            m["frequency_reason"] = fr["reason"]
+                        m[it] = fr[it]
+                        for k in ("frequency_method", "frequency_reason", "frequency_resolution"):
+                            if k in fr:
+                                m[k] = fr[k]
                     elif it == "rise_time":
-                        m[it] = _r6(A.transition_time(v, cap.dt, "rising"))
+                        m[it] = _r6(A.transition_time(v, dt, "rising"))
                     elif it == "fall_time":
-                        m[it] = _r6(A.transition_time(v, cap.dt, "falling"))
+                        m[it] = _r6(A.transition_time(v, dt, "falling"))
+                    elif it == "crossings":
+                        assert levels is not None
+                        cr = _crossings_result(t, v, levels, edge, smooth, between, lsb.get(c), max_crossings)
+                        notes.extend(f"{c}: {x}" for x in cr.pop("caveats"))
+                        m["crossings"] = cr
                 res[c] = m
-            out: dict[str, Any] = {"ok": True, "capture_id": cap.capture_id, "dt": _r6(cap.dt), "channels": res}
+            out: dict[str, Any] = {"ok": True, "capture_id": cid, "dt": _r6(dt), "channels": res}
+            if source is not None:
+                out["source"] = str(src)
             if "delay" in sel:
-                if "CH1" in cap.channels and "CH2" in cap.channels:
-                    out["delay_ch1_to_ch2"] = _r6(A.delay(cap.channels["CH1"].volts, cap.channels["CH2"].volts, cap.dt))
+                if "CH1" in volts and "CH2" in volts:
+                    out["delay_ch1_to_ch2"] = _r6(A.delay(volts["CH1"], volts["CH2"], dt))
                 else:
                     notes.append("delay needs both CH1 and CH2 in the capture")
             for c in chans:
@@ -4391,7 +4748,13 @@ def _slice_capture(cap: Capture, a: int, n: int) -> Capture:
     from dataclasses import replace
 
     off = a - cap.start_sample
-    chans = {k: replace(v, codes=v.codes[off: off + n], volts=v.volts[off: off + n], clipped=v.clipped[off: off + n])
+
+    def cut(x: np.ndarray | None) -> np.ndarray | None:
+        return None if x is None else x[off: off + n]
+    # the per-core raw arrays (half length, core order) are not cut: a slice drops them
+    chans = {k: replace(v, codes=v.codes[off: off + n], volts=v.volts[off: off + n], clipped=v.clipped[off: off + n],
+                        samples16=cut(v.samples16), min_volts=cut(v.min_volts), max_volts=cut(v.max_volts),
+                        min_codes=cut(v.min_codes), max_codes=cut(v.max_codes), raw_a=None, raw_b=None)
              for k, v in cap.channels.items()}
     return replace(cap, start_sample=a, channels=chans)
 

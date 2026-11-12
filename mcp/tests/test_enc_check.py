@@ -157,7 +157,7 @@ def test_health_tool_and_capture_caveat(sim_factory, tmp_path):
             h = await c.call("scope_health")
             assert h["encode_check"]["captures_checked"] == 1
             assert any(w.startswith("full-rate capture check (FPGA read 0x33): encode check OK") for w in h["in_words"])
-            st = await c.call("scope_status")
+            st = await c.call("scope_status", detail=True)
             assert "enc_check" in st["features"]
             d.enc_unrecovered_next = 1
             await c.call("scope_capture", channels=["CH1"])

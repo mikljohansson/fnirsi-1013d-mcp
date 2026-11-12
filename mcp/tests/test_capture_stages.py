@@ -272,7 +272,7 @@ def test_tools(sim_factory, tmp_path):
             h = await c.call("scope_health")
             assert h["capture_stages"]["stages"] == "CH1 A3 B3, CH2 A3 B3"
             assert "ADC capture stages CH1 A3 B3, CH2 A3 B3 (power-on default); capture clean" in h["in_words"]
-            st = await c.call("scope_status")
+            st = await c.call("scope_status", detail=True)
             assert "capture_stages" in st["features"]
             ci = await c.call("scope_calibration_info")
             assert ci["capture_stages"]["text"].startswith("no capture stages stored with the calibration")
