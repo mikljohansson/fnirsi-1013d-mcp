@@ -2166,3 +2166,23 @@ Newest entries at the bottom. Format: date, who, what, result.
   to the card (backup `backups/sdcard/sd_750-2362_20261109-094044.bin` = the 0.3.1 image f54ce4cd..., 1609 sectors compared
   identical, checksum 0xFAC6F249); power cycle: fw 0.3.2 70da4ca2 from the card, 709 valid at boot (power-on #52), stages
   0x06D2 until the owner's wizard run (expected 0x06DB). The owner's saved CH2 trace position was set to 0 for the battery.
+- 2026-11-12 11:41-11:44 (lead, owner present): **fw-hostdt + fw-hostkeep + mcp-notes merged (6fa42b8, image
+  c2eed0f8..., 827,904 bytes) FEL-loaded** with `fnirsi1013d-flash` (RAM only; the card keeps v0.3.2): `#VER` fw=0.3.2,
+  proto=1.30, fpga=0x153f. Inputs open (noise only), generator 1 kHz on, UI time base 500KSa/s / 200us/div, trigger auto,
+  time cursors 206 px apart. Screens read with READ_SCREEN.
+  - **Screen time scale (section 103): PASS.** UI rate: chip 500KSa/s / 200us/div, cursors T 824us / F 1.21kHz (the old
+    path). `scope_set_timebase(sample_rate=20e6)` (divider 9), RUN at the scope: chip 20MSa/s / 5us/div, T 20.6us /
+    F 48.5kHz. Divider 0: chip 200MSa/s / 500ns/div, T 2.06us / F 485kHz (the 11-12 report's 824 us is gone); a host
+    capture at divider 0 (c784) the same. GET_TIMEBASE index null both times. Not checked: a signal on the Freq / Period
+    cards, off-table dividers, the spectrum, the saved waveform, phosphor, a rate tap at the scope (steps 1 signal part,
+    5 to 9). Seen once in a RUN screenshot at divider 9: the CH2 trace in fragments (the 1 s screen read across RUN
+    frames of a floating input, inferred; not seen stopped).
+  - **Kept host single (section 104): PASS** (client library on COM10, two runs). Host single c1104 (auto, noise), read
+    as the reference; RUN at the scope 3 s (c1158, ui_run, GET_STATUS kept 1104); trigger normal at code 250 so RUN
+    waits: plain READ_RAW E_BUSY detail 1 after 1.00 s, READ_RAW KEPT c1104 in 0.05 s, kept flags 0x07, 16382 samples
+    of CH1 and CH2 equal to the reference (0 differ; shifted by 1 to 4 samples 6947 to 10979 differ); STOP: plain
+    READ_RAW E_STATE detail 1, KEPT again equal; READ_TRACE of c1159 16382 samples. First run (c785) the same.
+    pass_max_ms in RUN 135 in the first run, 40 in the second: the copy's 10 ms step was not isolated. Not checked:
+    the MCP tools on the unit (`capture_source`, `scope_wait_for_event`: this session's server ran the old host code),
+    the 64-capture average time, a real triggered event.
+  - Left: RUN, trigger auto at code 129, raw divider 399 (the UI's rate). Image in RAM until the next power-off.
