@@ -308,7 +308,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
-- **Usage notes from the induction-imager session** (2026-11-12, mcp 0.3.2; dispatched as mcp-notes). (1) `scope_capture`
+- [x] (Done on branch mcp-notes, 4edb8cd, 4750819, fbfbcf0: `preview_points`, window = `stats_span`, `scope_measure` crossings / `source` / FFT fallback, compact `scope_status` (`detail`), `scope_wait_for_event` (3600 s, progress); simulator only, tests/test_mcp_notes.py.) **Usage notes from the induction-imager session** (2026-11-12, mcp 0.3.2; dispatched as mcp-notes). (1) `scope_capture`
   and `scope_fetch_waveform` always return a preview (about 250 points with t, vmin, vmax per channel, or up to 2000
   inline samples): several thousand tokens per call; wanted `preview_points` (0 = none). (2) `window` on `scope_capture`
   stores only that window in the .npz; wanted the whole record in the file, the window only for what is returned.

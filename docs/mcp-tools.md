@@ -18,7 +18,7 @@ Taken from the MCP prior art surveyed in `research/notes/web-sources.md` section
 - **Arrays go to files, stats come inline** (ikatkov/rigol-mcp). Any waveform longer than 2,000 points is
   written to an `.npz` file (time vector, volts, raw codes, metadata) under `<data dir>/<date>/`
   (default `~/.fnirsi1013d/data`). The tool
-  returns statistics, the file path and an optional decimated min/max preview of at most 500 points.
+  returns statistics, the file path and an inline waveform whose size the caller sets (`preview_points`, below).
 - **Physical units in, physical units out.** Tools take volts, seconds and hertz, and convert with the
   scope's own calibration (P-8.5). Raw escape fields (`range_index`, `divider`, `level_code`) exist for
   experiments.
@@ -37,7 +37,7 @@ Package layout in `mcp/`: `fnirsi/protocol.py` (frame codec, CRCs, structs), `fn
 | Tier | Name | What it changes | Examples | Default |
 |---|---|---|---|---|
 | 0 | READ_ONLY | nothing | `scope_info`, `scope_profile`, `scope_status`, `get_config`, `fetch_waveform` (LOCAL), `read_calibration`, `screenshot`, `report`, `export_csv`, `decode` and `measure` on existing data, `log_status` | allowed |
-| 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_segments`, `capture_and_fft`, `decay_fit`, `measure` / `decode` with `capture=true`, `mask_test`, `dvm`, `log`, `log_stop` | allowed |
+| 1 | ACQUIRE | FPGA acquisition registers only (sample rate, trigger, memory geometry, arming); no effect outside the scope; takes the UI away from the person at the scope | `remote_session`, `set_timebase`, `set_trigger`, `capture`, `acquisition_control`, `averaged_capture`, `capture_segments`, `capture_and_fft`, `decay_fit`, `measure` / `decode` with `capture=true`, `wait_for_event`, `mask_test`, `dvm`, `log`, `log_stop` | allowed |
 | 2 | FRONT_END | relays (range, AC/DC) and the offset PWM; audible clicks, relay wear, a small transient at the input when AC coupling switches | `set_channel` | allowed, rate-limited to 5 relay changes per second by the server |
 | 3 | OUTPUT | drives the calibration pin (3.3 V logic square wave). If that pin is wired into the detector (e.g. as a TX gate drive), this switches real coil current | `generator`, `sweep`, `bode_sweep`, `self_test_loopback` | needs a confirmation token; off at server start |
 | 4 | RAW | arbitrary FPGA bus writes, rebooting into FEL | `raw_fpga`, `enter_fel` | disabled unless `FNIRSI_MCP_ENABLE_RAW=1`; needs a confirmation token |
@@ -100,9 +100,12 @@ flashed); every tool that checks the scope first carries the same caveat.
 **`scope_profile`** (tier 0). No parameters. Returns section 3 merged with live values (current memory
 limit, which bitstream, which caps are unverified: `read_lag`, interleave order, FORCE).
 
-**`scope_status`** (tier 0). No parameters. Returns `control` (LOCAL/REMOTE), `acq_state`, `capture_id`,
-`trigger_addr`, time since arm, battery level and charging, `exit_reason` if the scope went back to local
-on its own (user tap, watchdog, port closed).
+**`scope_status`** (tier 0). Compact by default, for polling (mcp-notes, 2026-11-12): `mode`, `display_mode`,
+`run_state`, `acq_state` and `flags` of the host single, `ms_since_arm`, `capture_id`, `capture_origin`, `settings_seq`,
+`capture_settings_seq`, `control`, `ui_busy`, `ext` (caps EXT_TRIGGER) and on legacy firmware `exit_reason` (user tap,
+watchdog, port closed): about 0.4 kB, two device requests fewer. `detail=true` adds `features`, `ui_averaging*`,
+`trigger_status`, `trigger_addr`, `capture_start_word`, uptime, main-loop times, the legacy watchdog, battery level and
+charging, and the host and device link statistics (1-3 kB more).
 
 **`remote_session`**: retired with collaborative mode (docs/plans/collaborative-mode.md, protocol 1.3). The scope
 is shared: no ownership to take or release, the last change wins, host captures appear on screen, and long runs
@@ -220,13 +223,16 @@ not use (the firmware refuses N / H on the wrong type).
 |---|---|---|---|
 | `channels` | list | enabled ones | |
 | `timeout_s` | float | 2.0 | normal mode waits this long for a trigger |
-| `window` | `[t0, t1]` s relative to the trigger | whole capture | reads only this part (faster) |
+| `window` | `[t0, t1]` s relative to the trigger | whole capture | the statistics, caveats and inline waveform cover this span (`stats_span`: `whole_record`, `t_start`, `t_end`, `n_samples`); the record is read and saved whole (mcp-notes: before, only the window was read and saved) |
 | `raw` | bool | false | also store raw codes per core |
 | `processed` | bool | false | use the firmware's processed trace instead of raw reads plus host compensation (slower, matches the screen) |
+| `preview_points` | int 0..1000 | unset | the inline waveform: 0 = none (statistics and the file only; right when only numbers are needed), N = the record in full up to 2N samples, else N min / max bins per channel. Unset: in full up to 2000 samples, else 250 bins (a two-channel 10000-sample capture: 17 kB of result, 2 kB with 0). Also on `fetch_waveform` and `averaged_capture` |
 | `peak` | bool | false | protocol 1.26 (caps PEAK_DETECT): peak detect for this capture: SET_DECIM 4 before the arm, the previous Filter restored after (a caveat says so); with the Filter already `peak` nothing is toggled. Refused at 200 MSa/s (peak needs a rate below it) and over 8190 samples |
 
-Returns per channel: min, max, mean, rms, Vpp, frequency estimate, clipped-sample count; `trigger`
-(`fired` / `auto_timeout` / `none`), `capture_id`, dt, sample count, file path, preview. Dynamic caveats:
+Returns per channel: min, max, mean, rms, Vpp, frequency estimate (from the crossings; from the FFT peak with
+`frequency_method` `fft_peak` and `frequency_resolution` when they are irregular, as in `measure`), clipped-sample
+count; `trigger` (`fired` / `auto_timeout` / `none`), `capture_id`, dt, sample count, `stats_span`, file path, the
+inline `samples` or `preview`. Dynamic caveats:
 "N samples clipped at 0/255: increase volts_per_div", "auto trigger fired: data not synchronised",
 "signal frequency estimate X is above fs/2.5: aliasing likely", "frequency > 30 MHz: above analog bandwidth".
 A peak-detect record (`peak` true in the result, kind `peak` in the `.npz`) adds per channel `envelope` (min, max,
@@ -242,7 +248,8 @@ samples the record stays legacy (GET_DECIM why 2 / 3) and the firmware does not 
 0x00).
 
 **`fetch_waveform`** (tier 0 in LOCAL, 1 in REMOTE). Reads the current capture without re-arming (the UI's
-last trace in LOCAL). Same returns as `capture`.
+last trace in LOCAL). Same returns as `capture`; `window` and `preview_points` as there (the whole record is
+saved).
 
 **`acquisition_control`** (tier 1). Low-level control for agents that want to arm, do something else (e.g.
 fire the detector), then wait.
@@ -250,9 +257,32 @@ fire the detector), then wait.
 | Param | Type | Notes |
 |---|---|---|
 | `action` | `"arm"`, `"wait"`, `"force"`, `"stop"` | |
-| `timeout_s` | float | for wait, <= 10 |
+| `timeout_s` | float | for wait, <= 60 (sent as WAIT requests of at most 10 s; was <= 10, one WAIT) |
 
 Caveat on `force`: "Only available once verified on this FPGA variant; otherwise use mode=auto."
+
+**`wait_for_event`** (tier 1, mcp-notes 2026-11-12). "Arm, the person causes the event, return the result" in one
+call. Sets the trigger (`channel` CH1 / CH2 / EXT, `edge`, `level` volts; mode normal; the type back to edge with a
+caveat), the record (`pre` / `post` times at the current rate, or `pretrigger_fraction`; refused with the record's
+limit at this rate when it does not fit), arms one host single and waits up to `timeout_s` (default 300, at most
+3600) in WAIT requests of `event_poll_s` (2 s, ServerConfig), sending a progress notification after each. Returns the
+`capture` result of the whole record (statistics, `file`, `stats_span`) with `waited_s`, `applied` (the trigger),
+`crossings` on `crossings_channel` (default the trigger channel) when `levels` are given (`crossing_edge`, `smooth`,
+`between` as `measure`), and no inline waveform unless `preview_points` is set (default 0).
+
+States it leaves: fired, the scope in STOP with this trigger (a host single always ends in STOP); timeout: `ok`
+false, `outcome` `timeout`, the host single STOPped (acq_state ABORTED), run_state STOP, the trigger as set; RUN or
+STOP pressed at the scope during the wait: `outcome` `aborted`; a cancelled tool call: STOP. A capture that completes
+between the last WAIT and the STOP is not lost: the firmware's STOP marks the host single ABORTED, but `capture_id` has
+moved on with origin host and the ring holds the record, so it is read and returned with a caveat.
+
+Why the limits: WAIT takes at most 10 000 ms (protocol section 8), so long waits are a series of WAITs, which also keep
+legacy firmware's 15 s REMOTE watchdog fed (collaborative firmware has none); the server's session lock is held for
+the whole wait, so other tool calls queue behind it (the idle port close never cuts a running tool), hence the 3600 s
+cap. The binding limit is the MCP client: the TypeScript SDK's request timeout is 60 s unless the client resets it on
+progress (`resetTimeoutOnProgress`) or raises it (Claude Code `MCP_TOOL_TIMEOUT`, Codex `tool_timeout_sec`). A client
+that gives up cancels the call, and the cancel STOPs the scope. `capture` keeps its 60 s limit and no progress (it
+holds the lock in one blocking call); `acquisition_control(wait)` went from 10 s to 60 s.
 
 **`averaged_capture`** (tier 1). The main tool for detector work.
 
@@ -260,7 +290,7 @@ Caveat on `force`: "Only available once verified on this FPGA variant; otherwise
 |---|---|---|---|
 | `n` | int | 64 | number of captures, 1..4096 |
 | `channels` | list | `["CH1"]` | |
-| `window` | `[t0, t1]` | whole capture | only this part is read and averaged |
+| `window` | `[t0, t1]` | whole capture | only this part is read and averaged, so the file holds only it: unlike `capture`, reading less per capture is what makes averaging fast |
 | `align` | `"hardware"`, `"edge"` | `"hardware"` | `edge`: per capture, find the crossing of `align_channel` at `align_level` with linear interpolation and shift by the sub-sample offset before averaging |
 | `align_channel` | channel | trigger source | typically CH2 carrying the detector's TX gate |
 | `align_level` | float V | trigger level | |
@@ -369,10 +399,28 @@ it twice on the host: `fft` is the on-scope FFT model (codes minus the zero code
 per-unit calibration when there is one). Caveats: 8-bit SFDR, firmware scaling, and "a host capture with a raw
 divider is labelled with the UI time base's rate" (known firmware limit).
 
-**`measure`** (tier 0 on an existing capture, 1 if it captures). Items: `vpp`, `vmin`, `vmax`, `mean`,
-`rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay` (CH1 -> CH2). Computed on the
-host from raw data with calibration. Caveat on rise time: "rise times below ~12 ns (0.35 / 30 MHz) measure
-the scope, not the signal".
+**`measure`** (tier 0 on an existing capture or a saved `.npz` (`source`, as `decode`), 1 if it captures). Items:
+`vpp`, `vmin`, `vmax`, `mean`, `rms`, `ac_rms`, `frequency`, `period`, `duty`, `rise_time`, `fall_time`, `delay`
+(CH1 -> CH2), `crossings`. Computed on the host from raw data with calibration. Caveat on rise time: "rise times below
+~12 ns (0.35 / 30 MHz) measure the scope, not the signal".
+
+Frequency (mcp-notes): from mid-level crossings with hysteresis (`frequency_method` `crossings`). When those are
+irregular (spread of the intervals over 0.2 of the mean, e.g. switching spikes on a buck ripple, which read 0.48 at
+20 MSa/s and 0.93 at 200 MSa/s on the bench) the strongest line of the record's Hann spectrum (`analysis.
+dominant_frequency`, parabolic peak, at least 6x the median bin) is returned with `frequency_method` `fft_peak`,
+`frequency_resolution` = the bin width fs / N, `frequency_reason` = why the crossings failed, duty null, and the caveat
+that it is the strongest line, not necessarily the fundamental. Other failures (no swing out of the noise, under a
+period) stay null with the reason.
+
+Crossings (mcp-notes, `analysis.level_crossings`): `levels` (volts at the tip), `edge` (`rising` / `falling` /
+`either`), `smooth` (a centred moving average: samples as an int or a time such as `'0.5us'`), `between` ([from, to];
+default the first and last level), `max_crossings` (16 per level returned, all counted). Hysteresis = 3 x the smoothed
+record's sample noise (at least half a code); a crossing is the midpoint of the noise's crossings between leaving one
+side of the hysteresis band and passing the other, so a slow noisy edge gives one unbiased crossing. Per level `count`,
+`first`, and per crossing `t` (seconds relative to the trigger, interpolated), `edge`, `slope_v_per_s`, `t_sigma` (the
+larger of noise / |slope| and half the noise's crossing span); `between` = {`from_level`, `to_level`, `t_from`, `t_to`,
+`interval`} (a rise or fall time between any two levels). Caveats: a level never reached / not crossed beyond the
+hysteresis, crossed several times (ringing, noise, a periodic signal), or within 4 noise sigmas of the record's extreme.
 
 **`scope_counter`** (tier 0 reading; tier 1 when `gate` / `source` / `level` / `hysteresis` configure it, since the
 scope's measurement cards share the counter; protocol 1.26, caps COUNTER, GET_COUNTER 0x0213). The FPGA's reciprocal
