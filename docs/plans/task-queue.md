@@ -6,6 +6,20 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Firmware
 
+- **Screen time axis ignores a host's raw divider** (induction-imager session 2026-11-12, fw 0.3.2 on 0x153F; dispatched
+  as fw-hostdt). UI time base 500 kSa/s (divider 399, index 20); `scope_set_timebase(sample_rate=20e6)` gave divider 9,
+  `window='20us'` divider 0, both `ui_timeperdiv_index` null. The screen shows the host capture, but time/div, cursors
+  and the frequency still assume the UI's 2 us per sample: a 483 kHz ripple read 76 us per period at 20 MSa/s and 824 us
+  between peaks at 200 MSa/s (824 us x 5 ns / 2 us = 2.06 us: the factor is the UI dt over the capture dt). The known
+  limit "a raw divider is labelled with the UI rate" (protocol row 45, the spectrum view) is the same root. Wanted: the
+  time scale of what is displayed follows the divider the capture ran at, or the screen says the scale is unknown.
+- **A finished host single is lost when the UI arms again** (same session; dispatched as fw-hostkeep). ARM (CH2 falling,
+  normal, single) gave capture 877 ARMED; the owner repeated the event at the scope, RUN ran on (capture 885, ui_run);
+  READ_RAW then answered E_BUSY detail 1 twice (the RUN loop sat armed in normal mode, no trigger coming), and after STOP
+  E_STATE "ring overwritten". Wanted: the last completed host capture stays readable until the host fetched it or armed
+  again (a copy outside the ring, read by capture_id), whatever the UI does meanwhile; and a UI capture that the ring no
+  longer holds stays readable as the processed trace (READ_TRACE) with a caveat instead of an error.
+
 - [x] (Done on branch fw-genlimit, 5b16ac3: one limit, SET_GEN's 25 MHz, for the generator menu and the settings check;
   every other SET_* field audited, no other mismatch; firmware/AGENTS.md section 102; bench pending.) **SET_GEN accepts
   what the settings check rejects** (bench 2026-11-08 19:41, docs/hardware-status.md): the protocol
@@ -294,6 +308,20 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## MCP / host
 
+- **Usage notes from the induction-imager session** (2026-11-12, mcp 0.3.2; dispatched as mcp-notes). (1) `scope_capture`
+  and `scope_fetch_waveform` always return a preview (about 250 points with t, vmin, vmax per channel, or up to 2000
+  inline samples): several thousand tokens per call; wanted `preview_points` (0 = none). (2) `window` on `scope_capture`
+  stores only that window in the .npz; wanted the whole record in the file, the window only for what is returned.
+  (3) Level crossings as a measure item: a list of levels, optional smoothing, times relative to the trigger, the time
+  between two levels (fall_time has fixed levels). (4) `scope_measure` frequency gave null on a 483 kHz buck ripple
+  (13 mV rms with 0.15 to 0.4 Vpp edge spikes: "irregular crossings"); wanted the FFT peak as a fallback, reported as
+  such. (5) `scope_status` returns the whole link and device statistics on every call; wanted a compact form for polling.
+  (6) A one-call wait for an event (channel, edge, level, pre and post time, a long timeout, statistics and crossings
+  back); `scope_capture` waits 60 s at most, `acquisition_control(wait)` 10 s.
+- **DC readings 2.5 codes apart between the channels at 5 V/div with offset_div -3** (same session: bench supply 18.0 V,
+  CH1 17.32 V mean on the + rail, CH2 17.75 V on a node at or below it, x1, 0.165 V per code). The calibration caveat
+  with the trace moved; the unit's wizard run is pending (stages 0x06D2). Check after the wizard whether the offset
+  dependence remains.
 - **The battery leaves the trace offsets as saved** (bench 2026-11-09 09:1x): `fnirsi1013d-battery` sets range,
   coupling and filter but not `offset_div`; a saved CH2 position of -3.45 div clipped the ladder's low level and failed
   A1, A2, A4. Set both offsets to 0 in the bench setup (and restore them at the end).
