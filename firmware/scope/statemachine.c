@@ -3543,27 +3543,32 @@ void handle_right_basic_menu_touch(void)
       }
     }
   }
-  //Check if auto set or page down button is touched
+  //Check if save wave or page down button is touched. After fw 0.3.3 (owner 2026-11-13): SAVE WAVE here, AUTO SET in
+  //the bottom slot, away from RUN/STOP, which is pressed many times in a row when single triggering
   else if((ytouch >= 123) && (ytouch <= 177))
   {
     //Check on wave view state (Skope mode) for which button is shown
     if(!scopesettings.waveviewmode)
     {
-      //Auto set so highlight that button if touched
-      scope_auto_set_button(1);
+      //Save wave so highlight that button if touched
+      scope_save_wave_button(1);
 
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //fw 0.2.51: in the spectrum view the view's own Auto (start, or cancel while it runs); it redraws the button
-      if(!PC_AUTOSET())
-      {
-        //Button back to inactive state
-        scope_auto_set_button(0);
+      //Button back to inactive state
+      scope_save_wave_button(0);
 
-        //Short time base run auto setup
-        if(!scopesettings.long_mode) scope_do_auto_setup();
-      }
+      //Save the waveform on the SD card; fw 0.2.69: in Frequency response the sweep table as CSV. fw 0.2.78: a host
+      //request meanwhile gets E_BUSY "file save in progress"
+      int hold = pc_glue_ui_hold(PC_HOLD_SAVE);
+
+      if(bode_view_active())
+        bode_view_save();
+      else
+        scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
+
+      pc_glue_ui_hold(hold);
     }
     else
     {
@@ -3694,31 +3699,27 @@ void handle_right_basic_menu_touch(void)
       pc_glue_ui_hold(hold);
     }
   }
-  //Check if save or delete wave button is touched
+  //Check if auto set or delete wave button is touched (AUTO SET in the bottom slot after fw 0.3.3)
   else if((ytouch >= 423) && (ytouch <= 477))
   {
     //Check on wave view state (Scope mode) for which button is shown
     if(!scopesettings.waveviewmode)
     {
-      //Save wave so highlight that button if touched
-      scope_save_wave_button(1);
+      //Auto set so highlight that button if touched
+      scope_auto_set_button(1);
 
       //Wait until touch is released
       tp_i2c_wait_for_touch_release();
 
-      //Button back to inactive state
-      scope_save_wave_button(0);
+      //fw 0.2.51: in the spectrum view the view's own Auto (start, or cancel while it runs); it redraws the button
+      if(!PC_AUTOSET())
+      {
+        //Button back to inactive state
+        scope_auto_set_button(0);
 
-      //Save the waveform on the SD card; fw 0.2.69: in Frequency response the sweep table as CSV. fw 0.2.78: a host
-      //request meanwhile gets E_BUSY "file save in progress"
-      int hold = pc_glue_ui_hold(PC_HOLD_SAVE);
-
-      if(bode_view_active())
-        bode_view_save();
-      else
-        scope_save_view_item_file(VIEW_TYPE_WAVEFORM);
-
-      pc_glue_ui_hold(hold);
+        //Short time base run auto setup
+        if(!scopesettings.long_mode) scope_do_auto_setup();
+      }
     }
     else
     {

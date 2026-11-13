@@ -595,11 +595,11 @@ void scope_auto_set_button(int mode)
   }
 
   //Draw the body of the button
-  display_fill_rounded_rect(739, 125, 51, 50, 2);
+  display_fill_rounded_rect(739, 425, 51, 50, 2);
 
   //Draw the edge
   display_set_fg_color(0x00505050);
-  display_draw_rounded_rect(739, 125, 51, 50, 2);
+  display_draw_rounded_rect(739, 425, 51, 50, 2);
 
   //Check if inactive or active mode
   if(mode == 0)
@@ -617,13 +617,13 @@ void scope_auto_set_button(int mode)
   if(PC_AUTOSET_RUNNING())
   {
     display_set_font(&font_2);
-    display_text(739 + (51 - ui_text_width(&font_2, "Auto...")) / 2, 143, "Auto...");
+    display_text(739 + (51 - ui_text_width(&font_2, "Auto...")) / 2, 443, "Auto...");
     return;
   }
 
   display_set_font(&font_3);
-  display_text(746, 135, "AUTO");
-  display_text(753, 150, "SET");
+  display_text(746, 435, "AUTO");
+  display_text(753, 450, "SET");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -893,11 +893,11 @@ void scope_save_wave_button(int mode)
   }
 
   //Draw the body of the button
-  display_fill_rounded_rect(739, 425, 51, 50, 2);
+  display_fill_rounded_rect(739, 125, 51, 50, 2);
 
   //Draw the edge
   display_set_fg_color(0x00505050);
-  display_draw_rounded_rect(739, 425, 51, 50, 2);
+  display_draw_rounded_rect(739, 125, 51, 50, 2);
 
   //Check if inactive or active mode
   if(mode == 0)
@@ -913,8 +913,8 @@ void scope_save_wave_button(int mode)
 
   //Display the text
   display_set_font(&font_3);
-  display_text(746, 435, "SAVE");
-  display_text(746, 450, "WAVE");
+  display_text(746, 135, "SAVE");
+  display_text(746, 150, "WAVE");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

@@ -16,16 +16,17 @@
 #define UI_BAR_W              51
 #define UI_BTN_H              50
 
-//First page slots, top to bottom (1.00o5's order and y). In Spectrum the cursor and measurement slots are empty until
-//spectrum markers and the spectrum's own measurement list exist.
+//First page slots, top to bottom (1.00o5's y). In Spectrum the cursor slots are empty until spectrum markers exist.
+//After fw 0.3.3 (owner 2026-11-13) AUTO SET and SAVE WAVE swapped places: AUTO SET is the bottom slot, away from RUN/STOP,
+//which is pressed many times in a row when single triggering. The waveform viewer's buttons keep their slots.
 #define UI_P1_CTRL            0
 #define UI_P1_RUN             1
-#define UI_P1_AUTO            2
+#define UI_P1_SAVEWAVE        2
 #define UI_P1_TCURSOR         3
 #define UI_P1_VCURSOR         4
 #define UI_P1_MEASURES        5
 #define UI_P1_SAVEPIC         6
-#define UI_P1_SAVEWAVE        7
+#define UI_P1_AUTO            7
 
 int ui_p1_shown(int slot, int spectrum);     //spectrum: 0 Scope, 1 Spectrum, 2 Frequency response (fw 0.2.66)
 

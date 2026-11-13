@@ -59,8 +59,9 @@ program on the PC has the scope's serial port open or has sent it a request in t
 - The run-state chip beside the trigger reads STOP, RUN or WAIT (a single shot waiting for its trigger).
 - The sun switches the screen to full brightness and back.
 
-**Right bar, first page.** The same slots in every mode: CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR, MEASURES,
-SAVE PIC, SAVE WAVE. The RUN/STOP button shows what a tap does: green RUN while stopped, red STOP while running. A
+**Right bar, first page.** The same slots in every mode: CTRL, RUN/STOP, SAVE WAVE, T CURSOR, V CURSOR, MEASURES,
+SAVE PIC, AUTO SET. AUTO SET is at the bottom so that pressing RUN/STOP over and over in single trigger never hits it
+by mistake. The RUN/STOP button shows what a tap does: green RUN while stopped, red STOP while running. A
 mode that has no use for a slot leaves it empty.
 
 **Right bar, CTRL page.** CTRL switches the bar to the page of controls for how the plot is shown. The order is the

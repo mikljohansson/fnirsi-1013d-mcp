@@ -17,7 +17,7 @@ int ui_p1_shown(int slot, int spectrum)
   if((spectrum == 2) && (slot == UI_P1_VCURSOR))
     return 0;
 
-  return (slot >= UI_P1_CTRL) && (slot <= UI_P1_SAVEWAVE);
+  return (slot >= UI_P1_CTRL) && (slot <= UI_P1_AUTO);
 }
 
 //Hit areas: each control from the middle of the gap above it to the middle of the gap below it; the steppers split at

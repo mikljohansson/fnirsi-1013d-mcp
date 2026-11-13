@@ -32,9 +32,10 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
 - **Dropdowns** (from the top bar): channel = the input (range, coupling, probe, invert); ACQ = acquisition only
   (sample rate, time per division, memory, roll, average, filter); Trigger = mode, edge, channel, position, Always
   50 %; Generator = the signal source. Nothing about how the plot looks goes in a dropdown.
-- **Right bar, first page**: actions on what is shown, in fixed slots: CTRL, RUN/STOP, AUTO SET, T CURSOR, V CURSOR,
-  MEASURES, SAVE PIC, SAVE WAVE. A mode that cannot use a slot leaves it empty rather than showing a control that does
-  nothing. AUTO SET means the mode's own auto (the spectrum's Auto in Spectrum).
+- **Right bar, first page**: actions on what is shown, in fixed slots: CTRL, RUN/STOP, SAVE WAVE, T CURSOR, V CURSOR,
+  MEASURES, SAVE PIC, AUTO SET. A mode that cannot use a slot leaves it empty rather than showing a control that does
+  nothing. AUTO SET means the mode's own auto (the spectrum's Auto in Spectrum); it sits at the bottom, away from
+  RUN/STOP, because RUN/STOP is pressed many times in a row when single triggering and AUTO SET throws the setup away.
 - **Right bar, CTRL page**: how the plot is shown and computed, the same order in every mode: Display (the variants,
   each with an icon, plus the variant's own parameters inside the fold-out), the mode's analysis controls (Trace style
   in Scope; Analyse in Spectrum), Grid, the V+ / CH / V- steppers for both channels, 50 % TRIG. A CTRL button

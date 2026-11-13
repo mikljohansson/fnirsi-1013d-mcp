@@ -11,6 +11,12 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Firmware
+
+- AUTO SET moved to the bottom of the right bar on every screen (Scope, Spectrum, Frequency response), swapping places
+  with SAVE WAVE, which is now right under RUN/STOP. Pressing RUN/STOP many times when single triggering no longer
+  risks an accidental AUTO SET. The waveform viewer's buttons are unchanged.
+
 ## [0.3.3] - 2026-11-12
 
 A maintenance release on the same FPGA bitstream, 0x153F, from an agent's bench session on a power board (protocol

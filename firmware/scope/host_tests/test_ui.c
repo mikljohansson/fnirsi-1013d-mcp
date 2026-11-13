@@ -314,7 +314,7 @@ static void test_ctrl_page(void)
   T_TRUE(UI_CTRL_TRIG50_Y >= UI_CTRL_STEP2_Y + UI_STEP_H);
 
   //First page: Spectrum leaves the cursor and measurement slots empty, Scope shows all eight
-  for(item = UI_P1_CTRL; item <= UI_P1_SAVEWAVE; item++)
+  for(item = UI_P1_CTRL; item <= UI_P1_AUTO; item++)
   {
     T_EQ(ui_p1_shown(item, 0), 1);
     T_EQ(ui_p1_shown(item, 1), !((item == UI_P1_TCURSOR) || (item == UI_P1_VCURSOR)));   //fw 0.2.65: MEASURES too
