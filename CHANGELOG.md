@@ -11,20 +11,25 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-13
+
+A maintenance release on the same FPGA bitstream, 0x153F, from the owner's use of 0.3.3 (protocol 1.30, row 73 added).
+User-facing notes: `docs/release-notes/0.3.4.md`.
+
 ### Firmware
 
 - AUTO SET moved to the bottom of the right bar on every screen (Scope, Spectrum, Frequency response), swapping places
   with SAVE WAVE, which is now right under RUN/STOP. Pressing RUN/STOP many times when single triggering no longer
-  risks an accidental AUTO SET. The waveform viewer's buttons are unchanged.
+  risks an accidental AUTO SET. The waveform viewer's buttons are unchanged (0d17fa0).
 - A sample rate set from the computer (MCP `scope_set_timebase`) now becomes the scope's own rate when it is one of
   the ACQ menu's rates (200 MSa/s .. 500 Sa/s in 1-2-5 steps): the ACQ menu shows it, the time/div moves to one that
   goes with it, and tapping the plot to zoom works from there. Before, the scope kept showing and zooming its previous
   rate (for example 200 MSa/s while the capture ran at 500 kSa/s). Other rates still run as before. Protocol row 73;
-  GET_TIMEBASE then reports the time/div index instead of 0xFF.
+  GET_TIMEBASE then reports the time/div index instead of 0xFF (75b4565).
 
-### Host
+### Host (mcp)
 
-- The simulator adopts a UI-rate divider the same way (protocol row 73).
+- The simulator adopts a UI-rate divider the same way (protocol row 73) (75b4565).
 
 ## [0.3.3] - 2026-11-12
 
