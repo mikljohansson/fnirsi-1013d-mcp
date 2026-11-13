@@ -15,6 +15,7 @@ import pytest
 
 from fnirsi1013d import analysis as A
 from fnirsi1013d import protocol as P
+from fnirsi1013d.units import fmt_si
 
 from test_server import client_for
 
@@ -33,12 +34,29 @@ def _ui_at_1msps(srv) -> None:
 
 
 async def _battery_sequence(c) -> None:
-    """The battery's acq group up to its first FFT: a raw 200 kSa/s, a segment run's short record and back."""
-    await c.call("scope_set_timebase", sample_rate="200kS/s")
+    """The battery's acq group up to its first FFT: a raw divider, a segment run's short record and back. The battery
+    ran 200 kSa/s; since protocol row 73 a UI rate is adopted by the UI, so 160 kSa/s (divider 1249, no UI rate) keeps
+    the raw path the finding was about."""
+    await c.call("scope_set_timebase", sample_rate="160kS/s")
     await c.call("scope_set_trigger", source="CH1", edge="rising", mode="normal", level=0.0, pretrigger_fraction=0.5,
                  total_samples=1000)
     await c.call("scope_set_trigger", source="CH1", edge="rising", mode="normal", level=0.0, pretrigger_fraction=0.5,
                  total_samples=3000)
+
+
+async def test_a_ui_rate_becomes_the_ui_time_base(sim_factory, tmp_path):
+    """Protocol row 73 (after fw 0.3.3, owner 2026-11-13): an agent set 500 kSa/s while the scope sat at 200 MSa/s;
+    the ACQ menu and the tap zoom kept 200 MSa/s. A divider that is one of the UI's rates is now the UI's rate and
+    time/div; any other divider stays raw (index 0xFF)."""
+    srv = sim_factory(signal="square:freq=1kHz,amp=1")
+    srv.device.ui_set_timebase(29)  # 1 us/div at 200 MSa/s
+    async with client_for(srv, tmp_path) as c:
+        await c.call("scope_set_timebase", sample_rate="500kS/s")
+        tb = srv.device.timebase()
+        assert (tb.divider, tb.samplerate_index, tb.timeperdiv_index) == (399, 8, 20)
+        await c.call("scope_set_timebase", sample_rate="160kS/s")
+        tb = srv.device.timebase()
+        assert (tb.divider, tb.samplerate_index, tb.timeperdiv_index) == (1249, 0xFF, 0xFF)
 
 
 async def test_raw_divider_forgotten_by_get_timebase_is_modelled(sim_factory, tmp_path):
@@ -47,9 +65,9 @@ async def test_raw_divider_forgotten_by_get_timebase_is_modelled(sim_factory, tm
     async with client_for(srv, tmp_path) as c:
         await _battery_sequence(c)
         dev = srv.device
-        assert dev.settings.divider == 999  # the FPGA keeps the raw divider
+        assert dev.settings.divider == 1249  # the FPGA keeps the raw divider
         assert dev.timebase().divider == 199  # GET_TIMEBASE: the UI table's, as fw 0.2.105
-        assert dev.decim_state().divider == 999  # GET_DECIM: the one the FPGA holds
+        assert dev.decim_state().divider == 1249  # GET_DECIM: the one the FPGA holds
 
 
 async def test_fft_and_dvm_use_the_divider_the_fpga_holds(sim_factory, tmp_path):
@@ -58,13 +76,13 @@ async def test_fft_and_dvm_use_the_divider_the_fpga_holds(sim_factory, tmp_path)
     async with client_for(srv, tmp_path) as c:
         await _battery_sequence(c)
         fft = await c.call("scope_capture_and_fft", channel="CH1", n_avg=2, peaks=3)
-        assert fft["sample_rate"] == pytest.approx(200e3)
+        assert fft["sample_rate"] == pytest.approx(160e3)
         assert fft["peaks"][0]["frequency"] == pytest.approx(1000, rel=0.01)
         dvm = await c.call("scope_dvm", channels=["CH1"], n=2)
         assert dvm["channels"]["CH1"]["frequency"] == pytest.approx(1000, rel=0.01)
-        assert any("over 15 ms" in x for x in dvm["caveats"]), dvm["caveats"]
+        assert any(f"over {fmt_si(3000 / 160e3, 's')}" in x for x in dvm["caveats"]), dvm["caveats"]
         cap = await c.call("scope_capture", channels=["CH1"], timeout_s=2.0)
-        assert cap["sample_rate"] == pytest.approx(200e3)
+        assert cap["sample_rate"] == pytest.approx(160e3)
 
 
 async def test_timebase_reports_follow_the_fpga(sim_factory, tmp_path):
@@ -74,11 +92,11 @@ async def test_timebase_reports_follow_the_fpga(sim_factory, tmp_path):
     async with client_for(srv, tmp_path) as c:
         await _battery_sequence(c)
         tr = await c.call("scope_set_trigger", total_samples=3000)
-        assert tr["applied"]["pre_trigger_time"] == pytest.approx(1500 * 5e-6)
+        assert tr["applied"]["pre_trigger_time"] == pytest.approx(1500 * 6.25e-6)
         s = c.sess.get_scope()
-        assert s.get_timebase(cached=False).divider == 999
-        assert s.capture_context().timebase.dt == pytest.approx(5e-6)
-        assert P.timebase_for_divider(999).dt == pytest.approx(5e-6)
+        assert s.get_timebase(cached=False).divider == 1249
+        assert s.capture_context().timebase.dt == pytest.approx(6.25e-6)
+        assert P.timebase_for_divider(1249).dt == pytest.approx(6.25e-6)
 
 
 # ---- finding 4a: a frequency for a trace without a period ------------------------------------------------------

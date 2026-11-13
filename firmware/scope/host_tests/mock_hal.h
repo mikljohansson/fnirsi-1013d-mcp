@@ -75,6 +75,8 @@ typedef struct
   pc_hw_timebase tb;
   uint32_t fpga_divider;          //0x0D the FPGA holds (pc_hal_divider_now): every timebase write; a UI snap is tb only
   uint32_t       tb_writes;
+  uint8_t        tb_adopt;        //SET_TIMEBASE mode 1 adopts a UI rate (pc_hal_timebase_adopt; on after reset)
+  uint32_t       tb_adopted;
   pc_hw_trigger  trg;
   uint8_t        gen_en, gen_duty;
   uint32_t       gen_hz;

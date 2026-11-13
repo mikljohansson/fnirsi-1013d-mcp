@@ -400,7 +400,9 @@ static void test_timebase(void)
   r = req(PC_CMD_GET_TIMEBASE, 0, 0);
   T_EQ(r.p[0], 23); T_EQ(pc_get_u32(r.p + 4), 39); T_EQ(S.tb_raw, 0);
 
-  //The same divider again from the UI at another index: the UI's pair is what runs
+  //The same divider again from the UI at another index: the UI's pair is what runs. 39 is a UI rate, which SET_TIMEBASE
+  //adopts since row 73 (test_timebase_adopt); the raw path is checked here with adoption off
+  mock.tb_adopt = 0;
   p[0] = 1; pc_put_u32(p + 4, 39);
   r = req(PC_CMD_SET_TIMEBASE, p, 8);
   T_EQ(r.p[0], 0xFF);
@@ -3854,6 +3856,50 @@ static resp_t enc_capture(void)
   return wait_done(1000);
 }
 
+//After fw 0.3.3 (owner 2026-11-13, protocol row 73): a mode 1 divider that is one of the UI's rates becomes the UI's
+//rate and time/div (the ACQ menu, the chip and the tap zoom kept 200 MSa/s while the FPGA ran the host's 500 kSa/s);
+//any other divider runs raw
+static void test_timebase_adopt(void)
+{
+  uint8_t  p[8];
+  resp_t   r;
+  uint32_t seq0;
+
+  setup(PC_FW_FPGA_VERSION);
+
+  //The UI at 200 MSa/s (1us/div, index 29)
+  memset(p, 0, 8); pc_put_u32(p + 4, 29);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(mock.tb.samplerate, 0);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  seq0 = pc_get_u32(r.p + 32);
+
+  //500 kSa/s by divider: the UI's pair takes it, GET_TIMEBASE reports the index, no raw divider
+  p[0] = 1; pc_put_u32(p + 4, 399);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0);
+  T_EQ(mock.tb_adopted, 1); T_EQ(S.tb_raw, 0);
+  T_EQ(mock.tb.samplerate, 8); T_EQ(mock.tb.timeperdiv, 20); T_EQ(mock.fpga_divider, 399);
+  T_EQ(r.p[0], 20); T_EQ(r.p[1], 8); T_EQ(pc_get_u32(r.p + 4), 399); T_EQ(pc_get_u32(r.p + 8), 500000);
+  r = req(PC_CMD_GET_STATUS, 0, 0);
+  T_TRUE(pc_get_u32(r.p + 32) != seq0);
+
+  //A host capture there is at the UI's own rate: nothing foreign on screen
+  r = enc_capture();
+  T_FALSE(disp_rate_foreign(mock_sr_div(mock.tb.samplerate)));
+
+  //A divider no UI rate has stays raw: the UI's pair is kept, GET_TIMEBASE says 0xFF
+  p[0] = 1; pc_put_u32(p + 4, 4);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(mock.tb_adopted, 1); T_EQ(S.tb_raw, 1);
+  T_EQ(r.p[0], 0xFF); T_EQ(pc_get_u32(r.p + 4), 4); T_EQ(mock.tb.samplerate, 8);
+
+  //The last short-mode rate (500 Sa/s) is adopted too
+  p[0] = 1; pc_put_u32(p + 4, mock_sr_div(17));
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(mock.tb_adopted, 2); T_EQ(S.tb_raw, 0); T_EQ(mock.tb.samplerate, 17);
+}
+
 //fw 0.2.87 (firmware/AGENTS.md section 57, fpga/al3/AGENTS.md "First-record saturation"): the host's raw divider 4095,
 //then a UI time/div snap that writes no 0x0D (acq_view_fit), then a host ARM with CIC2 + FIR: the arm computes N and the
 //shift from the divider the FPGA holds (N 4096, S 15), not from the UI table (D 199: S 7, every word 0xFFFF on the
@@ -3935,6 +3981,9 @@ static void test_screen_raw_divider(void)
   uint8_t p[8];
 
   setup(PC_FW_FPGA_VERSION);
+  //The raw path with the UI table's dividers (9, 0, 19), adoption off: since row 73 SET_TIMEBASE adopts those
+  //(test_timebase_adopt), the screen's scale serves the other dividers
+  mock.tb_adopt = 0;
   memset(p, 0, 8); pc_put_u32(p + 4, 20);
   r = req(PC_CMD_SET_TIMEBASE, p, 8);
   T_EQ(r.h.status, 0); T_EQ(dr_ui(), 399);
@@ -5029,6 +5078,7 @@ int main(void)
   test_ascii_ver();
   test_channel();
   test_timebase();
+  test_timebase_adopt();
   test_trigger();
   test_trigger2();
   test_capture_and_raw();

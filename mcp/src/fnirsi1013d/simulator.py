@@ -3125,6 +3125,15 @@ class Device:
             sr = P.TIME_PER_DIV_SAMPLE_RATE[r.value]
             s.divider, s.tpd_index, s.sr_index = P.SAMPLE_RATE_DIVIDERS[sr], r.value, sr
             self.ui_tb = (r.value, sr)
+        elif r.mode == 1 and r.value in P.SAMPLE_RATE_DIVIDERS:
+            # protocol row 73 (after fw 0.3.3): a divider that is one of the UI's rates becomes the UI's rate and the
+            # nearest time/div with it (the firmware's ladder, acq_view_tb_for_rate; here the 1.00o5 table)
+            sr = P.SAMPLE_RATE_DIVIDERS.index(r.value)
+            cur = self.ui_tb[0]
+            tpd = min((i for i in range(P.MIN_REMOTE_TIMEPERDIV_INDEX, 35) if P.TIME_PER_DIV_SAMPLE_RATE[i] == sr),
+                      key=lambda i: (abs(i - cur), i))
+            s.divider, s.tpd_index, s.sr_index = r.value, tpd, sr
+            self.ui_tb = (tpd, sr)
         elif r.mode == 1:
             s.divider, s.tpd_index, s.sr_index = r.value, 0xFF, 0xFF
         else:

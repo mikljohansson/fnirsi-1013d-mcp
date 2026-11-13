@@ -75,6 +75,10 @@ typedef struct
 void     pc_hal_timebase_read(pc_hw_timebase *t);
 int      pc_hal_timebase_lookup(uint8_t index, uint8_t *samplerate, uint32_t *divider);   //0 ok, -1 index out of range
 void     pc_hal_timebase_write(const pc_hw_timebase *t, int raw);                      //[UI][FPGA] raw: only divider is valid
+//After fw 0.3.3 (owner 2026-11-13): a host divider that is one of the UI's short-mode rates becomes the UI's rate, with the
+//nearest time/div whose ladder rate it is (acq_view_tb_for_rate), so the ACQ menu, the chip and the tap zoom follow the
+//host. 0 adopted (written as a mode 0 SET_TIMEBASE is), -1 not a UI rate (the caller writes it raw)
+int      pc_hal_timebase_adopt(uint32_t divider);                                      //[UI][FPGA]
 uint32_t pc_hal_divider_now(void);      //fw 0.2.87: the 0x0D value the FPGA holds (the last one anyone wrote; the UI
                                         //table's before the first): every decimation configuration is computed from it
 

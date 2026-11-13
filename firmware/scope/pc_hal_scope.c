@@ -263,6 +263,33 @@ void pc_hal_timebase_write(const pc_hw_timebase *t, int raw)
   }
 }
 
+int pc_hal_timebase_adopt(uint32_t divider)
+{
+  pc_hw_timebase t;
+  uint32_t       r;
+  int32          tpd;
+
+  for(r = 0; (r < ACQ_RATES) && (sample_rate_settings[r] != divider); r++)
+    ;
+
+  if(r >= ACQ_RATES)
+    return -1;
+
+  tpd = acq_view_tb_for_rate(r);
+
+  if((tpd < ACQ_TB_FIRST) || (tpd > ACQ_TB_LAST))
+    return -1;
+
+  //A rate tapped in STOP loses to the host's, as on the raw path
+  acq_view_rate_drop();
+
+  t.timeperdiv = (uint8_t)tpd;
+  t.samplerate = (uint8_t)r;
+  t.divider    = divider;
+  pc_hal_timebase_write(&t, 0);
+  return 0;
+}
+
 //----------------------------------------------------------------------------------------------------------------------------------
 // Trigger
 

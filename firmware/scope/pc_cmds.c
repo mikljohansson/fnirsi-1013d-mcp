@@ -1223,12 +1223,20 @@ static int h_set_timebase(pc_session *s, const uint8_t *req, uint32_t len, uint8
     if(value > PC_DIVIDER_MAX)
       return pc_error(s, PC_E_BAD_ARG, 4, "divider > 1048575");
 
-    t.divider = value;
-    pc_hal_timebase_write(&t, 1);
-    s->tb_raw     = 1;
-    s->tb_raw_tpd = t.timeperdiv;
-    s->tb_raw_sr  = t.samplerate;
-    s->tb_divider = value;
+    //After fw 0.3.3 (owner 2026-11-13, protocol row 73): a divider that is one of the UI's rates becomes the UI's rate and
+    //time/div (the ACQ menu, the chip and the tap zoom showed the UI's old pair while the FPGA ran the host's); any other
+    //divider runs raw as before
+    if(pc_hal_timebase_adopt(value) == 0)
+      s->tb_raw = 0;
+    else
+    {
+      t.divider = value;
+      pc_hal_timebase_write(&t, 1);
+      s->tb_raw     = 1;
+      s->tb_raw_tpd = t.timeperdiv;
+      s->tb_raw_sr  = t.samplerate;
+      s->tb_divider = value;
+    }
   }
   else
   {

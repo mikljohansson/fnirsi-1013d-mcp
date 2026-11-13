@@ -105,6 +105,7 @@ void mock_reset(uint16_t fpga_version)
   mock.tb.samplerate = tpd_sr[24];
   mock.tb.divider    = sr_div[tpd_sr[24]];
   mock.fpga_divider  = mock.tb.divider;
+  mock.tb_adopt      = 1;
 
   //C7 counter: the boot configuration, no result yet
   mock.cnt.gate   = 2;
@@ -232,6 +233,37 @@ uint32_t pc_hal_mul_factor_1x(uint8_t range)
 void pc_hal_timebase_read(pc_hw_timebase *t) { *t = mock.tb; }
 
 uint32_t pc_hal_divider_now(void) { return mock.fpga_divider; }
+
+//The firmware picks the time/div with acq_view_tb_for_rate (the UI's ladder); the mock takes the nearest index of the
+//1.00o5 table with that rate. Short-mode rates only (0..17), as ACQ_RATES
+int pc_hal_timebase_adopt(uint32_t divider)
+{
+  pc_hw_timebase t;
+  uint32_t       r, i, best = 0xFF, cur = mock.tb.timeperdiv;
+
+  if(!mock.tb_adopt)
+    return -1;
+
+  for(r = 0; (r < 18) && (sr_div[r] != divider); r++)
+    ;
+
+  if(r >= 18)
+    return -1;
+
+  for(i = 11; i < 35; i++)
+    if((tpd_sr[i] == r) && ((best == 0xFF) || (((i > cur) ? i - cur : cur - i) < ((best > cur) ? best - cur : cur - best))))
+      best = i;
+
+  if(best == 0xFF)
+    return -1;
+
+  t.timeperdiv = (uint8_t)best;
+  t.samplerate = (uint8_t)r;
+  t.divider    = divider;
+  pc_hal_timebase_write(&t, 0);
+  mock.tb_adopted++;
+  return 0;
+}
 
 int pc_hal_timebase_lookup(uint8_t index, uint8_t *samplerate, uint32_t *divider)
 {
