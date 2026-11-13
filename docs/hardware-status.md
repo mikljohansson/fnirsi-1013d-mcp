@@ -2215,3 +2215,14 @@ Newest entries at the bottom. Format: date, who, what, result.
   https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.3, its firmware hash be350b69... = the image on the card.
   **Not done: the hardware battery on the release image** (docs/releasing.md 4.6; the scope was on the induction-imager
   board, not on the ladder) and a power cycle from the card. Calibration wizard still pending (stages 0x06D2).
+- 2026-11-13 19:49-20:10 (lead, owner present): **v0.3.4 released and on the card.** Two fixes from the owner's use of
+  0.3.3: AUTO SET to the bottom of the right bar (0d17fa0) and SET_TIMEBASE mode 1 adopting a UI-rate divider, protocol
+  row 73 (75b4565); release commit c2625e9. The local `make gcc10` image f1035e39c10918f6... (828,416 bytes, `#VER`
+  fw=0.3.4) FEL-loaded and persisted in one run with `fnirsi1013d-flash --sha256 f1035e39... --persist`: backup
+  `backups/sdcard/sd_750-2368_20261113-194946.bin` (the 0.3.3 image), 1618 sectors compared identical, eGON checksum
+  0x6638C96C. GET_INFO: fw 0.3.4, build c2625e96 = the release commit, proto 1.30, fpga 0x153F. CI run 43486471227
+  green, its image f1035e39... = the one on the card. Dry run `v0.3.4-rc1`: release.yml green, 8 assets, SHA256SUMS 7 of
+  7, firmware f1035e39...; rc removed. Tag `v0.3.4` on c2625e9: release.yml run 43488283584 green, published as the
+  latest release, https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.4. **Not done**: the two fixes
+  were not tried on the unit (owner to check: AUTO SET at the bottom; an agent's 500 kSa/s shown in the ACQ menu with
+  tap zoom working), the hardware battery on the release image (docs/releasing.md 4.6), a power cycle from the card.
