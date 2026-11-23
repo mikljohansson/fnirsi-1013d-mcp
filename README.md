@@ -61,10 +61,9 @@ remote lock-out: you and the agent change the same live settings, and the screen
   type (edge, pulse width, Nth edge, timeout) and a trigger hold-off.
 - **Capture**: one capture, or a time window of it, with the raw ADC codes per core; the trace on the screen;
   arm, wait, force and stop; arm and wait up to an hour for an event you cause; averaged captures aligned on an
-  edge, or summed in the FPGA; segmented capture, up to 256 triggers back to back with a timestamp each (built and
-  simulator-tested, not yet benched); capture and FFT; a pulse-induction decay fit; measurements and
-  level-crossing times; the hardware counter (frequency, period, width and duty at 5 ns resolution, FPGA 0x153F);
-  calibrate volts against a known DC voltage.
+  edge, or summed in the FPGA; segmented capture, up to 256 triggers back to back with a timestamp each; capture
+  and FFT; a pulse-induction decay fit; measurements and level-crossing times; the hardware counter (frequency,
+  period, width and duty at 5 ns resolution, FPGA 0x153F); calibrate volts against a known DC voltage.
 - **Log**: stream one or both channels to the PC for minutes or hours, from 500 kS/s 8-bit on one channel to
   125 kS/s 16-bit on two; a lost stretch is marked, never hidden.
 - **Analyse**: decode UART, SPI or I2C from a capture; test captures against a mask built from a reference; a DVM

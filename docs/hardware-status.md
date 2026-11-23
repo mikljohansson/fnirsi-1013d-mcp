@@ -2226,3 +2226,21 @@ Newest entries at the bottom. Format: date, who, what, result.
   latest release, https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.4. **Not done**: the two fixes
   were not tried on the unit (owner to check: AUTO SET at the bottom; an agent's 500 kSa/s shown in the ACQ menu with
   tap zoom working), the hardware battery on the release image (docs/releasing.md 4.6), a power cycle from the card.
+- 2026-11-23 13:21-14:34 (lead, owner present): **v0.3.5 released and on the card.** GitHub issue #2 (AUTO SET left
+  20 ns/div for a 10 MHz signal, a time/div the zoom cannot return to): AUTO SET onto the ladder (eb6ff29) and, at the
+  owner's request, AUTO_SET in the protocol (1.31, row 74) with the MCP tool `scope_auto_set` (8ae113d); release commit
+  c971887. The local `make gcc10` image 86d984f4336e7faa... (828,928 bytes) FEL-loaded with `fnirsi1013d-flash --sha256
+  86d984f4...`: `#VER` fw=0.3.5, proto=1.31, fpga=0x153f; GET_INFO build c971887f = the release commit. **The fix on the
+  unit** (CH1 x10 AC on the calibration post, CH2 off, generator 10 MHz 50 % set through the client library with the
+  owner's go-ahead; the MCP server's 1 MHz ceiling was left as it is): AUTO_SET answered in 0.44 s and left time/div
+  index 31 = 50 ns/div, rate index 0, divider 0 = 200 MSa/s (before it: 500 us/div at 1 MSa/s); the screenshot shows
+  200MSa/s 50ns/div, Freq 10.00MHz, two divisions a period. Generator off and CH2 on again afterwards. The tap zoom from
+  there was not tapped on the unit (host test `test_autoset` covers it). An earlier image of the same day (4c1fcb30...,
+  build 37e2970f, before AUTO_SET) was FEL-loaded once and never written. Persisted with `--persist-only`: backup
+  `backups/sdcard/sd_750-2369_20261123-134246.bin` (the 0.3.4 image), 1619 sectors compared identical, eGON checksum
+  0x2212A3C6. CI run 45177164939 green (its firmware job 20 min: the GCC 10 cache had expired), its image 86d984f4... =
+  the one on the card. Dry run `v0.3.5-rc1`: release.yml run 45180408608 green, 8 assets, SHA256SUMS 7 of 7, firmware
+  86d984f4...; rc removed. Tag `v0.3.5` on c971887: release.yml run 45184299211 green, published as the latest release,
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.5. **Not done**: the hardware battery on the
+  release image (docs/releasing.md 4.6), a power cycle from the card, `scope_auto_set` through the MCP server itself
+  (the running server was started before the change; the client library call is the same path).
