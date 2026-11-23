@@ -11,6 +11,13 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Firmware
+
+- AUTO SET no longer lands on 20 ns/div (it did for signals of about 10 MHz and up), a time/div the zoom and the ACQ
+  menu do not offer: after zooming out there was no way back except AUTO SET again. AUTO SET now ends at the fastest
+  time/div the scope offers, 50 ns/div at 200 MSa/s, and at every time/div it picks the same sample rate a tap zoom to
+  that time/div would (issue #2, eb6ff29).
+
 ## [0.3.4] - 2026-11-13
 
 A maintenance release on the same FPGA bitstream, 0x153F, from the owner's use of 0.3.3 (protocol 1.30, row 73 added).
