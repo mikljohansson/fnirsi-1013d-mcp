@@ -81,6 +81,12 @@ int acq_view_set_tb(uint32 timeperdiv);
 //at an end (nothing changed), else ACQ_SET_TB / ACQ_SET_RATE as acq_view_set_tb. Short mode only.
 int acq_view_zoom(int dir, int rate_free);
 
+//AUTO SET's result (issue #2): the time/div it measured, `timeperdiv`, moved onto the ladder (the nearest slower
+//time/div with a ladder rate, e.g. 50 ns/div for 20 ns/div; else the nearest faster one) with the ladder's rate, the
+//pair a tap zoom or a time/div box would leave. AUTO SET wrote 1.00o5's index-to-rate table before, which reaches
+//20 ns/div: a time/div the zoom could leave but never return to. The caller writes the FPGA's rate. Short mode only.
+void acq_view_autoset(int32 timeperdiv);
+
 //fw 0.2.77, the Spectrum's span sets the rate (spec_ladder.h): the short-mode time/div to pair with sample_rate[r]: the
 //one nearest the current time/div whose ladder rate is r, else the nearest viable at r (tbv_snap); -1 when none is
 int32 acq_view_tb_for_rate(uint32 r);

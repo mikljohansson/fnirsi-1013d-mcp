@@ -1252,10 +1252,8 @@ void scope_do_auto_setup_old(void)
     }
 
     //Select the found time per division
-    scopesettings.timeperdiv = timeperdiv+11;
-    //if (scopesettings.samplecount == 15000)scopesettings.samplerate = time_per_div_sample_rate_15k[timeperdiv+11]; 
-     // else 
-        scopesettings.samplerate = time_per_div_sample_rate[timeperdiv+11];
+    //Issue #2: onto the time/div ladder with the ladder's rate (acq_view.h), never 20 ns/div and faster
+    acq_view_autoset(timeperdiv+11);
   }
   else
   {
@@ -1982,10 +1980,8 @@ void scope_do_auto_setup_new(void)
     }
 
     //Select the found time per division
-    scopesettings.timeperdiv = timeperdiv+11;
-    //if (scopesettings.samplecount == 15000)scopesettings.samplerate = time_per_div_sample_rate_15k[timeperdiv+11]; 
-    //  else 
-        scopesettings.samplerate = time_per_div_sample_rate[timeperdiv+11];
+    //Issue #2: onto the time/div ladder with the ladder's rate (acq_view.h), never 20 ns/div and faster
+    acq_view_autoset(timeperdiv+11);
   }
   else
   {

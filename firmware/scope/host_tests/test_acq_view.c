@@ -123,6 +123,55 @@ static void test_ladder(void)
   T_EQ(sample_rate[ladder(16382, 18)], 1000000);            //1 ms/div at 16k: 1 MSa/s, 1000 samples a division
 }
 
+//AUTO SET's result (issue #2): from every time/div it can measure and every rate left before it, the pair is the
+//ladder's, at the nearest slower time/div with a ladder rate (else the nearest faster), and both zoom directions
+//behave as from any ladder pair: 20 ns/div (a 10 MHz signal) becomes 50 ns/div at 200 MSa/s
+static void test_autoset(void)
+{
+  uint32 k, total;
+  int32  tpd, want;
+
+  for(k = 0; k < sizeof(totals) / sizeof(totals[0]); k++)
+  {
+    total = totals[k];
+
+    for(tpd = ACQ_TB_FIRST; tpd <= ACQ_TB_LAST; tpd++)
+    {
+      state(total, 5, 23, 1);
+      acq_view_autoset(tpd);
+
+      want = tpd;
+      while((want > ACQ_TB_FIRST) && (ladder(total, want) < 0))
+        want--;
+      while((want < ACQ_TB_LAST) && (ladder(total, want) < 0))
+        want++;
+
+      T_EQ(scopesettings.timeperdiv, want);
+      check_pair(total);
+
+      //Out and back in: the time/div AUTO SET chose is reachable again
+      if(acq_view_zoom(-1, 1))
+      {
+        T_TRUE(acq_view_zoom(1, 1) != 0);
+        T_EQ(scopesettings.timeperdiv, want);
+      }
+    }
+  }
+
+  state(3000, 5, 23, 1);
+  acq_view_autoset(32);
+  T_EQ(scopesettings.timeperdiv, 31);
+  T_EQ(scopesettings.samplerate, 0);
+  T_EQ(acq_view_zoom(1, 1), 0);
+
+  //Roll: left alone
+  state(3000, 5, 23, 1);
+  scopesettings.long_mode = 1;
+  acq_view_autoset(32);
+  T_EQ(scopesettings.timeperdiv, 23);
+  T_EQ(scopesettings.samplerate, 5);
+}
+
 //One zoom step from every cell (running): the ladder's pair for the next time/div with one, or a plain stop that
 //changes nothing where there is none
 static void test_step_every_cell(void)
@@ -655,6 +704,7 @@ int main(void)
 {
   test_mem_chips();
   test_ladder();
+  test_autoset();
   test_step_every_cell();
   test_walks();
   test_hand_rate_and_boxes();

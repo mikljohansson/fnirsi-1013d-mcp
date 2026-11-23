@@ -188,6 +188,34 @@ int acq_view_set_tb(uint32 timeperdiv)
   return acq_view_set_pair((int32)timeperdiv, acq_view_rate_free());
 }
 
+void acq_view_autoset(int32 timeperdiv)
+{
+  int32 t = timeperdiv, r;
+
+  if(scopesettings.long_mode)
+    return;
+
+  if(t < ACQ_TB_FIRST)
+    t = ACQ_TB_FIRST;
+  if(t > ACQ_TB_LAST)
+    t = ACQ_TB_LAST;
+
+  //The nearest slower time/div the ladder has (20, 10 and 5 ns/div have none), else the nearest faster one (a short
+  //record at the slow end)
+  while((t > ACQ_TB_FIRST) && (tbv_ladder_rate(frequency_per_div[t], sample_rate, ACQ_RATES, fpgasettings.totalsamples) < 0))
+    t--;
+  while((t < ACQ_TB_LAST) && (tbv_ladder_rate(frequency_per_div[t], sample_rate, ACQ_RATES, fpgasettings.totalsamples) < 0))
+    t++;
+
+  r = tbv_ladder_rate(frequency_per_div[t], sample_rate, ACQ_RATES, fpgasettings.totalsamples);
+
+  if(r < 0)
+    return;
+
+  scopesettings.samplerate = (uint8)r;
+  acq_view_set(t, sample_rate[r]);
+}
+
 int32 acq_view_tb_for_rate(uint32 r)
 {
   int32 t, best = -1, cur = (int32)scopesettings.timeperdiv;
