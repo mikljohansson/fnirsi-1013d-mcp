@@ -23,9 +23,15 @@ back first, so keep that backup.
 - **Scope view**: six hardware ranges plus software zoom; **16,384 samples per capture and channel instead of
   3,000**, with the trigger placed anywhere in the capture by dragging; trigger Auto, Normal or Single on
   a rising or falling edge of CH1, CH2 or an external signal on the calibration post; sample rate, time
-  per division and memory depth; roll mode; twelve measurements per channel as cards; time and voltage cursors;
-  digital phosphor with persistence and a heat palette; X-Y; an overview bar under every plot that previews the whole
-  capture, spectrum or sweep, with a window you drag.
+  per division and memory depth; roll mode that scrolls both channels without pause; twelve measurements per channel
+  as cards; time and voltage cursors; digital phosphor with persistence and a heat palette; X-Y; an overview bar under
+  every plot that previews the whole capture, spectrum or sweep, with a window you drag.
+- **Trigger types**: besides the edge, a pulse shorter or longer than a width, or the Nth edge after an idle time
+  (to pick one pulse of a burst or one bit of a frame).
+- **Peak detect** (ACQ > Sample Peak): every stored sample keeps the lowest and the highest of the 200 MS/s samples
+  in its interval, so a 1 us spike still shows at a slow time base.
+- **A hardware frequency counter** in the FPGA feeds the Freq, Period, Width and Duty cards: 5 ns resolution over a
+  100 ms gate, with thresholds that follow the signal.
 - **Averaging of successive captures** (ACQ > Average): the FPGA sums them at the fast rates, the MCU for filtered and
   slow captures.
 - **Clean traces at every sweep speed**: Acquisition > Filter picks Hi-Res (boxcar) or Anti-alias (CIC3 with the
@@ -37,7 +43,8 @@ back first, so keep that backup.
   or tank with the scope alone. The calibration post (the square-wave output hook on the side of the scope) drives
   it, CH1 and CH2 read its input and output; AUTO SET finds the span, cards give the corner frequency, peak and Q,
   the table saves as CSV.
-- **Generator**: a square wave on the calibration post, frequency and duty of your choice.
+- **Generator**: a square wave on the calibration post, frequency and duty of your choice up to 25 MHz, every edge
+  within 5 ns of ideal, changes without a glitch.
 - **The ADCs are calibrated core by core, and the firmware checks every fast capture.** Each channel is two
   interleaved ADC cores; the wizard measures a zero and a gain per core and clock class, a tracker follows the
   full-rate drift in the background, the wizard also trains when the FPGA captures each ADC chip's data, the FPGA
@@ -45,20 +52,24 @@ back first, so keep that backup.
 - A first-run screen, **Diagnostics** (status tiles, a calibration page, an event log, a report saved to the card),
   viewers for saved pictures and waveforms, Settings, USB drive mode.
 
-**From your AI agent over USB** (39 tools in the default profile; raw FPGA access is off unless you enable it; no
+**From your AI agent over USB** (41 tools in the default profile; raw FPGA access is off unless you enable it; no
 remote lock-out: you and the agent change the same live settings, and the screen follows)
 - **Read**: identity, capabilities, status, settings, calibration and voltage scaling, event log, the scope's own
   spectrum, card info, health, a screenshot; a report with a plot and an HTML page of any result.
-- **Set**: channel range, coupling, probe factor and offset; sample rate; decimation filter; trigger
-  source, edge, level in volts, mode, position before the trigger, capture length and auto time-out.
+- **Set**: channel range, coupling, probe factor and offset; sample rate; decimation filter or peak detect; trigger
+  source, edge, level in volts, mode, position before the trigger, capture length and auto time-out; the trigger
+  type (edge, pulse width, Nth edge, timeout) and a trigger hold-off.
 - **Capture**: one capture, or a time window of it, with the raw ADC codes per core; the trace on the screen;
-  arm, wait, force and stop; averaged captures aligned on an edge, or summed in the FPGA; a burst of
-  triggers captured back to back (built and simulator-tested, not yet benched); capture and FFT; a
-  pulse-induction decay fit; measurements; the hardware counter (frequency, period, width and duty at 5 ns
-  resolution, FPGA 0x153F); calibrate volts against a known DC voltage.
+  arm, wait, force and stop; arm and wait up to an hour for an event you cause; averaged captures aligned on an
+  edge, or summed in the FPGA; segmented capture, up to 256 triggers back to back with a timestamp each (built and
+  simulator-tested, not yet benched); capture and FFT; a pulse-induction decay fit; measurements and
+  level-crossing times; the hardware counter (frequency, period, width and duty at 5 ns resolution, FPGA 0x153F);
+  calibrate volts against a known DC voltage.
+- **Log**: stream one or both channels to the PC for minutes or hours, from 500 kS/s 8-bit on one channel to
+  125 kS/s 16-bit on two; a lost stretch is marked, never hidden.
 - **Analyse**: decode UART, SPI or I2C from a capture; test captures against a mask built from a reference; a DVM
   readout (DC, AC RMS, true RMS, min, max, frequency) with a statement of its real resolution; export any result as CSV.
-- **Drive**, each with a confirmation token: the generator, a loopback self-test, a Bode sweep. Every
+- **Drive**, each with a confirmation token: the generator, a chirp of it, a loopback self-test, a Bode sweep. Every
   hardware-changing call goes to an audit log.
 
 **Host tools** in the same package: **firmware updates from your PC over USB**, no card swapping

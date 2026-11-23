@@ -145,6 +145,7 @@ def build_host_vectors() -> list[dict[str, Any]]:
     v += build_host_vectors_153e()
     v += build_host_vectors_153f()
     v += build_host_vectors_1_30()
+    v += build_host_vectors_1_31()
     return v
 
 
@@ -159,6 +160,12 @@ def build_host_vectors_1_30() -> list[dict[str, Any]]:
                                                        bytes([P.CAPINFO_REQ_KEPT, 0, 0, 0])).encode(),
                   "1.30 GET_CAPTURE_INFO of the host's kept single: request byte 0 = 1 (KEPT), 1..3 zero"))
     return v
+
+
+def build_host_vectors_1_31() -> list[dict[str, Any]]:
+    """Protocol 1.31 (fw 0.3.5, row 74): AUTO_SET."""
+    return [_vec("host_req_auto_set", _f(P.Cmd.AUTO_SET, 72).encode(),
+                 "1.31 AUTO_SET 0x021B: no payload; AUTO SET as the Scope view's button, answered with the status body")]
 
 
 def build_host_vectors_153f() -> list[dict[str, Any]]:

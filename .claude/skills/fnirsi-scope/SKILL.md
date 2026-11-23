@@ -26,6 +26,8 @@ The server is `fnirsi1013d` (real scope) or `fnirsi1013d-sim` (simulator) (`.mcp
 - Coupling: DC for levels and decays; AC only for small ripple on DC.
 - Sample rate: >= 10 samples per period of the fastest feature, >= 10 per decay time constant, >= 10 MS/s when
   averaging (trigger jitter is 2 / fs). Window = total_samples / fs: 2-10 periods, or the whole decay.
+- Unknown signal: `scope_auto_set` (fw 0.3.5+) presses the scope's AUTO SET (V/div, trigger level, time/div from the
+  signal; it replaces the current settings), then refine by hand.
 - Trigger on the cleanest edge (TX gate on CH2 for detector work), level mid-edge in volts, mode `normal` for
   repetitive signals (`auto` just to find the signal), `pretrigger_fraction` 0.05-0.1 for decays after an edge.
 - Trigger types (caps `TRIG_TYPES`, guide 3c): `scope_set_trigger(type='pulse_width', polarity, width, longer)`,

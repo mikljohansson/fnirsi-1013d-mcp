@@ -572,6 +572,24 @@ class Scope:
         state = P.RunState.RUN if run else P.RunState.STOP
         return self._status(self._req(P.Cmd.SET_ACQ_STATE, P.SetAcqStateReq(int(state)).pack()))
 
+    @property
+    def has_auto_set(self) -> bool:
+        """Protocol 1.31 (fw 0.3.5): AUTO_SET, the Scope view's AUTO SET button from the host."""
+        return self.shared and self.info.proto_minor >= P.AUTOSET_MINOR
+
+    def auto_set(self, timeout: float = 20.0) -> P.StatusResp:
+        """AUTO_SET (protocol 1.31): AUTO SET as the Scope view's button. The firmware picks V/div, the trigger and
+        the time/div from the signal on the trigger channel and answers when done (up to a few seconds); every cached
+        setting is dropped. DeviceError E_STATE: detail 0 a host capture is pending, ``P.AUTOSET_E_ROLL`` roll mode,
+        ``P.AUTOSET_E_VIEW`` a Spectrum view shows, ``P.AUTOSET_E_VIEWER`` the waveform viewer is open."""
+        if not self.has_auto_set:
+            raise ScopeError(f"AUTO_SET needs protocol 1.{P.AUTOSET_MINOR} (this firmware speaks "
+                             f"1.{self.info.proto_minor})")
+        try:
+            return self._status(self._req(P.Cmd.AUTO_SET, timeout=timeout))
+        finally:
+            self.invalidate()
+
     def capture_info(self, kept: bool = False) -> P.CaptureInfo:
         """GET_CAPTURE_INFO: the settings the latest finished capture (any origin) was taken with. ``kept`` (protocol
         1.30): the host's kept single capture instead (DeviceError E_STATE detail ``P.STATE_NO_KEPT`` when none)."""

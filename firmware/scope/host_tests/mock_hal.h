@@ -99,6 +99,8 @@ typedef struct
   uint8_t  ui_armed;              //UI conversion in flight
   uint8_t  long_mode;
   uint32_t run_sets;              //pc_hal_ui_set_run calls
+  uint32_t autosets;              //pc_hal_ui_autoset runs (AUTO_SET, 1.31)
+  int      autoset_rc;            //what it answers (PC_AUTOSET_*; 0 = it ran: the UI at 50 ns/div, 200 MSa/s)
   int      last_run_set;
   int      indicator;             //last pc_hal_indicator state
   uint32_t indicator_draws;

@@ -613,6 +613,20 @@ void pc_hal_ui_read(pc_hw_ui *u)
   u->run = mock.ui_run; u->ui_armed = mock.ui_armed; u->long_mode = mock.long_mode;
 }
 
+int pc_hal_ui_autoset(void)
+{
+  if(mock.autoset_rc)
+    return mock.autoset_rc;
+
+  //A 10 MHz signal: the ladder's fastest pair
+  mock.tb.timeperdiv = 31;
+  mock.tb.samplerate = 0;
+  mock.tb.divider    = 0;
+  mock.fpga_divider  = 0;
+  mock.autosets++;
+  return 0;
+}
+
 void pc_hal_ui_set_run(int run)
 {
   mock.under_screen += mock.ui_screen;

@@ -175,7 +175,7 @@ static void test_info(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(r.ok); T_EQ(r.h.status, 0); T_EQ(r.len, PC_INFO_LEN);
-  T_EQ(r.p[0], 1); T_EQ(r.p[1], 30); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
+  T_EQ(r.p[0], 1); T_EQ(r.p[1], 31); T_EQ(pc_get_u16(r.p + 2), 512); T_EQ(pc_get_u32(r.p + 4), 66560);
   T_EQ(pc_get_u16(r.p + 8), PC_FW_FPGA_VERSION); T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192);
   caps = pc_get_u32(r.p + 20);
   //The capability word is the firmware's (PC_FW_FPGA_VERSION), never derived from the version word read
@@ -304,7 +304,7 @@ static void test_ascii_ver(void)
   pc_poll(&S, PC_CTX_MAIN);
   T_EQ(mock_nresps, 2);
   mock_resps[0].data[mock_resps[0].len - 1] = 0;
-  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.30,fpga=0x153f");
+  T_STR((char *)mock_resps[0].data, "#OK,FNIRSI-1013D-AI,fw=" PC_FW_VERSION ",proto=1.31,fpga=0x153f");
   T_MEM(mock_resps[1].data, "#ERR,UNKNOWN\n", 13);
 }
 
@@ -2539,7 +2539,7 @@ static void test_ext_trigger(void)
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(r.p[10], 2); T_EQ(pc_get_u16(r.p + 12), 8192); T_EQ(pc_get_u16(r.p + 28), 16382);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_EXT_TRIGGER, PC_CAP_EXT_TRIGGER);
-  T_EQ(r.p[1], 30);
+  T_EQ(r.p[1], 31);
 
   //Generator on, then EXT: the generator goes off
   memset(g, 0, 20); g[0] = 1; g[1] = 1;
@@ -3045,7 +3045,7 @@ static void test_fel_reset_stall(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_TRUE(pc_get_u32(r.p + 20) & PC_CAP_ENTER_FEL);
-  T_EQ(r.p[1], 30);
+  T_EQ(r.p[1], 31);
   pc_put_u32(p, 0x12345678);
   r = req(PC_CMD_ENTER_FEL, p, 4);
   T_EQ(r.h.status, PC_E_BAD_ARG); T_EQ(mock.fel_entries, 0);
@@ -3552,7 +3552,7 @@ static void test_decim_fir_protocol(void)
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & (PC_CAP_DECIM | PC_CAP_FIR), PC_CAP_DECIM | PC_CAP_FIR);
-  T_EQ(r.p[1], 30);
+  T_EQ(r.p[1], 31);
   set_trigger(0x30, 0, 0, 0, 0, 3000, 6000, 0, 0, &r);
   T_EQ(r.h.status, 0);
   memset(p, 0, 4); p[0] = 2; p[1] = 0x08;
@@ -3659,7 +3659,7 @@ static void test_seq_segments(void)
 
   setup(PC_FW_FPGA_VERSION);
   r = req(PC_CMD_GET_INFO, 0, 0);
-  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 30);
+  T_EQ(pc_get_u32(r.p + 20) & PC_CAP_SEQ, PC_CAP_SEQ); T_EQ(r.p[1], 31);
   r = status();
   //features: bits 0-8 of 1.26, bit 9 PEAK (fw-c6), bit 10 COUNTER (fw-c7), bit 11 LOGGER (fw-d4); 12 / 13 reserved
   T_EQ(r.len, PC_STATUS_LEN); T_EQ(pc_get_u16(r.p + 44), 0x0FFF); T_EQ(r.p[46], 0); T_EQ(r.p[47], 0);
@@ -3859,6 +3859,53 @@ static resp_t enc_capture(void)
 //After fw 0.3.3 (owner 2026-11-13, protocol row 73): a mode 1 divider that is one of the UI's rates becomes the UI's
 //rate and time/div (the ACQ menu, the chip and the tap zoom kept 200 MSa/s while the FPGA ran the host's 500 kSa/s);
 //any other divider runs raw
+//AUTO_SET (1.31): the Scope's AUTO SET from the host; refused with a host capture pending and where the button is not
+//the Scope's AUTO SET; a raw divider from before no longer holds; the Frequency response view closes first
+static void test_auto_set(void)
+{
+  uint8_t p[8];
+  resp_t  r;
+
+  setup(PC_FW_FPGA_VERSION);
+
+  //A raw divider (66.7 MSa/s) from the host, then AUTO SET: the UI's pair, GET_TIMEBASE reports its index
+  mock.tb_adopt = 0;
+  memset(p, 0, 8); p[0] = 1; pc_put_u32(p + 4, 2);
+  r = req(PC_CMD_SET_TIMEBASE, p, 8);
+  T_EQ(r.h.status, 0); T_EQ(S.tb_raw, 1);
+
+  r = req(PC_CMD_AUTO_SET, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.len, PC_STATUS_LEN); T_EQ(mock.autosets, 1); T_EQ(S.tb_raw, 0);
+  r = req(PC_CMD_GET_TIMEBASE, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(r.p[0], 31); T_EQ(r.p[1], 0); T_EQ(pc_get_u32(r.p + 4), 0);
+
+  //Where the button is not the Scope's AUTO SET: E_STATE with the reason, nothing run
+  mock.autoset_rc = PC_AUTOSET_ROLL;
+  r = req(PC_CMD_AUTO_SET, 0, 0);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_AUTOSET_ROLL);
+  mock.autoset_rc = PC_AUTOSET_VIEW;
+  r = req(PC_CMD_AUTO_SET, 0, 0);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_AUTOSET_VIEW);
+  mock.autoset_rc = PC_AUTOSET_VIEWER;
+  r = req(PC_CMD_AUTO_SET, 0, 0);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), PC_AUTOSET_VIEWER);
+  mock.autoset_rc = 0;
+  T_EQ(mock.autosets, 1);
+
+  //A host single pending: refused, the single stays armed
+  r = req(PC_CMD_ARM, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(S.acq_state, PC_ACQ_ARMED);
+  r = req(PC_CMD_AUTO_SET, 0, 0);
+  T_EQ(r.h.status, PC_E_STATE); T_EQ(pc_get_u16(r.p), 0); T_EQ(S.acq_state, PC_ACQ_ARMED); T_EQ(mock.autosets, 1);
+  r = req(PC_CMD_STOP, 0, 0);
+  T_EQ(r.h.status, 0);
+
+  //The Frequency response view closes first
+  mock.bode_view = 1;
+  r = req(PC_CMD_AUTO_SET, 0, 0);
+  T_EQ(r.h.status, 0); T_EQ(mock.bode_view, 0); T_EQ(mock.autosets, 2);
+}
+
 static void test_timebase_adopt(void)
 {
   uint8_t  p[8];
@@ -4819,7 +4866,7 @@ static void test_logger(void)
 
   r = req(PC_CMD_GET_INFO, 0, 0);
   T_EQ(pc_get_u32(r.p + 20) & PC_CAP_LOGGER, PC_CAP_LOGGER);
-  T_EQ(r.p[1], 30);
+  T_EQ(r.p[1], 31);
   r = status();
   T_EQ(pc_get_u16(r.p + 44) & PC_FEAT_W_LOGGER, PC_FEAT_W_LOGGER);
 
@@ -5079,6 +5126,7 @@ int main(void)
   test_channel();
   test_timebase();
   test_timebase_adopt();
+  test_auto_set();
   test_trigger();
   test_trigger2();
   test_capture_and_raw();

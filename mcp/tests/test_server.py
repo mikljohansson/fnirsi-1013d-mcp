@@ -26,6 +26,7 @@ ALL_TOOLS = {
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel", "scope_report", "scope_cal_probe", "scope_decode", "scope_export_csv", "scope_mask_test",
     "scope_dvm", "scope_counter", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop", "scope_wait_for_event",
+    "scope_auto_set",
 }
 
 
@@ -748,3 +749,14 @@ async def test_screenshot_without_cap_says_so(sim_factory, tmp_path):
         desc = next(t for t in (await c.session.list_tools()).tools if t.name == "scope_screenshot").description
         assert "SCREENSHOT capability" in desc.split(".")[0] + desc
         assert "READ_SCREEN is not built in" in await c.fails("scope_screenshot")
+
+
+async def test_auto_set_tool(client):
+    """scope_auto_set (protocol 1.31): the scope's AUTO SET; the generator's 1 MHz gives 200 ns/div at 200 MSa/s."""
+    g = await client.call("scope_generator", enabled=True, frequency="1MHz", duty_percent=50)
+    await client.call("scope_generator", enabled=True, frequency="1MHz", duty_percent=50, confirm_token=g["token"])
+    r = await client.call("scope_auto_set")
+    assert r["timebase"]["ui_timeperdiv_index"] == 29 and r["timebase"]["divider"] == 0
+    assert any("AUTO SET replaced" in c for c in r["caveats"])
+    client.srv.device.ui_set_spectrum(True)
+    assert "Spectrum view" in await client.fails("scope_auto_set")

@@ -3434,6 +3434,43 @@ class Device:
         self._set_run_state(r.state)
         return self._ok(req, self.status_bytes())
 
+    def _cmd_auto_set(self, req: P.Frame) -> P.Frame:
+        """AUTO_SET (protocol 1.31, row 74; pc_cmds.c h_auto_set). The model sets only the time base: from the
+        generator's frequency when it runs (about five divisions a period, as 1.00o5's matching table gives), else
+        20 us/div; then onto the firmware's ladder (acq_view_autoset: the nearest slower time/div with a rate that
+        holds ten samples a division and covers the screen, at the fastest such rate), so 20 ns/div is never left."""
+        if not self.shared or self.proto_minor < P.AUTOSET_MINOR:
+            return self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}")
+        if self.acq_state in (P.AcqState.ARMED, P.AcqState.TRIGGERED):
+            raise _DevErr(P.Status.E_STATE, 0, "host capture pending")
+        if self.display_mode in (P.DisplayMode.SPECTRUM, 2, 3):
+            raise _DevErr(P.Status.E_STATE, P.AUTOSET_E_VIEW, "AUTO_SET needs the Scope view")
+        s = self.settings
+        lo, hi = P.MIN_REMOTE_TIMEPERDIV_INDEX, 34
+        tpd = 23
+        if s.gen.enable and s.gen.p16:
+            want = 1000.0 / P.gen_freq_mhz(s.gen.p16) / 5
+            tpd = max((i for i in range(lo, hi + 1) if P.TIME_PER_DIV[i] >= want), default=lo)
+        total = s.trigger.total_samples
+
+        def rate(i: int) -> int | None:
+            for sr, d in enumerate(P.SAMPLE_RATE_DIVIDERS[:18]):
+                per_div = P.TIME_PER_DIV[i] * P.BASE_CLOCK_HZ / (d + 1)
+                if per_div >= 10 and int(per_div * 724 / 50) <= total - 1:
+                    return sr
+            return None
+
+        while tpd > lo and rate(tpd) is None:
+            tpd -= 1
+        while tpd < hi and rate(tpd) is None:
+            tpd += 1
+        sr = rate(tpd)
+        if sr is not None:
+            s.divider, s.tpd_index, s.sr_index = P.SAMPLE_RATE_DIVIDERS[sr], tpd, sr
+            self.ui_tb = (tpd, sr)
+            self.tb_reported_divider = None
+        return self._ok(req, self.status_bytes())
+
     def _cmd_get_capture_info(self, req: P.Frame) -> P.Frame:
         flags = req.payload[0] if req.payload and self.proto_minor >= P.KEPT_MINOR else 0
         if flags & ~P.CAPINFO_REQ_KEPT:

@@ -253,6 +253,14 @@ typedef struct
 
 void     pc_hal_ui_read(pc_hw_ui *u);
 void     pc_hal_ui_set_run(int run);             //[UI] as the RUN/STOP button; the next UI pass arms afresh
+//1.31 (fw 0.3.5): AUTO SET as the Scope view's button (scope_do_auto_setup: V/div, trigger and time/div from the
+//signal; it runs for up to a few seconds). 0 done, else why it did not run (the E_STATE detail): PC_AUTOSET_ROLL the
+//roll time bases (the button does nothing there), PC_AUTOSET_VIEW the Spectrum views (the button is their own Auto),
+//PC_AUTOSET_VIEWER the waveform viewer (the slot is DELETE WAVE). [UI] MAIN only
+#define PC_AUTOSET_ROLL    1
+#define PC_AUTOSET_VIEW    2
+#define PC_AUTOSET_VIEWER  3
+int      pc_hal_ui_autoset(void);
 uint32_t pc_hal_settings_fingerprint(void);      //hash of the capture-relevant UI settings (protocol section 14)
 void     pc_hal_indicator(int state);            //[UI] MCP chip in the top bar: 0 off, 1 on, 2 pulse
 //1.23 (fw 0.2.78): what keeps the UI from yielding to a host request now: 0 nothing (the modal loops leave by their

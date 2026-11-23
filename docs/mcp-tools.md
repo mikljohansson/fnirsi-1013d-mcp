@@ -268,6 +268,14 @@ Collaborative firmware, which capture it returns (fw-hostkeep, protocol 1.30, do
 On firmware before 1.30 only `latest` and `screen_trace` occur. `scope_status` shows `host_capture_kept` (id, fetched,
 still in the sample memory) from 1.30.
 
+**`auto_set`** (tier 2, protocol 1.31, firmware 0.3.5+). Presses the scope's AUTO SET: the scope picks V/div for
+the enabled channels, the trigger level and the time/div from the signal on the trigger channel, as the button on
+the Scope view does (up to a few seconds; relays click). No parameters. Returns `run_state`, `channels`, `timebase`
+and `trigger` as `get_config` does, with a caveat that the earlier settings were replaced. Use it to find an unknown
+signal, then refine with `set_channel` / `set_timebase` / `set_trigger`. The time/div ends on one the scope's zoom
+offers (50 ns/div at 200 MSa/s is the fastest). Refused in roll mode, with a Spectrum view or the waveform viewer on
+the screen, while a host capture is armed, and on firmware before protocol 1.31 (press the button at the scope).
+
 **`acquisition_control`** (tier 1). Low-level control for agents that want to arm, do something else (e.g.
 fire the detector, or let the person cause the event), then wait. From protocol 1.30 the armed single, once done,
 stays readable with `fetch_waveform` until the next `arm`, even if the person presses RUN or STOP meanwhile.

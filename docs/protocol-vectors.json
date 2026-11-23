@@ -9896,6 +9896,33 @@
     }
    ],
    "source": "host"
+  },
+  {
+   "name": "host_req_auto_set",
+   "description": "1.31 AUTO_SET 0x021B: no payload; AUTO SET as the Scope view's button, answered with the status body",
+   "hex": "a51301001b024800000000000000047e",
+   "frames": [
+    {
+     "cmd": 539,
+     "seq": 72,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 539,
+     "seq": 72,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
   }
  ]
 }

@@ -16,7 +16,7 @@
 #define PC_MAGIC0                 0xA5
 #define PC_MAGIC1                 0x13
 #define PC_PROTO_MAJOR            1
-#define PC_PROTO_MINOR            30   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
+#define PC_PROTO_MINOR            31   //1.1: GET_STATUS pass times (fw 0.1.1); 1.2: GET_LINK_STATS (fw 0.1.4);
                                         //1.3: shared control, SET_ACQ_STATE, GET_CAPTURE_INFO (fw 0.2.0),
                                         //     SD sector commands (fw 0.2.2); 1.4: EXT trigger (FPGA 0x1533, fw 0.2.9);
                                         //1.5: GET_EVENT_LOG (fw 0.2.12); 1.6: FFT_BENCH (fw 0.2.27);
@@ -69,6 +69,7 @@
                                         //1.30 (fw-hostkeep): the host's last single is kept until the next host
                                         //      ARM: READ_RAW flags bit 1 KEPT, GET_CAPTURE_INFO request byte 0 bit 0
                                         //      KEPT and byte 25 (kept flags), GET_STATUS 24 the kept capture_id
+                                        //1.31 (fw 0.3.5): AUTO_SET, the Scope view's AUTO SET button from the host
 
 #define PC_HDR_SIZE               16
 #define PC_CRC_SIZE               4
@@ -135,6 +136,7 @@
 #define PC_CMD_SET_TRIGGER2       0x0219     //1.26: trigger type, polarity, N, H, level, hold-off (FPGA 0x153C; 0x0214..0x0216
                                              //      are the contract's LOG_*, docs/plans/fpga-0x153c.md)
                                              //0x021A reserved (SET_PATTERN_TRIGGER of the 1.27 drafts, cut likewise)
+#define PC_CMD_AUTO_SET           0x021B     //1.31 (fw 0.3.5): AUTO SET as the Scope view's button
 #define PC_CMD_SD_INFO            0x0500     //1.3: card size, partition start, write window, eGON headers
 #define PC_CMD_SD_READ_SECTORS    0x0501     //1.3: up to 128 sectors
 #define PC_CMD_SD_STAGE           0x0502     //1.3: bytes into the 64 KiB write staging buffer

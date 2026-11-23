@@ -1712,6 +1712,37 @@ static int h_set_acq_state(pc_session *s, const uint8_t *req, uint32_t len, uint
   return PC_OK;
 }
 
+//AUTO_SET (1.31, fw 0.3.5; docs/protocol.md row 74): no payload. AUTO SET as the Scope view's button: the firmware
+//picks V/div, the trigger and the time/div from the signal (up to a few seconds, inside this main-loop poll), then
+//answers the status body; the host reads the settings back. The Frequency response view closes first (F_SCOPE).
+//E_STATE detail 0 with a host capture pending, PC_AUTOSET_* where the button is not the Scope's AUTO SET
+static int h_auto_set(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  int r;
+
+  (void)req;
+  (void)len;
+
+  if((s->acq_state == PC_ACQ_ARMED) || (s->acq_state == PC_ACQ_TRIGGERED))
+    return pc_error(s, PC_E_STATE, 0, "host capture pending");
+
+  r = pc_hal_ui_autoset();
+
+  //It ran for seconds inside this main-loop poll: the modal watch must not count that as a modal screen afterwards
+  s->last_main_ms = pc_hal_ms();
+  s->ui_busy      = 0;
+
+  if(r)
+    return pc_error(s, PC_E_STATE, (uint16_t)r, (r == PC_AUTOSET_ROLL) ? "roll mode: no AUTO SET" :
+                                                (r == PC_AUTOSET_VIEW) ? "AUTO_SET needs the Scope view" : "waveform viewer open");
+
+  //The UI's time/div and rate hold now, not a host's raw divider
+  s->tb_raw = 0;
+
+  *rl = pc_status_body(s, resp);
+  return PC_OK;
+}
+
 //1.30: GET_CAPTURE_INFO byte 25 for capture c (PC_KEPT_F_*): 0 unless c is the host's kept capture
 static uint8_t pc_kept_flags(const pc_session *s, const pc_capture *c)
 {
@@ -3666,6 +3697,7 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_GET_TRIGGER,  F_MODAL,                      0, h_get_trigger },
   { PC_CMD_SET_TRIGGER,  F_SCOPE,                      0, h_set_trigger },
   { PC_CMD_SET_TRIGGER2, F_SCOPE,                      PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
+  { PC_CMD_AUTO_SET,     F_SCOPE,                      0, h_auto_set },                       //1.31 (fw 0.3.5)
   { PC_CMD_GET_COUNTER,  F_MODAL,                      PC_CAP_COUNTER, h_get_counter },       //C7 counter (memory only)
   { PC_CMD_LOG_START,    F_SCOPE,                      PC_CAP_LOGGER, h_log_start },          //D4 logger
   { PC_CMD_LOG_READ,     0,                            PC_CAP_LOGGER, h_log_read },           //D4 logger (MAIN: the drain's ring)

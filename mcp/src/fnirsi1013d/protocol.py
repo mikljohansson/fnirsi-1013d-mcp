@@ -62,9 +62,17 @@ PROTO_MAJOR = 1
 #: does meanwhile: GET_STATUS 24 its capture_id (``kept_capture_id``), READ_RAW flags bit 1 ``ReadRawReq.KEPT``,
 #: GET_CAPTURE_INFO request byte 0 bit 0 (``CAPINFO_REQ_KEPT``) and response byte 25 (``kept_flags``, ``KEPT_F_*``),
 #: E_STATE detail ``STATE_NO_KEPT`` when nothing is kept
-PROTO_MINOR = 30
+#: 1.31 (fw 0.3.5, row 74): AUTO_SET 0x021B, the Scope view's AUTO SET button from the host (no payload, answers the
+#: status body; E_STATE detail 0 with a host capture pending, ``AUTOSET_E_*`` where the button is not the Scope's)
+PROTO_MINOR = 31
 #: 1.30: the first protocol minor with the kept host capture
 KEPT_MINOR = 30
+#: 1.31: the first protocol minor with AUTO_SET
+AUTOSET_MINOR = 31
+#: AUTO_SET E_STATE details (pc_hal.h PC_AUTOSET_*): the roll time bases, a Spectrum view, the waveform viewer
+AUTOSET_E_ROLL = 1
+AUTOSET_E_VIEW = 2
+AUTOSET_E_VIEWER = 3
 HEADER_SIZE = 16
 CRC_SIZE = 4
 MAX_REQUEST_FRAME = 512
@@ -134,6 +142,8 @@ class Cmd(enum.IntEnum):
     #: 0x0217 / 0x021A reserved (SET_PATTERN / SET_PATTERN_TRIGGER of the 1.27 drafts, cut with 0x153D's patterns)
     #: protocol 1.26 (cap TRIG_TYPES): trigger type, polarity, N / H, hold-off: the 0x153C trigger qualifier
     SET_TRIGGER2 = 0x0219
+    #: protocol 1.31 (fw 0.3.5): AUTO SET as the Scope view's button
+    AUTO_SET = 0x021B
     GET_GEN = 0x0300
     SET_GEN = 0x0301
     GET_CAL = 0x0400
@@ -178,7 +188,7 @@ BASIC_CMDS = frozenset({Cmd.PING, Cmd.GET_INFO, Cmd.GET_STATUS, Cmd.GET_BATTERY,
 #: With the Bode view open they close it first (its settings from before come back, as Menu > Scope), then apply;
 #: SET_ACQ_STATE RUN closes it too (its handler). No Bode sweep starts from them; BODE_CTRL and the reads keep the view.
 BODE_LEAVE_CMDS = frozenset({Cmd.SET_CHANNEL, Cmd.SET_TIMEBASE, Cmd.SET_TRIGGER, Cmd.SET_TRIGGER2, Cmd.LOG_START,
-                             Cmd.ARM, Cmd.SET_DECIM, Cmd.SET_SEQ, Cmd.SET_GEN, Cmd.CAL_PROBE})
+                             Cmd.ARM, Cmd.SET_DECIM, Cmd.SET_SEQ, Cmd.SET_GEN, Cmd.CAL_PROBE, Cmd.AUTO_SET})
 #: The FPGA bitstream the current firmware is built for (pc_cmds.h PC_FW_FPGA_VERSION; owner decision 2026-10-20: every
 #: firmware supports the latest bitstream only). The live value is InfoResp.fw_fpga_version / HealthResp.fw_fpga_version;
 #: this constant is what the simulator reports and what older-protocol answers (76 / 124 bytes, fields read as 0) lack.
@@ -4659,7 +4669,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.GET_HEALTH: 0, Cmd.SAVE_REPORT: 0, Cmd.SET_SEQ: SetSeqReq.size(), Cmd.GET_SEQ: 0,
     Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
     Cmd.CAL_PROBE: CalProbeReq.size(), Cmd.GET_COUNTER: CounterReq.size(), Cmd.SET_TRIGGER2: Trigger2.size(),
-    Cmd.LOG_START: LogStartReq.size(), Cmd.LOG_READ: LogReadReq.size(), Cmd.LOG_STOP: 0,
+    Cmd.LOG_START: LogStartReq.size(), Cmd.LOG_READ: LogReadReq.size(), Cmd.LOG_STOP: 0, Cmd.AUTO_SET: 0,
 }
 
 

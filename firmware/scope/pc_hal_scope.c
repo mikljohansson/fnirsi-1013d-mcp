@@ -1483,6 +1483,26 @@ void pc_hal_ui_set_run(int run)
   pc_draw_end(&save);
 }
 
+int pc_hal_ui_autoset(void)
+{
+  DISPLAYDATA save;
+
+  if(scopesettings.waveviewmode)
+    return PC_AUTOSET_VIEWER;
+
+  if(spectrum_mode())
+    return PC_AUTOSET_VIEW;
+
+  if(scopesettings.long_mode)
+    return PC_AUTOSET_ROLL;
+
+  //What the AUTO SET button does on the Scope view (statemachine.c)
+  pc_draw_begin(&save);
+  scope_do_auto_setup();
+  pc_draw_end(&save);
+  return 0;
+}
+
 //Capture-relevant settings (protocol section 14, settings_seq). The trigger level counts unless the UI's "always 50%"
 //rewrites it after every capture; the flag counts instead.
 uint32_t pc_hal_settings_fingerprint(void)

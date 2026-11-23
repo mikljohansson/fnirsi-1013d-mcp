@@ -2486,6 +2486,39 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             return out
         return await run("scope_acquisition_control", 1, args, go)
 
+    @register(2, title="AUTO SET")
+    async def scope_auto_set() -> dict[str, Any]:
+        """Press the scope's AUTO SET (protocol 1.31, firmware 0.3.5+): the scope itself picks V/div for the enabled
+        channels, the trigger level and the time/div from the signal on the trigger channel, as its AUTO SET button
+        does on the Scope view. Takes up to a few seconds; relays click. Returns the settings it chose (channels,
+        timebase, trigger). It replaces the settings you or the person at the scope had made: use it to find an
+        unknown signal, then refine with scope_set_channel / scope_set_timebase / scope_set_trigger.
+
+        The time/div ends on one the scope's zoom offers (50 ns/div at 200 MSa/s is the fastest). Not available in
+        roll mode, with a Spectrum view or the waveform viewer on the screen, or while a host capture is armed
+        (scope_acquisition_control stop first); a Frequency response view is closed first."""
+        def go() -> dict[str, Any]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            if not s.has_auto_set:
+                raise ToolError(f"scope_auto_set: needs protocol 1.{P.AUTOSET_MINOR} (firmware 0.3.5 or later); this "
+                                f"firmware speaks 1.{s.info.proto_minor}. Press AUTO SET at the scope instead")
+            try:
+                st = s.auto_set()
+            except DeviceError as e:
+                why = {0: "a host capture is armed: scope_acquisition_control(action='stop') first",
+                       P.AUTOSET_E_ROLL: "the scope is in roll mode (a long time base): no AUTO SET there",
+                       P.AUTOSET_E_VIEW: "a Spectrum view is on the screen: AUTO SET is the Scope view's",
+                       P.AUTOSET_E_VIEWER: "the waveform viewer is open at the scope"}
+                if e.status == P.Status.E_STATE and e.detail in why:
+                    raise ToolError(f"scope_auto_set: {why[e.detail]}") from e
+                raise
+            return {"ok": True, "run_state": P.RunState(st.run_state).name,
+                    "channels": [_channel_summary(s, 0), _channel_summary(s, 1)],
+                    "timebase": _timebase_summary(s), "trigger": _trigger_summary(s),
+                    "caveats": [*notes, "AUTO SET replaced the channel ranges, the trigger level and the time base"]}
+        return await run("scope_auto_set", 2, {}, go)
+
     @register(1, title="Wait for an event")
     async def scope_wait_for_event(
         ctx: Context,
