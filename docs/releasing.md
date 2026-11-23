@@ -77,8 +77,11 @@ on the way.
    the commit citations, and where the per-build history is. Do not move the whole dev diary into it.
 3. **Release notes** are a separate, user-facing file, `docs/release-notes/X.Y.Z.md`; its text is the body of
    the GitHub release. Write it for someone who owns a 1013D and has never seen the repository: what it is,
-   the highlights, the install steps, the caveats before flashing, known issues, credits. No protocol rows, no
-   agent names, no build-by-build history. Start from the previous release's file (for 0.3.0 the draft is
+   the highlights, the install steps, the caveats before flashing, known issues. No protocol rows, no
+   agent names, no build-by-build history. A Credits section goes in only when the release has someone to credit
+   for what is new in it (a contributor, a source the new work builds on); the standing credits are in the README
+   and the 0.3.0 notes, and are not repeated in every release (owner, 2026-11-23). Thank the reporter of a fixed
+   issue in the item itself. Start from the previous release's file (for 0.3.0 the draft is
    there, made from `docs/plans/announcement.md` and the CHANGELOG since 0.2.25). Every `{{placeholder}}`
    must be filled; `release_meta.py` refuses a file that still has one. The job appends the file list and
    `SHA256SUMS` to it.

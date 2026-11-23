@@ -11,12 +11,26 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-23
+
+A patch release on the same FPGA bitstream, 0x153F, for the first issue reported on GitHub, with AUTO SET added to the
+protocol (1.31, row 74) so an agent can press it.
+User-facing notes: `docs/release-notes/0.3.5.md`.
+
 ### Firmware
 
 - AUTO SET no longer lands on 20 ns/div (it did for signals of about 10 MHz and up), a time/div the zoom and the ACQ
   menu do not offer: after zooming out there was no way back except AUTO SET again. AUTO SET now ends at the fastest
   time/div the scope offers, 50 ns/div at 200 MSa/s, and at every time/div it picks the same sample rate a tap zoom to
   that time/div would (issue #2, eb6ff29).
+- Protocol 1.31: AUTO_SET (0x021B), the Scope view's AUTO SET button from the computer. The scope picks V/div, the
+  trigger level and the time/div and answers when done; refused in roll mode, in a Spectrum view, in the waveform
+  viewer and while a host capture is armed (`docs/protocol.md` row 74) (8ae113d).
+
+### Host (mcp)
+
+- New tool `scope_auto_set` (tier 2): presses the scope's AUTO SET and returns the settings it chose. `Scope.auto_set`
+  in the client library; the simulator models the time base (8ae113d).
 
 ## [0.3.4] - 2026-11-13
 
