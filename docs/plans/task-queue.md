@@ -332,6 +332,19 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   CH1 17.32 V mean on the + rail, CH2 17.75 V on a node at or below it, x1, 0.165 V per code). The calibration caveat
   with the trace moved; the unit's wizard run is pending (stages 0x06D2). Check after the wizard whether the offset
   dependence remains.
+- **Subtract a reference capture** (induction-imager session, 2026-11-24, optional for them: they subtract with numpy).
+  A load on the generator shifts every reading by the return drop in the probe ground (`docs/hardware-status.md`
+  2026-11-24; caveat `GEN_LOAD_NOTE`). Wanted: a helper that takes a capture with a tip on its own ground clip and
+  subtracts it from later captures of the same setup. Shape to decide: a tier 0 tool on saved files
+  (`scope_subtract(source, reference)` writing a new `.npz` that `scope_measure(source=)` and `scope_report` read), or
+  a `subtract=` argument on `scope_averaged_capture`. It must refuse when rate, record length, trigger position or the
+  generator settings differ, and should take either channel of the reference file (the term is the same on both).
+- **Bode in wiring A below 1 kHz on a DUT with a DC path** (same finding). The wiring text now names wiring B for such
+  a DUT, from the generator measurement alone. Bench: the 991 / 102 Ohm divider of 2026-10-19 from 10 Hz to 10 kHz in
+  wiring A and B. Expected in A (0.18 V per mA, corner near 1.3 kHz, inference): e about 0.26 V pp on both channels
+  below 300 Hz, so H reads about -13 dB against -20.6 dB, approaching wiring B above a few kHz. If it does, add a
+  caveat to the sweep when the lowest frequency is under 2 kHz in wiring A (the tool cannot see the wiring, so the
+  text is conditional), and take the common term out when a third quantity is known (CH2 on the DUT ground reads e).
 - **The battery leaves the trace offsets as saved** (bench 2026-11-09 09:1x): `fnirsi1013d-battery` sets range,
   coupling and filter but not `offset_div`; a saved CH2 position of -3.45 div clipped the ladder's low level and failed
   A1, A2, A4. Set both offsets to 0 in the bench setup (and restore them at the end).
@@ -484,6 +497,18 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   referenced to USB ground).
 
 ## Owner bench verdicts outstanding
+
+- [ ] **Return resistance of the probe ground** (2026-11-24; `docs/hardware-status.md` of that day, `fpga/al3/README.md`
+  "Changes" 2 addendum). The captures give about 185 Ohm between the BNC shells and the reference, the schematic 100 Ohm
+  (R71). Two checks, ten minutes, no opening of the case:
+  1. DMM, DC volts, between a BNC shell and a USB ground (hub socket shell). Generator at 0.05 Hz 50 %. First with
+     nothing on the post: 1.23 to 1.24 V in both half periods. Then 1 kOhm from the post to a BNC shell (a ground
+     clip): the reading alternates. Difference between the half periods: 0.15 V if the path is 100 Ohm, 0.27 V if it
+     is 185 Ohm (3.14 V / (2 kOhm + R) x R).
+  2. Same load, generator at 1 kHz: CH2 x10 DC with its tip on that USB ground and its clip open,
+     `scope_averaged_capture` n = 32 triggered on CH1 on the post. It reads minus VRF1, about -1.24 V. Flat within a
+     few mV: VRF1 holds and the whole drop is between the shells and VRF1 (R71 is not 100 Ohm on this board). A square
+     of about 0.12 V pp with the 0.1 ms edges: VRF1 itself moves (the TL432 is not holding it) and R71 is 100 Ohm.
 
 - [x] (2026-11-08, owner on fw 0.3.0+: the ACQ boxes and the pass-time label look good, the overrange warning appears and clears, Max hold holds a 1..10 kHz generator sweep with its harmonic comb, screenshot `docs/hardware-status.md` 2026-11-08.) 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)

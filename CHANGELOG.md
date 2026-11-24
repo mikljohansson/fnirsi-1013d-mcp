@@ -11,6 +11,16 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Host (mcp)
+
+- `scope_generator` and `scope_sweep` say that a load on the pin moves the probe reference: a load with a DC path
+  to a circuit grounded on the probe clips returns through the BNC shells and shifts every reading of that circuit
+  by about 0.18 V per mA, rising over 0.1 to 0.14 ms after each generator edge (measured by the induction-imager
+  session on 2026-11-24 with 2 kOhm on the pin; the schematic's 100 Ohm would give 0.1 V per mA, the difference is
+  an open bench item). The Bode wiring text names the USB-ground wiring for a DUT with a DC path swept to 1 kHz or
+  below. Guide section 5, the skill, `docs/mcp-tools.md`, `fpga/al3/README.md` "Changes" 2 (the return path traced
+  on the schematic) (042cf10).
+
 ## [0.3.5] - 2026-11-23
 
 A patch release on the same FPGA bitstream, 0x153F, for the first issue reported on GitHub, with AUTO SET added to the

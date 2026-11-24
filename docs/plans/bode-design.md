@@ -211,6 +211,13 @@ device later.
 
 ### 2.5 The ground return (new; bench item 1)
 
+**2026-11-24: the return error exists, at low frequencies.** A generator load of 2 kOhm at 1 kHz in wiring A shifted
+every reading by 0.18 V pp, about 0.18 V per mA, rising with 105 to 137 us after each edge (`docs/hardware-status.md`
+of that day). The shell capacitors go to GND (C100, C101, C131, C132; `fpga/al3/README.md` "Changes" 2 addendum), so
+they carry the return above about 1.3 kHz and R71 carries it below. The RC of 2026-10-19 draws little current where
+R71 carries it, which is why the two wirings agreed; a DUT with a DC path does not. The wiring text names wiring B for
+that case; the bench check is in the task queue.
+
 The stimulus current must return to the FPGA's ground. Where it flows decides whether the measurement works.
 
 - **DUT ground on a probe ground clip** (the obvious wiring): the current flows BNC shell, R71 (100 Ohm), VRF1, TL432,

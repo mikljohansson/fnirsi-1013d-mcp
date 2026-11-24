@@ -377,7 +377,7 @@ traced with a netlist script):
   shows it is DC: a wire or a resistor. No C, diode or TVS is drawn.
 - **Probe ground** (sheet Scope_Analog_Input):
   - The shells of both BNC connectors (RF1 and RF2, pins 1 to 4) join R71 (100 Ω) and 100 nF / 1 nF caps (C100, C101,
-    C131, C132, C116). R71's other end is **VRF1**.
+    C131, C132, C116). R71's other end is **VRF1**. (Where the capacitors go: the addendum of 2026-11-24 below.)
   - VRF1 is made by U21, a TL432 with cathode tied to REF, so it shunts at its 1.24 V reference. It is fed from 3V3
     through R81 (200 Ω) and reaches the VRF1 net through R82 (1 Ω). The anode is on GND, which is the same net as the
     FPGA, F1C100s, USB connector and SD-card cage grounds.
@@ -473,6 +473,38 @@ descriptions, `docs/agent-measurement-guide.md`) should say:
 - reference the EXT source to the scope's USB ground, or shift it down about 1.2 V (series LED) when it shares the probe
   ground;
 - never link the probe ground and USB ground, because the traces shift.
+
+**Addendum, 2026-11-24: a load on the calibration pin moves the BNC shells.** The post is driven against digital GND,
+so the current of a load that is grounded on the probe clips has to return from the shells to GND.
+
+- **The return path, traced on the same sheet** (pecostm32's `Schematics/1013D/Scope_Analog_Input.png`; its note says
+  the capacitor values are measured in part and guessed in part):
+  - C100, C101 (at RF1) and C131, C132 (at RF2), 100 nF each, go from the shells to **GND**. One unit in the forum
+    thread measured 150 nF for such a capacitor (`research/notes/thread-pages-031-060.md`).
+  - R71 (100 Ω) with C116 (1 nF) across it goes from the shells to **VRF1**. C134 and C135 (1 nF) go from VRF1 to GND.
+  - VRF1 is the TL432's cathode through R82 (1 Ω). The TL432 carries about 10 mA from R81, so a load current of a
+    milliampere either way leaves it in regulation (inference: nothing else heavy on VRF1 is drawn on the sheet).
+- **Expected from that**: a step of load current first charges the four shell capacitors, then flows through R71. Both
+  channels measure against VRF1, so every reading referenced to the shells shifts by I x 101 Ω, with a time constant
+  of 100 Ω x 0.4 to 0.6 µF = 40 to 60 µs. The probe's attenuation does not enter: the tip follows the shells.
+- **Measured** (induction-imager bench, fw 0.3.5, FPGA 0x153F, x10 probes, 1 V/div DC, 2 MSa/s, 32 averages, generator
+  1 kHz into 1 kΩ + 1 kΩ to the rail the clips were on; `docs/hardware-status.md` 2026-11-24):
+  - A tip on its own ground clip read a 0.182 V pp square with exponential edges: 105 µs after the rising and 137 µs
+    after the falling generator edge.
+  - The load current was 0.93 mA pp by the divider's mid node (0.93 V pp after subtracting the shift) and 1.06 mA pp by
+    the drop over R21 (post 3.14 V pp open, 2.08 V pp loaded). That gives **0.17 to 0.20 V per mA**, about 185 Ω.
+  - The post itself read a flat square, as it must: post and VRF1 share GND, the shells are not in that loop.
+- **Open**: 185 Ω against the schematic's 101 Ω, and 105 to 137 µs against 40 to 60 µs. Both are too large by about the
+  same factor, so a return resistance near 185 Ω with 0.6 to 0.7 µF fits (inference); 12 Ω at the scope input, the
+  bench session's first reading, does not, because it divided by the probe's attenuation. Candidates: R71 is not 100 Ω
+  on this board, or VRF1 is softer than a TL432 in regulation (R81's 200 Ω stands behind it). The different time
+  constants for the two edges point at something non-linear, which favours the second. A DC test with a DMM decides
+  (`docs/plans/task-queue.md`, "Owner bench verdicts outstanding").
+- **A hardware change?** The only simple one is a smaller R71; the 1014D has 10 Ω in its BNC return
+  (`research/notes/hack-repo-hardware-fpga.md` 2.3). It scales the shift down and makes a link between probe ground and
+  USB ground worse by the same factor: R71 is what limits that current today. Not recommended before the DC test says
+  where the 185 Ω sit (inference). Outside the scope the fix is free: a load of 20 kΩ or more, or a buffer on the
+  circuit's own supply.
 
 ### 3. Decimation filter: boxcar and CIC (version 0x1534, 2026-10-18)
 

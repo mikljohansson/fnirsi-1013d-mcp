@@ -2244,3 +2244,32 @@ Newest entries at the bottom. Format: date, who, what, result.
   https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.3.5. **Not done**: the hardware battery on the
   release image (docs/releasing.md 4.6), a power cycle from the card, `scope_auto_set` through the MCP server itself
   (the running server was started before the change; the client library call is the same path).
+- 2026-11-24 16:33-19:28 (induction-imager session at the scope; its files evaluated at the desk at 19:35, no hardware
+  touched by the evaluating session): **a load on the generator moves the probe reference.** fw 0.3.5, FPGA 0x153F, both
+  channels x10, 1 V/div DC (0.5 V/div AC before 17:00), 2 MSa/s, `scope_averaged_capture` n = 32, generator 1 kHz 50 %.
+  The post drove 1 kOhm + 1 kOhm to the rail both ground clips were on; the board had no other connection to the scope.
+  Files in `mcp/data/2026-11-24/` (gitignored).
+  - `192747_470_avg.npz`: CH2 with its tip on its own ground clip reads a square of 0.182 V pp with exponential
+    edges (asymptotes +0.090 / -0.092 V): time constant 105 us after the generator's rising edge, 137 us after the
+    falling one (single-exponential fits, residual 2.6 and 2.8 mV rms). The step at the edge itself is about 10 mV.
+  - `190816_610`, `191607_891`, `191942_245`: CH2 on a node 4.23 V above the clips (47 uF to the clip rail, the bench
+    session's note) carries the same term, 0.184 V pp; the bench session found three nodes within a millivolt.
+  - CH1 on the divider's mid node minus CH2 of `192747_470`: 4.620 -> 4.610 V on the top and 3.679 -> 3.690 V on the
+    bottom between 2 and 400 us after the edges, a flat square of 0.93 V pp: the term is additive.
+  - `165021_827`: both channels 3.11 / 3.14 V pp, read as the open post. `164356_203`, `165114_552`, `185749_082`: CH2
+    2.08 to 2.09 V pp, read as the loaded post (2 / 3 of the open swing, as 2 kOhm behind R21 gives); which node each
+    file shows is inferred from the amplitudes. The bench session: both tips on the generator lead read flat tops
+    within 0.6 %.
+  - Load current: 0.93 mA pp (0.93 V over the lower 1 kOhm) to 1.06 mA pp (1.06 V over R21, nominal 1 kOhm). Shift
+    **0.17 to 0.20 V per mA, about 185 Ohm**, at the probe tip whatever the probe (the tip follows the shells, which
+    move against VRF1). The bench session's 0.12 V per mA took 1.5 mA (3.1 V / 2 kOhm, without R21), and its 12 Ohm at
+    the scope input divided by the probe's 10, which does not apply.
+  - Schematic (fpga/al3/README.md "Changes" 2, addendum): shells to GND through C100, C101, C131, C132 (4 x 100 nF
+    nominal), shells to VRF1 through R71 100 Ohm: expected 0.10 V per mA and 40 to 60 us. **Not explained**: both
+    numbers are about 1.8 times larger on the unit. Candidates (inference): R71's value on this board, or VRF1 softer
+    than a TL432 in regulation. DC test for the owner queued (task queue, owner bench verdicts).
+  - Why the Bode bench of 2026-10-19 saw no return error in wiring A: the RC's current is small at 1 kHz and the shell
+    capacitors carry it above about 1.3 kHz (1 / (2 pi x 120 us)) (inference from the fit).
+  - Host: `scope_generator` / `scope_sweep` carry the caveat while the pin drives; the Bode wiring text names wiring B
+    for a DUT with a DC path below about 1 kHz; guide section 5, skill, mcp-tools, glossary. The induction-imager
+    board runs on 10 kOhm + 10 kOhm now (0.15 mA, 27 mV pp of shift) and subtracts a tip-on-ground capture.
