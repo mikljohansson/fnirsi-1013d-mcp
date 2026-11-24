@@ -492,8 +492,11 @@ async def test_generator_confirmation_flow(sim_factory, tmp_path):
                           confirm_token=r2["token"])
         assert r3["ok"] and abs(r3["applied"]["frequency"] - 20e3) < 0.02 and r3["applied"]["duty_percent"] == 30
         assert srv.device.settings.gen.enable == 1
+        # a DC load on the pin moves the probe reference (bench 2026-11-24): said while the pin drives, not when off
+        assert any("0.18 V per mA" in cv and "subtract" in cv for cv in r3["caveats"])
         r4 = await c.call("scope_generator", enabled=False)  # no token needed
         assert r4["ok"] and srv.device.settings.gen.enable == 0
+        assert not any("per mA" in cv for cv in r4["caveats"])
         assert "ceiling" in await c.fails("scope_generator", enabled=True, frequency=1e3, duty_percent=80)
         assert "FNIRSI_MCP_GEN_MAX_HZ" in await c.fails("scope_generator", enabled=True, frequency="2MHz")
         lines = (tmp_path / "audit.jsonl").read_text().splitlines()

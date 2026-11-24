@@ -266,8 +266,10 @@ is tier 3 with a confirmation token.
    ground on the probe ground clips** (wiring A, the default since the bench of 2026-10-19 showed the same H as the
    USB-ground wiring within 0.4 dB). Only for a DUT that must not see the probe reference: DUT ground on the USB
    shell with both clips open (wiring B), and then `ch2_coupling='ac'`, because the DUT sits 1.24 V below the probe
-   reference and saturates CH2 on 0.1 / 0.2 V/div (flag `ch2_overload`). The first sweep of a session returns this
-   as `connection`: show it to the person.
+   reference and saturates CH2 on 0.1 / 0.2 V/div (flag `ch2_overload`). Use wiring B also for a DUT with a DC path
+   from its input to its ground (a divider, a coil) swept to 1 kHz or below: in wiring A its current moves the probe
+   reference and both channels carry a common term of about 0.18 V per mA (section 5). The first sweep of a session returns
+   this as `connection`: show it to the person.
 2. **Never** on a coil being driven, a MOSFET drain, a powered circuit or anything that can drive the post. A PI
    detector's coil can be measured only unpowered and disconnected from its driver, through a series resistor.
 3. **Thru calibration** once per session and probe setup: both probes on the DUT input, `thru_cal='measure'`,
@@ -318,6 +320,21 @@ The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V
   through R71 (about 12 mA, calculated) and VRF1 sags (to about 1.1 V, calculated), moving all channels. Ask the
   user to float one side (battery-powered device under test, battery laptop, or an isolated USB link), and check
   by comparing a shorted-input zero (`scope_fetch_waveform` mean) with and without the device connected.
+- **A load on the generator moves the probe reference.** The calibration pin is driven against the USB ground, so
+  the current of a load with a DC path to a circuit grounded on the probe clips returns through the BNC shells and
+  the resistor between them and the reference. The shells move, and every CH1 / CH2 reading of that circuit shifts
+  by the same amount: about 0.18 V per mA of load current at the probe tip, the same with a x1 and a x10 probe
+  (owner's unit, 2026-11-24, `docs/hardware-status.md`; 0.1 V per mA by the schematic's 100 Ohm). Capacitors from
+  the shells to the USB ground carry the current at first, so the shift creeps in after each generator edge with a
+  time constant of 0.1 to 0.14 ms: in full at 1 kHz and below, less above. It looks like a slow rise on every flat
+  top, also on a supply rail. The pin itself reads right (it is referenced to the same ground as the scope's
+  reference), so both tips on the generator lead show a flat square.
+  - Load current = 3.1 V / (1 kOhm + load); the 1 kOhm is inside the scope. 2 kOhm shifts the readings by 0.18 V
+    pp, 20 kOhm by 27 mV, 100 kOhm by 6 mV: choose the load for the resolution you need.
+  - Or measure the shift and subtract it: capture with one probe tip clipped to its own ground clip, same setup and
+    trigger, and subtract that trace from the others (the shift is additive: a divider read 2.00 against 2.000
+    after the subtraction).
+  - A buffer on the circuit's own supply with a high-impedance input takes the load off the pin.
 - EXT trigger (caps `EXT_TRIGGER`): reference the source to the USB ground (connector shell); 3.3 V logic only.
   A source that shares the probe ground idles at ~1.24 V at the pin and is not recognised: insert a red LED or
   3 x 1N4148 in series (anode at the source) and trigger on the rising edge.
@@ -372,6 +389,7 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
   capture may still be bad: repeat it and report the counts.
 - The calibration pin is a frequency / duty / timing reference, not a voltage reference: it is a ~3.1 Vpp square
   wave referenced to the USB ground, so against the probe ground (VRF1, +1.24 V) it reads about -1.24 / +1.9 V.
+  With a DC load on it every other reading shifts by about 0.18 V per mA (section 5): say what the load was.
 - Pass on dynamic caveats (clipping, auto trigger fired, aliasing, restarts) instead of dropping them.
 
 ## 7a. Presenting results

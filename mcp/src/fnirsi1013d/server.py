@@ -178,8 +178,22 @@ CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference,
                    "square wave referenced to the scope's USB/digital ground, while the probe ground (BNC shells) "
                    "sits on VRF1, about +1.24 V above it (fpga/al3/README.md), so against the probe ground it reads "
                    "about -1.24 / +1.9 V. That is by design, not an error.")
+#: induction-imager bench 2026-11-24 (docs/hardware-status.md): 1 kOhm + 1 kOhm from the post to the rail the clips were
+#: on, 1 kHz: a tip on its own ground clip read 0.182 V pp, rising with 105 / 137 us after the edges; the current was
+#: 0.93 .. 1.06 mA pp (the divider's mid node, the drop over R21). Schematic: R71 100 Ohm from the shells to VRF1, four
+#: capacitors from the shells to the digital ground (fpga/al3/README.md "Changes" 2).
+GEN_LOAD_NOTE = ("A load with a DC path from the pin to a circuit grounded on the probe ground clips returns its "
+                 "current through the BNC shells, which are tied to the scope's reference through a resistor (R71), so "
+                 "the shells move and EVERY CH1 / CH2 reading of that circuit shifts with the load current: about "
+                 "0.18 V per mA at the probe tip, the same with a x1 and a x10 probe (owner's unit, 2026-11-24; 0.1 V "
+                 "per mA by the schematic). The shift follows the generator's edges with a time constant of 0.1 to "
+                 "0.14 ms (in full at 1 kHz and below, less above), so it looks like a slow creep on every flat top. "
+                 "The pin itself reads right; nodes of the circuit do not. Load current = 3.1 V / (1 kOhm + load): "
+                 "2 kOhm shifts the readings by 0.18 V pp, 20 kOhm by 27 mV, 100 kOhm by 6 mV. Keep the load light "
+                 "enough for the resolution needed, or capture a probe tip clipped to its own ground with the same "
+                 "setup and subtract it (the shift is additive).")
 
-EXT_NOTE = ("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
+EXT_NOTE =("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
             "scope's USB/digital ground, NOT to the probe ground: the BNC shells sit on VRF1, about +1.24 V above USB "
             "ground (fpga/al3/README.md). Reference the EXT source to the USB connector shell; a source that shares the "
             "probe ground idles at ~1.24 V at the pin and is not recognised: put a red LED (or 3 x 1N4148) in series, "
@@ -4355,7 +4369,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         referenced to the USB ground; the probe ground is VRF1, +1.24 V above it, so it reads about -1.24 / +1.9 V.
         Square wave only, 3.3 V logic, edges on the 5 ns grid. Not a sine source and not a power driver: buffer
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
-        switches real coil current. Needs caps GENERATOR (every supported firmware has it)."""
+        switches real coil current. Needs caps GENERATOR (every supported firmware has it).
+
+        Load current moves the probe reference: a load with a DC path from the pin to a circuit grounded on the probe
+        ground clips returns through the BNC shells and shifts every CH1 / CH2 reading of that circuit by about
+        0.18 V per mA (3.1 V / (1 kOhm + load); x1 and x10 probes alike), creeping in over 0.1 to 0.14 ms after each
+        edge. A 2 kOhm load shifts by 0.18 V pp, 20 kOhm by 27 mV. Keep the load light, or capture a probe tip on its
+        own ground clip with the same setup and subtract it (the result's caveat has the details)."""
         args = {"enabled": enabled, "frequency": frequency, "duty_percent": duty_percent}
 
         def go() -> dict[str, Any]:
@@ -4395,6 +4415,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                                high_clocks=n_h + f_h / 65536, low_clocks=n_l + f_l / 65536, p16=g.p16, h16=g.h16)
             cav = notes + [CAL_OUTPUT_NOTE, GEN_NOTE, "Square wave only, 3.3 V logic. Not a sine source and not a power "
                                                       "driver: buffer it before driving a MOSFET gate."]
+            if g.enable:
+                cav.append(GEN_LOAD_NOTE)
             return {"ok": True, "applied": applied, "caveats": cav}
         return await run("scope_generator", 3, args, go)
 
@@ -4474,7 +4496,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if note:
                 cav.append(note)
             cav += [GEN_NOTE, "each step is a glitch-free change of the square: the frequency between steps is exact "
-                    "(2^-16 of the period); the chirp is a staircase, not a continuous sweep"]
+                    "(2^-16 of the period); the chirp is a staircase, not a continuous sweep", GEN_LOAD_NOTE]
             return {"ok": True, "applied": {"steps": len(freqs), "f_start": freqs[0], "f_stop": f1,
                                             "requested_steps_per_s": sr, "spacing": spacing, "shape": shape,
                                             "duty_percent": duty_percent},

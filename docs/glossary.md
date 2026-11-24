@@ -12,7 +12,8 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 - **Coupling**: DC passes everything; AC puts a capacitor in series so the DC level is removed before the amplifier.
 - **Probe reference, VRF1**: the node the probe ground clips and the BNC shells sit on. It is tied to the scope's internal
   ground through a 100 ohm resistor (R71), so it is not the same node as **USB ground**: a circuit grounded on the USB shell
-  sits about 1.2 V below the probe reference (bench 2026-10-19).
+  sits about 1.2 V below the probe reference (bench 2026-10-19). A current through the ground clips moves the shells
+  against the reference, and every reading with them: about 0.18 V per mA (bench 2026-11-24).
 - **Offset, offset PWM, dcoffset, trace position**: a DC voltage added at the ADC input so a signal can be placed
   vertically. The FPGA generates it as a 25 kHz PWM; `dcoffset` is the host protocol's name for the same knob; the trace
   position is the screen-side result.
