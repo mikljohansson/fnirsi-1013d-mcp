@@ -2365,3 +2365,18 @@ Newest entries at the bottom. Format: date, who, what, result.
   - Scope left as found by this session at 08:45, except the generator: CH1 1 V/div x10 DC offset -3.46 div, CH2
     2 V/div x10 DC offset -3.46 div, trigger CH1 rising 4.16 V auto, 2 MSa/s boxcar, RUN; generator off (found on at
     1 kHz). The owner switches the CH2 probe back to x10 and removes the resistor.
+- 2026-11-25 10:55-11:10 (lead, owner present): **20 and 10 ns/div with sin(x)/x interpolation, on the unit**
+  (GitHub issue #2 follow-up, option C of `docs/mockups/acq-fast-timediv.html`, commit bd6c08e). The local `make gcc10`
+  image a632b6e11471b37e... (830,976 bytes) FEL-loaded, **not persisted**: the card still holds the 0.3.5 release image,
+  so a power cycle goes back to it. GET_INFO build bd6c08e1, proto 1.31. CH1 x10 AC 500 mV/div on the calibration
+  post, CH2 off, generator 10 MHz 50 % through the client library with the owner's go-ahead. AUTO_SET: time/div index
+  31 (50 ns/div), divider 0, as in 0.3.5. SET_TIMEBASE index 32 and 33: 20 and 10 ns/div at 200 MSa/s, RUN and STOP.
+  Screen (READ_SCREEN): a smooth curve through the samples, each sample a dot, 2.5 and 5 divisions a period, Freq
+  10.00MHz, Vpp 2.03-2.06 V; the ACQ chip's time/div orange. Stopped, the picture is clean; in RUN the 12-request
+  screenshot tears at its 40-row request borders (y 160, 320) because the trace moves between requests: the
+  screenshot's artefact, not the trace's. The shoulders on the 10 MHz edges are in the samples (they sit on the dots).
+  ACQ menu opened by the owner at 20 ns/div and read with it open: 23 time/div boxes from 10 ns/div to 200 ms/div, no
+  5 ns/div, 10 ns/div in orange text, 20 ns/div (chosen) with an orange fill, 200MSa/s green. Generator off and CH2
+  on again afterwards. **Not done**: the tap zoom into 20 / 10 ns/div by hand (the time base was set over USB; host
+  test `test_autoset` covers the steps), CH2 and both channels together, Dots / Bars styles, the phosphor view and a
+  stopped zoom at these time bases, drawing speed (pass time) at 10 ns/div.
