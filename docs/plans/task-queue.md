@@ -338,15 +338,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
   subtracts it from later captures of the same setup. Shape to decide: a tier 0 tool on saved files
   (`scope_subtract(source, reference)` writing a new `.npz` that `scope_measure(source=)` and `scope_report` read), or
   a `subtract=` argument on `scope_averaged_capture`. It must refuse when rate, record length, trigger position, the
-  channel's range and probe setting or the generator settings differ. Whether one channel's reference serves the
-  other is open (the term may be fixed in codes, not volts: owner bench item "Generator load shift").
+  channel's range and probe setting or the generator settings differ. A reference serves only captures with the
+  same probe factor and range (a x10 probe adds its own part, about one code is ADC-side: bench 2026-11-25).
 - **Bode in wiring A below 1 kHz on a DUT with a DC path** (same finding). The wiring text now names wiring B for such
   a DUT, from the generator measurement alone. Bench: the 991 / 102 Ohm divider of 2026-10-19 from 10 Hz to 10 kHz in
-  wiring A and B. If the 0.18 V per mA of x10 probes at 1 V/div held on the sweep's ranges, both channels would
-  carry about 0.26 V pp below 300 Hz and H would read about -13 dB against -20.6 dB, approaching wiring B above a
-  few kHz; the scaling with range and probe is open (owner bench item "Generator load shift"), so that is a guess
-  at the size, not a prediction. If an error shows, add a caveat to the sweep when the lowest frequency is under
-  2 kHz in wiring A (the tool cannot see the wiring, so the text is conditional).
+  wiring A and B. Expected in A from the 102 Ohm return (multimeter, 2026-11-25): about -15.4 dB against -20.6 dB
+  at 100 Hz and below, approaching wiring B above a few hundred Hz with x1 probes (about 7 uF on the shells) and
+  later with x10 probes, which add their own part. If it shows, add a caveat to the sweep when the lowest frequency
+  is under 2 kHz in wiring A (the tool cannot see the wiring, so the text is conditional).
 - **The battery leaves the trace offsets as saved** (bench 2026-11-09 09:1x): `fnirsi1013d-battery` sets range,
   coupling and filter but not `offset_div`; a saved CH2 position of -3.45 div clipped the ladder's low level and failed
   A1, A2, A4. Set both offsets to 0 in the bench setup (and restore them at the end).
@@ -500,22 +499,14 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 
 ## Owner bench verdicts outstanding
 
-- [ ] **Generator load shift: which node moves** (2026-11-24 / 25; `docs/hardware-status.md` of those days,
-  `fpga/al3/README.md` "Changes" 2 addendum). A load on the generator shifts the readings by 0.18 V per mA (x10
-  probes, 1 V/div). A tip on a USB ground moved too (2026-11-25), with the same sign, so the first reading, a drop
-  over R71 between the shells and VRF1 and nothing else, does not hold. Two parts are possible: the shells against
-  VRF1 (fixed in volts at the tip) and VRF1 against the ground the ADC's offset is referenced to (fixed in ADC
-  codes). Checks, none needs the case open:
-  1. Range scaling (an agent on the owner's wiring): 2 kOhm on the generator at 1 kHz, a x10 tip on its own ground
-     clip, `scope_averaged_capture` n = 32 at 1, 2 and 5 V/div. The shift stays 0.18 V: it is the shells. It grows
-     to about 0.36 and 0.9 V (5 codes on every range): it is VRF1. In between: both, and a straight line through
-     the three gives the two parts.
-  2. The loaded pin: the same load, a tip on the post. Flat tops: the pin is free of the shift. The same creep:
-     the caveat must say so. (The flat capture of 2026-11-24 was the open post, 3.1 V pp.)
-  3. DMM, DC volts, between a BNC shell and a USB ground (hub socket shell), generator at 0.05 Hz 50 %. Nothing on
-     the post: 1.23 to 1.24 V in both half periods. 1 kOhm from the post to a ground clip: the reading alternates
-     by 3.14 V / (2 kOhm + R) x R, R being the whole return resistance (R71 plus what VRF1 gives way): 0.15 V for
-     100 Ohm, 0.18 V for 120 Ohm, 0.27 V for 185 Ohm.
+- [x] (2026-11-25 08:47-09:05, owner at the bench: all three checks done, `docs/hardware-status.md`. Range scaling:
+  0.236 V fixed in volts plus 0.82 code. The loaded pin through a x10 probe creeps by 0.23 V. A x1 probe on its own
+  clip shows 0.045 V where x10 shows 0.264 V. Multimeter: 1.240 V idle, 1.336 / 1.190 V with 1 kOhm on the post,
+  102 Ohm. So R71 is the schematic's 100 Ohm, the shells have about 7 uF to GND, and the rest is the x10 probe's
+  response to its shield moving.) **Generator load shift: which node moves** (2026-11-24 / 25). A load on the
+  generator shifts the readings by 0.18 V per mA (x10 probes, 1 V/div), also on a tip on a USB ground. Checks:
+  range scaling of a tip on its own clip at 1, 2 and 5 V/div; a tip on the loaded post; a multimeter between a BNC
+  shell and a USB ground with 1 kOhm from the post to a clip at 0.05 Hz.
 
 - [x] (2026-11-08, owner on fw 0.3.0+: the ACQ boxes and the pass-time label look good, the overrange warning appears and clears, Max hold holds a 1..10 kHz generator sweep with its harmonic comb, screenshot `docs/hardware-status.md` 2026-11-08.) 0.2.40/0.2.41 layout: Roll/Average/Filter boxes and the pass-time label alignment; Max hold behaviour; overrange
   warning. (Auto mode verified by the coordinator on 0.2.41: 6/6 triggered records at 10 MS/s, untriggered flagged truthfully.)

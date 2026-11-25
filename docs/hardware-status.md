@@ -2302,3 +2302,66 @@ Newest entries at the bottom. Format: date, who, what, result.
   - Host texts corrected the same morning: the caveat and the guide state the measured condition (x10, 1 V/div:
     0.18 V per mA, 5 codes per mA) and that the scaling with range and probe is open. Checks queued (task queue,
     owner bench verdicts): the tip-on-clip capture at 1, 2 and 5 V/div, a tip on the loaded post, the DMM test.
+- 2026-11-25 08:47-08:49 (owner at the bench, captures by the evaluating session over MCP): **range scaling of the
+  generator-load shift.** Owner's wiring, the induction-imager board off the scope: 1 kOhm from the calibration post to
+  the CH1 ground clip, CH1 x10 tip on the post, CH2 x10 tip clipped to its own ground clip. Generator 1 kHz 50 % (found
+  running, switched off afterwards), both DC, offsets 0, 2 MSa/s with the boxcar filter (N = 100), 8000 samples,
+  trigger CH1 rising at 0.21 V, `scope_averaged_capture` n = 32. CH1 stayed at 1 V/div. Files in
+  `mcp/data/2026-11-25/`: `084758_604` (CH2 1 V/div), `084808_843` (2), `084820_517` (5), `084835_428` (10).
+  - CH2 on its own clip, settled peak to peak (350 to 480 us after each edge): 0.264 V at 1 V/div (34.6 mV per code),
+    0.287 V at 2 V/div, 0.397 V at 5 V/div, 0.523 V at 10 V/div (350 mV per code). A straight line in volts per code:
+    **0.236 V fixed in volts plus 0.82 code.** Time constants 90 to 133 us at 1 and 2 V/div.
+  - CH1 on the loaded post, the same in all four files: a step of 1.50 V at each edge, then the tops rise by 0.23 V and
+    the bottoms fall by 0.23 V with 104 to 117 us (settled 1.73 V pp). **The loaded pin is not flat.**
+  - Current: 1.4 to 1.5 mA pp (3.14 V open less 1.73 V over R21; 1.73 V less 0.24 V over the 1 kOhm). The part fixed in
+    volts is 0.16 V per mA; the part fixed in codes is 3 mV at the ADC, about 2 Ohm of VRF1 against GND, near the
+    schematic's value.
+  - Reading (inference): the larger part sits at the input, not at the ADC, so this morning's reading (mostly VRF1
+    against GND) is wrong in its sizes. But the shells moving against a fixed VRF1 does not fit either: the post would
+    then creep by half the shell's movement, 0.12 V, and the step would be 1.59 V; it creeps by 0.23 V after a step of
+    1.50 V, as if the shells stayed put against GND and every x10 reading gained 0.16 V per mA. A term that arises in
+    the x10 probe's divider (9 times a small voltage at the scope's input) would do that and would vanish with a x1
+    probe. Next: the same capture with the CH2 probe switched to x1, then the DMM between a shell and a USB ground.
+  - Left as: generator off, CH1 and CH2 1 V/div x10 DC, offsets 0 (found at -3.46 / -3.43 div, CH2 at 2 V/div),
+    trigger CH1 0.21 V normal (found 4.14 V auto), filter boxcar as found.
+- 2026-11-25 08:54-08:56 (owner at the bench, same wiring, the CH2 probe switched to x1; captures over MCP):
+  **the same shift with a x1 probe.** CH2 x1 DC on its own ground clip, CH1 x10 on the post unchanged, generator 1 kHz
+  (switched on with a token, off afterwards), n = 32. Files `085429_264` (CH2 0.1 V/div, the hardware range of
+  1 V/div x10) and `085508_077` (0.5 V/div).
+  - CH2 x1: 0.045 V settled peak to peak at 0.1 V/div and 0.048 V at 0.5 V/div, against 0.264 V with the probe on x10
+    on the same hardware range. The edges are different too: a slow rise that has not settled in the half period
+    (fits 530 and 595 us, towards about 0.10 V), against 100 to 120 us with x10. Step at the edge under 6 mV.
+  - CH1 x10 on the post: unchanged, step 1.50 V, creep 0.23 V, 110 to 118 us.
+  - Reading (inference, it now fits every capture of both days): the real voltage between the shells and the scope's
+    reference is what x1 shows, I x R71 behind the shells' capacitance to GND: 0.15 V at 1.5 mA for the schematic's
+    100 Ohm gives 0.045 to 0.052 V pp at 1 kHz with a time constant of 0.7 to 0.8 ms, i.e. about 7 uF on the shells
+    (the sheet's 4 x 100 nF are marked undetermined). A x10 probe adds its own response: its shield moves with the
+    shells against the scope's input reference, and the cable capacitance couples that movement into the centre with
+    the probe's time constant, about 0.11 ms. That part is about 0.18 V here (0.12 V per mA at 1 kHz); it appears on
+    every x10 reading, also with the tip on the post or on a USB ground, and it is why the x10 traces look settled
+    after 0.3 ms at a level above I x R71. The ADC-side part stays 0.8 to 1 code. Sum for x10 at 1 V/div: 0.045 +
+    0.18 + 0.03 = 0.255 V against 0.264 V measured.
+  - So: R71 need not be anything but 100 Ohm, the 185 Ohm of 2026-11-24 was the x10 probe's response, and the shift
+    is not the same with x1 and x10 at 1 kHz (0.03 against 0.16 to 0.19 V per mA). At DC both would show I x R71 on
+    nodes referenced to the clips and nothing on the pin. Not yet measured directly: the shells against GND at DC
+    (the DMM check).
+  - Left as: generator off, CH2 x1 0.5 V/div DC (the probe is on x1), CH1 1 V/div x10, scope in RUN.
+- 2026-11-25 09:00-09:05 (owner at the bench with a multimeter, generator set over MCP): **the return resistance at
+  DC.** Wiring unchanged (1 kOhm from the calibration post to the CH1 ground clip). Multimeter on DC volts, red on a
+  probe ground clip, black on a USB ground.
+  - Generator off: 1.240 V (VRF1; no cable drop this time).
+  - Generator 0.05 Hz 50 % (token; off afterwards): the reading alternates between 1.336 V and 1.190 V, the same
+    values every period. 0.146 V for 1.41 to 1.48 mA pp (the pin's 3.11 / 0.01 V over R21 of 1.0 to 1.09 kOhm plus the
+    1 kOhm): **99 to 103 Ohm** from the shells to GND through R71, R82 and the TL432. From the idle 1.240 V the two
+    sides are 108 to 113 Ohm with current into VRF1 and 85 to 89 Ohm with current out of it; not followed up.
+  - Conclusion of the two days: R71 is the schematic's 100 Ohm. Nodes on the clips read I x 100 Ohm high at DC; the
+    shells' about 7 uF to GND low-pass that (0.03 V per mA at 1 kHz with a x1 probe); a x10 probe adds its own part
+    on every reading (0.16 to 0.19 V per mA in total at 1 kHz and 1 V/div); the ADC-side part is under a code per mA.
+    The x10 part's mechanism (the shield on the shells, the cable's capacitance into the centre) is an inference from
+    the x1 / x10 pair, not isolated by a test of its own.
+  - Host texts brought in line (the third wording): `GEN_LOAD_NOTE`, `scope_generator`'s description, the Bode wiring
+    text, guide section 5, skill, mcp-tools, glossary, `fpga/al3/README.md` "Changes" 2, bode-design 2.5; the owner
+    bench item in the task queue is closed.
+  - Scope left as found by this session at 08:45, except the generator: CH1 1 V/div x10 DC offset -3.46 div, CH2
+    2 V/div x10 DC offset -3.46 div, trigger CH1 rising 4.16 V auto, 2 MSa/s boxcar, RUN; generator off (found on at
+    1 kHz). The owner switches the CH2 probe back to x10 and removes the resistor.

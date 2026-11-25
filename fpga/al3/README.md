@@ -484,44 +484,44 @@ so the current of a load that is grounded on the probe clips has to return from 
   - R71 (100 Ω) with C116 (1 nF) across it goes from the shells to **VRF1**. C134 and C135 (1 nF) go from VRF1 to GND.
   - VRF1 is the TL432's cathode through R82 (1 Ω). The TL432 carries about 10 mA from R81, so a load current of a
     milliampere either way leaves it in regulation (inference: nothing else heavy on VRF1 is drawn on the sheet).
-- **A second path into the readings, on the data-acquisition sheet** (`Scope_Data_Acquisition.png`, read from a
-  coarse image): each AD9288 core has `ANALOGx_ADC_INPUT` through 200 Ω on one input and, on the other, the node of
-  `ADCx_OFFSET`: the FPGA's offset PWM through 2 x 1 kΩ with three capacitors to GND. The op-amp's output rides on
-  VRF1; the offset node is referenced to GND. A movement of VRF1 against GND therefore enters every reading of the
-  channel one to one at the ADC, at 4 mV per code (1.024 V pp full scale), wherever the probe tip is (inference
-  from the sheet).
-- **Two parts are possible** when a load current I returns through the clips. Both rise as the four shell
-  capacitors charge, with (R71 + Z) x 0.4 to 0.6 µF, Z being what VRF1 gives way against GND:
-  - the shells against VRF1, I x R71 = 0.1 V per mA: in volts at the tip, the same on every range, and only on
-    nodes referenced to the shells;
-  - VRF1 against GND, I x Z: in ADC codes, so in volts it grows with V/div and the probe setting, and it is on every
-    reading. A TL432 in regulation behind R82 would make it about 1 Ω, 0.3 codes per mA.
-- **Measured** (induction-imager bench, fw 0.3.5, FPGA 0x153F, x10 probes, 1 V/div DC = 35 mV per code, 2 MSa/s, 32
-  averages, generator 1 kHz; `docs/hardware-status.md` 2026-11-24 and 2026-11-25):
-  - 1 kΩ + 1 kΩ on the post, 0.93 to 1.06 mA pp (by the divider's mid node, and by the drop over R21: post 3.14 V pp
-    open, 2.08 V pp loaded). A tip on its own ground clip read a 0.182 V pp square with exponential edges, 105 µs
-    after the rising and 137 µs after the falling generator edge: **0.17 to 0.20 V per mA, 5 codes per mA.**
-  - 10 kΩ + 10 kΩ, 0.15 mA pp: nodes of the circuit 23 to 30 mV pp, the same per mA.
-  - Same load, a tip on a USB ground with its clip open: 36 mV pp with the same sign, about 12 mV of it within
-    10 µs of the edge and the rest with about 100 µs.
-  - The pin under load was not captured. The flat square of 2026-11-24 with both tips on the generator lead was
-    the open post (3.1 V pp).
-- **What that says** (inference): a tip on the USB ground does not see the shells, so the shift there is VRF1
-  moving against GND, or something else common to the readings. If the slow 21 mV are VRF1, Z is about 18 Ω
-  (21 mV / (7.75 x 0.15 mA): 8.75 from codes to x10 volts on this range, less the tip's own -1), far from the
-  schematic's 1 Ω. The same 18 Ω would put 24 mV on the circuit's nodes, which read 23 to 30 mV, so the 15 mV that
-  100 Ω of R71 should add do not stand out. The traces also lack the overshoot a x10 probe shows when its shield
-  moves against the scope's input reference. Both point at VRF1 against GND as the larger part, but signals of one
-  code do not settle it. The reading first written here on 2026-11-24 (185 Ω between the shells and VRF1, the same
-  volts with any probe) is withdrawn.
-- **Checks that settle it** (`docs/plans/task-queue.md`, "Owner bench verdicts outstanding"): the tip-on-its-clip
-  capture at 1, 2 and 5 V/div separates volts from codes; a tip on the loaded post; a DMM between a shell and a USB
-  ground with a known DC load gives R71 + Z.
-- **A hardware change?** Not before those checks. A smaller R71 (the 1014D has 10 Ω in its BNC return,
-  `research/notes/hack-repo-hardware-fpga.md` 2.3) helps only the first part and makes a link between probe ground
-  and USB ground worse. If VRF1 is the larger part, the remedy is at the reference (R82, the TL432, its bypass),
-  which needs the board in hand. Outside the scope the fix is free: a load of 20 kΩ or more, a buffer on the
-  circuit's own supply, or the subtraction.
+- **A second, small path into the readings, on the data-acquisition sheet** (`Scope_Data_Acquisition.png`, read
+  from a coarse image): each AD9288 core has `ANALOGx_ADC_INPUT` through 200 Ω on one input and, on the other, the
+  node of `ADCx_OFFSET`: the FPGA's offset PWM through 2 x 1 kΩ with three capacitors to GND. The op-amp's output
+  rides on VRF1; the offset node is referenced to GND. A movement of VRF1 against GND therefore enters every
+  reading of the channel at the ADC, at 4 mV per code (1.024 V pp full scale), wherever the probe tip is
+  (inference from the sheet).
+- **Measured** (fw 0.3.5, FPGA 0x153F, generator 1 kHz, 2 MSa/s, 32 averages; `docs/hardware-status.md`
+  2026-11-24 and 2026-11-25):
+  - Multimeter, DC, a BNC shell against a USB ground: 1.240 V idle; 1.336 V and 1.190 V in the two half periods
+    with 1 kΩ from the post to a ground clip at 0.05 Hz. 0.146 V for 1.41 to 1.48 mA: **99 to 103 Ω**, R71 with
+    R82 and the TL432.
+  - A x1 probe on its own ground clip, the same load at 1 kHz: 0.045 V pp, still rising at the end of each half
+    period. For I x 100 Ω = 0.15 V that is a time constant of 0.7 to 0.8 ms, **about 7 µF on the shells**, not the
+    sheet's 4 x 100 nF.
+  - The same probe on x10, 1 V/div: 0.264 V pp, settled after 0.3 ms (time constants 90 to 133 µs). Over the ranges
+    1, 2, 5 and 10 V/div: 0.264, 0.287, 0.397 and 0.523 V, a straight line of 0.236 V fixed in volts plus 0.82
+    code.
+  - A x10 tip on the loaded post: a step of 1.50 V, then 0.23 V of creep with 104 to 118 µs. A x10 tip on a USB
+    ground with its clip open, 0.15 mA of load: 36 mV pp with the same sign.
+  - Other loads through x10 at 1 V/div: 0.182 V pp at about 1 mA (1 kΩ + 1 kΩ), 23 to 30 mV at 0.15 mA.
+- **What that says:**
+  - The return path is the sheet's: R71 = 100 Ω into VRF1. At DC a node referenced to the clips reads I x 100 Ω
+    high with any probe, and the post reads right.
+  - The shells' capacitance to GND is about 7 µF on this unit (inference from the x1 trace), so the real shift is
+    low-passed at about 200 Hz and is 0.03 V per mA at 1 kHz.
+  - A x10 probe adds its own response (inference from the x1 / x10 pair): its shield is on the shells, the scope's
+    input resistance returns to VRF1, and the cable's capacitance couples the shield's movement into the centre
+    with the probe's time constant, about 0.11 ms. That is about 0.18 V at 1.5 mA and 1 kHz, on every x10 reading,
+    whatever the tip touches. It is why x10 traces look settled early at a level above I x R71, and why the
+    first reading of 2026-11-24 came out as 185 Ω.
+  - The ADC-side part is 0.8 to 1 code at 1.5 mA: 3 to 4 mV of VRF1 against GND, 2 to 3 Ω, near R82 plus the
+    TL432.
+  - x10 at 1 V/div and 1.5 mA: 0.045 + 0.18 + 0.03 = 0.255 V against 0.264 V measured.
+- **A hardware change?** A smaller R71 scales the real part and the x10 part down together (the 1014D has 10 Ω in
+  its BNC return, `research/notes/hack-repo-hardware-fpga.md` 2.3), and makes a link between probe ground and USB
+  ground worse by the same factor: R71 is what limits that current. Not recommended for this alone (inference).
+  Outside the scope the fix is free: a load of 20 kΩ or more, a x1 probe, a buffer on the circuit's own supply, or
+  the subtraction.
 
 ### 3. Decimation filter: boxcar and CIC (version 0x1534, 2026-10-18)
 

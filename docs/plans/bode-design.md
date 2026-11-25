@@ -211,15 +211,13 @@ device later.
 
 ### 2.5 The ground return (new; bench item 1)
 
-**2026-11-24 / 25: a return error exists, at low frequencies.** A generator load of 2 kOhm at 1 kHz in wiring A
-shifted the readings by 0.18 V pp (x10 probes, 1 V/div), rising with 105 to 137 us after each edge
-(`docs/hardware-status.md` of those days). The shell capacitors go to GND (C100, C101, C131, C132;
-`fpga/al3/README.md` "Changes" 2 addendum), so they carry the return above about 1.3 kHz; below it the current goes
-through R71 into VRF1. A tip on the USB ground moved as well, so the error is not only e = I x Z_ret on the shells
-as this section assumed: VRF1 moving against the ground the ADC's offset is referenced to would show on every
-reading (inference, not separated yet). The RC of 2026-10-19 draws little current at low frequencies, which is why
-the two wirings agreed; a DUT with a DC path does not. The wiring text names wiring B for that case (its return
-does not pass VRF1); the bench checks are in the task queue.
+**2026-11-24 / 25: a return error exists, at low frequencies.** In wiring A the DUT's current returns through R71
+into VRF1: 102 Ohm by multimeter, so Z_ret is 100 Ohm at DC. The shells have about 7 uF to GND (a x1 probe on its
+own clip rises with 0.7 to 0.8 ms), so Z_ret falls above about 200 Hz, not 16 kHz as assumed below. x10 probes add
+their own part on both channels (the shield moves with the shells): 0.16 to 0.19 V per mA at 1 kHz against 0.03
+with x1 (`docs/hardware-status.md` of those days, `fpga/al3/README.md` "Changes" 2 addendum). The RC of
+2026-10-19 draws little current below 1 kHz, which is why the two wirings agreed; a DUT with a DC path does not.
+The wiring text names wiring B for that case (its return does not pass R71); the bench check is in the task queue.
 
 The stimulus current must return to the FPGA's ground. Where it flows decides whether the measurement works.
 

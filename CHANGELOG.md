@@ -13,14 +13,14 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ### Host (mcp)
 
-- `scope_generator` and `scope_sweep` say that a load on the pin moves the scope's reference: a load that is
-  grounded on the probe clips returns through the BNC shells and shifts the readings, about 0.18 V per mA with x10
-  probes at 1 V/div, rising over 0.1 to 0.17 ms after each generator edge (measured by the induction-imager session
-  on 2026-11-24 and 25 with 2 kOhm and 20 kOhm on the pin). A tip on the USB ground moved too, so the mechanism and
-  the scaling with range and probe setting are open bench items; the texts state only what was measured. The Bode
-  wiring text names the USB-ground wiring for a DUT with a DC path swept to 1 kHz or below. Guide section 5, the
-  skill, `docs/mcp-tools.md`, `fpga/al3/README.md` "Changes" 2 (the return path traced on the schematic)
-  (042cf10, 0be269a).
+- `scope_generator` and `scope_sweep` say what a load on the pin does to the readings: a load that is grounded on
+  the probe clips returns through the BNC shells and the 100 Ohm between them and the scope's reference (R71,
+  102 Ohm by multimeter), so nodes on the clips read 0.1 V per mA high at DC. With the generator at 1 kHz a x1 probe
+  shows about 0.03 V per mA and a x10 probe 0.16 to 0.19 V per mA on every reading, rising over about 0.11 ms
+  (bench 2026-11-24 and 25: the induction-imager session's captures, then range, x1 and multimeter checks with the
+  owner). The Bode wiring text names the USB-ground wiring for a DUT with a DC path swept to 1 kHz or below. Guide
+  section 5, the skill, `docs/mcp-tools.md`, `fpga/al3/README.md` "Changes" 2 (the return path traced on the
+  schematic) (042cf10, 0be269a, 4fc2e34).
 
 ## [0.3.5] - 2026-11-23
 
