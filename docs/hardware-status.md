@@ -2365,7 +2365,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   - Scope left as found by this session at 08:45, except the generator: CH1 1 V/div x10 DC offset -3.46 div, CH2
     2 V/div x10 DC offset -3.46 div, trigger CH1 rising 4.16 V auto, 2 MSa/s boxcar, RUN; generator off (found on at
     1 kHz). The owner switches the CH2 probe back to x10 and removes the resistor.
-- 2026-11-25 10:55-11:10 (lead, owner present): **20 and 10 ns/div with sin(x)/x interpolation, on the unit**
+- 2026-11-25 12:30-12:43 (lead, owner present): **20 and 10 ns/div with sin(x)/x interpolation, on the unit**
   (GitHub issue #2 follow-up, option C of `docs/mockups/acq-fast-timediv.html`, commit bd6c08e). The local `make gcc10`
   image a632b6e11471b37e... (830,976 bytes) FEL-loaded, **not persisted**: the card still holds the 0.3.5 release image,
   so a power cycle goes back to it. GET_INFO build bd6c08e1, proto 1.31. CH1 x10 AC 500 mV/div on the calibration
