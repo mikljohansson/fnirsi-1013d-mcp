@@ -344,11 +344,10 @@ Per unit at `<data_dir>/cal/<serial>.json` (default data dir `~/.fnirsi1013d/dat
 range-independent; 0 V at dcoffset 0: CH1 A 132.47 / B 127.14, CH2 A 128.80 / B 129.19 (CH2 has 0 V points only, so
 firmware gains). The firmware formula assumes 128 on the compensated mean. Grounds: the probe ground is VRF1,
 +1.24 V over the USB ground (fpga/al3/README.md); the calibration output reads -1.24 / +1.9 V against it by design.
-A load on the generator returned through the ground clips shifts the readings: about 0.18 V per mA with x10 probes at
-1 V/div (bench 2026-11-24 / 25, `server.GEN_LOAD_NOTE` on `scope_generator` / `scope_sweep` while the pin drives,
-`bode.CONNECTION_TEXT`). A tip on the USB ground moved too, so the term is not only the shells against VRF1; how it
-scales with range and probe setting is an open bench item (task queue "Owner bench verdicts outstanding"). Until
-then the tool texts state only the measured condition.
+A load on the generator returned through the ground clips drops over R71 (102 Ohm by multimeter, 2026-11-25): nodes
+on the clips read 0.1 V per mA high at DC; at 1 kHz a x1 probe shows about 0.03 V per mA (about 7 uF on the shells)
+and a x10 probe 0.16 to 0.19 V per mA on every reading (its shield moves with the shells). `server.GEN_LOAD_NOTE` on
+`scope_generator` / `scope_sweep` while the pin drives, `bode.CONNECTION_TEXT`; bench log 2026-11-24 / 25.
 
 ## Tests (`tests/`, 559 with test_report, about 4.5 min)
 

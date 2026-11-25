@@ -267,8 +267,8 @@ is tier 3 with a confirmation token.
    USB-ground wiring within 0.4 dB). Only for a DUT that must not see the probe reference: DUT ground on the USB
    shell with both clips open (wiring B), and then `ch2_coupling='ac'`, because the DUT sits 1.24 V below the probe
    reference and saturates CH2 on 0.1 / 0.2 V/div (flag `ch2_overload`). Use wiring B also for a DUT with a DC path
-   from its input to its ground (a divider, a coil) swept to 1 kHz or below: in wiring A its current moves the scope's
-   reference and shifts the readings of both channels (section 5: 0.18 V per mA with x10 probes at 1 V/div). The first sweep of a session returns
+   from its input to its ground (a divider, a coil) swept to 1 kHz or below: in wiring A its current moves the probe
+   ground against the scope's reference and shifts the readings of both channels (section 5). The first sweep of a session returns
    this as `connection`: show it to the person.
 2. **Never** on a coil being driven, a MOSFET drain, a powered circuit or anything that can drive the post. A PI
    detector's coil can be measured only unpowered and disconnected from its driver, through a series resistor.
@@ -320,25 +320,24 @@ The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V
   through R71 (about 12 mA, calculated) and VRF1 sags (to about 1.1 V, calculated), moving all channels. Ask the
   user to float one side (battery-powered device under test, battery laptop, or an isolated USB link), and check
   by comparing a shorted-input zero (`scope_fetch_waveform` mean) with and without the device connected.
-- **A load on the generator moves the scope's reference.** The calibration pin is driven against the USB ground.
-  The current of a load that is grounded on the probe clips returns through the BNC shells into the reference the
-  front end works against (VRF1), and the CH1 / CH2 readings shift with it.
-  - Measured (owner's unit, x10 probes, 1 V/div, generator 1 kHz; `docs/hardware-status.md` 2026-11-24 and
-    2026-11-25): about 0.18 V per mA of load current, 5 ADC codes per mA. 2 kOhm on the pin: 0.18 V pp; 20 kOhm:
-    23 to 30 mV. Load current = 3.1 V / (1 kOhm + load); the 1 kOhm is inside the scope.
-  - The shift creeps in after each generator edge with a time constant of 0.1 to 0.17 ms: in full at 1 kHz and
-    below, less above. It looks like a slow rise on every flat top, also on a supply rail.
-  - It is not limited to nodes of the driven circuit: a tip on the scope's USB ground, its clip open, moved by
-    36 mV with the 20 kOhm load. Whether the pin itself is free of it under load is not measured.
-  - How it scales with V/div and the probe setting is not measured. Two parts are possible (fpga/al3/README.md
-    "Changes" 2 addendum): the shells moving against the reference, the same volts at the tip on every range, and
-    the reference moving against the ground the ADC's offset uses, the same number of codes on every range and so
-    more volts at a coarser V/div or a higher probe factor. Do not carry the 0.18 V per mA to another range or
-    probe.
-  - What works: keep the load light. Or capture one probe tip clipped to its own ground clip with the same load,
-    range, probe setting and trigger, and subtract that trace from the others (the shift is additive: a divider
-    read 2.00 against 2.000 after the subtraction). A buffer on the circuit's own supply with a high-impedance
-    input takes the load off the pin.
+- **A load on the generator shifts the readings.** The calibration pin is driven against the USB ground. The
+  current of a load that is grounded on the probe clips returns through the BNC shells and the 100 Ohm between
+  them and the scope's reference (R71), so the clips move against the reference (bench 2026-11-24 / 25,
+  `docs/hardware-status.md`).
+  - At DC and for slow signals: nodes referenced to the clips read 0.1 V per mA of load current too high (102 Ohm
+    by multimeter), with any probe. The pin itself and nodes on the USB ground read right.
+  - The shells have about 7 uF to ground, so the real shift builds up with 0.7 to 0.8 ms. With the generator at
+    1 kHz a x1 probe shows about 0.03 V per mA, still rising at the end of each half period.
+  - A x10 probe shows more, and on every reading, also with its tip on the pin or on a USB ground: its shield
+    moves with the shells against the scope's input, and the cable couples that in within about 0.11 ms
+    (inference from the x1 / x10 pair). Measured at 1 kHz and 1 V/div: 0.16 to 0.19 V per mA (0.26 V pp with
+    1 kOhm on the pin, 0.18 V with 2 kOhm, 23 to 30 mV with 20 kOhm), a slow rise on every flat top that looks
+    settled after 0.3 ms. About one ADC code per 1.5 mA comes on top on every range.
+  - Load current = 3.1 V / (1 kOhm + load); the 1 kOhm is inside the scope.
+  - What works: keep the load light (20 kOhm or more). Use a x1 probe where the signal allows. Or capture one
+    probe tip clipped to its own ground clip with the same load, probe, range and trigger, and subtract that
+    trace from the nodes of the circuit (the shift is additive: a divider read 2.00 against 2.000 after the
+    subtraction). A buffer on the circuit's own supply with a high-impedance input takes the load off the pin.
 - EXT trigger (caps `EXT_TRIGGER`): reference the source to the USB ground (connector shell); 3.3 V logic only.
   A source that shares the probe ground idles at ~1.24 V at the pin and is not recognised: insert a red LED or
   3 x 1N4148 in series (anode at the source) and trigger on the rising edge.
@@ -393,8 +392,7 @@ Give value, unit and how it was measured (n averaged, sample rate, range, alignm
   capture may still be bad: repeat it and report the counts.
 - The calibration pin is a frequency / duty / timing reference, not a voltage reference: it is a ~3.1 Vpp square
   wave referenced to the USB ground, so against the probe ground (VRF1, +1.24 V) it reads about -1.24 / +1.9 V.
-  With a load on it the readings shift (section 5: 0.18 V per mA with x10 probes at 1 V/div): say what the load
-  was.
+  With a load on it the readings shift (section 5): say what the load and the probes were.
 - Pass on dynamic caveats (clipping, auto trigger fired, aliasing, restarts) instead of dropping them.
 
 ## 7a. Presenting results

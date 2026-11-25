@@ -182,19 +182,21 @@ CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference,
 #: on, 1 kHz: a tip on its own ground clip read 0.182 V pp, rising with 105 / 137 us after the edges; the current was
 #: 0.93 .. 1.06 mA pp (the divider's mid node, the drop over R21). Schematic: R71 100 Ohm from the shells to VRF1, four
 #: capacitors from the shells to the digital ground (fpga/al3/README.md "Changes" 2).
-#: 2026-11-25, 10 kOhm + 10 kOhm: nodes of the circuit 23 .. 30 mV pp, and a tip on a USB ground with its clip open
-#: 36 mV pp with the same sign: the term is not only the shells moving against VRF1. Only what was measured is stated;
-#: the scaling with V/div and the probe setting is open (docs/plans/task-queue.md, owner bench verdicts).
+#: 2026-11-25 with the owner (1 kOhm from the post to a clip, about 1.5 mA pp): a multimeter between a shell and a USB
+#: ground read 1.336 / 1.190 V at 0.05 Hz (102 Ohm); a x1 probe on its own clip 0.045 V pp at 1 kHz, still rising; the
+#: same probe on x10 0.264 V pp, settled; x10 over 1 .. 10 V/div 0.236 V + 0.82 code; a x10 tip on the loaded post
+#: creeps by 0.23 V. The x10 probe's part (its shield moves with the shells) is an inference from the x1 / x10 pair.
 GEN_LOAD_NOTE = ("A load on the pin that is grounded on the probe ground clips returns its current through the BNC "
-                 "shells into the scope's reference, and the CH1 / CH2 readings shift with the load current. Measured "
-                 "on the owner's unit with x10 probes at 1 V/div (2026-11-24 and 25): about 0.18 V per mA, 5 ADC codes "
-                 "per mA; 0.18 V pp with 2 kOhm on the pin, 23 to 30 mV with 20 kOhm (load current = 3.1 V / (1 kOhm "
-                 "+ load)). The shift follows the generator's edges with a time constant of 0.1 to 0.17 ms (in full at "
-                 "1 kHz and below, less above), so it looks like a slow creep on every flat top. It is not limited to "
-                 "nodes of the driven circuit: a tip on the scope's USB ground moved too. How it scales with V/div and "
-                 "the probe setting is not measured, so do not carry the 0.18 V per mA to another range or probe. "
-                 "Keep the load light enough for the resolution needed, or capture a probe tip clipped to its own "
-                 "ground with the same load, range, probe setting and trigger and subtract it (the shift is additive).")
+                 "shells and the 100 Ohm between them and the scope's reference (R71; 102 Ohm by multimeter, "
+                 "2026-11-25), so nodes referenced to the clips read 0.1 V per mA of load current too high at DC, "
+                 "with any probe. The shells also have about 7 uF to ground, so with the generator at 1 kHz a x1 probe "
+                 "shows only about 0.03 V per mA, still rising at the end of each half period. A x10 probe shows "
+                 "more, and on every reading, also with its tip on the pin or on the USB ground: its shield moves "
+                 "with the shells and the cable couples that in within about 0.11 ms. Measured at 1 kHz and 1 V/div: "
+                 "0.16 to 0.19 V per mA, a creep on every flat top. Load current = 3.1 V / (1 kOhm + load): 1 mA with "
+                 "2 kOhm, 0.15 mA with 20 kOhm. Keep the load light, use a x1 probe where the signal allows, or "
+                 "capture a probe tip clipped to its own ground with the same load, probe, range and trigger and "
+                 "subtract it from the nodes of the circuit (the shift is additive).")
 
 EXT_NOTE =("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
             "scope's USB/digital ground, NOT to the probe ground: the BNC shells sit on VRF1, about +1.24 V above USB "
@@ -4374,12 +4376,13 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
         switches real coil current. Needs caps GENERATOR (every supported firmware has it).
 
-        Load current moves the scope's reference: a load on the pin that is grounded on the probe ground clips returns
-        through the BNC shells and shifts the CH1 / CH2 readings, creeping in over 0.1 to 0.17 ms after each edge.
-        Measured with x10 probes at 1 V/div: about 0.18 V per mA of load current (3.1 V / (1 kOhm + load)), 0.18 V pp
-        with 2 kOhm, 23 to 30 mV with 20 kOhm; other ranges and probe settings are not measured. Keep the load light,
-        or capture a probe tip on its own ground clip with the same load and settings and subtract it (the result's
-        caveat has the details)."""
+        Load current shifts the readings: a load on the pin that is grounded on the probe ground clips returns
+        through the BNC shells and the 100 Ohm between them and the scope's reference, so nodes on the clips read
+        0.1 V per mA of load current (3.1 V / (1 kOhm + load)) too high at DC. With the generator at 1 kHz a x1 probe
+        shows about 0.03 V per mA and a x10 probe 0.16 to 0.19 V per mA on every reading, creeping in over about
+        0.11 ms after each edge. Keep the load at 20 kOhm or more, use a x1 probe where the signal allows, or capture
+        a probe tip on its own ground clip with the same load, probe and range and subtract it (the result's caveat
+        has the details)."""
         args = {"enabled": enabled, "frequency": frequency, "duty_percent": duty_percent}
 
         def go() -> dict[str, Any]:

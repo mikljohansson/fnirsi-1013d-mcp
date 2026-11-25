@@ -619,8 +619,8 @@ phase-continuous (taken at once, the step in progress completing with its old le
 `period_clocks`, `high_clocks` / `low_clocks` and the raw P16 / H16. Caveats: the calibration-output note, "Square wave
 only, 3.3 V logic. Not a sine source and not a power driver: buffer it before driving a MOSFET gate.", and while the
 pin drives the load note (`GEN_LOAD_NOTE`, also on `sweep`): a load that is grounded on the probe clips returns through
-the BNC shells and shifts the readings, about 0.18 V per mA with x10 probes at 1 V/div (other ranges and probe
-settings not measured), creeping in over 0.1 to 0.17 ms after each edge; keep the load light or subtract a tip-on-its-own-ground capture
+the BNC shells and R71 (100 Ohm): nodes on the clips read 0.1 V per mA high at DC; at 1 kHz a x1 probe shows about
+0.03 V per mA and a x10 probe 0.16 to 0.19 V per mA on every reading, creeping in over about 0.11 ms; keep the load light or subtract a tip-on-its-own-ground capture
 (`docs/agent-measurement-guide.md` section 5). Disabling
 (`enabled=false`) does not need a token. Up to protocol 1.26 the square came from Atlan4's 50 MHz DDS (11.64 mHz
 steps, 20 ns edge jitter).

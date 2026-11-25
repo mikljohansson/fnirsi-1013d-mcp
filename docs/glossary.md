@@ -13,8 +13,8 @@ Written for the maintainer on 2026-10-19 after a bench day; facts from `research
 - **Probe reference, VRF1**: the node the probe ground clips and the BNC shells sit on. It is tied to the scope's internal
   ground through a 100 ohm resistor (R71), so it is not the same node as **USB ground**: a circuit grounded on the USB shell
   sits about 1.2 V below the probe reference (bench 2026-10-19). A current through the ground clips shifts
-  the readings: about 0.18 V per mA with x10 probes at 1 V/div (bench 2026-11-24); which node moves against which
-  is open.
+  the readings: R71 drops 0.1 V per mA at DC; at 1 kHz a x10 probe shows 0.16 to 0.19 V per mA and a x1 probe 0.03
+  (bench 2026-11-25).
 - **Offset, offset PWM, dcoffset, trace position**: a DC voltage added at the ADC input so a signal can be placed
   vertically. The FPGA generates it as a 25 kHz PWM; `dcoffset` is the host protocol's name for the same knob; the trace
   position is the screen-side result.

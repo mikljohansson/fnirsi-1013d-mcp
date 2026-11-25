@@ -93,11 +93,12 @@ The probe ground (BNC shells) is VRF1, about +1.24 V above the scope's USB/digit
 - Earthed device under test plus earthed PC = ground loop through R71: VRF1 sags (about 1.1 V, calculated) and every
   trace shifts. Ask to float one side (battery DUT or laptop, isolated USB); check with a shorted-input zero with
   and without the device connected.
-- A load on the generator pin, grounded on the probe clips, moves the scope's reference: the CH1 / CH2 readings
-  shift, creeping in over 0.1 to 0.17 ms after each generator edge. Measured with x10 probes at 1 V/div: 0.18 V
-  per mA (3.1 V / (1 kOhm + load)), 2 kOhm = 0.18 V pp, 20 kOhm = 23 to 30 mV; a tip on the USB ground moved too;
-  other ranges and probe settings are not measured. Keep the load light, or capture a tip clipped to its own
-  ground with the same load and settings and subtract it (guide section 5).
+- A load on the generator pin, grounded on the probe clips, returns through the 100 Ohm between the clips and the
+  scope's reference: nodes on the clips read 0.1 V per mA too high at DC, with any probe. At 1 kHz a x1 probe shows
+  about 0.03 V per mA; a x10 probe shows 0.16 to 0.19 V per mA on every reading (its shield moves with the clips),
+  creeping in over about 0.11 ms. Load current = 3.1 V / (1 kOhm + load). Keep the load at 20 kOhm or more, use x1
+  where the signal allows, or subtract a capture of a tip clipped to its own ground with the same load, probe and
+  range (guide section 5).
 - EXT trigger sources: 3.3 V logic referenced to the USB ground; if they share the probe ground, a red LED (or
   3 x 1N4148) in series and the rising edge. Never connect the calibration pin to a coil, drain or damping resistor.
 
