@@ -63,6 +63,7 @@ nav:
       - Calibration: guide/calibration.md
       - The screens: guide/screens.md
       - Generator: guide/generator.md
+      - Release 0.4.0: release-notes/0.4.0.md
       - Release 0.3.5: release-notes/0.3.5.md
       - Release 0.3.4: release-notes/0.3.4.md
       - Release 0.3.3: release-notes/0.3.3.md

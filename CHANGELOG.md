@@ -11,13 +11,18 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
+A feature release on the same FPGA bitstream, 0x153F (protocol 1.31 unchanged): the interpolated 20 and 10 ns/div.
+User-facing notes: `docs/release-notes/0.4.0.md`.
+
 ### Firmware
 
 - 20 ns/div and 10 ns/div can be chosen at 200 MSa/s, by the zoom and in the ACQ menu (GitHub issue #2 follow-up).
   A division holds four or two samples there, so the scope draws the curve between the samples with sin(x)/x
   interpolation, as bench scopes do, and marks every real sample with a dot. The time/div is orange in the ACQ menu
   and in the top bar while the trace is interpolated. AUTO SET still stops at 50 ns/div. The 5 ns/div box, which
-  could never be chosen, is gone from the menu. Dots and Bars trace styles draw as before.
+  could never be chosen, is gone from the menu. Dots and Bars trace styles draw as before (bd6c08e).
 
 ### Host (mcp)
 
