@@ -84,8 +84,10 @@ static void test_viability(void)
           hi = t;
           n++;
 
-          //Every viable pair: at least ten samples per division (fw 0.2.69), the record spans the trace area
-          T_TRUE(rate[r] >= (uint64)fpd[t] * TBV_MIN_SAMPLES_PER_DIV);
+          //Every viable pair: at least ten samples per division (fw 0.2.69; two at the full rate, drawn interpolated:
+          //issue #2 follow-up), the record spans the trace area
+          T_TRUE(rate[r] >= (uint64)fpd[t] * ((rate[r] >= TBV_FULL_RATE) ? TBV_MIN_SAMPLES_FULL : TBV_MIN_SAMPLES_PER_DIV));
+          T_EQ(tbv_interpolated(rate[r], fpd[t]), rate[r] < (uint64)fpd[t] * TBV_MIN_SAMPLES_PER_DIV);
           T_TRUE((int64_t)TBV_SPAN_PX * rate[r] < (int64_t)depths[k] * TBV_PX_PER_DIV * fpd[t]);
         }
       }
@@ -95,21 +97,38 @@ static void test_viability(void)
     }
 
     //The coupled rate of every short time/div (plot tap zoom, SET_TIMEBASE mode 0) is viable at every depth down to
-    //50 ns/div (index 31); 20, 10 and 5 ns/div hold fewer than ten samples at any rate (fw 0.2.69) and are never viable
+    //50 ns/div (index 31). 20 and 10 ns/div hold four and two samples a division: viable at 200 MSa/s only, where the
+    //trace is interpolated (issue #2 follow-up); 5 ns/div (one sample) never is
     for(t = 11; t <= 31; t++)
+    {
       T_TRUE(tbv_viable(rate[coupled[t]], fpd[t], depths[k]));
+      T_TRUE(!tbv_interpolated(rate[coupled[t]], fpd[t]));
+    }
     for(t = 32; t <= 34; t++)
       for(r = 0; r < 18; r++)
-        T_TRUE(!tbv_viable(rate[r], fpd[t], depths[k]));
+      {
+        T_EQ(tbv_viable(rate[r], fpd[t], depths[k]), (r == 0) && (t < 34));
+        T_EQ(tbv_interpolated(rate[r], fpd[t]), (r == 0) && (t < 34));
+      }
   }
 
   //Edges at the default depth: 200 MSa/s reaches 1 us/div (200 samples/div) and 50 ns/div (ten); 2 us/div would need
-  //400, 20 ns/div holds four (fw 0.2.69; one sample per division was enough before)
+  //400. 20 ns/div holds four and 10 ns/div two: viable at the full rate, interpolated; 5 ns/div holds one; 100 MSa/s
+  //at 50 ns/div holds five and is not the full rate
   T_TRUE(tbv_viable(200000000, 1000000, 3000));
   T_TRUE(!tbv_viable(200000000, 500000, 3000));
   T_TRUE(tbv_viable(200000000, 20000000, 3000));
-  T_TRUE(!tbv_viable(200000000, 50000000, 3000));
+  T_TRUE(!tbv_interpolated(200000000, 20000000));
+  T_TRUE(tbv_viable(200000000, 50000000, 3000));
+  T_TRUE(tbv_interpolated(200000000, 50000000));
+  T_TRUE(tbv_viable(200000000, 100000000, 3000));
+  T_TRUE(tbv_interpolated(200000000, 100000000));
   T_TRUE(!tbv_viable(200000000, 200000000, 3000));
+  T_TRUE(!tbv_interpolated(200000000, 200000000));
+  T_TRUE(!tbv_viable(100000000, 20000000, 3000));
+  T_TRUE(!tbv_interpolated(100000000, 20000000));
+  T_TRUE(!tbv_interpolated(0, 20000000));
+  T_TRUE(!tbv_interpolated(200000000, 0));
   //The owner's bench case (2026-10-19): 100 kSa/s at 10 us/div is one sample per division; 100 us/div (ten) is viable
   T_TRUE(!tbv_viable(100000, 100000, 3000));
   T_TRUE(tbv_viable(100000, 10000, 3000));
@@ -125,7 +144,8 @@ static void test_viability(void)
 //The hand-written table against the derivation at 3000 samples: it is not reproduced, so the table goes. Every cell
 //where they disagree is explained: the table offered 250 samples/div (the record, 3000 / 250 = 12 div, ends before
 //the 14.5 div trace area: zeros past the record end), or withheld 200 samples/div (fits: 15 div), or offered fewer
-//than ten samples per division (fw 0.2.69; 74 cells: 3 at 250 samples/div, 71 below ten samples/div; 4 cells at 200
+//than ten samples per division (fw 0.2.69; 72 cells: 3 at 250 samples/div, 69 below ten samples/div, 200 MSa/s at 20
+//and 10 ns/div being viable again since the issue #2 follow-up; 4 cells at 200
 //withheld; with the one-sample rule of 0.2.64 it was 20 cells, 17 below one sample/div)
 static void test_against_old_table(void)
 {
@@ -158,7 +178,7 @@ static void test_against_old_table(void)
 
   printf("test_tb_view: derived vs 1.00o5 table at 3000 samples: %d cells differ (%d only in the table, %d only derived)\n",
          diff, only_old, only_new);
-  T_EQ(only_old, 74);
+  T_EQ(only_old, 72);
   T_EQ(only_new, 4);
 }
 

@@ -2094,6 +2094,10 @@ void scope_acqusition_settings(int mode)
   //Only display the text when in range of the text array
   if(scopesettings.timeperdiv < (sizeof(time_div_texts) / sizeof(int8 *)))
   {
+    //Issue #2 follow-up: orange while the trace is interpolated (20 and 10 ns/div), as the menu's box
+    if((mode == 0) && acq_view_interpolated())
+      display_set_fg_color(ORANGE_COLOR);
+
     //Display the text from the table
     display_text(ACQ_BUTTON_XPOS + 38, ACQ_BUTTON_YPOS + 19, (int8 *)time_div_texts[scopesettings.timeperdiv]);
   }
@@ -5187,18 +5191,20 @@ void scope_acquisition_timeperdiv_select(void)
 
   display_set_font(&font_2);
 
-  //The short time bases from the slowest (200 ms/div, time_div_texts 11) to the fastest (5 ns/div, 34): cell i is
-  //time/div 34 - i. The chosen one green with black text; the others white where the record can show them (fw 0.2.64:
-  //derived from the record, acq_view.c; fw-stoprate: stopped with a rate pending, where that rate can too), grey where
-  //not (a grey one cannot be chosen)
+  //The short time bases from the fastest (10 ns/div, time_div_texts 33) to the slowest (200 ms/div, 11): cell i is
+  //time/div UI_ACQ_TB_TOP - i. The chosen one green with black text; the others white where the record can show them
+  //(fw 0.2.64: derived from the record, acq_view.c; fw-stoprate: stopped with a rate pending, where that rate can
+  //too), grey where not (a grey one cannot be chosen). Issue #2 follow-up: the interpolated time bases (20 and
+  //10 ns/div, under ten samples a division) are orange in place of white and of green
   for(i = 0; i < UI_ACQ_TB_N; i++)
   {
-    c = ((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i;
+    c = UI_ACQ_TB_TOP - i;
 
     if((c == scopesettings.timeperdiv) && (scopesettings.timeperdiv > 8))
-      acq_grid_cell(UI_ACQ_TB_Y, i, (const char *)time_div_texts[c], GREEN_COLOR, BLACK_COLOR);
+      acq_grid_cell(UI_ACQ_TB_Y, i, (const char *)time_div_texts[c], acq_view_tb_interpolated(c) ? ORANGE_COLOR : GREEN_COLOR, BLACK_COLOR);
     else
-      acq_grid_cell(UI_ACQ_TB_Y, i, (const char *)time_div_texts[c], MIDLEGREY_COLOR, acq_view_tb_ok(c) ? WHITE_COLOR : 0x00686868);
+      acq_grid_cell(UI_ACQ_TB_Y, i, (const char *)time_div_texts[c], MIDLEGREY_COLOR,
+                    !acq_view_tb_ok(c) ? 0x00686868 : acq_view_tb_interpolated(c) ? ORANGE_COLOR : WHITE_COLOR);
   }
 }
 

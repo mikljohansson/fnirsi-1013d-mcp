@@ -106,7 +106,9 @@ with Filter Off reads as its alias, on the trace and on the cards: nothing on th
 
 **Time/div and sample rate.** While the scope is running, the time/div picks the sample rate. Each zoom step takes
 the fastest rate whose record covers the ten divisions with at least ten samples per division. Zooming in ends at
-50 ns/div at 200 MSa/s. Zooming out ends at 200 ms/div, at the border of roll mode. A rate you pick by hand in the ACQ
+10 ns/div at 200 MSa/s. At 20 and 10 ns/div a division holds only four or two samples, so the scope draws the curve
+between them with sin(x)/x interpolation, as bench scopes do, and marks each real sample with a dot; the time/div is
+orange in the ACQ menu and in the top bar while the trace is interpolated. AUTO SET stops at 50 ns/div. Zooming out ends at 200 ms/div, at the border of roll mode. A rate you pick by hand in the ACQ
 menu holds until the next zoom step. When a rate makes the time/div impossible, the time/div snaps to the nearest one
 that works, and "Time/div set to ... for this rate" shows for a few seconds. While stopped, the record on screen keeps
 its rate: the zoom goes only as far as that record allows, then says "Stopped: press RUN to zoom further".

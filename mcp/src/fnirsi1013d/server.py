@@ -2534,7 +2534,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         timebase, trigger). It replaces the settings you or the person at the scope had made: use it to find an
         unknown signal, then refine with scope_set_channel / scope_set_timebase / scope_set_trigger.
 
-        The time/div ends on one the scope's zoom offers (50 ns/div at 200 MSa/s is the fastest). Not available in
+        The time/div ends on one the scope's zoom offers with at least ten samples a division (50 ns/div at 200 MSa/s
+        is the fastest; never the interpolated 20 and 10 ns/div). Not available in
         roll mode, with a Spectrum view or the waveform viewer on the screen, or while a host capture is armed
         (scope_acquisition_control stop first); a Frequency response view is closed first."""
         def go() -> dict[str, Any]:

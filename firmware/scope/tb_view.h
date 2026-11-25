@@ -5,7 +5,7 @@
 // trigger point at column `pos` (scopesettings.triggerhorizontalposition) and the first sample shown
 // F = trig - 1 - ceil(pos / xpps), xpps = 50 x (1 / time per div) / sample rate pixels per sample (1.00o5's formula).
 // A time/div is viable for a sample rate when the record (memory depth x sample period) spans the whole trace area and
-// a division holds at least TBV_MIN_SAMPLES_PER_DIV samples. The functions below derive that from the real record length; they replace
+// a division holds at least TBV_MIN_SAMPLES_PER_DIV samples (TBV_MIN_SAMPLES_FULL at the full rate). The functions below derive that from the real record length; they replace
 // 1.00o5's hand-written viable_time_per_div table (host_tests/test_tb_view.c compares the two).
 //
 // Units: fs = samples per second (sample_rate[]), fpd = divisions per second (frequency_per_div[], 1 / time per div),
@@ -23,7 +23,13 @@
                                          //(the drawing interpolates the last pixel towards column 727)
 #define TBV_PX_PER_DIV           50
 #define TBV_MIN_SAMPLES_PER_DIV  10      //fw 0.2.69 (owner, bench: 100 kSa/s at 10 us/div showed one sample per division
-                                         //and a wobbling interpolated edge): 200 MSa/s reaches 50 ns/div
+                                         //and a wobbling interpolated edge)
+//Issue #2 follow-up (owner 2026-11-25, option C of docs/mockups/acq-fast-timediv.html): at the ADC's own rate no faster
+//rate exists and the front end (about 30 MHz) has band-limited the signal far below half of it, so a division may
+//hold as few as two samples: 200 MSa/s reaches 20 and 10 ns/div, drawn with sin(x)/x interpolation (sinc_view.h) and
+//marked in the ACQ menu and chip. 5 ns/div (one sample a division) stays out. AUTO SET stops at 50 ns/div.
+#define TBV_FULL_RATE            200000000
+#define TBV_MIN_SAMPLES_FULL     2
 
 //Record-position slider under the grid (slider_ov.h; fw 0.2.74, decision 7): the track x 2..727 (726 columns) by
 //y 452..471 with no line of its own; the window a box with a 1 px margin (scope_draw_slider_row). The hit
@@ -39,6 +45,10 @@
 
 //1 when time/div `fpd` is viable at sample rate `fs` for a record of `total` samples
 int tbv_viable(uint32 fs, uint32 fpd, uint32 total);
+
+//1 when a division of time/div `fpd` at rate `fs` holds fewer than TBV_MIN_SAMPLES_PER_DIV samples and is shown all
+//the same: the full rate's fast time bases, where the trace is interpolated
+int tbv_interpolated(uint32 fs, uint32 fpd);
 
 //The viable index of fpd[first..last] nearest to `current` (a tie to the lower index, the slower time/div); `current`
 //itself when viable; -1 when none is

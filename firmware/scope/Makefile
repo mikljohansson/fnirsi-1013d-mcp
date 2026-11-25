@@ -95,6 +95,8 @@ SRCS += disp_rate.c
 SRCS += touch_pick.c
 # fw 0.2.64: the record behind the trace, time/div viability, slider (pure C, host_tests/test_tb_view.c); the ACQ glue
 SRCS += tb_view.c acq_view.c
+# issue #2 follow-up: sin(x)/x interpolation of the trace under ten samples a division (host_tests/test_sinc_view.c)
+SRCS += sinc_view.c sinc_view_lut.c
 # fw 0.2.73: the slider track overview (slider_ov.c pure, host_tests/test_slider_ov.c; slider_ov_draw.c draws)
 SRCS += slider_ov.c slider_ov_draw.c
 # fw 0.2.77: the Spectrum's zoom ladder, span drives the sample rate (pure C, host_tests/test_spec_zoom.c)

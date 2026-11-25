@@ -114,18 +114,22 @@ static void test_ladder(void)
     }
   }
 
-  //The owner's ends at the default depth: 50 ns/div at 200 MSa/s; 200 ms/div at 1 kSa/s (the roll boundary)
-  T_EQ(ladder_end(3000, 1), 31);
+  //The ends at the default depth: 10 ns/div at 200 MSa/s (issue #2 follow-up: 20 and 10 ns/div interpolated; 50 ns/div
+  //before); 200 ms/div at 1 kSa/s (the roll boundary)
+  T_EQ(ladder_end(3000, 1), 33);
   T_EQ(ladder(3000, 31), 0);
-  T_EQ(ladder(3000, 32), -1);
+  T_EQ(ladder(3000, 32), 0);
+  T_EQ(ladder(3000, 33), 0);
+  T_EQ(ladder(3000, 34), -1);
   T_EQ(ladder_end(3000, -1), ACQ_TB_FIRST);
   T_EQ(sample_rate[ladder(3000, ACQ_TB_FIRST)], 1000);
   T_EQ(sample_rate[ladder(16382, 18)], 1000000);            //1 ms/div at 16k: 1 MSa/s, 1000 samples a division
 }
 
 //AUTO SET's result (issue #2): from every time/div it can measure and every rate left before it, the pair is the
-//ladder's, at the nearest slower time/div with a ladder rate (else the nearest faster), and both zoom directions
-//behave as from any ladder pair: 20 ns/div (a 10 MHz signal) becomes 50 ns/div at 200 MSa/s
+//ladder's, at the nearest slower time/div with a ladder rate and ten samples a division (else the nearest faster),
+//and both zoom directions behave as from any ladder pair: 20 ns/div (a 10 MHz signal) becomes 50 ns/div at
+//200 MSa/s, and the hand zooms on from there to the interpolated 20 and 10 ns/div
 static void test_autoset(void)
 {
   uint32 k, total;
@@ -141,12 +145,13 @@ static void test_autoset(void)
       acq_view_autoset(tpd);
 
       want = tpd;
-      while((want > ACQ_TB_FIRST) && (ladder(total, want) < 0))
+      while((want > ACQ_TB_FIRST) && ((ladder(total, want) < 0) || acq_view_tb_interpolated((uint32)want)))
         want--;
       while((want < ACQ_TB_LAST) && (ladder(total, want) < 0))
         want++;
 
       T_EQ(scopesettings.timeperdiv, want);
+      T_TRUE(!acq_view_interpolated());
       check_pair(total);
 
       //Out and back in: the time/div AUTO SET chose is reachable again
@@ -162,7 +167,31 @@ static void test_autoset(void)
   acq_view_autoset(32);
   T_EQ(scopesettings.timeperdiv, 31);
   T_EQ(scopesettings.samplerate, 0);
-  T_EQ(acq_view_zoom(1, 1), 0);
+  T_TRUE(!acq_view_interpolated());
+
+  //By hand from there: 20 ns/div, 10 ns/div (interpolated, 200 MSa/s), then the end; and back out
+  T_EQ(acq_view_zoom(1, 1), ACQ_SET_TB); T_EQ(scopesettings.timeperdiv, 32); T_TRUE(acq_view_interpolated());
+  T_EQ(acq_view_zoom(1, 1), ACQ_SET_TB); T_EQ(scopesettings.timeperdiv, 33); T_TRUE(acq_view_interpolated());
+  T_EQ(scopesettings.samplerate, 0);
+  T_EQ(acq_view_zoom(1, 1), 0);          T_EQ(scopesettings.timeperdiv, 33);
+  T_EQ(acq_view_zoom(-1, 1), ACQ_SET_TB); T_EQ(acq_view_zoom(-1, 1), ACQ_SET_TB);
+  T_EQ(scopesettings.timeperdiv, 31);    T_TRUE(!acq_view_interpolated());
+
+  //The menu's marking: 20 and 10 ns/div only; a box at 200 MSa/s is not one because of its rate
+  T_TRUE(acq_view_tb_interpolated(32) && acq_view_tb_interpolated(33));
+  T_TRUE(!acq_view_tb_interpolated(31) && !acq_view_tb_interpolated(34) && !acq_view_tb_interpolated(11));
+  T_TRUE(acq_view_tb_ok(32) && acq_view_tb_ok(33) && !acq_view_tb_ok(34));
+
+  //Stopped at 100 MSa/s the record cannot show them; stopped at 200 MSa/s it can
+  state(3000, 1, 30, 0);
+  T_TRUE(!acq_view_tb_ok(32) && !acq_view_tb_ok(33));
+  state(3000, 0, 31, 0);
+  T_TRUE(acq_view_tb_ok(32) && acq_view_tb_ok(33));
+  T_EQ(acq_view_zoom(1, 0), ACQ_SET_TB); T_EQ(scopesettings.timeperdiv, 32); T_TRUE(acq_view_interpolated());
+
+  //Roll or another rate: not interpolated
+  scopesettings.samplerate = 1;
+  T_TRUE(!acq_view_interpolated());
 
   //Roll: left alone
   state(3000, 5, 23, 1);

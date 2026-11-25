@@ -16,7 +16,7 @@ CMDS_SRCS  := $(SRC)/pc_cmds.c $(SRC)/gen_pat.c $(SRC)/enc_heal.c $(SRC)/cap_sta
 CMDS_DEPS  := $(CMDS_SRCS) $(PROTO_SRCS) $(SRC)/disp_rate.h $(SRC)/enc_heal.h $(SRC)/pc_cmds.h $(SRC)/pc_hal.h $(SRC)/pc_decim.h $(SRC)/pc_seq.h $(SRC)/adc_cal.h $(SRC)/acal_track.h $(SRC)/pc_protocol.h $(SRC)/pc_ident.h $(SRC)/pc_report.h $(SRC)/pc_life.h $(SRC)/gen_pat.h mock_hal.h test_util.h
 
 .PHONY: all test test-arm vectors clean
-all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_cap_hw $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll $(OUT)/test_settings
+all: $(OUT)/test_protocol $(OUT)/test_rx_ring $(OUT)/vector_check $(OUT)/decim_check $(OUT)/test_session $(OUT)/test_session_debug $(OUT)/fft_cli $(OUT)/test_spec_fmt $(OUT)/test_adc_cal $(OUT)/test_phosphor $(OUT)/test_mmu $(OUT)/test_usbw $(OUT)/test_acal_track $(OUT)/test_cal_wizard $(OUT)/test_enc_heal $(OUT)/test_cap_stage $(OUT)/test_cap_hw $(OUT)/test_diag $(OUT)/test_ui $(OUT)/test_touch_pick $(OUT)/test_tb_view $(OUT)/test_seq $(OUT)/seq_check $(OUT)/test_ui_diag $(OUT)/bode_cli $(OUT)/test_bode_sweep $(OUT)/test_fpga_bus $(OUT)/test_slider_ov $(OUT)/test_acq_view $(OUT)/test_sinc_view $(OUT)/test_spec_zoom $(OUT)/test_trig_ui $(OUT)/test_peak_bars $(OUT)/test_log $(OUT)/test_roll $(OUT)/test_settings
 
 $(OUT):
 	mkdir -p $@
@@ -85,6 +85,10 @@ $(OUT)/test_diag: test_diag.c test_util.h $(CMDS_DEPS) $(SRC)/settings_check.c $
 # Plot touch geometry: pointer position, left handle column, channel pick, shared move (fw 0.2.54)
 $(OUT)/test_touch_pick: test_touch_pick.c test_util.h $(SRC)/touch_pick.c $(SRC)/touch_pick.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_touch_pick.c $(SRC)/touch_pick.c
+
+# sin(x)/x interpolation of the trace at the fastest time bases (issue #2 follow-up): the taps and the curve
+$(OUT)/test_sinc_view: test_sinc_view.c test_util.h $(SRC)/sinc_view.c $(SRC)/sinc_view_lut.c $(SRC)/sinc_view.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_sinc_view.c $(SRC)/sinc_view.c $(SRC)/sinc_view_lut.c -lm
 
 # The record behind the trace (fw 0.2.64): time/div viability from the record length, window, slider
 $(OUT)/test_tb_view: test_tb_view.c test_util.h $(SRC)/tb_view.c $(SRC)/tb_view.h | $(OUT)
@@ -201,6 +205,8 @@ test: all
 	$(OUT)/test_tb_view
 	$(OUT)/test_slider_ov
 	$(OUT)/test_acq_view
+	$(OUT)/test_sinc_view
+	$(PYTHON) -I ../../tools/gen_sinc_table.py --check ../sinc_view_lut.c
 	$(OUT)/test_spec_zoom
 	$(OUT)/test_trig_ui
 	$(OUT)/test_peak_bars

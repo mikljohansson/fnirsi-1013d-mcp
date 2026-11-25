@@ -2284,14 +2284,15 @@ static const ui_acq_row *acq(int roll, int average, int filter_on, int peak, int
 }
 
 //fw-acqui (owner 2026-10-21): the Sample Rate and Time per Division grids in five columns. The texts as variables.c has
-//them (the rates 0..17, the time/divs 34 down to 11, the order the grid shows them)
+//them (the rates 0..17, the time/divs 33 down to 11, the order the grid shows them; issue #2 follow-up: 5 ns/div, never
+//selectable, is not in the grid)
 static void test_acq_grid(void)
 {
   static const char *rates[UI_ACQ_RATE_N] = { "200MSa/s", "100MSa/s", "50MSa/s", "20MSa/s", "10MSa/s", "5MSa/s", "2MSa/s",
     "1MSa/s", "500KSa/s", "200KSa/s", "100KSa/s", "50KSa/s", "20KSa/s", "10KSa/s", "5KSa/s", "2KSa/s", "1KSa/s", "500Sa/s" };
   static const char *tbs[UI_ACQ_TB_N] = { "200ms/div", "100ms/div", "50ms/div", "20ms/div", "10ms/div", "5ms/div",
     "2ms/div", "1ms/div", "500us/div", "200us/div", "100us/div", "50us/div", "20us/div", "10us/div", "5us/div", "2us/div",
-    "1us/div", "500ns/div", "200ns/div", "100ns/div", "50ns/div", "20ns/div", "10ns/div", "5ns/div" };
+    "1us/div", "500ns/div", "200ns/div", "100ns/div", "50ns/div", "20ns/div", "10ns/div" };
   uint32 i, widest = 0;
 
   //Five columns spanning x + 8 .. 394, as the row of four boxes does, left of the Memory column's rule
@@ -2303,7 +2304,7 @@ static void test_acq_grid(void)
   T_EQ(UI_ACQ_GRID_DY(5), 28);
 
   //Rates: four rows (5, 5, 5, 3) under the heading (16 px at y + 8) and above the rule at y + 155; time/divs: five rows
-  //(5 x 4 + 4) under their heading at y + 216 (16 px) and inside the 386 px menu (its edge at y + 385)
+  //(5 x 4 + 3) under their heading at y + 216 (16 px) and inside the 386 px menu (its edge at y + 385)
   T_EQ((UI_ACQ_RATE_N - 1) / UI_ACQ_GRID_COLS, 3);
   T_TRUE(UI_ACQ_RATE_Y >= 8 + 16 + 4);
   T_TRUE(UI_ACQ_RATE_Y + UI_ACQ_GRID_DY(UI_ACQ_RATE_N - 1) + UI_ACQ_GRID_H + 8 <= 155);
@@ -2342,8 +2343,9 @@ static void test_acq_grid(void)
   T_EQ(ui_acq_grid_at(250, 117, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);         //no 19th rate
   T_EQ(ui_acq_grid_at(40, 32, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);
   T_EQ(ui_acq_grid_at(40, 241, UI_ACQ_TB_Y, UI_ACQ_TB_N), 0);
-  T_EQ(ui_acq_grid_at(250, 353, UI_ACQ_TB_Y, UI_ACQ_TB_N), 23);
-  T_EQ(ui_acq_grid_at(330, 353, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);             //no 25th time/div
+  T_EQ(ui_acq_grid_at(170, 353, UI_ACQ_TB_Y, UI_ACQ_TB_N), 22);
+  T_EQ(ui_acq_grid_at(250, 353, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);             //no 24th time/div
+  T_EQ(UI_ACQ_TB_TOP - (UI_ACQ_TB_N - 1), 11);                              //the last cell is 200 ms/div
   T_EQ(ui_acq_grid_at(250, 378, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);
   T_EQ(ui_acq_grid_at(40, 180, UI_ACQ_TB_Y, UI_ACQ_TB_N), -1);
   T_EQ(ui_acq_grid_at(420, 40, UI_ACQ_RATE_Y, UI_ACQ_RATE_N), -1);           //the Memory column

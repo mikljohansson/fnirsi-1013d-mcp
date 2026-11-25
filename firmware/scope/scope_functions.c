@@ -27,6 +27,7 @@
 #include "sin_cos_math.h"
 #include "tb_view.h"
 #include "acq_view.h"
+#include "sinc_view.h"
 #include "trig_ui.h"
 #include "peak_bars.h"
 #include "ref_and_math.h"
@@ -2186,7 +2187,10 @@ void scope_display_trace_data(void)
       switch(scopesettings.ACQ_trace)
       { 
                 //Linear trace mode
-        case 0: scope_display_channel_linear_trace_old(&scopesettings.channel1); break; // // scope_display_channel_sinx_trace, scope_display_channel_linear_trace
+        //(issue #2 follow-up: interpolated with sin(x)/x under ten samples a division, 20 and 10 ns/div)
+        case 0: if(acq_view_interpolated()) scope_display_channel_sinc_trace(&scopesettings.channel1);
+                else scope_display_channel_linear_trace_old(&scopesettings.channel1);
+                break;
                 //Dots trace mode
         case 1: scope_display_channel_dots_trace(&scopesettings.channel1); break;
                 //Peak x trace mode
@@ -2219,7 +2223,9 @@ void scope_display_trace_data(void)
               switch(scopesettings.ACQ_trace)
       { 
                 //Linear trace mode
-        case 0: scope_display_channel_linear_trace_old(&scopesettings.channel2); break; // scope_display_channel_linear_trace
+        case 0: if(acq_view_interpolated()) scope_display_channel_sinc_trace(&scopesettings.channel2);
+                else scope_display_channel_linear_trace_old(&scopesettings.channel2);
+                break;
                 //Dots trace mode
         case 1: scope_display_channel_dots_trace(&scopesettings.channel2); break;
                 //Peak x trace mode
@@ -2656,6 +2662,82 @@ void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings)  //povodn
   }
 }
  
+//==============================================================================
+//Issue #2 follow-up (option C of docs/mockups/acq-fast-timediv.html): the Linear trace at the full rate's fast time
+//bases (20 and 10 ns/div: a sample every 12.5 or 25 px). The curve between the samples is computed with sin(x)/x
+//interpolation (sinc_view.h) on the samples' screen y, one point a pixel column, and every real sample is marked with
+//a 3 x 3 dot, so what was measured and what was computed can be told apart. The trace points are the samples, as
+//the Linear trace stores them.
+#define SINC_TRACE_SAMPLES   192     //724 px at more than 5 px a sample: under 146 samples, and the taps' lead and tail
+
+void scope_display_channel_sinc_trace(PCHANNELSETTINGS settings)
+{
+  static int16   v[SINC_TRACE_SAMPLES];
+  PDISPLAYPOINTS tracepoints = settings->tracepoints;
+  uint32         step = (uint32)(disp_sample_step * 65536.0 + 0.5);     //samples per pixel column, Q16
+  int32          total = fpgasettings.totalsamples;
+  int32          lead, base, n, i, x, y, lastx, lasty;
+
+  settings->noftracepoints = 0;
+
+  if((disp_xend <= disp_xstart) || (step == 0) || (step > 65536) || (disp_first_sample < 0) || (disp_first_sample >= total))
+    return;
+
+  //The samples under the trace area, with up to four before and after them for the taps
+  lead = (disp_first_sample < SINCV_TAPS / 2) ? disp_first_sample : SINCV_TAPS / 2;
+  base = disp_first_sample - lead;
+  n    = lead + (int32)((((uint32)(disp_xend - disp_xstart)) * step) >> 16) + 2 + SINCV_TAPS / 2;
+
+  if(n > SINC_TRACE_SAMPLES)
+    n = SINC_TRACE_SAMPLES;
+
+  if(base + n > total)
+    n = total - base;
+
+  for(i = 0; i < n; i++)
+    v[i] = (int16)scope_get_y_sample(settings, base + i);
+
+  //The curve, a point for every pixel column, to the record's end at most
+  lastx = disp_xstart;
+  lasty = v[lead];
+
+  for(x = disp_xstart + 1; x < disp_xend; x++)
+  {
+    uint32 pos = ((uint32)lead << 16) + (uint32)(x - disp_xstart) * step;
+
+    if((int32)(pos >> 16) > n - 1)
+      break;
+
+    y = sincv_at(v, n, pos);
+
+    //The curve overshoots a fast edge by a few pixels: kept inside the trace area
+    if(y < 49)
+      y = 49;
+    else if(y > 448)
+      y = 448;
+
+    display_draw_line(lastx, lasty, x, y);
+    lastx = x;
+    lasty = y;
+  }
+
+  //The samples themselves
+  for(i = lead; i < n; i++)
+  {
+    x = disp_xstart + (int32)((((uint32)(i - lead) << 16) + (step >> 1)) / step);
+
+    if(x >= disp_xend)
+      break;
+
+    tracepoints->x = x;
+    tracepoints->y = v[i];
+    tracepoints++;
+    settings->noftracepoints++;
+
+    display_fill_rect(x - 1, v[i] - 1, 3, 3);
+  }
+}
+
 //==============================================================================
 void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
 {

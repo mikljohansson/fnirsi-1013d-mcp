@@ -1,0 +1,287 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ACQ Fast Time/div Options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a short brief, then four device mock-ups side by side in a 2 x 2 grid (one column when narrow),
+   each = the ACQ menu at its real 478 px, the top bar's ACQ chip and a 10 MHz trace as that option draws it;
+   then a comparison table and the two open decisions. The device panels keep the scope's own colours in both themes. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --fg: #16201d;
+  --muted: #5a6763;
+  --rule: #d5dbd8;
+  --accent: #0b7a5c;
+  --accent-soft: #dff1ea;
+  --warn: #a35a00;
+  /* the scope's screen: fixed, it is a picture of the device */
+  --dev-bg: #000000;
+  --dev-menu: #1e1e1e;
+  --dev-cell: #3b3b3b;
+  --dev-text: #ffffff;
+  --dev-dead: #686868;
+  --dev-green: #00e000;
+  --dev-yellow: #ffff00;
+  --dev-caution: #ff9a1f;
+  --dev-grid: #2c2c2c;
+  --dev-rule: #555555;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: Inter, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111615; --surface: #1a2120; --fg: #e6ecea; --muted: #9aa8a4; --rule: #2e3937;
+    --accent: #4fd0a8; --accent-soft: #17332b; --warn: #f0a94a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111615; --surface: #1a2120; --fg: #e6ecea; --muted: #9aa8a4; --rule: #2e3937;
+  --accent: #4fd0a8; --accent-soft: #17332b; --warn: #f0a94a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.55 var(--font-body);
+  padding-block: 32px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font: 600 28px/1.2 var(--font-display); margin: 0; text-wrap: balance; }
+h2 { font: 600 19px/1.25 var(--font-display); margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); }
+.brief { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font: 600 12px/1 var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.hint { font-size: 13px; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 500px), 1fr)); gap: 20px; }
+.opt { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; min-width: 0;
+       display: flex; flex-direction: column; gap: 12px; }
+.opt.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.opt header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tag { font: 600 12px/1 var(--font-mono); padding: 5px 8px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); }
+.rec { font: 600 12px/1 var(--font-body); color: var(--accent); margin-left: auto; }
+.opt p { font-size: 14px; color: var(--muted); }
+.scroll { overflow-x: auto; }
+.device { width: 478px; background: var(--dev-bg); padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 0; }
+.chip { display: flex; align-items: stretch; background: var(--dev-cell); border-radius: 3px; overflow: hidden; height: 36px;
+        font: 700 11px/1.15 var(--font-body); color: var(--dev-text); }
+.chip b { background: var(--dev-green); color: #000; display: flex; align-items: center; padding: 0 5px; font-weight: 700; }
+.chip span { padding: 4px 8px; display: flex; flex-direction: column; justify-content: center; white-space: nowrap; }
+.chip .caution { color: var(--dev-caution); }
+.barnote { font: 500 11px/1.2 var(--font-body); color: #9a9a9a; }
+.menu { position: relative; width: 478px; height: 392px; background: var(--dev-menu); font: 700 12px/1 var(--font-body); color: var(--dev-text); }
+.menu .head { position: absolute; font-size: 13px; }
+.menu .rule { position: absolute; height: 1px; background: var(--dev-rule); }
+.menu .vrule { position: absolute; width: 1px; background: var(--dev-rule); }
+.cell { position: absolute; width: 74px; height: 25px; border-radius: 3px; background: var(--dev-cell); color: var(--dev-text);
+        display: flex; align-items: center; justify-content: center; border: 0; font: inherit; padding: 0; cursor: pointer; }
+.cell.static { cursor: default; }
+.cell.dead { color: var(--dev-dead); cursor: default; }
+.cell.on { background: var(--dev-green); color: #000; }
+.cell.caution { color: var(--dev-caution); box-shadow: inset 0 0 0 1px var(--dev-caution); }
+.cell.caution.on { background: var(--dev-caution); color: #000; box-shadow: none; }
+.cell:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.box { position: absolute; width: 92px; height: 40px; border-radius: 3px; background: var(--dev-cell);
+       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.mem { position: absolute; width: 56px; height: 25px; border-radius: 3px; background: var(--dev-cell);
+       display: flex; align-items: center; justify-content: center; }
+.mem.on { background: var(--dev-yellow); color: #000; }
+.small { position: absolute; font-size: 11px; line-height: 1.5; }
+.trace { display: block; width: 478px; height: 150px; background: var(--dev-bg); }
+.cap { font: 500 13px/1.4 var(--font-body); color: var(--fg); }
+.cap em { font-style: normal; color: var(--warn); font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+th { font: 600 12px/1.3 var(--font-body); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+.tablebox { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; }
+.decide { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.decide div { border-top: 2px solid var(--accent); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.decide strong { font: 600 15px/1.3 var(--font-display); }
+.decide p { font-size: 14px; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 14px; }
+</style>
+
+<div class="wrap">
+  <div class="brief">
+    <span class="eyebrow">FNIRSI 1013D &middot; issue #2 follow-up</span>
+    <h1>What the ACQ menu should offer faster than 50 ns/div</h1>
+    <p class="lede">The scope samples at 200 MSa/s, so 20 ns/div holds four samples per division. Today the firmware
+      requires ten, which leaves three permanently grey boxes. The reporter asks to allow 20 ns/div by hand, mark it, and
+      drop the faster ones. Each panel below shows the menu, the top bar's ACQ chip and a 10 MHz square wave from the
+      calibration post as that option would draw it.</p>
+    <p class="hint">Tap the time/div boxes in any panel. The sample rate follows as on the scope (3000 samples of memory).</p>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section>
+    <h2>Side by side</h2>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>Option</th><th>Fastest time/div</th><th>How 20 ns/div looks</th><th>Work</th><th>Main risk</th></tr></thead>
+        <tbody>
+          <tr><td>Today (0.3.5)</td><td>50 ns/div</td><td>Not selectable; three grey boxes</td><td>None</td><td>Dead boxes read as a fault; the reporter's request stays open</td></tr>
+          <tr><td>A &middot; tidy</td><td>50 ns/div</td><td>Not offered</td><td>Small: the grid loses three boxes</td><td>Says no to the request</td></tr>
+          <tr><td>B &middot; allow and mark</td><td>20 ns/div</td><td>Five straight segments per 10 MHz period, drawn orange in menu and chip</td><td>Small to medium: one exception in the rate rule, the marking, host tests</td><td>A coarse trace that people may read as the signal's real shape</td></tr>
+          <tr><td>C &middot; allow and interpolate</td><td>10 ns/div</td><td>A smooth curve through the samples, sample points shown</td><td>Medium to large: sin(x)/x drawing on a CPU with no FPU, a bench session</td><td>Interpolation invents detail when the input is not band-limited; drawing speed</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Two decisions before any code</h2>
+    <div class="decide">
+      <div>
+        <strong>Where the exception applies</strong>
+        <p>Only at 200 MSa/s, where no faster rate exists and the 30 MHz front end has already band-limited the signal.
+          Or also when zooming into a stopped record at any rate, which is magnification of data already captured.
+          The mock-ups show the first.</p>
+      </div>
+      <div>
+        <strong>How it is marked</strong>
+        <p>The mock-ups use orange text with an outline in the menu, an orange fill when chosen, and an orange time/div
+          in the ACQ chip. Orange is already the trigger chip's frequency colour, so a different hue or a small tag
+          ("x2.5 zoom") may read better.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var NAMES = ["5ns","10ns","20ns","50ns","100ns","200ns","500ns","1us","2us","5us","10us","20us","50us","100us",
+               "200us","500us","1ms","2ms","5ms","10ms","20ms","50ms","100ms","200ms"];
+  var SECS  = [5e-9,1e-8,2e-8,5e-8,1e-7,2e-7,5e-7,1e-6,2e-6,5e-6,1e-5,2e-5,5e-5,1e-4,2e-4,5e-4,1e-3,2e-3,5e-3,1e-2,2e-2,5e-2,.1,.2];
+  var RATES = [200e6,100e6,50e6,20e6,10e6,5e6,2e6,1e6,500e3,200e3,100e3,50e3,20e3,10e3,5e3,2e3,1e3,500];
+  var RNAME = ["200MSa/s","100MSa/s","50MSa/s","20MSa/s","10MSa/s","5MSa/s","2MSa/s","1MSa/s","500KSa/s","200KSa/s",
+               "100KSa/s","50KSa/s","20KSa/s","10KSa/s","5KSa/s","2KSa/s","1KSa/s","500Sa/s"];
+  var TOTAL = 3000, W = 478, H = 150, F = 10e6;
+
+  var OPTS = [
+    { id: "now", tag: "Today", title: "0.3.5 as released", first: 0, floor: 10, sinc: false, start: 3,
+      text: "5, 10 and 20 ns/div are drawn but can never be chosen. AUTO SET and the zoom both stop at 50 ns/div." },
+    { id: "a", tag: "A", title: "Tidy: remove the dead boxes", first: 3, floor: 10, sinc: false, start: 3,
+      text: "Same behaviour as today with the three grey boxes gone. The grid starts at 50 ns/div." },
+    { id: "b", tag: "B", title: "Allow 20 ns/div, marked", first: 2, floor: 4, sinc: false, start: 2, pick: true,
+      text: "20 ns/div can be chosen by hand or by zoom at 200 MSa/s. It is orange in the menu and the chip. AUTO SET still stops at 50 ns/div. 10 and 5 ns/div are removed." },
+    { id: "c", tag: "C", title: "Allow 20 and 10 ns/div, interpolated", first: 1, floor: 2, sinc: true, start: 2,
+      text: "As B, and below ten samples per division the trace is drawn with sin(x)/x interpolation, the way bench scopes do. 5 ns/div is removed." }
+  ];
+
+  function perDiv(t, r) { return SECS[t] * RATES[r]; }
+  // the firmware's ladder: the fastest rate with enough samples per division whose record covers the screen
+  function ladder(t, floor) {
+    for (var r = 0; r < RATES.length; r++) {
+      var need = (r === 0) ? floor : 10;
+      if (perDiv(t, r) >= need && Math.floor(perDiv(t, r) * 724 / 50) <= TOTAL - 1) return r;
+    }
+    return -1;
+  }
+  // the calibration post's 10 MHz square through a 30 MHz single-pole front end
+  function sig(t) {
+    var v = 0;
+    for (var k = 1; k <= 9; k += 2) {
+      var x = k * F / 30e6;
+      v += (4 / Math.PI) / k / Math.sqrt(1 + x * x) * Math.sin(2 * Math.PI * k * F * t - Math.atan(x));
+    }
+    return v;
+  }
+  function el(tag, cls, html) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+  function place(e, x, y) { e.style.left = x + "px"; e.style.top = y + "px"; return e; }
+
+  function drawTrace(svg, o, t, r) {
+    var spp = SECS[t] / 50, dt = 1 / RATES[r], mid = H / 2, amp = 46, s = "";
+    for (var gx = 0; gx <= W; gx += 50) s += '<line x1="' + gx + '" y1="0" x2="' + gx + '" y2="' + H + '" stroke="var(--dev-grid)" stroke-width="1"/>';
+    for (var gy = mid % 50; gy <= H; gy += 50) s += '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="var(--dev-grid)" stroke-width="1"/>';
+    var smooth = o.sinc && perDiv(t, r) < 10, pts = [], i, x;
+    if (smooth) {
+      for (x = 0; x <= W; x++) pts.push(x + "," + (mid - amp * sig(x * spp)).toFixed(1));
+    } else {
+      var n = Math.ceil(W * spp / dt) + 1;
+      for (i = 0; i <= n; i++) pts.push((i * dt / spp).toFixed(1) + "," + (mid - amp * sig(i * dt)).toFixed(1));
+    }
+    s += '<polyline fill="none" stroke="var(--dev-yellow)" stroke-width="1.5" points="' + pts.join(" ") + '"/>';
+    if (smooth) {
+      var m = Math.ceil(W * spp / dt);
+      for (i = 0; i <= m; i++)
+        s += '<circle cx="' + (i * dt / spp).toFixed(1) + '" cy="' + (mid - amp * sig(i * dt)).toFixed(1) + '" r="2.2" fill="var(--dev-yellow)"/>';
+    }
+    svg.innerHTML = s;
+  }
+
+  function build(o) {
+    var card = el("article", "opt" + (o.pick ? " pick" : ""));
+    var head = el("header", "", '<span class="tag">' + o.tag + '</span><h2>' + o.title + '</h2>' +
+                  (o.pick ? '<span class="rec">Recommended first step</span>' : ""));
+    card.appendChild(head);
+    card.appendChild(el("p", "", o.text));
+    var scroll = el("div", "scroll"), dev = el("div", "device");
+    var bar = el("div", "bar"), chip = el("div", "chip"), note = el("span", "barnote", "top bar");
+    bar.appendChild(chip); bar.appendChild(note);
+    var menu = el("div", "menu");
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "trace"); svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("role", "img");
+    dev.appendChild(bar); dev.appendChild(menu); dev.appendChild(svg);
+    scroll.appendChild(dev); card.appendChild(scroll);
+    var cap = el("div", "cap"); card.appendChild(cap);
+    var state = { t: o.start };
+
+    function render() {
+      var r = ladder(state.t, o.floor), i, c;
+      menu.innerHTML = "";
+      menu.appendChild(place(el("div", "head", "Sample Rate"), 160, 9));
+      menu.appendChild(place(el("div", "head", "Memory"), 415, 9));
+      for (i = 0; i < RATES.length; i++) {
+        c = el("div", "cell static" + (i === r ? " on" : ""), RNAME[i]);
+        menu.appendChild(place(c, 8 + 78 * (i % 5), 33 + 28 * Math.floor(i / 5)));
+      }
+      for (i = 0; i < 5; i++)
+        menu.appendChild(place(el("div", "mem" + (i === 0 ? " on" : ""), String(3000 * (i + 1))), 413, 33 + 36 * i));
+      var v = el("div", "vrule"); v.style.height = "392px"; menu.appendChild(place(v, 402, 0));
+      var h1 = el("div", "rule"); h1.style.width = "386px"; menu.appendChild(place(h1, 8, 153));
+      var boxes = [["Roll", "mode"], ["Average", "mode"], ["Filter", "Off"], ["Sample", "Normal"]];
+      for (i = 0; i < 4; i++)
+        menu.appendChild(place(el("div", "box", "<span>" + boxes[i][0] + "</span><span>" + boxes[i][1] + "</span>"), 8 + 98 * i, 163));
+      var h2 = el("div", "rule"); h2.style.width = "386px"; menu.appendChild(place(h2, 8, 211));
+      menu.appendChild(place(el("div", "head", "Time per Division"), 145, 220));
+      menu.appendChild(place(el("div", "small", "Pass time<br>16 ms"), 410, 218));
+      for (i = o.first; i < NAMES.length; i++) {
+        var n = i - o.first, ok = ladder(i, o.floor) >= 0, few = ok && perDiv(i, ladder(i, o.floor)) < 10;
+        c = el(ok ? "button" : "div", "cell" + (ok ? "" : " dead") + (few ? " caution" : "") + (i === state.t ? " on" : ""), NAMES[i] + "/div");
+        if (ok) {
+          c.type = "button"; c.id = o.id + "-tb-" + i;
+          c.addEventListener("click", (function (k) { return function () { state.t = k; render(); }; })(i));
+        }
+        menu.appendChild(place(c, 8 + 78 * (n % 5), 245 + 28 * Math.floor(n / 5)));
+      }
+      var pd = perDiv(state.t, r), fewNow = pd < 10;
+      chip.innerHTML = "<b>ACQ</b><span><span>" + RNAME[r] + '</span><span' + (fewNow ? ' class="caution"' : "") + ">" +
+                       NAMES[state.t] + "/div" + (fewNow && o.sinc ? " sin x/x" : "") + "</span></span>";
+      drawTrace(svg, o, state.t, r);
+      svg.setAttribute("aria-label", "10 MHz square wave at " + NAMES[state.t] + " per division");
+      var per = 1 / F / SECS[state.t];
+      cap.innerHTML = "10 MHz at " + NAMES[state.t] + "/div: " + (per >= 0.1 ? per.toFixed(per < 10 ? 1 : 0) + " divisions per period, " : "") +
+        (pd >= 1 ? pd.toFixed(pd < 10 ? 1 : 0) : pd.toFixed(2)) + " samples per division" +
+        (fewNow ? (o.sinc ? ". <em>Curve interpolated between the dots.</em>" : ". <em>Straight lines between few samples.</em>") : ".");
+    }
+    render();
+    return card;
+  }
+
+  var grid = document.getElementById("grid");
+  for (var i = 0; i < OPTS.length; i++) grid.appendChild(build(OPTS[i]));
+})();
+</script>

@@ -2629,14 +2629,14 @@ void handle_acquisition_menu_touch(void)
         //Check on time per div being set
         else if(ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_TB_Y, UI_ACQ_TB_N) >= 0)
         {
-          //fw-acqui: the five-column grid, cell i is time/div 34 - i (menu.c scope_acquisition_timeperdiv_select).
+          //fw-acqui: the five-column grid, cell i is time/div UI_ACQ_TB_TOP - i (menu.c scope_acquisition_timeperdiv_select).
           //Set the new time per div, the trigger point kept inside the record (fw 0.2.68: acq_view_set_tb, the path the
           //snap after a rate change takes too; fw 0.2.64: a grey, not viable, time/div cannot be chosen). fw 0.2.76:
           //running or in Single, the ladder's rate for it comes with it (docs/ui-guidelines.md section 2, "Time/div
           //drives the sample rate")
           i = ui_acq_grid_at(xtouch - ACQ_MENU_XPOS, ytouch - ACQ_MENU_YPOS, UI_ACQ_TB_Y, UI_ACQ_TB_N);
 
-          int r = acq_view_set_tb(((sizeof(time_div_texts) / sizeof(int8 *)) - 1) - i);
+          int r = acq_view_set_tb(UI_ACQ_TB_TOP - i);
 
           if(r)
           {

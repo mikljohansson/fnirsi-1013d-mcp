@@ -278,7 +278,7 @@ the enabled channels, the trigger level and the time/div from the signal on the 
 the Scope view does (up to a few seconds; relays click). No parameters. Returns `run_state`, `channels`, `timebase`
 and `trigger` as `get_config` does, with a caveat that the earlier settings were replaced. Use it to find an unknown
 signal, then refine with `set_channel` / `set_timebase` / `set_trigger`. The time/div ends on one the scope's zoom
-offers (50 ns/div at 200 MSa/s is the fastest). Refused in roll mode, with a Spectrum view or the waveform viewer on
+offers with at least ten samples a division (50 ns/div at 200 MSa/s is the fastest; never the interpolated 20 and 10 ns/div). Refused in roll mode, with a Spectrum view or the waveform viewer on
 the screen, while a host capture is armed, and on firmware before protocol 1.31 (press the button at the scope).
 
 **`acquisition_control`** (tier 1). Low-level control for agents that want to arm, do something else (e.g.

@@ -11,6 +11,14 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Firmware
+
+- 20 ns/div and 10 ns/div can be chosen at 200 MSa/s, by the zoom and in the ACQ menu (GitHub issue #2 follow-up).
+  A division holds four or two samples there, so the scope draws the curve between the samples with sin(x)/x
+  interpolation, as bench scopes do, and marks every real sample with a dot. The time/div is orange in the ACQ menu
+  and in the top bar while the trace is interpolated. AUTO SET still stops at 50 ns/div. The 5 ns/div box, which
+  could never be chosen, is gone from the menu. Dots and Bars trace styles draw as before.
+
 ### Host (mcp)
 
 - `scope_generator` and `scope_sweep` say what a load on the pin does to the readings: a load that is grounded on

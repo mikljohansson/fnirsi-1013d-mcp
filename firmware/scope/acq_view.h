@@ -82,10 +82,17 @@ int acq_view_set_tb(uint32 timeperdiv);
 int acq_view_zoom(int dir, int rate_free);
 
 //AUTO SET's result (issue #2): the time/div it measured, `timeperdiv`, moved onto the ladder (the nearest slower
-//time/div with a ladder rate, e.g. 50 ns/div for 20 ns/div; else the nearest faster one) with the ladder's rate, the
-//pair a tap zoom or a time/div box would leave. AUTO SET wrote 1.00o5's index-to-rate table before, which reaches
-//20 ns/div: a time/div the zoom could leave but never return to. The caller writes the FPGA's rate. Short mode only.
+//time/div with a ladder rate that holds ten samples a division, so 50 ns/div for 20 or 10 ns/div: AUTO SET shows
+//what the samples show and leaves the interpolated time bases to the hand; else the nearest faster one) with the
+//ladder's rate, the pair a tap zoom or a time/div box would leave. AUTO SET wrote 1.00o5's index-to-rate table before.
+//The caller writes the FPGA's rate. Short mode only.
 void acq_view_autoset(int32 timeperdiv);
+
+//Issue #2 follow-up: 1 when time/div index `timeperdiv` is one of the full rate's interpolated time bases (20 and
+//10 ns/div: fewer than ten samples a division; orange in the ACQ menu), and 1 when the pair on screen now is one
+//(the trace is drawn with sin(x)/x interpolation, the ACQ chip's time/div is orange)
+int acq_view_tb_interpolated(uint32 timeperdiv);
+int acq_view_interpolated(void);
 
 //fw 0.2.77, the Spectrum's span sets the rate (spec_ladder.h): the short-mode time/div to pair with sample_rate[r]: the
 //one nearest the current time/div whose ladder rate is r, else the nearest viable at r (tbv_snap); -1 when none is

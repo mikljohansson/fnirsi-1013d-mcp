@@ -145,7 +145,8 @@ extern const char *const ui_run_action[2];                        //[0] stopped:
 #define UI_ACQ_RATE_N         18
 #define UI_ACQ_TB_HEAD_Y      216
 #define UI_ACQ_TB_Y           241
-#define UI_ACQ_TB_N           24
+#define UI_ACQ_TB_N           23      //200 ms/div .. 10 ns/div (issue #2 follow-up: 5 ns/div, never selectable, is gone)
+#define UI_ACQ_TB_TOP         33      //the time/div index of cell 0, the fastest (10 ns/div); cell i is UI_ACQ_TB_TOP - i
 #define UI_ACQ_BOX_LINE1_Y    168
 #define UI_ACQ_BOX_LINE2_Y    182
 #define UI_ACQ_ROW_HIT_BOTTOM 210     //the boxes' hit area runs down to the rule at y 211

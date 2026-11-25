@@ -57,8 +57,7 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   time/div with a handful of samples per division. The ACQ menu's rate boxes stay for a manual choice: a rate set by
   hand holds until the next zoom step or time/div box, which takes the ladder's rate again; when a rate box makes the
   time/div impossible (record too short, or under ten samples per division) the time/div snaps and the snap notice says
-  so, as before. The ends are plain stops: zooming in ends at 50 ns/div at 200 MSa/s (20, 10 and 5 ns/div are never
-  viable and stay grey), zooming out ends at 200 ms/div (1 kSa/s at 3000 samples) at the roll boundary, which a tap
+  so, as before. The ends are plain stops: zooming in ends at 10 ns/div at 200 MSa/s, zooming out ends at 200 ms/div (1 kSa/s at 3000 samples) at the roll boundary, which a tap
   never crosses (roll is the ACQ menu's mode button; in roll the tap steps 50 s .. 100 ms/div as before); a tap at an
   end changes nothing and the other direction works at once. Stopped (and in the waveform viewer) the record on screen
   is fixed and keeps its rate: the zoom steps through the time/divs that record can show, and where the ladder would go
@@ -67,7 +66,18 @@ first. Facts about the panel and the fonts are in `firmware/README.md`.
   scopes: green in the grid and the ACQ chip, nothing written to the FPGA, the record keeping its own rate for its
   trace, cursors and measurements; RUN arms at it as a tap while running would (snap and notice included), and until
   then the white time/div boxes are those the record can show and the new rate keeps. AUTO SET leaves a ladder pair
-  too (issue #2, `acq_view_autoset`): the time/div it measured, or the nearest slower one the ladder has, at the ladder's rate. The host's SET_TIMEBASE by UI index keeps its documented index-to-rate table (`docs/protocol.md`).
+  too (issue #2, `acq_view_autoset`): the time/div it measured, or the nearest slower one the ladder has with ten samples a
+  division, at the ladder's rate.
+- **Interpolated time bases** (owner 2026-11-25, GitHub issue #2 follow-up; option C of
+  `docs/mockups/acq-fast-timediv.html`, the acceptance reference). The ten-samples rule guards against a rate that is
+  too slow for the signal when a faster one exists. At 200 MSa/s none exists, and the front end (about 30 MHz) has
+  band-limited the signal far below half the rate, so there a division may hold as few as two samples: 20 and
+  10 ns/div are on the ladder at 200 MSa/s (`tb_view.h` `TBV_MIN_SAMPLES_FULL`). Three things keep that honest. The
+  Linear trace is drawn with sin(x)/x interpolation between the samples (`sinc_view.c`), and every real sample is a
+  3 x 3 dot on the curve, so measured and computed can be told apart. The time base is **orange** where it is
+  interpolated: its box in the ACQ menu (text when it can be chosen, fill when chosen) and the time/div in the ACQ
+  chip. AUTO SET never chooses one: it stops at 50 ns/div and the faster ones are the hand's. 5 ns/div (one sample a
+  division) is not offered and has no box. Dots and Bars trace styles, the phosphor view, REF and MATH draw as before. The host's SET_TIMEBASE by UI index keeps its documented index-to-rate table (`docs/protocol.md`).
 - **Span drives the sample rate** (maintainer, 2026-10-19 23:09; fw 0.2.77), the Spectrum's counterpart. The view is a span
   from a 1-2-5 ladder (1 Hz .. 20 MHz, then the whole axis 0 .. 25 MHz) around a centre: a tap in the right half of the
   plot narrows the span one step, the left half widens it, both about the centre (kept inside 0 .. 25 MHz); a drag in

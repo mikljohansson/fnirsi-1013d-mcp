@@ -1485,8 +1485,9 @@ The trace is a window onto the record: 50 px per division over columns 3..726, t
 `host_tests/test_tb_view.c`) derives from the real record length (`fpgasettings.totalsamples` x sample period):
 
 - a time/div is **viable** at a rate when the record spans the 724 px trace area and a division holds at least ten
-  samples (fw 0.2.69, maintainer: one sample per division drew a wobbling interpolated edge; 200 MSa/s now reaches 50 ns/div,
-  and 20, 10 and 5 ns/div snap to 50 ns/div; at 3000 samples: up to 207 samples/div, so 200 MSa/s reaches 1 us/div;
+  samples (fw 0.2.69, maintainer: one sample per division drew a wobbling interpolated edge; at 200 MSa/s, the ADC's own rate,
+  two are enough since the issue #2 follow-up: 20 and 10 ns/div are viable there, drawn with sin(x)/x interpolation
+  (`sinc_view.c`) and marked orange, and 5 ns/div snaps to 10 ns/div; at 3000 samples: up to 207 samples/div, so 200 MSa/s reaches 1 us/div;
   15000 samples reach 5 us/div);
   1.00o5's hand-written `viable_time_per_div` table is gone (it offered 250 samples/div, a record shorter than the
   screen: zeros past its end; the test lists the 24 cells that differ);
@@ -1504,7 +1505,8 @@ settings load. Long (roll) mode is left as it was.
 zoom step and an ACQ menu time/div box set the time/div together with its ladder rate (`tbv_ladder_rate`: the fastest
 short-mode rate at which the time/div is viable for the current record length), so the rate falls when zooming out
 past the record and rises when zooming in past ten samples per division; a time/div box is grey only when no rate can
-show it (20, 10, 5 ns/div). With 3000 samples the ladder runs from 200 ms/div at 1 kSa/s to 50 ns/div at 200 MSa/s
+show it. With 3000 samples the ladder runs from 200 ms/div at 1 kSa/s to 10 ns/div at 200 MSa/s (20 and 10 ns/div
+interpolated; 5 ns/div has no box)
 (1 ms/div at 200 kSa/s, 200 samples a division); deeper memory moves every step to a faster rate. A rate box still
 sets the rate by hand (the time/div snaps with the notice when needed) until the next zoom step. The ends are plain
 stops and the tap never crosses into or out of roll. Stopped or in the viewer, the rate is the record's: the zoom

@@ -38,12 +38,19 @@ int tbv_viable(uint32 fs, uint32 fpd, uint32 total)
   if((fs == 0) || (fpd == 0) || (total < 2))
     return 0;
 
-  //At least TBV_MIN_SAMPLES_PER_DIV samples per division (fw 0.2.69: ten; one before)
-  if((uint64)fs < (uint64)fpd * TBV_MIN_SAMPLES_PER_DIV)
+  //At least TBV_MIN_SAMPLES_PER_DIV samples per division (fw 0.2.69: ten; one before); at the full rate two, drawn
+  //interpolated (tb_view.h)
+  if((uint64)fs < (uint64)fpd * ((fs >= TBV_FULL_RATE) ? TBV_MIN_SAMPLES_FULL : TBV_MIN_SAMPLES_PER_DIV))
     return 0;
 
   //The record spans the trace area: the last column's sample is inside the record
   return tbv_span_samples(fs, fpd) <= (int64)total - 1;
+}
+
+int tbv_interpolated(uint32 fs, uint32 fpd)
+{
+  return (fs >= TBV_FULL_RATE) && (fpd != 0) && ((uint64)fs < (uint64)fpd * TBV_MIN_SAMPLES_PER_DIV) &&
+         ((uint64)fs >= (uint64)fpd * TBV_MIN_SAMPLES_FULL);
 }
 
 int32 tbv_snap(uint32 fs, const uint32 *fpd, int32 first, int32 last, int32 current, uint32 total)
