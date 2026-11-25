@@ -98,7 +98,7 @@ The probe ground (BNC shells) is VRF1, about +1.24 V above the scope's USB/digit
   about 0.03 V per mA; a x10 probe shows 0.16 to 0.19 V per mA on every reading (its shield moves with the clips),
   creeping in over about 0.11 ms. Load current = 3.1 V / (1 kOhm + load). Keep the load at 20 kOhm or more, use x1
   where the signal allows, or subtract a capture of a tip clipped to its own ground with the same load, probe and
-  range (guide section 5).
+  range (guide section 5). Reading tools add a note while the generator is on, whoever switched it on.
 - EXT trigger sources: 3.3 V logic referenced to the USB ground; if they share the probe ground, a red LED (or
   3 x 1N4148) in series and the rising edge. Never connect the calibration pin to a coil, drain or damping resistor.
 

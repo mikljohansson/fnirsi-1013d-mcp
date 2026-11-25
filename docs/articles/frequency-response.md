@@ -97,6 +97,13 @@ the DUT on USB ground it sits about 1.2 V below the probe reference, and that DC
 end before the offset can correct it. Since wiring A measured the same H, the clips became the recommended wiring, and
 the tool got a ch2_overload flag.
 
+A later bench (2026-11-25) found where the predicted ground-return error does appear. The return path is R71's
+100 Ohm, as the study said: a multimeter read 102 Ohm. But the shells have about 7 uF to ground, so above a few
+hundred hertz that capacitance carries the current, and this bench's RC drew almost none below 1 kHz. A DUT that
+draws DC from the post, a divider or a coil, shows the error below about 1 kHz. The numbers are in the
+[bench log](../hardware-status.md) of that day and in the [measurement guide](../agent-measurement-guide.md),
+section 5.
+
 ## The engine on the device
 
 fw-bode built the same measurement into the firmware (fw 0.2.66): the planner and DFT in fixed point (`bode_dsp.c`),

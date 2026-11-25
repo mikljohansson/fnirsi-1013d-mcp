@@ -155,7 +155,9 @@ STATIC_PROFILE: dict[str, str] = {
                  "average frequency exact to 2^-16 of the period, every edge within 5 ns of its ideal time, <= 25 MHz "
                  "(caps GENERATOR). No DAC, no arbitrary waveform. At the probe it is a ~3.1 Vpp square wave whose "
                  "DC level is the USB ground, 1.24 V below the probe ground (reads -1.24 / +1.9 V): a timing reference, not "
-                 "a voltage reference",
+                 "a voltage reference. A load on it that is grounded on the probe clips shifts the readings: 0.1 V per "
+                 "mA of load current at DC on nodes referenced to the clips; with x10 probes 0.16 to 0.19 V per mA at "
+                 "1 kHz on every reading (scope_generator has the details and the remedies)",
     "throughput": "~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for "
                   "short windows [U USB rate]",
 }
@@ -197,8 +199,14 @@ GEN_LOAD_NOTE = ("A load on the pin that is grounded on the probe ground clips r
                  "2 kOhm, 0.15 mA with 20 kOhm. Keep the load light, use a x1 probe where the signal allows, or "
                  "capture a probe tip clipped to its own ground with the same load, probe, range and trigger and "
                  "subtract it from the nodes of the circuit (the shift is additive).")
+#: on every reading tool while GET_STATUS says the generator drives the pin (Session.reading_notes): an agent that
+#: did not switch the generator on itself never sees scope_generator's caveat (the bench of 2026-11-25 found it on)
+GEN_ON_NOTE = ("the scope's generator is on: if the calibration pin drives a load that is grounded on the probe "
+               "clips, these readings are shifted by the load current (0.1 V per mA at DC on nodes referenced to the "
+               "clips; with x10 probes 0.16 to 0.19 V per mA at 1 kHz on every reading, creeping in over about "
+               "0.11 ms after each generator edge). scope_generator's description has the details and the remedies")
 
-EXT_NOTE =("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
+EXT_NOTE = ("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
             "scope's USB/digital ground, NOT to the probe ground: the BNC shells sit on VRF1, about +1.24 V above USB "
             "ground (fpga/al3/README.md). Reference the EXT source to the USB connector shell; a source that shares the "
             "probe ground idles at ~1.24 V at the pin and is not recognised: put a red LED (or 3 x 1N4148) in series, "
@@ -228,6 +236,8 @@ class Session:
         self.tokens: dict[str, tuple[str, float, str]] = {}
         self.relay_times: collections.deque[float] = collections.deque()
         self.last_capture: Capture | None = None
+        #: GET_STATUS of the last ensure_control said the generator drives the calibration pin
+        self.gen_on = False
         self.last_capture_file: str | None = None
         #: the Bode tool shows its wiring text with the first sweep of a session
         self.bode_wiring_shown = False
@@ -344,6 +354,11 @@ class Session:
 
     # control --------------------------------------------------------------------------------------------
 
+    def reading_notes(self) -> list[str]:
+        """Caveats for a tool that returns voltages, from the status ``ensure_control`` just read: the generator-on
+        note (a load on the pin shifts the readings)."""
+        return [GEN_ON_NOTE] if self.gen_on else []
+
     def ensure_control(self) -> list[str]:
         """Make the scope accept SET_*/ARM/READ_*. Collaborative firmware (SHARED_MODE): nothing to take; a modal menu
         blocks only before protocol 1.23 (fw 0.2.78 closes it for the request). Legacy firmware: acquire REMOTE if
@@ -351,6 +366,7 @@ class Session:
         s = self.get_scope()
         self.last_tool = time.monotonic()
         st = s.status()
+        self.gen_on = bool(st.ext_flags & P.ExtFlags.GENERATOR)
         deadline = time.monotonic() + self.cfg.starting_wait_s
         while st.ui_busy == P.UiBusy.STARTING and time.monotonic() < deadline:
             time.sleep(0.25)  # USB is up before the main loop's first pass (about 5 s after a FEL load)
@@ -1275,7 +1291,7 @@ def _capture_for_analysis(sess: Session, s: Scope, chans: list[str], capture: bo
     ``capture`` (tier 1), else this server's last capture when it has the channels, else the scope's latest capture
     (collaborative firmware), the UI trace (legacy LOCAL) or the finished remote capture."""
     if capture:
-        notes += sess.ensure_control()
+        notes += sess.ensure_control() + sess.reading_notes()
         cap = s.capture(chans, timeout_s)
         if cap is None:
             raise ToolError(f"{tool}: no trigger within {timeout_s} s")
@@ -1337,7 +1353,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             "can change settings (the screen shows host captures; long runs restart and say so when a setting "
             "is changed at the scope). "
             "Waveforms are saved as .npz files; results carry statistics, a preview and caveats. Read the "
-            "caveats: they say when data is clipped, aliased or unsynchronised."),
+            "caveats: they say when data is clipped, aliased or unsynchronised. Grounds: the generator pin "
+            "(calibration post) is referenced to the USB ground, the probe ground clips sit 1.24 V above it, "
+            "and a load on the pin shifts the readings; read scope_generator's description before wiring "
+            "anything to the pin."),
     )
 
     def tier_enabled(tier: int) -> bool:
@@ -1545,6 +1564,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             if s.profile().has(P.Caps.DECIM):
                 out["decimation"] = _decim_summary(s.get_decim())
             out["caveats"] = [SCALING_CAVEAT]
+            if out["generator"].get("enabled"):
+                out["caveats"].append(GEN_ON_NOTE)
             return out
         return await run("scope_get_config", 0, {}, go)
 
@@ -2351,7 +2372,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
 
         def go() -> dict[str, Any]:
             w = _window_arg(window)
-            notes = sess.ensure_control()
+            notes = sess.ensure_control() + sess.reading_notes()
             s = sess.get_scope()
             chans = _channels_arg(channels, [CHANNEL_NAMES[c] for c in (0, 1) if s.get_channel(c).enable] or ["CH1"])
             restore: str | None = None
@@ -2590,7 +2611,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
             raise ToolError(f"{tool}: give pre / post or pretrigger_fraction, not both")
 
         def setup() -> tuple[list[str], P.StatusResp, dict[str, Any], list[str]]:
-            notes = sess.ensure_control()
+            notes = sess.ensure_control() + sess.reading_notes()
             s = sess.get_scope()
             prof = s.profile()
             cav: list[str] = []
@@ -2740,7 +2761,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         held = _Held(sess)
         try:
             await anyio.to_thread.run_sync(held.acquire)
-            notes = await anyio.to_thread.run_sync(sess.ensure_control)
+            notes = await anyio.to_thread.run_sync(sess.ensure_control) + sess.reading_notes()
             s = sess.get_scope()
             restarts: list[dict[str, Any]] = []
             t0 = time.monotonic()
@@ -3106,7 +3127,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 "timeout_s": timeout_s}
 
         def go() -> dict[str, Any]:
-            notes = sess.ensure_control()
+            notes = sess.ensure_control() + sess.reading_notes()
             s = sess.get_scope()
             if not s.profile().has(P.Caps.SEQ):
                 raise ToolError("scope_capture_segments needs FPGA bitstream 0x1536 and firmware 0.2.58 or later "
@@ -3208,7 +3229,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         try:
             try:
                 await anyio.to_thread.run_sync(held.acquire)
-                notes = await anyio.to_thread.run_sync(sess.ensure_control)
+                notes = await anyio.to_thread.run_sync(sess.ensure_control) + sess.reading_notes()
                 psum = None
                 f = None
                 enbw = 0.0
@@ -3948,7 +3969,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         def go() -> dict[str, Any]:
             from . import report as R
 
-            notes = sess.ensure_control()
+            notes = sess.ensure_control() + sess.reading_notes()
             s = sess.get_scope()
             ch = channel_index(channel)
             cctx = s.capture_context()
@@ -4129,7 +4150,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         args = {"channels": channels, "n": n, "duration_s": duration_s, "timeout_s": timeout_s}
 
         def go() -> dict[str, Any]:
-            notes = sess.ensure_control()
+            notes = sess.ensure_control() + sess.reading_notes()
             s = sess.get_scope()
             chans = _channels_arg(channels, ["CH1"])
             dur = _q(duration_s, "s")
@@ -4450,7 +4471,8 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         answered at the scope's next main-loop pass, so each step costs a pass (the unit on 2026-11-06: 34 ms per step
         with one GET_GEN poll each, 29 steps / s); a faster request runs as fast as the scope answers and the stats
         say what was reached (a device-paced chirp needs a firmware CHIRP command, not in this protocol). Use it with the Spectrum view or scope_capture_and_fft to see a
-        filter's response. The generator is restored as found. Needs a token (drives the pin)."""
+        filter's response. The generator is restored as found. Needs a token (drives the pin). A load on the pin
+        that is grounded on the probe clips shifts the readings while it runs (scope_generator's description)."""
         args = {"start": start, "stop": stop, "steps": steps, "time_s": time_s, "rate": rate, "spacing": spacing,
                 "shape": shape, "duty_percent": duty_percent}
 
@@ -4545,7 +4567,7 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                 raise ToolError("scope_log needs the streaming logger (caps LOGGER, protocol 1.27 on FPGA 0x153D)")
             if sess.log_run is not None and sess.log_run.running:
                 raise ToolError(f"a log is running ({sess.log_run.dir}); scope_log_stop first")
-            notes = sess.ensure_control()
+            notes = sess.ensure_control() + sess.reading_notes()
             chans = _channels_arg(channels, ["CH1"])
             plan = LF.plan_log(parse_quantity(rate, "S/s"), chans, bits, filter, fir=s.profile().has(P.Caps.FIR))
             dur = None if duration is None else parse_quantity(duration, "s")
@@ -4695,7 +4717,10 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         (stored on the scope and here), 'device' (the scope's stored thru) or a stored name (applied here). Wiring: post -> DUT input with the CH1 tip there, CH2 tip on the DUT
         output, DUT ground on the probe ground clips (wiring A; bench 2026-10-19: the same H as the USB-ground wiring
         within 0.4 dB). Wiring B (DUT ground on the USB shell, clips open) puts the DUT 1.24 V below the probe
-        reference: use ch2_coupling='ac' there, or CH2 saturates on 0.1 and 0.2 V/div. Per point the generator
+        reference: use ch2_coupling='ac' there, or CH2 saturates on 0.1 and 0.2 V/div. Use wiring B also for a
+        DUT with a DC path from its input to its ground (a divider, a coil) swept to 1 kHz or below: in wiring A
+        its current drops over the 100 Ohm between the clips and the scope's reference and adds to both channels
+        (0.1 V per mA at DC). Per point the generator
         runs a strictly periodic square of an integer period P of 5 ns clocks (f = 200 MHz / P exactly, a grid 0.5 %
         fine at 1 MHz; protocol 1.27), both channels are captured through the 16-bit CIC3 + FIR filter at a rate that
         makes the record a whole number of periods (legacy 200 MSa/s above 1.5 MHz), and a single-bin DFT at that

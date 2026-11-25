@@ -234,6 +234,10 @@ CH2 / CH1 as magnitude in dB (cyan, left axis) and phase in degrees (pink, right
 3. Clip both probe grounds to the DUT's ground. Do not ground the DUT on the USB connector's shell: that ground sits
    about 1.2 V below the probe ground.
 4. The bench sweeps use both probes at 1X.
+5. A DUT with a DC path from its input to its ground, such as a resistor divider or a coil, draws its current
+   through the ground clips. Below about 1 kHz that adds the same error to both channels: a 1 kOhm over 100 Ohm
+   divider would read about -15 dB instead of -20.6 dB at 100 Hz (calculated). Read such a DUT above about 1 kHz
+   ([Generator](generator.md#a-load-on-the-post-shifts-the-readings)).
 
 **Entering and leaving.** The view takes over the generator, both channels, the time base and RUN/STOP. Leaving
 through the Scope or Spectrum analyser row gives every one of them back as it was. Nothing is driven until a sweep

@@ -348,6 +348,9 @@ A load on the generator returned through the ground clips drops over R71 (102 Oh
 on the clips read 0.1 V per mA high at DC; at 1 kHz a x1 probe shows about 0.03 V per mA (about 7 uF on the shells)
 and a x10 probe 0.16 to 0.19 V per mA on every reading (its shield moves with the shells). `server.GEN_LOAD_NOTE` on
 `scope_generator` / `scope_sweep` while the pin drives, `bode.CONNECTION_TEXT`; bench log 2026-11-24 / 25.
+`server.GEN_ON_NOTE` (`Session.reading_notes`, from the generator flag in the GET_STATUS that `ensure_control` reads)
+goes on the reading tools and `scope_get_config` while the generator is on; a new tool that returns voltages adds
+`sess.reading_notes()` to its notes. `STATIC_PROFILE["generator"]` and the server's instructions name the gotcha.
 
 ## Tests (`tests/`, 559 with test_report, about 4.5 min)
 

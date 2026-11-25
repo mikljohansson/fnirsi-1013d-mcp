@@ -338,6 +338,8 @@ The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V
     probe tip clipped to its own ground clip with the same load, probe, range and trigger, and subtract that
     trace from the nodes of the circuit (the shift is additive: a divider read 2.00 against 2.000 after the
     subtraction). A buffer on the circuit's own supply with a high-impedance input takes the load off the pin.
+  - The tools say it: `scope_generator` and `scope_sweep` in their caveats, and every reading tool and
+    `scope_get_config` with a short note while the generator is on, also when someone else switched it on.
 - EXT trigger (caps `EXT_TRIGGER`): reference the source to the USB ground (connector shell); 3.3 V logic only.
   A source that shares the probe ground idles at ~1.24 V at the pin and is not recognised: insert a red LED or
   3 x 1N4148 in series (anode at the source) and trigger on the rising edge.

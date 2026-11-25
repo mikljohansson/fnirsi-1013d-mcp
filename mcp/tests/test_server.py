@@ -494,9 +494,19 @@ async def test_generator_confirmation_flow(sim_factory, tmp_path):
         assert srv.device.settings.gen.enable == 1
         # a load on the pin shifts the readings (bench 2026-11-24 / 25): said while the pin drives, not when off
         assert any("0.1 V per mA" in cv and "x10 probe" in cv and "subtract" in cv for cv in r3["caveats"])
+        # an agent that did not switch it on meets the gotcha too: get_config and every reading while it runs
+        on_note = "the scope's generator is on"
+        assert any(on_note in cv for cv in (await c.call("scope_get_config"))["caveats"])
+        assert any(on_note in cv for cv in (await c.call("scope_capture", preview_points=0))["caveats"])
+        assert any(on_note in cv for cv in (await c.call("scope_averaged_capture", n=2, preview_points=0))["caveats"])
+        assert not any(on_note in cv for cv in (await c.call("scope_set_timebase", sample_rate=2e6))["caveats"])
         r4 = await c.call("scope_generator", enabled=False)  # no token needed
         assert r4["ok"] and srv.device.settings.gen.enable == 0
         assert not any("per mA" in cv for cv in r4["caveats"])
+        assert not any(on_note in cv for cv in (await c.call("scope_get_config"))["caveats"])
+        assert not any(on_note in cv for cv in (await c.call("scope_capture", preview_points=0))["caveats"])
+        prof = await c.call("scope_profile")
+        assert "shifts the readings" in json.dumps(prof)
         assert "ceiling" in await c.fails("scope_generator", enabled=True, frequency=1e3, duty_percent=80)
         assert "FNIRSI_MCP_GEN_MAX_HZ" in await c.fails("scope_generator", enabled=True, frequency="2MHz")
         lines = (tmp_path / "audit.jsonl").read_text().splitlines()

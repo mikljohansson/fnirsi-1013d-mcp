@@ -80,7 +80,7 @@ apply to its settings.
 | Full scale | about 256 codes = ~8.8 divisions; e.g. ~0.88 V at 100 mV/div | P-8.5 [U] |
 | Coupling | DC or AC (relay) | |
 | Input impedance / max input | 1 MOhm; maximum safe voltage per FNIRSI is not reliable, assume 40 V peak at 1x and use a 10x probe for anything higher [U] | needs datasheet check |
-| Generator | square wave only, 3.3 V logic on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz; only on Atlan4 bitstreams. No DAC, no arbitrary waveform | P-8.6 |
+| Generator | square wave only, 3.3 V logic on the calibration pin, 11.6 mHz steps, 20 ns edge jitter, <= 25 MHz; only on Atlan4 bitstreams. No DAC, no arbitrary waveform. A load on it that is grounded on the probe clips shifts the readings (0.1 V per mA at DC; with x10 probes 0.16 to 0.19 V per mA at 1 kHz) | P-8.6; bench 2026-11-25 |
 | Throughput | ~50-65 full dual-channel AL3 captures per second via raw reads; hundreds per second for short windows | P-11 [U USB rate] |
 
 ## 4. Tool reference
@@ -235,6 +235,11 @@ count; `trigger` (`fired` / `auto_timeout` / `none`), `capture_id`, dt, sample c
 inline `samples` or `preview`. Dynamic caveats:
 "N samples clipped at 0/255: increase volts_per_div", "auto trigger fired: data not synchronised",
 "signal frequency estimate X is above fs/2.5: aliasing likely", "frequency > 30 MHz: above analog bandwidth".
+While the scope's generator drives the pin (GET_STATUS says so, whoever switched it on), every reading tool
+(`capture`, `averaged_capture`, `decay_fit`, `capture_and_fft`, `capture_segments`, `wait_for_event`, `measure` and
+`decode` with a fresh capture, `mask_test`, `dvm`, `log`) and `get_config` add the generator-on note
+(`GEN_ON_NOTE`): a load on the pin that is grounded on the probe clips shifts the readings, with the sizes and a
+pointer to `scope_generator`. The setting tools stay quiet.
 A peak-detect record (`peak` true in the result, kind `peak` in the `.npz`) adds per channel `envelope` (min, max,
 mean and max width), the samples / preview as `<ch>_min` and `<ch>_max`, and the file `<ch>_min_volts`,
 `<ch>_max_volts`, `<ch>_min_codes`, `<ch>_max_codes`; `volts` / `codes` are the midpoint; the caveat says the
@@ -639,10 +644,11 @@ steps / s. Without the poll (SET_GEN's own answer says taken) a step costs one p
 200 log steps asked at 100 steps / s), 62 steps / s in RUN and 64 in STOP, 0 polls, 0 sleeps, so about 16 ms per step. A faster request runs as fast as the scope answers and the caveats say what was
 reached (a device-paced chirp needs a firmware CHIRP command, not in this protocol). At most 600 s per call. Returns
 the statistics (steps sent, achieved steps / s, late steps, polls, sleeps) and restores the generator it found. Watch it on the scope's Spectrum
-view or with `scope_capture_and_fft`.
+view or with `scope_capture_and_fft`. Its caveats carry the generator's load note.
 
 **`bode_sweep`** (`scope_bode_sweep`, tier 3, token, caps DECIM and the generator): frequency response CH2 / CH1 of a
 passive DUT on the calibration post; parameters and returns in mcp/README.md "Bode sweep" and the guide's section 3b
+(the wiring too: a DUT with a DC path swept to 1 kHz or below goes on the USB ground, wiring B)
 (design: docs/plans/bode-design.md). `where='device'` (protocol 1.20, fw 0.2.66): the scope's own engine runs the sweep
 (BODE_CTRL action 1 with the settings, or 5 for `thru_cal='measure'`), the tool polls READ_BODE until the state leaves
 `running`, reads the 20-byte rows, recomputes f from the stimulus period (P in 5 ns clocks since protocol 1.27,

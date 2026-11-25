@@ -46,10 +46,26 @@ them.
 6. Tap **AUTO SET** to fit the trace to the screen. CH1 shows a square wave of about 3 Vpp, and the Freq card (on by
    default) reads 10 kHz.
 
+## A load on the post shifts the readings
+
+The post is driven against the scope's USB ground, not against the probe ground clips. When the post drives a
+circuit whose ground is on the clips, the current comes back through the clips and a 100 Ohm resistor inside the
+scope, and the readings shift with it:
+
+- **A steady or slow signal**: every point measured against the clips reads 0.1 V too high for each milliampere
+  the post delivers.
+- **The generator at 1 kHz**: a probe on 1X shows about 0.03 V per mA. A probe on 10X shows 0.16 to 0.19 V per mA,
+  on every trace, as a slow rise after each edge of the generator.
+
+The post delivers 3.1 V / (1 kOhm + load): 1 mA into 2 kOhm, 0.15 mA into 20 kOhm. Keep the load at 20 kOhm or
+more, or use 1X probes where the signal allows. Measured on one unit
+([bench log](../hardware-status.md), 2026-11-25).
+
 ## Over USB
 
 The MCP tool `scope_generator` sets the power, frequency and duty. It drives the calibration pin, so it is a tier 3
 tool: it needs a confirmation token ([MCP tools](../mcp-tools.md)). Check the wiring before you enable it.
+While the generator is on, the measuring tools add a note about the load on the post (the section above).
 The server also caps the frequency at 1 MHz and the duty at 50 % unless you raise its limits
 (`FNIRSI_MCP_GEN_MAX_HZ`, `FNIRSI_MCP_GEN_MAX_DUTY`).
 
