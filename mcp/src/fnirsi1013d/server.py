@@ -182,16 +182,19 @@ CAL_OUTPUT_NOTE = ("The calibration output is a frequency/duty/timing reference,
 #: on, 1 kHz: a tip on its own ground clip read 0.182 V pp, rising with 105 / 137 us after the edges; the current was
 #: 0.93 .. 1.06 mA pp (the divider's mid node, the drop over R21). Schematic: R71 100 Ohm from the shells to VRF1, four
 #: capacitors from the shells to the digital ground (fpga/al3/README.md "Changes" 2).
-GEN_LOAD_NOTE = ("A load with a DC path from the pin to a circuit grounded on the probe ground clips returns its "
-                 "current through the BNC shells, which are tied to the scope's reference through a resistor (R71), so "
-                 "the shells move and EVERY CH1 / CH2 reading of that circuit shifts with the load current: about "
-                 "0.18 V per mA at the probe tip, the same with a x1 and a x10 probe (owner's unit, 2026-11-24; 0.1 V "
-                 "per mA by the schematic). The shift follows the generator's edges with a time constant of 0.1 to "
-                 "0.14 ms (in full at 1 kHz and below, less above), so it looks like a slow creep on every flat top. "
-                 "The pin itself reads right; nodes of the circuit do not. Load current = 3.1 V / (1 kOhm + load): "
-                 "2 kOhm shifts the readings by 0.18 V pp, 20 kOhm by 27 mV, 100 kOhm by 6 mV. Keep the load light "
-                 "enough for the resolution needed, or capture a probe tip clipped to its own ground with the same "
-                 "setup and subtract it (the shift is additive).")
+#: 2026-11-25, 10 kOhm + 10 kOhm: nodes of the circuit 23 .. 30 mV pp, and a tip on a USB ground with its clip open
+#: 36 mV pp with the same sign: the term is not only the shells moving against VRF1. Only what was measured is stated;
+#: the scaling with V/div and the probe setting is open (docs/plans/task-queue.md, owner bench verdicts).
+GEN_LOAD_NOTE = ("A load on the pin that is grounded on the probe ground clips returns its current through the BNC "
+                 "shells into the scope's reference, and the CH1 / CH2 readings shift with the load current. Measured "
+                 "on the owner's unit with x10 probes at 1 V/div (2026-11-24 and 25): about 0.18 V per mA, 5 ADC codes "
+                 "per mA; 0.18 V pp with 2 kOhm on the pin, 23 to 30 mV with 20 kOhm (load current = 3.1 V / (1 kOhm "
+                 "+ load)). The shift follows the generator's edges with a time constant of 0.1 to 0.17 ms (in full at "
+                 "1 kHz and below, less above), so it looks like a slow creep on every flat top. It is not limited to "
+                 "nodes of the driven circuit: a tip on the scope's USB ground moved too. How it scales with V/div and "
+                 "the probe setting is not measured, so do not carry the 0.18 V per mA to another range or probe. "
+                 "Keep the load light enough for the resolution needed, or capture a probe tip clipped to its own "
+                 "ground with the same load, range, probe setting and trigger and subtract it (the shift is additive).")
 
 EXT_NOTE =("EXT triggers on the calibration pin, a 3.3 V logic input (never more than 3.3 V) referenced to the "
             "scope's USB/digital ground, NOT to the probe ground: the BNC shells sit on VRF1, about +1.24 V above USB "
@@ -4371,11 +4374,12 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
         it before driving a MOSFET gate. If the pin is wired into the detector (e.g. as a TX gate drive) this
         switches real coil current. Needs caps GENERATOR (every supported firmware has it).
 
-        Load current moves the probe reference: a load with a DC path from the pin to a circuit grounded on the probe
-        ground clips returns through the BNC shells and shifts every CH1 / CH2 reading of that circuit by about
-        0.18 V per mA (3.1 V / (1 kOhm + load); x1 and x10 probes alike), creeping in over 0.1 to 0.14 ms after each
-        edge. A 2 kOhm load shifts by 0.18 V pp, 20 kOhm by 27 mV. Keep the load light, or capture a probe tip on its
-        own ground clip with the same setup and subtract it (the result's caveat has the details)."""
+        Load current moves the scope's reference: a load on the pin that is grounded on the probe ground clips returns
+        through the BNC shells and shifts the CH1 / CH2 readings, creeping in over 0.1 to 0.17 ms after each edge.
+        Measured with x10 probes at 1 V/div: about 0.18 V per mA of load current (3.1 V / (1 kOhm + load)), 0.18 V pp
+        with 2 kOhm, 23 to 30 mV with 20 kOhm; other ranges and probe settings are not measured. Keep the load light,
+        or capture a probe tip on its own ground clip with the same load and settings and subtract it (the result's
+        caveat has the details)."""
         args = {"enabled": enabled, "frequency": frequency, "duty_percent": duty_percent}
 
         def go() -> dict[str, Any]:

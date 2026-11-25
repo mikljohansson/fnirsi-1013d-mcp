@@ -618,9 +618,9 @@ integer number of clocks (200 MHz / P: 1 kHz, 1 MHz) has no dither at all. A cha
 phase-continuous (taken at once, the step in progress completing with its old length). Returns the actual frequency (`frequency_exact_hz`), duty,
 `period_clocks`, `high_clocks` / `low_clocks` and the raw P16 / H16. Caveats: the calibration-output note, "Square wave
 only, 3.3 V logic. Not a sine source and not a power driver: buffer it before driving a MOSFET gate.", and while the
-pin drives the load note (`GEN_LOAD_NOTE`, also on `sweep`): a load with a DC path to a circuit grounded on the probe
-clips returns through the BNC shells and shifts every reading of that circuit by about 0.18 V per mA, creeping in over
-0.1 to 0.14 ms after each edge; keep the load light or subtract a tip-on-its-own-ground capture
+pin drives the load note (`GEN_LOAD_NOTE`, also on `sweep`): a load that is grounded on the probe clips returns through
+the BNC shells and shifts the readings, about 0.18 V per mA with x10 probes at 1 V/div (other ranges and probe
+settings not measured), creeping in over 0.1 to 0.17 ms after each edge; keep the load light or subtract a tip-on-its-own-ground capture
 (`docs/agent-measurement-guide.md` section 5). Disabling
 (`enabled=false`) does not need a token. Up to protocol 1.26 the square came from Atlan4's 50 MHz DDS (11.64 mHz
 steps, 20 ns edge jitter).
