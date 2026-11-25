@@ -2380,3 +2380,16 @@ Newest entries at the bottom. Format: date, who, what, result.
   on again afterwards. **Not done**: the tap zoom into 20 / 10 ns/div by hand (the time base was set over USB; host
   test `test_autoset` covers the steps), CH2 and both channels together, Dots / Bars styles, the phosphor view and a
   stopped zoom at these time bases, drawing speed (pass time) at 10 ns/div.
+- 2026-11-25 12:48-13:10 (lead, owner present): **v0.4.0 released and on the card.** The interpolated 20 and
+  10 ns/div (bd6c08e, the entry above), new screenshots (`acq-menu`, `interpolated`: 1f6dead) and the generator-load
+  notes of 2026-11-24 / 25; release commit 9d16b93. The local `make gcc10` image f6f1eac15a3ee554... (830,976 bytes)
+  FEL-loaded with `fnirsi1013d-flash --sha256 f6f1eac1...`: `#VER` fw=0.4.0, proto=1.31, fpga=0x153f; GET_INFO build
+  9d16b93b = the release commit; SET_TIMEBASE index 33, 32 and 31 accepted at divider 0. The trace was not looked at
+  again on this image: its code is that of bd6c08e, benched the same hour. Persisted with `--persist-only`: backup
+  `backups/sdcard/sd_750-2373_20261125-125212.bin` (the 0.3.5 image), 1623 sectors compared identical, eGON checksum
+  0xF7DF619A. CI run 45608433049 green, its image f6f1eac1... = the one on the card. Dry run `v0.4.0-rc1`: release.yml
+  run 45609249593 green, 8 assets, SHA256SUMS 7 of 7, firmware f6f1eac1...; rc removed. Tag `v0.4.0` on 9d16b93:
+  release.yml run 45610189414 green, published as the latest release,
+  https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.4.0. **Not done**: the list of the entry above
+  (zoom by hand, CH2, both channels, Dots / Bars, phosphor, stopped zoom, pass time at 10 ns/div), the hardware battery
+  on the release image (docs/releasing.md 4.6), a power cycle from the card.
