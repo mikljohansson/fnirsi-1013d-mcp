@@ -484,27 +484,44 @@ so the current of a load that is grounded on the probe clips has to return from 
   - R71 (100 Ω) with C116 (1 nF) across it goes from the shells to **VRF1**. C134 and C135 (1 nF) go from VRF1 to GND.
   - VRF1 is the TL432's cathode through R82 (1 Ω). The TL432 carries about 10 mA from R81, so a load current of a
     milliampere either way leaves it in regulation (inference: nothing else heavy on VRF1 is drawn on the sheet).
-- **Expected from that**: a step of load current first charges the four shell capacitors, then flows through R71. Both
-  channels measure against VRF1, so every reading referenced to the shells shifts by I x 101 Ω, with a time constant
-  of 100 Ω x 0.4 to 0.6 µF = 40 to 60 µs. The probe's attenuation does not enter: the tip follows the shells.
-- **Measured** (induction-imager bench, fw 0.3.5, FPGA 0x153F, x10 probes, 1 V/div DC, 2 MSa/s, 32 averages, generator
-  1 kHz into 1 kΩ + 1 kΩ to the rail the clips were on; `docs/hardware-status.md` 2026-11-24):
-  - A tip on its own ground clip read a 0.182 V pp square with exponential edges: 105 µs after the rising and 137 µs
-    after the falling generator edge.
-  - The load current was 0.93 mA pp by the divider's mid node (0.93 V pp after subtracting the shift) and 1.06 mA pp by
-    the drop over R21 (post 3.14 V pp open, 2.08 V pp loaded). That gives **0.17 to 0.20 V per mA**, about 185 Ω.
-  - The post itself read a flat square, as it must: post and VRF1 share GND, the shells are not in that loop.
-- **Open**: 185 Ω against the schematic's 101 Ω, and 105 to 137 µs against 40 to 60 µs. Both are too large by about the
-  same factor, so a return resistance near 185 Ω with 0.6 to 0.7 µF fits (inference); 12 Ω at the scope input, the
-  bench session's first reading, does not, because it divided by the probe's attenuation. Candidates: R71 is not 100 Ω
-  on this board, or VRF1 is softer than a TL432 in regulation (R81's 200 Ω stands behind it). The different time
-  constants for the two edges point at something non-linear, which favours the second. A DC test with a DMM decides
-  (`docs/plans/task-queue.md`, "Owner bench verdicts outstanding").
-- **A hardware change?** The only simple one is a smaller R71; the 1014D has 10 Ω in its BNC return
-  (`research/notes/hack-repo-hardware-fpga.md` 2.3). It scales the shift down and makes a link between probe ground and
-  USB ground worse by the same factor: R71 is what limits that current today. Not recommended before the DC test says
-  where the 185 Ω sit (inference). Outside the scope the fix is free: a load of 20 kΩ or more, or a buffer on the
-  circuit's own supply.
+- **A second path into the readings, on the data-acquisition sheet** (`Scope_Data_Acquisition.png`, read from a
+  coarse image): each AD9288 core has `ANALOGx_ADC_INPUT` through 200 Ω on one input and, on the other, the node of
+  `ADCx_OFFSET`: the FPGA's offset PWM through 2 x 1 kΩ with three capacitors to GND. The op-amp's output rides on
+  VRF1; the offset node is referenced to GND. A movement of VRF1 against GND therefore enters every reading of the
+  channel one to one at the ADC, at 4 mV per code (1.024 V pp full scale), wherever the probe tip is (inference
+  from the sheet).
+- **Two parts are possible** when a load current I returns through the clips. Both rise as the four shell
+  capacitors charge, with (R71 + Z) x 0.4 to 0.6 µF, Z being what VRF1 gives way against GND:
+  - the shells against VRF1, I x R71 = 0.1 V per mA: in volts at the tip, the same on every range, and only on
+    nodes referenced to the shells;
+  - VRF1 against GND, I x Z: in ADC codes, so in volts it grows with V/div and the probe setting, and it is on every
+    reading. A TL432 in regulation behind R82 would make it about 1 Ω, 0.3 codes per mA.
+- **Measured** (induction-imager bench, fw 0.3.5, FPGA 0x153F, x10 probes, 1 V/div DC = 35 mV per code, 2 MSa/s, 32
+  averages, generator 1 kHz; `docs/hardware-status.md` 2026-11-24 and 2026-11-25):
+  - 1 kΩ + 1 kΩ on the post, 0.93 to 1.06 mA pp (by the divider's mid node, and by the drop over R21: post 3.14 V pp
+    open, 2.08 V pp loaded). A tip on its own ground clip read a 0.182 V pp square with exponential edges, 105 µs
+    after the rising and 137 µs after the falling generator edge: **0.17 to 0.20 V per mA, 5 codes per mA.**
+  - 10 kΩ + 10 kΩ, 0.15 mA pp: nodes of the circuit 23 to 30 mV pp, the same per mA.
+  - Same load, a tip on a USB ground with its clip open: 36 mV pp with the same sign, about 12 mV of it within
+    10 µs of the edge and the rest with about 100 µs.
+  - The pin under load was not captured. The flat square of 2026-11-24 with both tips on the generator lead was
+    the open post (3.1 V pp).
+- **What that says** (inference): a tip on the USB ground does not see the shells, so the shift there is VRF1
+  moving against GND, or something else common to the readings. If the slow 21 mV are VRF1, Z is about 18 Ω
+  (21 mV / (7.75 x 0.15 mA): 8.75 from codes to x10 volts on this range, less the tip's own -1), far from the
+  schematic's 1 Ω. The same 18 Ω would put 24 mV on the circuit's nodes, which read 23 to 30 mV, so the 15 mV that
+  100 Ω of R71 should add do not stand out. The traces also lack the overshoot a x10 probe shows when its shield
+  moves against the scope's input reference. Both point at VRF1 against GND as the larger part, but signals of one
+  code do not settle it. The reading first written here on 2026-11-24 (185 Ω between the shells and VRF1, the same
+  volts with any probe) is withdrawn.
+- **Checks that settle it** (`docs/plans/task-queue.md`, "Owner bench verdicts outstanding"): the tip-on-its-clip
+  capture at 1, 2 and 5 V/div separates volts from codes; a tip on the loaded post; a DMM between a shell and a USB
+  ground with a known DC load gives R71 + Z.
+- **A hardware change?** Not before those checks. A smaller R71 (the 1014D has 10 Ω in its BNC return,
+  `research/notes/hack-repo-hardware-fpga.md` 2.3) helps only the first part and makes a link between probe ground
+  and USB ground worse. If VRF1 is the larger part, the remedy is at the reference (R82, the TL432, its bypass),
+  which needs the board in hand. Outside the scope the fix is free: a load of 20 kΩ or more, a buffer on the
+  circuit's own supply, or the subtraction.
 
 ### 3. Decimation filter: boxcar and CIC (version 0x1534, 2026-10-18)
 

@@ -2263,7 +2263,9 @@ Newest entries at the bottom. Format: date, who, what, result.
   - Load current: 0.93 mA pp (0.93 V over the lower 1 kOhm) to 1.06 mA pp (1.06 V over R21, nominal 1 kOhm). Shift
     **0.17 to 0.20 V per mA, about 185 Ohm**, at the probe tip whatever the probe (the tip follows the shells, which
     move against VRF1). The bench session's 0.12 V per mA took 1.5 mA (3.1 V / 2 kOhm, without R21), and its 12 Ohm at
-    the scope input divided by the probe's 10, which does not apply.
+    the scope input divided by the probe's 10, which does not apply. **Corrected 2026-11-25**: "whatever the
+    probe" and "does not apply" were deductions from the schematic, not measurements; the entry of 2026-11-25
+    withdraws them.
   - Schematic (fpga/al3/README.md "Changes" 2, addendum): shells to GND through C100, C101, C131, C132 (4 x 100 nF
     nominal), shells to VRF1 through R71 100 Ohm: expected 0.10 V per mA and 40 to 60 us. **Not explained**: both
     numbers are about 1.8 times larger on the unit. Candidates (inference): R71's value on this board, or VRF1 softer
@@ -2273,3 +2275,30 @@ Newest entries at the bottom. Format: date, who, what, result.
   - Host: `scope_generator` / `scope_sweep` carry the caveat while the pin drives; the Bode wiring text names wiring B
     for a DUT with a DC path below about 1 kHz; guide section 5, skill, mcp-tools, glossary. The induction-imager
     board runs on 10 kOhm + 10 kOhm now (0.15 mA, 27 mV pp of shift) and subtracts a tip-on-ground capture.
+- 2026-11-25 07:10-07:14 (induction-imager session at the scope; its files evaluated at the desk at 07:24, no
+  hardware touched by the evaluating session): **the generator-load shift also shows on a tip that is not on the
+  circuit.** The setup of 2026-11-24 with 10 kOhm + 10 kOhm on the generator (0.15 mA pp), x10, 1 V/div DC (35 mV per
+  code), 2 MSa/s, n = 32. Files in `mcp/data/2026-11-25/` (gitignored).
+  - `071017_070_avg.npz`: CH2 on the board's held node, 4.193 -> 4.216 V, 23 mV pp, time constants 167 and 149 us.
+    CH1 on the test node: a 0.94 V square whose tops rise by 28 to 32 mV. Per mA the same as with 2 kOhm (0.16 to
+    0.21 V per mA).
+  - `071413_380_avg.npz`: CH2 tip on a USB ground, its clip open, CH1's clip on the board. Mean -1.262 V; -1.282 V
+    before the generator's rising edge, -1.271 V at 1 to 4 us after it, -1.265 V at 10 to 40 us, then rising to
+    -1.246 V (200 to 495 us); back at -1.281 V by 700 us after the falling edge. 36 mV pp with the sign of the
+    circuit's nodes; single-exponential fits 91 and 105 us (residual 3.2 and 4.7 mV rms).
+  - What it rules out: a drop between the shells and VRF1 and nothing else (the reading of 2026-11-24). A tip on the
+    USB ground with its clip open does not see the shells. With VRF1 holding it would read flat; with VRF1 pushed up
+    by the current the tip's own voltage against it would fall, not rise.
+  - What fits (inference; `fpga/al3/README.md` "Changes" 2 addendum): the ADC takes the op-amp's output, which rides
+    on VRF1, against the offset PWM's node, which is referenced to GND (data-acquisition sheet). VRF1 moving against
+    GND then shows on every reading at 4 mV per code, 8.75 times larger in the x10 volts of this range, with the
+    sign seen. If the slow 21 mV are that, VRF1 gives way by about 18 Ohm; the same 18 Ohm put 24 mV on the
+    circuit's nodes, which read 23 to 30 mV, so the 15 mV of R71's 100 Ohm do not stand out. The about 12 mV within
+    10 us on the USB ground tip are not explained (the open clip's lead, the hub's ground).
+  - Withdrawn from the entry of 2026-11-24: 185 Ohm between the shells and VRF1, "the same with any probe", and
+    "the pin reads right" (the flat capture was the open post; the loaded pin was never captured). The
+    induction-imager session's first reading, a term that scales with the probe factor, may be right for the larger
+    part.
+  - Host texts corrected the same morning: the caveat and the guide state the measured condition (x10, 1 V/div:
+    0.18 V per mA, 5 codes per mA) and that the scaling with range and probe is open. Checks queued (task queue,
+    owner bench verdicts): the tip-on-clip capture at 1, 2 and 5 V/div, a tip on the loaded post, the DMM test.
