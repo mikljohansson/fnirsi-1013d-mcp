@@ -21,6 +21,10 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
   owner). The Bode wiring text names the USB-ground wiring for a DUT with a DC path swept to 1 kHz or below. Guide
   section 5, the skill, `docs/mcp-tools.md`, `fpga/al3/README.md` "Changes" 2 (the return path traced on the
   schematic) (042cf10, 0be269a, 4fc2e34).
+- While the scope's generator is on, whoever switched it on, every reading tool and `scope_get_config` add a short
+  note that a load on the pin shifts the readings; `scope_profile`, the server's instructions and the descriptions
+  of `scope_sweep` and `scope_bode_sweep` name it too. The user guide's Generator and Frequency response pages say
+  it for the person at the scope (1041e5b).
 
 ## [0.3.5] - 2026-11-23
 
