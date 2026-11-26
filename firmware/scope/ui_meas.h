@@ -34,17 +34,35 @@ void ui_ms_scope_defaults(uint8 *rank12);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Card fit. Cards are UI_CARD_W x UI_CARD_H (ui_fmt.h) at a 120 px pitch in one row: the Scope's at y 426 above the
-//record-position slider, CH1's from x 5 and CH2's from x 366 (three each; CH1 takes the whole row, six, while the CH2
-//block is not shown), the spectrum's from x 5 at y 446 (six). When more are chosen than fit, the last place shows
+//record-position slider, the spectrum's from x 5 at y 446 (six). When more are chosen than fit, the last place shows
 //"+N" (N = the cards not shown, it included) in the block's colour, so nothing is cut silently.
+//
+//The Scope's row (issue #4): six places shared by the two channel blocks, CH1's from x 5 and CH2's from x 366, three
+//each. A block alone on the row has all six from x 5, either channel. With both shown, a block with more than three
+//chosen takes the places the other leaves unused (the other has fewer than three chosen); CH2's block then starts
+//after CH1's places. A tap on the "+N more" place expands the blocks: every chosen card, in rows of the block's places
+//stacked upward at a UI_MS_ROW_PITCH pitch over the trace, and after the last card a "Show less" place that folds them
+//again. The tap area of both places is UI_MS_HIT_UP px taller than the card, upward, and ends above the slider.
 
 #define UI_MS_PITCH           120
 #define UI_MS_SCOPE_Y         426
 #define UI_MS_SPEC_Y          426                   //fw 0.2.71: the Scope's row (the slider row under it)
 #define UI_MS_ROW_CARDS       6
+#define UI_MS_ROW_PITCH       24                    //expanded rows: card height + 2
+#define UI_MS_HIT_UP          11                    //the "+N more" / "Show less" tap area above the card
+#define UI_MS_HIT_Y_END       450                   //its end (exclusive): the slider row's own hit area starts here
 
 int    ui_ms_fit(int n, int cap, int *more);        //value cards drawn (n or cap - 1); *more = the "+N" count or 0
-int    ui_ms_scope_cap(int ch, int other_shown);    //places for a Scope channel block
+//The Scope's blocks: n[ch] cards chosen, shown[ch] the block is on the row -> cap[ch] places from place slot0[ch]
+void   ui_ms_scope_layout(const int n[2], const int shown[2], int cap[2], int slot0[2]);
+uint32 ui_ms_row_x(int slot);                       //x of a place 0..5 of the Scope's row
+//A block of n cards on cap places: the places it draws (value cards first). Folded: as ui_ms_fit, *toggle the "+N
+//more" place (-1 when all fit) with *more its count. Expanded: n value cards and *toggle = n, the "Show less" place
+//(-1 and one row when all fit), *more 0
+int    ui_ms_scope_block(int n, int cap, int expanded, int *toggle, int *more);
+//Place i of a block (cap places from slot0): row 0 at UI_MS_SCOPE_Y, further rows above
+void   ui_ms_scope_place(int i, int cap, int slot0, uint32 *x, uint32 *y);
+int    ui_ms_card_hit(uint32 cx, uint32 cy, int32 x, int32 y);   //1 when x, y is in the tap area of the card at cx, cy
 uint32 ui_ms_card_x(int ch, int slot);              //Scope: x of a channel block's slot; ch 0 is also the spectrum's row
 const char *ui_ms_more_text(char *t, int more);     //"+N"
 

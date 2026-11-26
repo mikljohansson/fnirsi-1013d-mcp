@@ -47,27 +47,42 @@
 #include <math.h>
 //----------------------------------------------------------------------------------------------------------------------------------
 
-//fw 0.2.64: the first row the lower V/div tap band may not use on a half: the top of that half's measurement cards (as
-//scope_display_measurements draws them), else the grid's bottom
+static int scope_measures_layout(int shown[2], int n[2], int cap[2], int slot0[2]);
+
+//fw 0.2.64: the first row the lower V/div tap band may not use on a half: the top of the measurement cards drawn on
+//that half (issue #4: the blocks as scope_display_measurements lays them out, expanded rows included), else the
+//bottom of the grid
 static int32 scope_tap_bottom(int half)
 {
-  uint8  *m = scopesettings.measuresstate[half];
-  uint32  i, n = 0;
-  int     shown;
+  int   shown[2], n[2], cap[2], slot0[2], ch, toggle, more, places, rows, last;
+  int32 top = touch_cards_top(0), t;
 
-  if(half == 0)
-    shown = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 || scopesettings.ref4) &&
-            !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
-  else
-    shown = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 || scopesettings.ref8) &&
-            !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
+  scope_measures_layout(shown, n, cap, slot0);
 
-  if(shown)
-    for(i = 0; i < 12; i++)
-      if(m[i])
-        n++;
+  for(ch = 0; ch < 2; ch++)
+  {
+    if(!shown[ch] || (cap[ch] <= 0))
+      continue;
 
-  return touch_cards_top(n);
+    places = ui_ms_scope_block(n[ch], cap[ch], scope_measures_expanded, &toggle, &more);
+
+    if(places <= 0)
+      continue;
+
+    //The places of the block on this half: 0..2 the left one, 3..5 the right one
+    last = slot0[ch] + ((places < cap[ch]) ? places : cap[ch]) - 1;
+
+    if(half ? (last < UI_MS_ROW_CARDS / 2) : (slot0[ch] >= UI_MS_ROW_CARDS / 2))
+      continue;
+
+    rows = (places - 1) / cap[ch] + 1;
+    t    = touch_cards_top((uint32)(rows - 1) * CARDS_PER_ROW + 1);
+
+    if(t < top)
+      top = t;
+  }
+
+  return top;
 }
 
 //V/div one step on a tap band
@@ -3485,21 +3500,71 @@ void scope_display_cursor_measurements(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
-void scope_display_measurements(void)
+//fw 0.2.65 (Measurements v2): one row of cards per block; a block shows when its channel or one of its reference
+//traces is on and Hide is off, never in roll mode (the rule of 1.00o5). Issue #4: the six places are shared by the
+//blocks and a tap on "+N more" expands them (ui_meas.h, ui_ms_scope_layout). Returns 1 when a block has more cards
+//than places.
+static int scope_measures_layout(int shown[2], int n[2], int cap[2], int slot0[2])
 {
-  int shown[2], ch;
+  uint8 order[UI_MEAS_COUNT];
+  int   ch;
 
-  //fw 0.2.65 (Measurements v2): one row of cards per block, CH1's taking the whole row while CH2's is not shown
-  //(ui_ms_scope_cap); a block shows when its channel or one of its reference traces is on and Hide is off, never in
-  //roll mode (1.00o5's rule)
   shown[0] = (scopesettings.channel1.enable || scopesettings.ref1 || scopesettings.ref2 || scopesettings.ref3 ||
               scopesettings.ref4) && !scopesettings.hide_values_CH1 && !scopesettings.long_mode;
   shown[1] = (scopesettings.channel2.enable || scopesettings.ref5 || scopesettings.ref6 || scopesettings.ref7 ||
               scopesettings.ref8) && !scopesettings.hide_values_CH2 && !scopesettings.long_mode;
 
   for(ch = 0; ch < 2; ch++)
+    n[ch] = ui_ms_order(scopesettings.measuresstate[ch], UI_MEAS_COUNT, order);
+
+  ui_ms_scope_layout(n, shown, cap, slot0);
+
+  return (shown[0] && (n[0] > cap[0])) || (shown[1] && (n[1] > cap[1]));
+}
+
+void scope_display_measurements(void)
+{
+  int shown[2], n[2], cap[2], slot0[2], ch;
+
+  //Nothing left to expand (a card taken off the list, a block switched off): folded again
+  if(!scope_measures_layout(shown, n, cap, slot0))
+    scope_measures_expanded = 0;
+
+  for(ch = 0; ch < 2; ch++)
     if(shown[ch])
-      scope_display_channel_measurements(ch, ui_ms_scope_cap(ch, shown[ch ^ 1]));
+      scope_display_channel_measurements(ch, cap[ch], slot0[ch]);
+}
+
+//Issue #4: a touch-down on the "+N more" or "Show less" place of a block. 1 when it was one: the blocks are expanded
+//or folded (the next trace pass draws them)
+int scope_measures_toggle_touch(int32 x, int32 y)
+{
+  int    shown[2], n[2], cap[2], slot0[2], ch, toggle, more;
+  uint32 cx, cy;
+
+  if(scopesettings.waveviewmode || !scope_measures_layout(shown, n, cap, slot0))
+    return 0;
+
+  for(ch = 0; ch < 2; ch++)
+  {
+    if(!shown[ch])
+      continue;
+
+    ui_ms_scope_block(n[ch], cap[ch], scope_measures_expanded, &toggle, &more);
+
+    if(toggle < 0)
+      continue;
+
+    ui_ms_scope_place(toggle, cap[ch], slot0[ch], &cx, &cy);
+
+    if(ui_ms_card_hit(cx, cy, x, y))
+    {
+      scope_measures_expanded ^= 1;
+      return 1;
+    }
+  }
+
+  return 0;
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -3567,37 +3632,47 @@ static PCHANNELSETTINGS scope_measures_source(int ch, uint32 *color)
 }
 
 //fw 0.2.65: the chosen cards of a block in the chosen order (measuresstate holds the display rank, ui_meas.h), as many
-//as the block has places; with more chosen the last place reads "+N more". A live channel's card takes its value from a
+//as the block has places; with more chosen the last place reads "+N more", or, expanded (issue #4), every card in
+//rows upward and "Show less" after the last. A live channel's card takes its value from a
 //registered card source (ui_ms_set_source; fw-c7: the FPGA counter's six timing cards, ui_meas.h "the card rule") when
 //there is one and it has a value for that channel (it returns 1), from the record statistics otherwise; a reference
 //trace always from its record.
-void scope_display_channel_measurements(int ch, int cap)
+void scope_display_channel_measurements(int ch, int cap, int slot0)
 {
   PCHANNELSETTINGS settings;
-  uint32       color;
+  uint32       color, x, y;
   uint8        order[UI_MEAS_COUNT];
   char         more_text[4];
-  int          n, fit, more, i, live;
+  int          n, places, toggle, more, i, live;
   ui_ms_source src;
 
   settings = scope_measures_source(ch, &color);
   live     = (settings == &scopesettings.channel1) || (settings == &scopesettings.channel2);
   n        = ui_ms_order(scopesettings.measuresstate[ch], UI_MEAS_COUNT, order);
-  fit      = ui_ms_fit(n, cap, &more);
+  places   = ui_ms_scope_block(n, cap, scope_measures_expanded, &toggle, &more);
 
-  for(i = 0; i < fit; i++)
+  for(i = 0; i < places; i++)
   {
+    ui_ms_scope_place(i, cap, slot0, &x, &y);
+
+    if(i == toggle)
+    {
+      if(more)
+        scope_draw_card(x, y, color, ui_ms_more_text(more_text, more), "more");
+      else
+        scope_draw_card(x, y, color, "Show", "less");
+
+      continue;
+    }
+
     measurementtext[0] = 0;
     src = live ? ui_ms_get_source(order[i]) : 0;
 
     if(!src || !src(ch, measurementtext))
       measurementfunctions[order[i]](settings);
 
-    scope_draw_card(ui_ms_card_x(ch, i), UI_MS_SCOPE_Y, color, measurement_names[order[i]], measurementtext);
+    scope_draw_card(x, y, color, measurement_names[order[i]], measurementtext);
   }
-
-  if(more)
-    scope_draw_card(ui_ms_card_x(ch, fit), UI_MS_SCOPE_Y, color, ui_ms_more_text(more_text, more), "more");
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

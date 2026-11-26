@@ -124,12 +124,77 @@ int ui_ms_fit(int n, int cap, int *more)
   return cap - 1;
 }
 
-int ui_ms_scope_cap(int ch, int other_shown)
+void ui_ms_scope_layout(const int n[2], const int shown[2], int cap[2], int slot0[2])
 {
-  if((ch == 0) && !other_shown)
-    return UI_MS_ROW_CARDS;
+  int half = UI_MS_ROW_CARDS / 2, ch;
 
-  return UI_MS_ROW_CARDS / 2;
+  cap[0] = cap[1] = 0;
+  slot0[0] = slot0[1] = 0;
+
+  if(shown[0] && shown[1])
+  {
+    cap[0] = cap[1] = half;
+
+    //A block over its half takes the places the other does not use
+    for(ch = 0; ch < 2; ch++)
+      if((n[ch] > half) && (n[ch ^ 1] < half))
+      {
+        cap[ch ^ 1] = (n[ch ^ 1] > 0) ? n[ch ^ 1] : 0;
+        cap[ch]     = UI_MS_ROW_CARDS - cap[ch ^ 1];
+      }
+
+    slot0[1] = cap[0];
+  }
+  else if(shown[0])
+    cap[0] = UI_MS_ROW_CARDS;
+  else if(shown[1])
+    cap[1] = UI_MS_ROW_CARDS;
+}
+
+uint32 ui_ms_row_x(int slot)
+{
+  //The second half one pixel on: 366, where the CH2 block has always stood
+  return 5 + UI_MS_PITCH * (uint32)slot + ((slot >= UI_MS_ROW_CARDS / 2) ? 1 : 0);
+}
+
+int ui_ms_scope_block(int n, int cap, int expanded, int *toggle, int *more)
+{
+  int fit;
+
+  *toggle = -1;
+  *more   = 0;
+
+  if(!expanded || (n <= cap) || (cap <= 0))
+  {
+    fit = ui_ms_fit(n, cap, more);
+
+    if(*more)
+      *toggle = fit;
+
+    return fit + (*more ? 1 : 0);
+  }
+
+  *toggle = n;
+  return n + 1;
+}
+
+void ui_ms_scope_place(int i, int cap, int slot0, uint32 *x, uint32 *y)
+{
+  if(cap <= 0)
+    cap = 1;
+
+  *x = ui_ms_row_x(slot0 + i % cap);
+  *y = UI_MS_SCOPE_Y - UI_MS_ROW_PITCH * (uint32)(i / cap);
+}
+
+int ui_ms_card_hit(uint32 cx, uint32 cy, int32 x, int32 y)
+{
+  int32 y1 = (int32)cy + UI_CARD_H + UI_MS_HIT_UP;
+
+  if(y1 > UI_MS_HIT_Y_END)
+    y1 = UI_MS_HIT_Y_END;
+
+  return (x >= (int32)cx) && (x < (int32)cx + UI_CARD_W) && (y >= (int32)cy - UI_MS_HIT_UP) && (y < y1);
 }
 
 uint32 ui_ms_card_x(int ch, int slot)

@@ -810,6 +810,121 @@ static void test_meas_order(void)
 }
 
 //Card fit: one row, CH1 three places (six without the CH2 block), CH2 three; overflow shows "+N" in the last place
+//Issue #4: the Scope row's six places shared by the blocks, the expanded rows and the tap area of the toggle place
+static void test_ms_scope_row(void)
+{
+  int n[2], shown[2], cap[2], slot0[2], a, b, sa, sb, toggle, more, k, i, e;
+  uint32 x, y;
+
+  for(sa = 0; sa < 2; sa++)
+    for(sb = 0; sb < 2; sb++)
+      for(a = 0; a <= UI_MEAS_COUNT; a++)
+        for(b = 0; b <= UI_MEAS_COUNT; b++)
+        {
+          n[0] = a; n[1] = b; shown[0] = sa; shown[1] = sb;
+          ui_ms_scope_layout(n, shown, cap, slot0);
+
+          //Never more than the row, never a place for a block that is not shown, the blocks side by side
+          T_TRUE(cap[0] + cap[1] <= UI_MS_ROW_CARDS);
+          T_TRUE(sa || (cap[0] == 0));
+          T_TRUE(sb || (cap[1] == 0));
+          T_EQ(slot0[0], 0);
+          T_TRUE(!(sa && sb) || (slot0[1] == cap[0]));
+
+          //Alone on the row: all six from the left, either channel
+          if(sa != sb)
+          {
+            T_EQ(cap[sa ? 0 : 1], UI_MS_ROW_CARDS);
+            T_EQ(slot0[1], 0);
+          }
+
+          if(sa && sb)
+          {
+            //Three each unless one overflows and the other leaves places: then nothing is left unused
+            if(((a > 3) && (b < 3)) || ((b > 3) && (a < 3)))
+              T_EQ(cap[0] + cap[1], UI_MS_ROW_CARDS);
+            else
+            {
+              T_EQ(cap[0], 3);
+              T_EQ(cap[1], 3);
+            }
+
+            //A block that fits its half never loses a card to the other
+            T_TRUE((a > 3) || (cap[0] >= a));
+            T_TRUE((b > 3) || (cap[1] >= b));
+          }
+
+          for(k = 0; k < 2; k++)
+            for(e = 0; e < 2; e++)
+            {
+              int places;
+
+              if(!shown[k])
+                continue;
+
+              places = ui_ms_scope_block(n[k], cap[k], e, &toggle, &more);
+
+              if(n[k] <= cap[k])
+              {
+                T_EQ(places, n[k]); T_EQ(toggle, -1); T_EQ(more, 0);
+              }
+              else if(!e)
+              {
+                //Folded: the last place counts the cards not shown, itself included
+                T_EQ(places, cap[k]); T_EQ(toggle, cap[k] - 1); T_EQ(more, n[k] - (cap[k] - 1));
+              }
+              else
+              {
+                T_EQ(places, n[k] + 1); T_EQ(toggle, n[k]); T_EQ(more, 0);
+              }
+
+              //Every place inside the plot, in the columns of its block, above the slider
+              for(i = 0; i < places; i++)
+              {
+                ui_ms_scope_place(i, cap[k], slot0[k], &x, &y);
+                T_TRUE(x >= ui_ms_row_x(slot0[k]));
+                T_TRUE(x + UI_CARD_W <= 728);
+                T_TRUE((sa && sb && (k == 0)) ? (x + UI_CARD_W < ui_ms_row_x(slot0[1])) : 1);
+                T_TRUE(y >= 48 + 22);
+                T_TRUE(y + UI_CARD_H <= 452);
+                T_TRUE(e || (y == UI_MS_SCOPE_Y));
+
+                //The first row is the same folded and expanded (but the toggle place)
+                if(i < cap[k])
+                  T_EQ(y, UI_MS_SCOPE_Y);
+              }
+            }
+        }
+
+  //The places: 5, 125, 245, 366, 486, 606
+  T_EQ(ui_ms_row_x(0), 5);
+  T_EQ(ui_ms_row_x(2), 245);
+  T_EQ(ui_ms_row_x(3), 366);
+  T_EQ(ui_ms_row_x(5), 606);
+
+  //CH1 twelve, CH2 one: CH1 has five places (four cards and "+8"), CH2 the sixth
+  n[0] = 12; n[1] = 1; shown[0] = shown[1] = 1;
+  ui_ms_scope_layout(n, shown, cap, slot0);
+  T_EQ(cap[0], 5); T_EQ(cap[1], 1); T_EQ(slot0[1], 5);
+  T_EQ(ui_ms_scope_block(12, 5, 0, &toggle, &more), 5); T_EQ(toggle, 4); T_EQ(more, 8);
+
+  //Expanded, three places: card 7 is the second place of the third row; twelve cards and "Show less" take five rows
+  ui_ms_scope_place(7, 3, 3, &x, &y);
+  T_EQ(x, 486); T_EQ(y, UI_MS_SCOPE_Y - 2 * UI_MS_ROW_PITCH);
+  ui_ms_scope_place(12, 3, 0, &x, &y);
+  T_EQ(x, 5); T_EQ(y, UI_MS_SCOPE_Y - 4 * UI_MS_ROW_PITCH);
+
+  //The tap area: the card and UI_MS_HIT_UP px above it, never into the slider row (y 450)
+  T_TRUE(ui_ms_card_hit(245, UI_MS_SCOPE_Y, 245, UI_MS_SCOPE_Y - UI_MS_HIT_UP));
+  T_TRUE(ui_ms_card_hit(245, UI_MS_SCOPE_Y, 245 + UI_CARD_W - 1, 449));
+  T_TRUE(!ui_ms_card_hit(245, UI_MS_SCOPE_Y, 245, 450));
+  T_TRUE(!ui_ms_card_hit(245, UI_MS_SCOPE_Y, 244, 430));
+  T_TRUE(!ui_ms_card_hit(245, UI_MS_SCOPE_Y, 245 + UI_CARD_W, 430));
+  T_TRUE(!ui_ms_card_hit(245, UI_MS_SCOPE_Y, 245, UI_MS_SCOPE_Y - UI_MS_HIT_UP - 1));
+  T_TRUE(ui_ms_card_hit(5, 330, 60, 330 + UI_CARD_H + UI_MS_HIT_UP - 1));
+  T_TRUE(!ui_ms_card_hit(5, 330, 60, 330 + UI_CARD_H + UI_MS_HIT_UP));
+}
+
 static void test_meas_fit(void)
 {
   char t[8];
@@ -825,10 +940,7 @@ static void test_meas_fit(void)
   T_EQ(fit, 5); T_EQ(more, 7);
   T_EQ(ui_ms_fit(5, 0, &more), 0); T_EQ(more, 0);
 
-  T_EQ(ui_ms_scope_cap(0, 1), 3);
-  T_EQ(ui_ms_scope_cap(0, 0), 6);
-  T_EQ(ui_ms_scope_cap(1, 1), 3);
-  T_EQ(ui_ms_scope_cap(1, 0), 3);
+  test_ms_scope_row();
 
   //The places: CH1 from x 5, CH2 from x 366, 120 px apart; no overlap between the blocks, all inside the plot
   T_EQ(ui_ms_card_x(0, 0), 5);

@@ -211,6 +211,7 @@ int32 disp_first_sample;
 
 uint32 disp_have_trigger;
 uint32 disp_trigger_index;            //Trigger point in the sample buffers
+uint8  scope_measures_expanded;       //issue #4: the measurement blocks show every card (a tap on "+N more"); not saved
 uint32 disp_trigger_frac;             //issue #3: the level crossing, Q16 of a sample after disp_trigger_index (0..65536)
 uint32 disp_first_frac_q16;           //issue #3: the window's sub-sample phase after disp_first_sample (tbv_window_sub)
 double disp_first_frac;               //the same as a fraction, for the drawers that step in double
