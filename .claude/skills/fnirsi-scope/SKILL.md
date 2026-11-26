@@ -86,6 +86,11 @@ and report `restarts`: pass that on; after repeated restarts ask them to leave t
 the scope is closed by the next request (fw 0.2.78+; the caveat says so: tell the person); on older firmware
 "modal screen" / E_BUSY = ask them to close it. Say what you changed; leave the scope running.
 
+The cards along the bottom of the screen are the person's readings: `scope_measures` (fw 0.4.1+) reads them and sets
+them per channel, in order (`ch1=['Freq', '+Duty', 'Vpp']`). Put the two or three that answer the task first (six
+places, shared by the channels; the rest go behind "+N more" unless `expanded=true`) and say which and why. Timing
+cards read "no period" unless the record shows a full period.
+
 ## Grounds
 
 The probe ground (BNC shells) is VRF1, about +1.24 V above the scope's USB/digital ground (fpga/al3/README.md).

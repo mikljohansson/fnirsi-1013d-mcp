@@ -273,6 +273,15 @@ Collaborative firmware, which capture it returns (fw-hostkeep, protocol 1.30, do
 On firmware before 1.30 only `latest` and `screen_trace` occur. `scope_status` shows `host_capture_kept` (id, fetched,
 still in the sample memory) from 1.30.
 
+**`measures`** (tier 1 to change, 0 to read; protocol 1.32, firmware 0.4.1+). The measurement cards along the bottom of
+the Scope view, as the MEASURES menu sets them: `ch1` / `ch2` are lists of names in display order (Vmax, Vmin, Vavg,
+Vrms, Vpp, Vp, Freq, Period, +Width, -Width, +Duty, -Duty; `[]` for none, omitted = unchanged), `hide_ch1` / `hide_ch2`
+hide a block without changing its choice, `expanded` shows every chosen card in rows (what a tap on "+N more" does).
+Without arguments it reads. The answer gives per channel the cards, the places the block has on the six-place row
+(`places`), how many cards are visible (`visible`) and whether the channel is on. It exists so an agent can put the
+readings that matter for the task in front of the person and say why; for numbers of its own it uses `measure` and
+`counter`. Only the screen changes: no capture is taken, armed or aborted, and `settings_seq` does not move.
+
 **`auto_set`** (tier 2, protocol 1.31, firmware 0.3.5+). Presses the scope's AUTO SET: the scope picks V/div for
 the enabled channels, the trigger level and the time/div from the signal on the trigger channel, as the button on
 the Scope view does (up to a few seconds; relays click). No parameters. Returns `run_state`, `channels`, `timebase`

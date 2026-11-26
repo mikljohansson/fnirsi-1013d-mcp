@@ -11,6 +11,38 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+### Protocol 1.32
+
+- GET_MEASURES 0x0106 and SET_MEASURES 0x0107: the Scope view's measurement cards from the host (owner 2026-11-26,
+  with GitHub issue #4). 28 bytes: Hide per channel and expanded as flags, and per channel the rank of each of the
+  twelve measurements (0 off, else its place). SET takes the CH1 list, the CH2 list and the flags per a mask,
+  renumbers the lists and answers the state. Only the screen changes: a pending host single stays armed and
+  `settings_seq` does not step (`docs/protocol.md` row 75; 3198872).
+
+### Host (mcp)
+
+- `scope_measures`: reads the cards on the scope's screen or chooses and orders them per channel, hides a block,
+  expands the rows. It reports the places each block has and how many of its cards are visible, so an agent can put
+  the readings that matter in front of the person. `Scope.get_measures` / `set_measures`, `P.Measures`; the
+  simulator models the lists (3198872).
+
+### Firmware
+
+- The trigger point is drawn on the H pointer (GitHub issue #3). The level crossing stood one to two samples plus up
+  to two more to the right of the pointer: a few pixels at ordinary time bases, 1 to 15 px at 50 ns/div and 21 to
+  96 px (up to two divisions) at 10 ns/div. Two causes, both from 1.00o5. The trace window started on a whole sample
+  (`trig - 1 - ceil(pos / xpps)`) measured from the pointer icon's left edge; it now has a sub-sample phase and puts
+  the crossing on the pointer's tip (`tbv_window_sub`, `TBV_POS_TIP`). And the trigger search compared samples two
+  apart in steps of two; it now finds the two neighbouring samples around the level and where between them the level
+  is crossed (`disp_trigger_frac`). Linear, interpolated, Dots and phosphor traces follow the phase. READ_TRACE's
+  `sw_trigger_index` is the sample before the crossing (it could be one earlier before). Bench: at 10 ns/div the
+  crossing stood 38 to 68 px right of the pointer, now within -4 to +8 px (33f5bcc).
+- Measurement cards (GitHub issue #4). The six places of the Scope's row are shared: a channel alone on the row has
+  all six (CH2 alone had three), and with both channels shown a block with more than three cards takes the places
+  the other does not use. A tap on "+N more" expands the blocks to every chosen card, in rows stacked upward over
+  the trace, with "Show less" after the last card to fold them again (the place did nothing before). The expanded
+  state is not saved (438aac1).
+
 ## [0.4.0] - 2026-11-25
 
 A feature release on the same FPGA bitstream, 0x153F (protocol 1.31 unchanged): the interpolated 20 and 10 ns/div.

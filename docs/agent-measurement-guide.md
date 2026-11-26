@@ -309,6 +309,15 @@ firmware 0.2.78+ (protocol 1.23; the caveat says so, the scope shows no note): t
 if they were using it. Older firmware fails with "modal screen" (E_BUSY): ask them to close it. Leave the scope as you found it where reasonable (RUN, the
 user's range) and say what you changed.
 
+**The measurement cards** (fw 0.4.1+, `scope_measures`). The cards along the bottom of the Scope view are what the
+person reads while they work. `scope_measures()` shows what is there; `scope_measures(ch1=[...], ch2=[...])` chooses
+and orders them. Advise before you change: say which readings answer the task (for a PWM stage Freq and +Duty, for a
+supply rail Vavg and Vpp, for a pulse +Width and Vmax) and put those first. The row has six places shared by the two
+channels (three each with both on, all six for a channel alone); cards beyond them sit behind "+N more" until the
+person taps it or you pass `expanded=true`, which covers the bottom of the trace. Freq, Period, Width and Duty read
+"no period" when the record holds less than one period. For your own numbers use `scope_measure` or `scope_counter`:
+the cards are for the person.
+
 ## 5. Grounds: the probe ground is not the USB ground
 
 The BNC shells (probe ground clips) sit on VRF1, a TL432 reference about +1.24 V above the scope's digital ground

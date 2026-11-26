@@ -1296,8 +1296,10 @@ The model is pure C in `ui_meas.c` (host-tested in `host_tests/test_ui.c`); `sco
   Vpp, Vavg per channel in that order; in the spectrum CH1 Peak, Level, THD, CH2 Peak, Level, then RBW and (waterfall
   only) Time. A settings sector written by an older image shows its cards in table order (1.00o5 stored 1 for every
   chosen card); a 1.00o5 image reading ours sees the same choice.
-- **Fit.** The cards keep to one row and no longer stack upward over the trace: the Scope's at y 426, CH1 three from x 5
-  (six, the whole row, while the CH2 block is not shown: CH2 off with no reference trace, or Hide), CH2 three from x 366;
+- **Fit.** The cards keep to one row and no longer stack upward over the trace: the Scope's at y 426, six places
+  shared by the blocks (fw 0.4.1, issue #4: CH1 three from x 5 and CH2 three from x 366; a block alone on the row has
+  all six from x 5; with both shown a block over three takes the places the other leaves unused; a tap on "+N more"
+  expands the blocks into rows stacked upward, "Show less" folds them; `ui_ms_scope_layout`, `ui_ms_scope_block`);
   the spectrum's six from x 5 at y 426 (446 before fw 0.2.71). With more chosen than fit, the last place reads "+N more" (N the cards not shown)
   in the block's colour, so nothing is dropped silently.
 - **Spectrum values.** Peak, Level and RBW as before. THD: the power in the three bins around each harmonic 2..10 (each
@@ -1480,8 +1482,10 @@ on release, only when the finger is still on the row; a tap outside closes the f
 
 ### Time/div, sample rate and the record (fw 0.2.64)
 
-The trace is a window onto the record: 50 px per division over columns 3..726, the trigger point at column
-`triggerhorizontalposition`, first sample `trig - 1 - ceil(pos / xpps)` (1.00o5's formula). `tb_view.c` (pure,
+The trace is a window onto the record: 50 px per division over columns 3..726, the trigger crossing on the tip of the
+H pointer (column `triggerhorizontalposition + 7`), so the first column shows the record at
+`trig - (pos + 7 - 3) / xpps` samples, with a sub-sample part (fw 0.4.1, issue #3; 1.00o5's whole-sample
+`trig - 1 - ceil(pos / xpps)` left the trigger one to two samples right of the pointer). `tb_view.c` (pure,
 `host_tests/test_tb_view.c`) derives from the real record length (`fpgasettings.totalsamples` x sample period):
 
 - a time/div is **viable** at a rate when the record spans the 724 px trace area and a division holds at least ten

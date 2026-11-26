@@ -2429,7 +2429,7 @@ snapped index in the response and the per-mode Filter).
 Points for a successor:
 - **tb_view.c/.h** (pure): the trace window maths. A time/div is viable when `724 x fs < total x 50 x fpd` (the record
   covers columns 3..727, the last pixel's interpolation included) and `fs >= fpd` (one sample per division; 200 MSa/s
-  at 5 ns/div is exactly one). `tbv_window` keeps 1.00o5's first-sample formula (trig - 1 - ceil(pos / xpps)) and
+  at 5 ns/div is exactly one). `tbv_window` (fw 0.4.1: `tbv_window_sub`, section 105; before it 1.00o5's trig - 1 - ceil(pos / xpps)) places the window and
   clamps it into the record; a record shorter than the screen draws from column 3 to `3 + ceil(total x xpps)`.
   `tbv_pos_limits` are the trigger point columns that keep the window inside the record for the nominal trigger sample
   (`fpgasettings.settriggerpoint`); a software trigger found off the nominal point is handled by the window clamp. The
@@ -2526,8 +2526,9 @@ Points for a successor:
   `ui_ms_order` gives the display order, `ui_ms_toggle` puts a new item last and closes gaps, `ui_ms_select_all` keeps
   the chosen order; every change renumbers 1..k first, so garbage ranks heal on the next tap. Wave files and reference
   files carry the ranks in the measuresstate bytes as before (harmless).
-- **Fit**: one row only (the 1.00o5 stacking upward over the trace is gone). `ui_ms_scope_cap`: CH1 3, or 6 when the
-  CH2 block is not shown; CH2 3 from x 366. `ui_ms_fit`: with more chosen than places the last place is "+N more" in the
+- **Fit**: one row only (the 1.00o5 stacking upward over the trace is gone). fw 0.4.1 (section 105) replaced
+  `ui_ms_scope_cap` (CH1 3, or 6 when the CH2 block is not shown; CH2 3 from x 366) with shared places and the
+  expanded rows. `ui_ms_fit`: with more chosen than places the last place is "+N more" in the
   block's colour. Spectrum: 6 places from x 5 at y 446, the "+N" with a neutral chip.
 - **Scope cards** (`scope_display_measurements`, `scope_display_channel_measurements(ch, cap)`, `scope_measures_source`
   in scope_functions.c): block rule as 1.00o5 (channel or one of its references on, Hide off, not in roll mode).
@@ -7949,3 +7950,42 @@ arm, before the first bus write); check_vectors OK (3 new firmware vectors, 2 ho
 completed host single (DONE not taken: sequencer setting left on?); the kept samples differ between steps 5 and 6 (the
 copy taken after a write); a UI stall of tens of ms at every RUN capture (the hook copying more than once: kept_state not
 moving to COPY); the screen trace returned in place of the host's unread single.
+
+## 105. Issues #3 and #4: the trigger crossing on the H pointer, shared card places and "+N more", the cards from the host (fw 0.4.1, protocol 1.32, row 75)
+
+**Issue #3 (trigger position).** Two 1.00o5 leftovers put the level crossing right of the H pointer, by a fixed number
+of samples, so by 21 to 96 px at 10 ns/div (25 px a sample):
+- `tbv_window` started the window on a whole sample, `trig - 1 - ceil(pos / xpps)`, from the pointer icon's left edge.
+  Now `tbv_window_sub(trig, trig_frac, pos, ...)` returns `first` and a Q16 phase `frac`: the record position in the
+  first trace column is `trig + trig_frac - (pos + TBV_POS_TIP - TBV_X_FIRST) / xpps` (the tip is 7 columns right of
+  `pos`). `tbv_pos_limits` and `tbv_slider` follow (one sample is kept after the last column for the phase).
+  `tbv_window` is the whole-sample form (the slider, the tests).
+- `scope_process_trigger` compared `buffer[i]` and `buffer[i + 2]` in steps of two. Now neighbouring samples over the
+  same span (count - 20 .. count + 60), `disp_trigger_index` the sample before the crossing and `disp_trigger_frac`
+  (Q16, 0..65536) the linear position of the level between the two. No trigger found, EXT, a loaded waveform: 0.
+- Drawers: `disp_first_frac_q16` / `disp_first_frac` (set in `scope_display_trace_data`, 0 in long mode and roll).
+  The double-stepping drawers start at `disp_first_sample + disp_first_frac`; `scope_first_y` interpolates the first
+  column; the sinc trace adds the phase to its Q16 position and shifts the sample dots; the phosphor map's x0 moves
+  left by the phase. Not done: the peak-pair bars (`pb_start` takes a whole first sample; under one sample a column
+  there) and the saved waveform (the file has no room for the fraction: a viewed waveform is up to one sample off).
+- The phase changes with every capture, so it must stay out of `phos_xkey` (the map would restart every record).
+
+**Issue #4 (cards).** `ui_meas.c`: `ui_ms_scope_layout` (six places shared; alone = six from x 5 for either channel;
+both shown: three each unless one is over three and the other under, then the other keeps what it uses),
+`ui_ms_row_x` (5, 125, 245, 366, 486, 606), `ui_ms_scope_block` (folded: "+N more" on the last place; expanded: all
+cards and "Show less" at index n), `ui_ms_scope_place` (rows upward, 24 px pitch), `ui_ms_card_hit` (the card and 11 px
+above it, never below y 450). `scope_measures_expanded` (RAM only) is toggled by `scope_measures_toggle_touch`, called
+first in the plot branch of `scan_for_touch` (the place lies over the slider's upper hit area); it folds by itself when
+no block overflows. `scope_tap_bottom` takes the tap bands' lower edge from the same layout. The spectrum's and the
+Bode view's "+N more" are still counts only (queued).
+
+Host tests: test_tb_view `test_window_sub` (the crossing within 1/16 px of the tip at 10, 20, 50 ns/div and slower,
+every eighth of a sample), test_ui `test_ms_scope_row` (all 13 x 13 x 4 combinations).
+
+**Protocol 1.32 (owner 2026-11-26: "add MCP commands to work with the measures").** GET_MEASURES 0x0106 (F_MODAL) and
+SET_MEASURES 0x0107 (no flags: it runs in MAIN, leaves the Frequency response view and a pending single alone) in
+pc_cmds.c (`pc_measures_body`, `h_get_measures`, `h_set_measures`; the layout is in the comment and in protocol.md row
+75). HAL: `pc_hw_measures`, `pc_hal_measures_get` / `_set(m, mask)` in pc_hal_scope.c copy `measuresstate[ch]` through
+`ui_ms_normalise`, `hide_values_CH1/2` and `scope_measures_expanded`; nothing is drawn there, the next trace pass shows
+it. Only the Scope's lists: the spectrum's words 221..223 and the Bode list are not on the wire. test_session
+`test_measures`.
