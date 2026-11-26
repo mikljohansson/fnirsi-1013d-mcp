@@ -326,10 +326,65 @@ static void test_limits_and_window(void)
   T_EQ(tbv_clamp_pos(lo - 10, 200000000, 1000000, 3000, 1500), lo);
   T_EQ(tbv_clamp_pos(lo, 200000000, 1000000, 3000, 1500), lo);
 
-  //1.00o5's first sample formula for an ordinary case: trig 1500, 2 px per sample, pos 357: 1500 - 178.5 - 1 -> 1320
+  //The trigger sample on the pointer's tip: trig 1500, 2 px per sample, pos 357: the tip at column 364, 361 px =
+  //180.5 samples after the first trace column -> 1319.5 (1.00o5: 1500 - 178.5 - 1 -> 1320, the trigger sample at
+  //column 363 by chance of the rounding)
   tbv_window(1500, 357, 25000000, 1000000, 3000, &f, &xend);
-  T_EQ(f, 1320);
+  T_EQ(f, 1319);
   T_EQ(xend, TBV_X_END);
+}
+
+//Issue #3: the trigger crossing is drawn on the H pointer's tip, at every time base and for every sub-sample position
+//of the crossing. The column of record position p (Q16 samples) for a window first + frac: 3 + (p - first - frac) x xpps
+static void test_window_sub(void)
+{
+  static const uint32 fss[]  = { 200000000, 200000000, 200000000, 200000000, 25000000, 5000000 };
+  static const uint32 fpds[] = { 100000000,  50000000,  20000000,   1000000,  1000000,  100000 };   //10, 20, 50 ns, 1 us, 1 us, 10 us
+  unsigned a, k;
+  int32 pos, first, xend;
+  uint32 frac, tf;
+
+  for(a = 0; a < 6; a++)
+    for(pos = 40; pos <= 680; pos += 7)
+      for(k = 0; k <= 8; k++)
+      {
+        uint32 fs = fss[a], fpd = fpds[a], total = 16000;
+        int64_t num = (int64_t)TBV_PX_PER_DIV * fpd, cross, x_q16;
+
+        tf = k * 8192;                                  //0 .. 65536: the crossing at the next sample is allowed
+        tbv_window_sub(8000, tf, pos, fs, fpd, total, &first, &frac, &xend);
+
+        T_TRUE(frac < 65536);
+        T_TRUE(first >= 0);
+        T_EQ(xend, TBV_X_END);
+
+        //Where the crossing is drawn, in Q16 columns: within a 16th of a column (the Q16 of the phase) of the tip
+        cross = ((int64_t)8000 << 16) + tf - (((int64_t)first << 16) + frac);
+        x_q16 = ((int64_t)TBV_X_FIRST << 16) + (cross * num) / fs;
+        T_TRUE(x_q16 - ((int64_t)(pos + TBV_POS_TIP) << 16) <= 4096);
+        T_TRUE(((int64_t)(pos + TBV_POS_TIP) << 16) - x_q16 <= 4096);
+      }
+
+  //10 ns/div, the reporter's case (pos 357, the tip at 364): 361 px = 14.44 samples before the trigger sample;
+  //1.00o5 gave 1484, the trigger sample at column 403
+  tbv_window_sub(1500, 0, 357, 200000000, 100000000, 3000, &first, &frac, &xend);
+  T_EQ(first, 1485);
+  T_EQ(frac, 36701);                                    //0.56 of a sample
+  tbv_window_sub(1500, 32768, 357, 200000000, 100000000, 3000, &first, &frac, &xend);
+  T_EQ(first, 1486);
+  T_EQ(frac, 3933);
+
+  //A clamped window has no phase
+  tbv_window_sub(1500, 30000, 100000, 200000000, 100000000, 3000, &first, &frac, &xend);
+  T_EQ(first, 0);
+  T_EQ(frac, 0);
+  tbv_window_sub(1500, 30000, -100000, 200000000, 100000000, 3000, &first, &frac, &xend);
+  T_EQ(first, 3000 - 2 - 28);                          //724 px at 25 px a sample: 28 whole samples
+  T_EQ(frac, 0);
+
+  //The plain window is the same in whole samples
+  tbv_window(1500, 357, 200000000, 100000000, 3000, &first, &xend);
+  T_EQ(first, 1485);
 }
 
 static void test_slider(void)
@@ -388,6 +443,7 @@ int main(void)
   test_snap();
   test_snap_is_manual_set();
   test_limits_and_window();
+  test_window_sub();
   test_slider();
   return t_report("test_tb_view");
 }

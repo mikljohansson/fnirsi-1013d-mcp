@@ -746,31 +746,35 @@ void scope_process_trigger(uint32 count)
     buffer = (uint8 *)channel2tracebuffer;
   }
 
-   disp_have_trigger = 0;
+  disp_have_trigger = 0;
+  disp_trigger_frac = 0;
 
   //EXT trigger: no level crossing to refine in the traces; the hardware trigger position stands
   if(scopesettings.triggerchannel == 2)
     return;
   
-  //Set a starting point for checking on trigger
-  //Count is half a sample buffer!!
-  index = count - 20;//20 // 6  //10 bolo
-  count = 40;   //40 5 20
-  
-  //Need a better check here, maybe over a wider range of samples
+  //Issue #3: the level crossing between two neighbouring samples, count - 20 .. count + 60 as before, and how far
+  //towards the second one the level is crossed (linear, Q16), so the crossing itself can be drawn on the H pointer.
+  //1.00o5 compared samples two apart in steps of two and took the first of them: the crossing was anywhere in the two
+  //samples after the index it set, 10 ns at 200 MSa/s
+  index = count - 20;
+  count = 80;
+
   while(count--)
   {
     sample1 = buffer[index];
-    sample2 = buffer[index + 2];//1
+    sample2 = buffer[index + 1];
 
     if(((scopesettings.triggeredge == 0) && (sample1 < level) && (sample2 >= level)) ||
        ((scopesettings.triggeredge == 1) && (sample1 >= level) && (sample2 < level)))
-    //    if(((scopesettings.triggeredge == 0) && (sample1 < level) && (sample2 > level)) ||
-    //   ((scopesettings.triggeredge == 1) && (sample1 > level) && (sample2 < level)))  
-
     {
-      //Set the current index as trigger point
+      //The sample before the crossing is the trigger point
       disp_trigger_index = index;
+
+      if(scopesettings.triggeredge == 0)
+        disp_trigger_frac = ((level - sample1) << 16) / (sample2 - sample1);
+      else
+        disp_trigger_frac = ((sample1 - level) << 16) / (sample1 - sample2);
 
       //Signal trigger has been found
       disp_have_trigger = 1;
@@ -780,8 +784,7 @@ void scope_process_trigger(uint32 count)
     }
 
     //Select next sample to check
-    //index--;
-    index=index+2;
+    index++;
   }
 }
 
@@ -2056,6 +2059,7 @@ void scope_display_trace_data(void)
     
     //disp_trigger_index = (scopesettings.samplecount / 2); 
     //disp_trigger_index = (1500); // 
+    disp_trigger_frac  = 0;
     disp_trigger_index = (fpgasettings.settriggerpoint); 
   } 
 
@@ -2079,12 +2083,18 @@ void scope_display_trace_data(void)
   //(1.00o5 clamped only the start, so the trace shifted against the trigger point and zeros were drawn past the end)
   if(!scopesettings.long_mode && (scopesettings.samplerate < 18) && (scopesettings.timeperdiv < 35))
   {
-    tbv_window((int32)disp_trigger_index, triggerposition, sample_rate[scopesettings.samplerate],
-               frequency_per_div[scopesettings.timeperdiv], fpgasettings.totalsamples, &disp_first_sample, &disp_xend);
+    //Issue #3: the window has a sub-sample phase, so the trigger crossing stands on the H pointer's tip at every
+    //time base (the drawers start at disp_first_sample + disp_first_frac)
+    tbv_window_sub((int32)disp_trigger_index, disp_trigger_frac, triggerposition, sample_rate[scopesettings.samplerate],
+                   frequency_per_div[scopesettings.timeperdiv], fpgasettings.totalsamples, &disp_first_sample,
+                   &disp_first_frac_q16, &disp_xend);
+    disp_first_frac = disp_first_frac_q16 / 65536.0;
     disp_xstart = TBV_X_FIRST;
   }
   else
   {
+    disp_first_frac_q16 = 0;
+    disp_first_frac     = 0.0;
 
     //The displayable x range is based on the number of samples and the number of x positions needed per sample
     //Halved to allow trigger position to be in the center
@@ -2457,11 +2467,26 @@ int32 scope_code_to_y(PCHANNELSETTINGS settings, int32 code)
 //----------------------------------------------------------------------------------------------------------------------------------
 
 
+//Issue #3: the trace's y in the first trace column. The window starts disp_first_frac of a sample after
+//disp_first_sample, so with several pixels a sample the first point lies between two samples
+static int32 scope_first_y(PCHANNELSETTINGS settings)
+{
+  int32 y0 = scope_get_y_sample(settings, disp_first_sample);
+  int32 y1;
+
+  if((disp_first_frac_q16 == 0) || (disp_sample_step >= 1.0) || (disp_first_sample + 1 >= (int32)fpgasettings.totalsamples))
+    return y0;
+
+  y1 = scope_get_y_sample(settings, disp_first_sample + 1);
+
+  return y0 + (((y1 - y0) * (int32)disp_first_frac_q16) >> 16);
+}
+
 //==============================================================================
 
 void scope_display_channel_linear_trace(PCHANNELSETTINGS settings)  //povodna 2
 {
-    double inputindex = disp_first_sample;
+    double inputindex = disp_first_sample + disp_first_frac;
     register int32 lastx = disp_xstart;
     register int32 xpos = disp_xstart + 1;
 
@@ -2519,7 +2544,7 @@ void scope_display_channel_linear_trace(PCHANNELSETTINGS settings)  //povodna 2
 //==============================================================================
 void scope_display_channel_linear_trace3(PCHANNELSETTINGS settings)
 {
-    double inputindex = disp_first_sample;
+    double inputindex = disp_first_sample + disp_first_frac;
     register int32 xpos = disp_xstart;
 
     // Tracepoints buffer (nepoužívame na spojnice, ale nech ostane konzistentný)
@@ -2584,7 +2609,7 @@ void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings)  //povodn
   register PDISPLAYPOINTS tracepoints = settings->tracepoints;
 
   //Get the processed sample
-  sample1 = scope_get_y_sample(settings, disp_first_sample);
+  sample1 = scope_first_y(settings);
 
   //Store the first sample in the trace points buffer
   tracepoints->x = lastx;
@@ -2595,7 +2620,7 @@ void scope_display_channel_linear_trace_old(PCHANNELSETTINGS settings)  //povodn
   settings->noftracepoints = 1;
 
   //Step to the next input index
-  inputindex = disp_first_sample + disp_sample_step;
+  inputindex = disp_first_sample + disp_first_frac + disp_sample_step;
 
   //The previous index is the index of the first sample
   previousindex = disp_first_sample;
@@ -2686,7 +2711,7 @@ void scope_display_channel_sinc_trace(PCHANNELSETTINGS settings)
   //The samples under the trace area, with up to four before and after them for the taps
   lead = (disp_first_sample < SINCV_TAPS / 2) ? disp_first_sample : SINCV_TAPS / 2;
   base = disp_first_sample - lead;
-  n    = lead + (int32)((((uint32)(disp_xend - disp_xstart)) * step) >> 16) + 2 + SINCV_TAPS / 2;
+  n    = lead + (int32)((((uint32)(disp_xend - disp_xstart)) * step) >> 16) + 3 + SINCV_TAPS / 2;
 
   if(n > SINC_TRACE_SAMPLES)
     n = SINC_TRACE_SAMPLES;
@@ -2698,12 +2723,13 @@ void scope_display_channel_sinc_trace(PCHANNELSETTINGS settings)
     v[i] = (int16)scope_get_y_sample(settings, base + i);
 
   //The curve, a point for every pixel column, to the record's end at most
+  //(issue #3: from the window's sub-sample phase, so the first column is a computed point too)
   lastx = disp_xstart;
   lasty = v[lead];
 
-  for(x = disp_xstart + 1; x < disp_xend; x++)
+  for(x = disp_xstart; x < disp_xend; x++)
   {
-    uint32 pos = ((uint32)lead << 16) + (uint32)(x - disp_xstart) * step;
+    uint32 pos = ((uint32)lead << 16) + disp_first_frac_q16 + (uint32)(x - disp_xstart) * step;
 
     if((int32)(pos >> 16) > n - 1)
       break;
@@ -2716,15 +2742,17 @@ void scope_display_channel_sinc_trace(PCHANNELSETTINGS settings)
     else if(y > 448)
       y = 448;
 
-    display_draw_line(lastx, lasty, x, y);
+    if(x > disp_xstart)
+      display_draw_line(lastx, lasty, x, y);
+
     lastx = x;
     lasty = y;
   }
 
-  //The samples themselves
-  for(i = lead; i < n; i++)
+  //The samples themselves; the window's first one lies left of the trace area when the phase is not zero
+  for(i = lead + (disp_first_frac_q16 ? 1 : 0); i < n; i++)
   {
-    x = disp_xstart + (int32)((((uint32)(i - lead) << 16) + (step >> 1)) / step);
+    x = disp_xstart + (int32)((((uint32)(i - lead) << 16) - disp_first_frac_q16 + (step >> 1)) / step);
 
     if(x >= disp_xend)
       break;
@@ -2753,7 +2781,7 @@ void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
   register PDISPLAYPOINTS tracepoints = settings->tracepoints;
 
   //Get the processed sample
-  sample1 = scope_get_y_sample(settings, disp_first_sample);
+  sample1 = scope_first_y(settings);
 
   //Store the first sample in the trace points buffer
   tracepoints->x = lastx;
@@ -2764,7 +2792,7 @@ void scope_display_channel_dots_trace(PCHANNELSETTINGS settings)//1
   settings->noftracepoints = 1;
 
   //Step to the next input index
-  inputindex = disp_first_sample + disp_sample_step;
+  inputindex = disp_first_sample + disp_first_frac + disp_sample_step;
 
   //The previous index is the index of the first sample
   previousindex = disp_first_sample;
@@ -2881,7 +2909,7 @@ int scope_display_channel_bars(PCHANNELSETTINGS settings, int ch)
 //==============================================================================
 void scope_display_channel_peak_trace(PCHANNELSETTINGS settings)//2
 {
-    double inputindex = disp_first_sample;
+    double inputindex = disp_first_sample + disp_first_frac;
     register int32 xpos = disp_xstart;
 
     register PDISPLAYPOINTS tracepoints = settings->tracepoints;
@@ -3045,7 +3073,7 @@ int32 scope_get_y_sample_fir(PCHANNELSETTINGS settings, double sample_pos)
 }
 void scope_display_channel_sinx_trace(PCHANNELSETTINGS settings)
 {
-    //double inputindex = disp_first_sample;
+    //double inputindex = disp_first_sample + disp_first_frac;
     double inputindex = 0.0;
     double disp_sample_step = 0.25;
 
@@ -3134,7 +3162,7 @@ int32 scope_get_y_sample_fir(PCHANNELSETTINGS settings, double sample_pos)
 }
 void scope_display_channel_sinx_trace(PCHANNELSETTINGS settings)
 {
-    double inputindex = disp_first_sample;
+    double inputindex = disp_first_sample + disp_first_frac;
 
     int32 lastx = disp_xstart;
     int32 xpos  = disp_xstart + 1;
@@ -3201,7 +3229,7 @@ int32 scope_get_y_sample_sinc(PCHANNELSETTINGS settings, double sample_pos)
 }
 void scope_display_channel_sinx_trace(PCHANNELSETTINGS settings)
 {
-    double inputindex = disp_first_sample;
+    double inputindex = disp_first_sample + disp_first_frac;
 
     int32 lastx = disp_xstart;
     int32 xpos  = disp_xstart + 1;
@@ -4156,6 +4184,7 @@ void scope_restore_setup_from_file(void)
   scopesettings.triggerverticalposition   = ptr[index++];
   disp_have_trigger                       = ptr[index++];
   disp_trigger_index                      = ptr[index++];
+  disp_trigger_frac                       = 0;     //a saved waveform carries the trigger sample only
 
   //Leave some space for other scope settings changes   10
   index = OTHER_SETTING_OFFSET;

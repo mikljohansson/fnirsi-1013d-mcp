@@ -86,12 +86,13 @@ void tbv_pos_limits(uint32 fs, uint32 fpd, uint32 total, uint32 trig, int32 *lo,
     return;
   }
 
-  //First sample shown >= 0: pos <= (trig - 1) x xpps
-  h = tbv_floordiv(((int64)trig - 1) * num, fs);
+  //First sample shown >= 0: the tip column pos + TBV_POS_TIP at or left of the trigger sample's, trig x xpps px from
+  //the first trace column
+  h = tbv_floordiv((int64)trig * num, fs) - (TBV_POS_TIP - TBV_X_FIRST);
 
-  //Last column's sample <= total - 1: pos > (trig - total + V - 1) x xpps
-  v = tbv_span_samples(fs, fpd);
-  l = tbv_floordiv(((int64)trig - (int64)total + v - 1) * num, fs) + 1;
+  //Last column's sample (the sub-sample phase included, so one more) <= total - 1
+  v = tbv_span_samples(fs, fpd) + 1;
+  l = tbv_floordiv(((int64)trig - (int64)total + v) * num, fs) + 1 - (TBV_POS_TIP - TBV_X_FIRST);
 
   //Record shorter than the trace area: it starts at the left edge
   if(l > h)
@@ -173,12 +174,14 @@ int32 tbv_zoom_step(int32 t, int dir, const uint32 *fpd, int32 first, int32 last
   return -1;
 }
 
-void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend)
+void tbv_window_sub(int32 trig, uint32 trig_frac, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first,
+                    uint32 *frac, int32 *xend)
 {
   int64 num = (int64)TBV_PX_PER_DIV * fpd;
-  int64 f, fmax, end;
+  int64 a, q, r, f, fmax, end;
 
   *xend = TBV_X_END;
+  *frac = 0;
 
   if((fs == 0) || (fpd == 0) || (total < 2))
   {
@@ -186,21 +189,28 @@ void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int3
     return;
   }
 
-  //1.00o5: F = trig - pos / xpps - 1, truncated: trig - 1 - ceil(pos x fs / (50 fpd))
-  f = (int64)trig - 1 + tbv_floordiv(-(int64)pos * fs, num);
+  //The crossing (trig + trig_frac / 65536) stands on the pointer's tip column, (pos + TBV_POS_TIP - TBV_X_FIRST) px =
+  //that x fs / (50 fpd) samples after the first trace column. Whole samples q and the rest r apart, so nothing
+  //overflows: F = trig + trig_frac - q - r / num, in Q16
+  a = ((int64)pos + TBV_POS_TIP - TBV_X_FIRST) * fs;
+  q = tbv_floordiv(a, num);
+  r = a - q * num;
+  f = (((int64)trig - q) << 16) + (int64)trig_frac - (r << 16) / num;
 
-  fmax = (int64)total - 1 - tbv_span_samples(fs, fpd);
+  //One sample kept after the last column's for the sub-sample phase
+  fmax = (int64)total - 2 - tbv_span_samples(fs, fpd);
 
   if(fmax >= 0)
   {
     //The window stays inside the record (a trigger found off the nominal point can push it)
-    if(f > fmax)
-      f = fmax;
+    if(f > (fmax << 16))
+      f = fmax << 16;
 
     if(f < 0)
       f = 0;
 
-    *first = (int32)f;
+    *first = (int32)(f >> 16);
+    *frac  = (uint32)(f & 0xFFFF);
     return;
   }
 
@@ -213,6 +223,13 @@ void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int3
 
   if(end < TBV_X_END)
     *xend = (int32)end;
+}
+
+void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend)
+{
+  uint32 frac;
+
+  tbv_window_sub(trig, 0, pos, fs, fpd, total, first, &frac, xend);
 }
 
 void tbv_slider(int32 first, uint32 fs, uint32 fpd, uint32 total, int32 *x, int32 *w)
@@ -229,7 +246,8 @@ void tbv_slider(int32 first, uint32 fs, uint32 fpd, uint32 total, int32 *x, int3
   if(first < 0)
     first = 0;
 
-  vis = tbv_span_samples(fs, fpd) + 1;
+  //The samples under the trace area and the one kept after them for the sub-sample phase (tbv_window_sub)
+  vis = tbv_span_samples(fs, fpd) + 2;
   ww  = (vis * TBV_SLIDER_W) / total;
 
   if(ww > TBV_SLIDER_W)

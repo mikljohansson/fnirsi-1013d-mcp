@@ -233,4 +233,6 @@ static void roll_view_draw(void)
   //1.00o5's roll left these for a saved roll picture / waveform: the record holds its columns from index 0
   disp_have_trigger = 1;
   disp_first_sample = roll_m.count;
+  disp_first_frac_q16 = 0;
+  disp_first_frac     = 0.0;
 }

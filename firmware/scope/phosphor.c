@@ -390,7 +390,9 @@ void phosphor_draw(void)
           continue;
         }
 
-        phos_add_record(&phos_m[ch], phos_ch(ch)->tracebuffer + first, n, PHOS_LUT(ch), (disp_xstart - PHOS_X0) << 16, dx,
+        //Issue #3: the first sample stands the window's sub-sample phase left of the first column
+        phos_add_record(&phos_m[ch], phos_ch(ch)->tracebuffer + first, n, PHOS_LUT(ch),
+                        ((disp_xstart - PHOS_X0) << 16) - (int32)(((int64)disp_first_frac_q16 * dx) >> 16), dx,
                         disp_xstart - PHOS_X0, disp_xend - PHOS_X0, inc);
       }
   }

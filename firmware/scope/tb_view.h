@@ -1,9 +1,12 @@
 //----------------------------------------------------------------------------------------------------------------------------------
 // tb_view.h - the record behind the scope trace (fw 0.2.64, docs/plans/task-queue.md "ACQ: sample rate vs time/div coupling").
 //
-// The trace shows a window of the record: 50 px per division, trace columns 3..726 (scope_display_trace_data), the
-// trigger point at column `pos` (scopesettings.triggerhorizontalposition) and the first sample shown
-// F = trig - 1 - ceil(pos / xpps), xpps = 50 x (1 / time per div) / sample rate pixels per sample (1.00o5's formula).
+// The trace shows a window of the record: 50 px per division, trace columns 3..726 (scope_display_trace_data). The
+// trigger point is drawn on the tip of the H pointer, column pos + TBV_POS_TIP (pos =
+// scopesettings.triggerhorizontalposition, the pointer icon's left edge), so the first trace column shows the record at
+// F = trig - (pos + TBV_POS_TIP - TBV_X_FIRST) / xpps samples, xpps = 50 x (1 / time per div) / sample rate pixels per
+// sample. F has a sub-sample part (issue #3): with several pixels a sample, whole samples left the trigger point one to
+// two samples right of the pointer (1.00o5's F = trig - 1 - ceil(pos / xpps): 21 to 46 px at 10 ns/div).
 // A time/div is viable for a sample rate when the record (memory depth x sample period) spans the whole trace area and
 // a division holds at least TBV_MIN_SAMPLES_PER_DIV samples (TBV_MIN_SAMPLES_FULL at the full rate). The functions below derive that from the real record length; they replace
 // 1.00o5's hand-written viable_time_per_div table (host_tests/test_tb_view.c compares the two).
@@ -22,6 +25,7 @@
 #define TBV_SPAN_PX              (TBV_X_END - TBV_X_FIRST)       //724: first trace column to the last pixel's end
                                          //(the drawing interpolates the last pixel towards column 727)
 #define TBV_PX_PER_DIV           50
+#define TBV_POS_TIP              7       //the H pointer's tip, columns right of pos (top_pointer_icon: 14 wide, tip bit 7)
 #define TBV_MIN_SAMPLES_PER_DIV  10      //fw 0.2.69 (owner, bench: 100 kSa/s at 10 us/div showed one sample per division
                                          //and a wobbling interpolated edge)
 //Issue #2 follow-up (owner 2026-11-25, option C of docs/mockups/acq-fast-timediv.html): at the ADC's own rate no faster
@@ -89,8 +93,14 @@ int32 tbv_ladder_rate(uint32 fpd, const uint32 *rates, int32 nrates, uint32 tota
 int32 tbv_zoom_step(int32 t, int dir, const uint32 *fpd, int32 first, int32 last, const uint32 *rates, int32 nrates,
                     uint32 total);
 
-//The drawn window for trigger sample `trig` and trigger point `pos`: the first sample shown (kept inside the record)
-//and the end column (exclusive; TBV_X_END unless the record ends inside the trace area)
+//The drawn window for the trigger crossing at sample trig + trig_frac / 65536 (the sample before the level crossing
+//and how far towards the next one the level is crossed) and trigger point `pos`: the record position shown in the
+//first trace column, *first + *frac / 65536 samples (kept inside the record; a clamped window has frac 0), and the end
+//column (exclusive; TBV_X_END unless the record ends inside the trace area)
+void tbv_window_sub(int32 trig, uint32 trig_frac, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first,
+                    uint32 *frac, int32 *xend);
+
+//The same in whole samples (trig_frac 0, the phase dropped): the slider's window, the tests
 void tbv_window(int32 trig, int32 pos, uint32 fs, uint32 fpd, uint32 total, int32 *first, int32 *xend);
 
 //The slider's window for first sample `first`: x on the track and width

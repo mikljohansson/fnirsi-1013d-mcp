@@ -956,6 +956,9 @@ extern int32 disp_first_sample;
 
 extern uint32 disp_have_trigger;
 extern uint32 disp_trigger_index;
+extern uint32 disp_trigger_frac;
+extern uint32 disp_first_frac_q16;
+extern double disp_first_frac;
 
 extern int32 disp_xstart;
 extern int32 disp_xend;
