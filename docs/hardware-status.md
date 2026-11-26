@@ -2393,3 +2393,34 @@ Newest entries at the bottom. Format: date, who, what, result.
   https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.4.0. **Not done**: the list of the entry above
   (zoom by hand, CH2, both channels, Dots / Bars, phosphor, stopped zoom, pass time at 10 ns/div), the hardware battery
   on the release image (docs/releasing.md 4.6), a power cycle from the card.
+- 2026-11-26 07:20-09:05 (lead, owner at the scope for the taps): **GitHub issues #3 and #4 on the unit, v0.4.1
+  released; not yet on the card.** RAM loads only (`fnirsi1013d-flash`), CH1 x10 AC 500 mV/div on the calibration
+  post, CH2 off, generator 1 MHz 50 % (the MCP server's limit; the reporter used 12 MHz), trigger CH1 Normal.
+  - **#3, trigger crossing against the H pointer's tip**, measured in READ_SCREEN pictures after STOP (the level row
+    from the T pointer, the crossing from the trace columns), level codes 105 / 118 / 128, both edges. On the card's
+    0.4.0 (build 9d16b93b): 10 ns/div +38 to +68 px, 20 ns/div +12 to +32 px, 50 ns/div +5 to +12 px, 500 ns/div -3 px.
+    On the new code (33f5bcc, two shots per setting, agreeing within 1 px): 10 ns/div -3.8 to +8.0 px, 20 ns/div -2.2
+    to +3.8 px, 50 ns/div -0.1 to +2.6 px, 500 ns/div +0.1 to +0.7 px. What is left grows with the level's distance
+    from the trace centre, rising edges early and falling ones late; cause not found. A first run with the host's
+    offset (dcoffset 112) gave crossings on the wrong side of the pointer on 0.4.0: the T pointer and the searched
+    level disagree there; not followed up (dcoffset 0 in all the numbers above).
+  - **#4, the card layouts**, set with SET_MEASURES (protocol 1.32, 3198872) and read from the screen: CH1 alone with
+    twelve: five cards and "+7 more"; expanded: two rows of six and "Show less"; both channels, CH2 three: CH1 two
+    cards and "+10 more", CH2 from x 366; CH2 one card: CH1 four cards and "+8 more", CH2 in the sixth place; both
+    with twelve, expanded: four rows each and "Show less"; CH2 alone with twelve: from x 5, five cards and "+7 more".
+  - **The tap (owner, 08:24-08:26, watched over GET_MEASURES)**: the cards expanded and folded 22 times, and three
+    taps beside the toggle place went to the plot behind it (CH1 5 V/div to 2 V/div to 1 V/div, the time base one
+    step). 8269287: a touch on any card is taken, any card of an overflowing block toggles. Owner on that image:
+    "this works" (expand on "+5 more", fold on a CH1 card, nothing on a CH2 card).
+  - One detour: the owner's first tap did nothing because the scope had been power-cycled (power-on #88) and ran the
+    card's 0.4.0 again; GET_INFO said protocol 1.31.
+  - **Release**: commit 10416d1, local `make gcc10` image 0308699b8aa3dfe5... (835,072 bytes) FEL-loaded, `#VER`
+    fw=0.4.1, proto=1.32, fpga=0x153f, GET_INFO build 10416d1b. CI run 45777974790 green, its image 0308699b... the
+    same. Dry run `v0.4.1-rc1`: release.yml run 45778726855 green, 8 assets, SHA256SUMS 7 of 7; rc removed. Tag
+    `v0.4.1`: release.yml run 45779449477 green, https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.4.1.
+    Issues #3 and #4 answered and closed.
+  - **Not done**: the image is **not on the card** (`--persist-only` at 09:00 found no COM10: the scope had left USB;
+    the card still boots 0.4.0). CH2 as the trigger source, the Dots style and the phosphor view with the new
+    window; the cards' tap bands (`scope_tap_bottom`) by hand; the hardware battery. Left on the unit by this
+    session: CH1's cards Freq, Vpp, Vavg, Vmax, Vmin, +Duty, Period (the owner's were Freq, Vpp, Vavg), saved with
+    the settings at the power-off.
