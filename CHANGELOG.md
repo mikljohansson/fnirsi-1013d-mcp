@@ -11,6 +11,11 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-26
+
+A patch release on the same FPGA bitstream, 0x153F: GitHub issues #3 (trigger position) and #4 (measurement cards),
+and protocol 1.32 with the cards from the host. User-facing notes: `docs/release-notes/0.4.1.md`.
+
 ### Protocol 1.32
 
 - GET_MEASURES 0x0106 and SET_MEASURES 0x0107: the Scope view's measurement cards from the host (owner 2026-11-26,
@@ -39,9 +44,10 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
   crossing stood 38 to 68 px right of the pointer, now within -4 to +8 px (33f5bcc).
 - Measurement cards (GitHub issue #4). The six places of the Scope's row are shared: a channel alone on the row has
   all six (CH2 alone had three), and with both channels shown a block with more than three cards takes the places
-  the other does not use. A tap on "+N more" expands the blocks to every chosen card, in rows stacked upward over
-  the trace, with "Show less" after the last card to fold them again (the place did nothing before). The expanded
-  state is not saved (438aac1).
+  the other does not use. A tap on "+N more" (or any card of that channel) expands the blocks to every chosen card,
+  in rows stacked upward over the trace, with "Show less" after the last card; a tap on the block folds them again
+  (the place did nothing before). A tap on a card no longer reaches the plot behind it, where it changed V/div or
+  the time base. The expanded state is not saved (438aac1, 8269287).
 
 ## [0.4.0] - 2026-11-25
 
