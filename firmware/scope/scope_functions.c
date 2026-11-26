@@ -3535,32 +3535,38 @@ void scope_display_measurements(void)
       scope_display_channel_measurements(ch, cap[ch], slot0[ch]);
 }
 
-//Issue #4: a touch-down on the "+N more" or "Show less" place of a block. 1 when it was one: the blocks are expanded
-//or folded (the next trace pass draws them)
+//Issue #4: a touch-down on a measurement card. 1 when it was on one: the touch is the cards', never the plot's (a
+//tap beside "Show less" changed V/div on the bench, 2026-11-26). On a block with more cards than places, any of
+//its cards expands or folds the blocks (the next trace pass draws them): "+N more" and "Show less" say so, and the
+//finger need not find the one place, which moves between the two states
 int scope_measures_toggle_touch(int32 x, int32 y)
 {
-  int    shown[2], n[2], cap[2], slot0[2], ch, toggle, more;
+  int    shown[2], n[2], cap[2], slot0[2], ch, toggle, more, places, i;
   uint32 cx, cy;
 
-  if(scopesettings.waveviewmode || !scope_measures_layout(shown, n, cap, slot0))
+  if(scopesettings.waveviewmode)
     return 0;
+
+  scope_measures_layout(shown, n, cap, slot0);
 
   for(ch = 0; ch < 2; ch++)
   {
     if(!shown[ch])
       continue;
 
-    ui_ms_scope_block(n[ch], cap[ch], scope_measures_expanded, &toggle, &more);
+    places = ui_ms_scope_block(n[ch], cap[ch], scope_measures_expanded, &toggle, &more);
 
-    if(toggle < 0)
-      continue;
-
-    ui_ms_scope_place(toggle, cap[ch], slot0[ch], &cx, &cy);
-
-    if(ui_ms_card_hit(cx, cy, x, y))
+    for(i = 0; i < places; i++)
     {
-      scope_measures_expanded ^= 1;
-      return 1;
+      ui_ms_scope_place(i, cap[ch], slot0[ch], &cx, &cy);
+
+      if(ui_ms_card_hit(cx, cy, x, y))
+      {
+        if(toggle >= 0)
+          scope_measures_expanded ^= 1;
+
+        return 1;
+      }
     }
   }
 

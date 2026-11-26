@@ -7975,8 +7975,9 @@ both shown: three each unless one is over three and the other under, then the ot
 `ui_ms_row_x` (5, 125, 245, 366, 486, 606), `ui_ms_scope_block` (folded: "+N more" on the last place; expanded: all
 cards and "Show less" at index n), `ui_ms_scope_place` (rows upward, 24 px pitch), `ui_ms_card_hit` (the card and 11 px
 above it, never below y 450). `scope_measures_expanded` (RAM only) is toggled by `scope_measures_toggle_touch`, called
-first in the plot branch of `scan_for_touch` (the place lies over the slider's upper hit area); it folds by itself when
-no block overflows. `scope_tap_bottom` takes the tap bands' lower edge from the same layout. The spectrum's and the
+first in the plot branch of `scan_for_touch` (the cards lie over the slider's upper hit area and the tap bands); it
+takes every touch on a card (bench 2026-11-26: a tap beside "Show less" changed V/div and the time base) and toggles on
+any card of an overflowing block. It folds by itself when no block overflows. `scope_tap_bottom` takes the tap bands' lower edge from the same layout. The spectrum's and the
 Bode view's "+N more" are still counts only (queued).
 
 Host tests: test_tb_view `test_window_sub` (the crossing within 1/16 px of the tip at 10, 20, 50 ns/div and slower,

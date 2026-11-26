@@ -828,8 +828,9 @@ void scan_for_touch(void)
     //PC protocol build: the spectrum view takes touches in the trace area
     PC_SPECTRUM_TOUCH();
 
-    //Issue #4: the "+N more" / "Show less" place of the measurement cards expands or folds them. Before everything
-    //else on the plot: the place lies over the slider's upper hit area and, expanded, over the traces
+    //Issue #4: a touch on a measurement card is the cards': on a block with more cards than places it expands or
+    //folds them ("+N more" / "Show less"), on the others it does nothing. Before everything else on the plot: the
+    //cards lie over the slider's upper hit area, the tap bands and, expanded, the traces
     if(scope_measures_toggle_touch((int32)xtouch, (int32)ytouch))
     {
       while(havetouch)

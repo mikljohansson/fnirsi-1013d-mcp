@@ -69,7 +69,7 @@ void scope_display_cursor_measurements(void);
 void scope_display_measurements(void);
 void scope_draw_card(uint32 x, uint32 y, uint32 color, const char *name, const char *value);   //fw 0.2.56: one measurement card
 void scope_display_channel_measurements(int ch, int cap, int slot0);   //fw 0.2.65: block ch (its source, order and places)
-int  scope_measures_toggle_touch(int32 x, int32 y);   //issue #4: a touch on "+N more" / "Show less" expands or folds the cards
+int  scope_measures_toggle_touch(int32 x, int32 y);   //issue #4: a touch on a card (1: taken); on an overflowing block it expands or folds the cards
 
 void scope_display_vmax(PCHANNELSETTINGS settings);
 void scope_display_vmin(PCHANNELSETTINGS settings);

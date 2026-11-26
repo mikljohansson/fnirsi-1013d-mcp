@@ -40,9 +40,10 @@ void ui_ms_scope_defaults(uint8 *rank12);
 //The Scope's row (issue #4): six places shared by the two channel blocks, CH1's from x 5 and CH2's from x 366, three
 //each. A block alone on the row has all six from x 5, either channel. With both shown, a block with more than three
 //chosen takes the places the other leaves unused (the other has fewer than three chosen); CH2's block then starts
-//after CH1's places. A tap on the "+N more" place expands the blocks: every chosen card, in rows of the block's places
-//stacked upward at a UI_MS_ROW_PITCH pitch over the trace, and after the last card a "Show less" place that folds them
-//again. The tap area of both places is UI_MS_HIT_UP px taller than the card, upward, and ends above the slider.
+//after CH1's places. A tap on a block with more cards than places ("+N more", or any other of its cards) expands
+//the blocks: every chosen card, in rows of the block's places stacked upward at a UI_MS_ROW_PITCH pitch over the
+//trace, and after the last card a "Show less" place; a tap on the block folds them again. The tap area of a card is
+//UI_MS_HIT_UP px taller than the card, upward, and ends above the slider. A tap on a card never reaches the plot.
 
 #define UI_MS_PITCH           120
 #define UI_MS_SCOPE_Y         426

@@ -71,7 +71,8 @@ it and opens a fold-out beside the bar. A tap outside a fold-out closes it and d
 **Bottom row.** Measurement cards, chosen with MEASURES. Each card is a name in the colour of its source and a value.
 The Scope's row has six places, shared by the two channels: a channel alone has all six, and a channel with more than
 three cards takes the places the other does not use. With more cards chosen than fit, the last place reads
-"+N more"; in the Scope a tap on it shows every card in rows above, and "Show less" folds them again. Under the cards is the slider row: a small overview
+"+N more"; in the Scope a tap on it (or on any card of that channel) shows every card in rows above, and a tap on
+"Show less" or any of those cards folds them again. A tap on a card never changes V/div or the time base. Under the cards is the slider row: a small overview
 of everything the plot shows a part of, with a window for the part on screen. Drag the window to move it, or tap the
 track outside the window to jump there.
 
