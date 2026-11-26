@@ -26,7 +26,7 @@ ALL_TOOLS = {
     "scope_raw_fpga", "scope_health", "scope_save_report", "scope_capture_segments",
     "scope_enter_fel", "scope_report", "scope_cal_probe", "scope_decode", "scope_export_csv", "scope_mask_test",
     "scope_dvm", "scope_counter", "scope_sweep", "scope_log", "scope_log_status", "scope_log_stop", "scope_wait_for_event",
-    "scope_auto_set",
+    "scope_auto_set", "scope_measures",
 }
 
 
@@ -773,3 +773,20 @@ async def test_auto_set_tool(client):
     assert any("AUTO SET replaced" in c for c in r["caveats"])
     client.srv.device.ui_set_spectrum(True)
     assert "Spectrum view" in await client.fails("scope_auto_set")
+
+
+
+async def test_measures_tool(client):
+    """scope_measures (protocol 1.32): reads the cards, sets them per channel and says how many are visible."""
+    r = await client.call("scope_measures")
+    assert [c["cards"] for c in r["channels"]] == [["Freq", "Vpp", "Vavg"]] * 2
+    assert r["channels"][0]["places"] == 3 and r["channels"][0]["visible"] == 3 and not r["expanded"]
+    r = await client.call("scope_measures", ch1=["Freq", "+Duty", "Vpp", "Vrms", "Period"], ch2=["Vpp"])
+    c1, c2 = r["channels"]
+    assert c1["cards"] == ["Freq", "+Duty", "Vpp", "Vrms", "Period"] and c2["cards"] == ["Vpp"]
+    assert (c1["places"], c1["visible"], c2["places"], c2["visible"]) == (5, 5, 1, 1)
+    r = await client.call("scope_measures", ch1=["Vmax", "Vmin", "Vavg", "Vrms", "Vpp", "Vp", "Freq"])
+    assert r["channels"][0]["visible"] == 4 and any("+N more" in c for c in r["caveats"])
+    r = await client.call("scope_measures", expanded=True)
+    assert r["expanded"] and r["channels"][0]["visible"] == 7
+    assert "unknown measurement" in await client.fails("scope_measures", ch1=["Vpk"])

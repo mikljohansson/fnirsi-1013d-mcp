@@ -261,6 +261,23 @@ void     pc_hal_ui_set_run(int run);             //[UI] as the RUN/STOP button; 
 #define PC_AUTOSET_VIEW    2
 #define PC_AUTOSET_VIEWER  3
 int      pc_hal_ui_autoset(void);
+//1.32 (fw 0.4.1): the Scope's measurement cards (the MEASURES menu, ui_meas.h). rank[ch][item]: 0 off, else the
+//card's place in the channel's block (1 first); items in the menu's order: Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq,
+//Period, +Width, -Width, +Duty, -Duty. flags: PC_MEAS_F_*. set renumbers the ranks 1..k (ties by item index). [UI]
+#define PC_MEAS_ITEMS        12
+#define PC_MEAS_F_HIDE_CH1   0x01
+#define PC_MEAS_F_HIDE_CH2   0x02
+#define PC_MEAS_F_EXPANDED   0x04        //every chosen card in rows (the "+N more" tap); folds when nothing overflows
+#define PC_MEAS_F_ALL        0x07
+typedef struct
+{
+  uint8_t flags;
+  uint8_t rank[2][PC_MEAS_ITEMS];
+} pc_hw_measures;
+
+void     pc_hal_measures_get(pc_hw_measures *m);
+//mask bit 0 / 1: take rank[0] / rank[1]; bit 2: take flags
+void     pc_hal_measures_set(const pc_hw_measures *m, uint8_t mask);
 uint32_t pc_hal_settings_fingerprint(void);      //hash of the capture-relevant UI settings (protocol section 14)
 void     pc_hal_indicator(int state);            //[UI] MCP chip in the top bar: 0 off, 1 on, 2 pulse
 //1.23 (fw 0.2.78): what keeps the UI from yielding to a host request now: 0 nothing (the modal loops leave by their

@@ -613,6 +613,37 @@ void pc_hal_ui_read(pc_hw_ui *u)
   u->run = mock.ui_run; u->ui_armed = mock.ui_armed; u->long_mode = mock.long_mode;
 }
 
+void pc_hal_measures_get(pc_hw_measures *m)
+{
+  *m = mock.measures;
+}
+
+//As the device: the lists renumbered 1..k in rank order, ties by item index
+void pc_hal_measures_set(const pc_hw_measures *m, uint8_t mask)
+{
+  int ch, i, k, r;
+
+  for(ch = 0; ch < 2; ch++)
+    if(mask & (1 << ch))
+    {
+      k = 0;
+
+      for(r = 1; r <= PC_MEAS_ITEMS; r++)
+        for(i = 0; i < PC_MEAS_ITEMS; i++)
+          if(m->rank[ch][i] == r)
+            mock.measures.rank[ch][i] = (uint8_t)++k;
+
+      for(i = 0; i < PC_MEAS_ITEMS; i++)
+        if(m->rank[ch][i] == 0)
+          mock.measures.rank[ch][i] = 0;
+    }
+
+  if(mask & 0x04)
+    mock.measures.flags = m->flags;
+
+  mock.measure_sets++;
+}
+
 int pc_hal_ui_autoset(void)
 {
   if(mock.autoset_rc)

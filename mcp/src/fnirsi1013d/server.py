@@ -2560,6 +2560,77 @@ def build_server(cfg: ServerConfig | None = None) -> tuple[FastMCP, Session]:
                     "caveats": [*notes, "AUTO SET replaced the channel ranges, the trigger level and the time base"]}
         return await run("scope_auto_set", 2, {}, go)
 
+    @register(1, title="Measurement cards on the screen")
+    async def scope_measures(
+        ch1: Annotated[list[str] | None, Field(
+            description="CH1's cards in display order, e.g. ['Freq', 'Vpp', '+Duty']; [] for none; omit to leave "
+                        "them. Names: Vmax, Vmin, Vavg, Vrms, Vpp, Vp, Freq, Period, +Width, -Width, +Duty, -Duty")] = None,
+        ch2: Annotated[list[str] | None, Field(description="CH2's cards, likewise")] = None,
+        hide_ch1: Annotated[bool | None, Field(description="hide CH1's cards without changing the choice")] = None,
+        hide_ch2: Annotated[bool | None, Field(description="hide CH2's cards")] = None,
+        expanded: Annotated[bool | None, Field(
+            description="true shows every chosen card in rows over the bottom of the trace (what a tap on "
+                        "'+N more' does), false the single row")] = None,
+    ) -> dict[str, Any]:
+        """The measurement cards along the bottom of the scope's screen (the MEASURES menu; protocol 1.32, firmware
+        0.4.1+): read what is shown, or choose and order the cards per channel. Without arguments it only reads.
+        Use it to put the readings that matter for the task in front of the person at the scope (say which and
+        why), not to read values yourself: scope_measure and scope_counter give you numbers.
+
+        The row has six places, shared by the two channels: a channel alone on the screen has all six, with both
+        shown three each, and a channel with more than three cards takes the places the other leaves unused. Cards
+        beyond the places are counted on a '+N more' place, which the person can tap; `expanded` does the same.
+        The first cards are the ones that stay visible, so order by importance. Freq, Period, Width and Duty cards
+        read 'no period' when the record holds less than one period: pick a time base that shows two or more.
+        Only the screen changes, never the acquisition; the choice is the person's setting too, so tell them what
+        you changed. Returns per channel the cards in order, the places it has (`places`), how many are visible
+        (`visible`), `hidden`, and `expanded`."""
+        args = {"ch1": ch1, "ch2": ch2, "hide_ch1": hide_ch1, "hide_ch2": hide_ch2, "expanded": expanded}
+
+        def go() -> dict[str, Any]:
+            notes = sess.ensure_control()
+            s = sess.get_scope()
+            if not s.has_measures:
+                raise ToolError(f"scope_measures: needs protocol 1.{P.MEASURES_MINOR} (firmware 0.4.1 or later); this "
+                                f"firmware speaks 1.{s.info.proto_minor}. The MEASURES button at the scope does it")
+            change = any(v is not None for v in args.values())
+            try:
+                m = s.set_measures(**args) if change else s.get_measures()
+            except ValueError as e:
+                raise ToolError(f"scope_measures: {e}") from e
+            en = [s.get_channel(0).enable, s.get_channel(1).enable]
+            hid = [bool(m.flags & P.MEAS_F_HIDE_CH1), bool(m.flags & P.MEAS_F_HIDE_CH2)]
+            names = [m.names(0), m.names(1)]
+            shown = [bool(en[c]) and not hid[c] for c in (0, 1)]
+            half = P.MEAS_ROW_PLACES // 2
+            cap = [0, 0]
+            if shown[0] and shown[1]:
+                cap = [half, half]
+                for c in (0, 1):
+                    if len(names[c]) > half > len(names[c ^ 1]):
+                        cap[c ^ 1] = len(names[c ^ 1])
+                        cap[c] = P.MEAS_ROW_PLACES - cap[c ^ 1]
+            elif shown[0] or shown[1]:
+                cap[0 if shown[0] else 1] = P.MEAS_ROW_PLACES
+            exp = bool(m.flags & P.MEAS_F_EXPANDED)
+            chans = []
+            for c in (0, 1):
+                n = len(names[c])
+                vis = 0 if not shown[c] else n if (n <= cap[c] or exp) else cap[c] - 1
+                chans.append({"channel": f"CH{c + 1}", "cards": names[c], "hidden": hid[c],
+                              "channel_enabled": bool(en[c]), "places": cap[c], "visible": vis})
+            caveats = list(notes)
+            for c in chans:
+                if c["visible"] < len(c["cards"]) and c["channel_enabled"] and not c["hidden"]:
+                    caveats.append(f"{c['channel']}: {len(c['cards']) - c['visible']} of its cards are behind '+N more' "
+                                   f"(the first {c['visible']} show); expanded=true shows all")
+            if change:
+                caveats.append("the measurement cards on the scope's screen were changed: tell the person which and why")
+            return {"ok": True, "channels": chans, "expanded": exp, "available": list(P.MEASURE_NAMES),
+                    "row_places": P.MEAS_ROW_PLACES, "applied": {k: v for k, v in args.items() if v is not None},
+                    "caveats": caveats}
+        return await run("scope_measures", 1 if any(v is not None for v in args.values()) else 0, args, go)
+
     @register(1, title="Wait for an event")
     async def scope_wait_for_event(
         ctx: Context,

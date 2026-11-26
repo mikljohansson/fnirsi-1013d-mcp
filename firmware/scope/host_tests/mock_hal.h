@@ -100,6 +100,8 @@ typedef struct
   uint8_t  long_mode;
   uint32_t run_sets;              //pc_hal_ui_set_run calls
   uint32_t autosets;              //pc_hal_ui_autoset runs (AUTO_SET, 1.31)
+  pc_hw_measures measures;        //the Scope's measurement cards (GET_MEASURES / SET_MEASURES, 1.32)
+  uint32_t measure_sets;          //pc_hal_measures_set calls
   int      autoset_rc;            //what it answers (PC_AUTOSET_*; 0 = it ran: the UI at 50 ns/div, 200 MSa/s)
   int      last_run_set;
   int      indicator;             //last pc_hal_indicator state

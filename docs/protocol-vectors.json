@@ -9923,6 +9923,77 @@
     }
    ],
    "source": "host"
+  },
+  {
+   "name": "host_req_get_measures",
+   "description": "1.32 GET_MEASURES 0x0106: no payload; the Scope view's measurement cards",
+   "hex": "a5130100060149000000000000003e08",
+   "frames": [
+    {
+     "cmd": 262,
+     "seq": 73,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": ""
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 262,
+     "seq": 73,
+     "status": 0,
+     "flags": 0,
+     "len": 0,
+     "payload": "",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_req_set_measures",
+   "description": "1.32 SET_MEASURES 0x0107: mask 0x05 (the CH1 list and the flags), expanded, CH1 = Freq, +Duty, Vpp, Vrms in that order (ranks by item: Vrms 4, Vpp 3, Freq 1, +Duty 2)",
+   "hex": "a513010007014a0000001c0000009bfb040c05000000000403000100000002000000000000000000000000002635815b",
+   "frames": [
+    {
+     "cmd": 263,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 28,
+     "payload": "040c0500000000040300010000000200000000000000000000000000"
+    }
+   ],
+   "device_events": [
+    {
+     "cmd": 263,
+     "seq": 74,
+     "status": 0,
+     "flags": 0,
+     "len": 28,
+     "payload": "040c0500000000040300010000000200000000000000000000000000",
+     "event": "frame"
+    }
+   ],
+   "source": "host"
+  },
+  {
+   "name": "host_resp_measures",
+   "description": "1.32 the 28-byte body both commands answer: flags 0x04 (expanded), 12 items, mask 0, the CH1 ranks as set and CH2 at its defaults (Freq, Vpp, Vavg)",
+   "hex": "a513010107014a0000001c000000d223040c0000000000040300010000000200000003000200010000000000b46a46f4",
+   "frames": [
+    {
+     "cmd": 263,
+     "seq": 74,
+     "status": 0,
+     "flags": 1,
+     "len": 28,
+     "payload": "040c0000000000040300010000000200000003000200010000000000"
+    }
+   ],
+   "device_events": [],
+   "source": "host"
   }
  ]
 }

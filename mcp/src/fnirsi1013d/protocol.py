@@ -64,9 +64,25 @@ PROTO_MAJOR = 1
 #: E_STATE detail ``STATE_NO_KEPT`` when nothing is kept
 #: 1.31 (fw 0.3.5, row 74): AUTO_SET 0x021B, the Scope view's AUTO SET button from the host (no payload, answers the
 #: status body; E_STATE detail 0 with a host capture pending, ``AUTOSET_E_*`` where the button is not the Scope's)
-PROTO_MINOR = 31
+#: 1.32 (fw 0.4.1, row 75): GET_MEASURES 0x0106 / SET_MEASURES 0x0107, the Scope view's measurement cards (the
+#: MEASURES menu's choice and order per channel, Hide, the expanded rows): ``Measures``
+PROTO_MINOR = 32
 #: 1.30: the first protocol minor with the kept host capture
 KEPT_MINOR = 30
+#: 1.32: the first protocol minor with GET_MEASURES / SET_MEASURES
+MEASURES_MINOR = 32
+#: The Scope's measurements in the MEASURES menu's order (the item index of ``Measures.ch1`` / ``ch2``), as the cards
+#: name them (firmware ui_fmt.c measurement_names)
+MEASURE_NAMES = ("Vmax", "Vmin", "Vavg", "Vrms", "Vpp", "Vp", "Freq", "Period", "+Width", "-Width", "+Duty", "-Duty")
+MEAS_F_HIDE_CH1 = 0x01
+MEAS_F_HIDE_CH2 = 0x02
+#: every chosen card in rows over the trace (the "+N more" tap); the scope folds it when nothing overflows
+MEAS_F_EXPANDED = 0x04
+MEAS_M_CH1 = 0x01
+MEAS_M_CH2 = 0x02
+MEAS_M_FLAGS = 0x04
+#: places in the Scope's card row, shared by the two channels (firmware ui_meas.h UI_MS_ROW_CARDS)
+MEAS_ROW_PLACES = 6
 #: 1.31: the first protocol minor with AUTO_SET
 AUTOSET_MINOR = 31
 #: AUTO_SET E_STATE details (pc_hal.h PC_AUTOSET_*): the roll time bases, a Spectrum view, the waveform viewer
@@ -142,6 +158,9 @@ class Cmd(enum.IntEnum):
     #: 0x0217 / 0x021A reserved (SET_PATTERN / SET_PATTERN_TRIGGER of the 1.27 drafts, cut with 0x153D's patterns)
     #: protocol 1.26 (cap TRIG_TYPES): trigger type, polarity, N / H, hold-off: the 0x153C trigger qualifier
     SET_TRIGGER2 = 0x0219
+    #: protocol 1.32 (fw 0.4.1): the Scope view's measurement cards
+    GET_MEASURES = 0x0106
+    SET_MEASURES = 0x0107
     #: protocol 1.31 (fw 0.3.5): AUTO SET as the Scope view's button
     AUTO_SET = 0x021B
     GET_GEN = 0x0300
@@ -2050,6 +2069,40 @@ class SetTriggerReq(Payload):
     M_TOTAL: ClassVar[int] = 1 << 5
     M_HOLDOFF: ClassVar[int] = 1 << 6
     M_AUTO_TIMEOUT: ClassVar[int] = 1 << 7
+
+
+@dataclass
+class Measures(Payload):
+    """GET_MEASURES response, SET_MEASURES request and response (protocol 1.32, 28 bytes): ``flags`` (``MEAS_F_*``),
+    ``items`` (12), ``mask`` (request: ``MEAS_M_*``, what to take; 0 in a response), the ranks of CH1 and CH2 (0 off,
+    else the card's place in the block, 1 first; item order ``MEASURE_NAMES``)."""
+
+    FIELDS = [("flags", "B"), ("items", "B"), ("mask", "B"), ("_r", "x"), ("ch1", "12B"), ("ch2", "12B")]
+    flags: int = 0
+    items: int = 12
+    mask: int = 0
+    ch1: list[int] = field(default_factory=lambda: [0] * 12)
+    ch2: list[int] = field(default_factory=lambda: [0] * 12)
+
+    def names(self, ch: int) -> list[str]:
+        """The chosen measurements of channel ``ch`` (0 / 1) in display order."""
+        ranks = self.ch2 if ch else self.ch1
+        return [MEASURE_NAMES[i] for i in sorted((i for i in range(12) if ranks[i]), key=lambda i: (ranks[i], i))]
+
+    @staticmethod
+    def ranks(names: Iterable[str]) -> list[int]:
+        """Rank list for measurement names in display order (case-insensitive; ValueError on an unknown or repeated
+        name)."""
+        low = [n.lower() for n in MEASURE_NAMES]
+        out = [0] * 12
+        for k, name in enumerate(names):
+            key = str(name).strip().lower()
+            if key not in low:
+                raise ValueError(f"unknown measurement {name!r}: one of {', '.join(MEASURE_NAMES)}")
+            if out[low.index(key)]:
+                raise ValueError(f"measurement {name!r} given twice")
+            out[low.index(key)] = k + 1
+        return out
 
 
 @dataclass
@@ -4670,6 +4723,7 @@ REQUEST_SIZES: dict[Cmd, int] = {
     Cmd.READ_SEQ: ReadSeqReq.size(), Cmd.BODE_CTRL: BodeCtrlReq.size(), Cmd.READ_BODE: ReadBodeReq.size(),
     Cmd.CAL_PROBE: CalProbeReq.size(), Cmd.GET_COUNTER: CounterReq.size(), Cmd.SET_TRIGGER2: Trigger2.size(),
     Cmd.LOG_START: LogStartReq.size(), Cmd.LOG_READ: LogReadReq.size(), Cmd.LOG_STOP: 0, Cmd.AUTO_SET: 0,
+    Cmd.GET_MEASURES: 0, Cmd.SET_MEASURES: Measures.size(),
 }
 
 

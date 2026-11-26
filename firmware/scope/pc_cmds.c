@@ -1743,6 +1743,64 @@ static int h_auto_set(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *
   return PC_OK;
 }
 
+//GET_MEASURES / SET_MEASURES (1.32, fw 0.4.1; docs/protocol.md row 75): the Scope's measurement cards. Body, 28
+//bytes: 0 flags (PC_MEAS_F_*: Hide CH1, Hide CH2, expanded), 1 the items per channel (12), 2 in a request the mask
+//(bit 0 take the CH1 list, bit 1 the CH2 list, bit 2 the flags; 0 in a response), 3 reserved, 4..15 the CH1 ranks,
+//16..27 the CH2 ranks (0 off, else the card's place in the block; items in the MEASURES menu's order). SET answers
+//the body as it stands afterwards (ranks renumbered 1..k). It changes what the screen shows, never the acquisition.
+#define PC_MEASURES_LEN  (4 + 2 * PC_MEAS_ITEMS)
+
+static uint32_t pc_measures_body(uint8_t *resp)
+{
+  pc_hw_measures m;
+
+  pc_hal_measures_get(&m);
+  resp[0] = m.flags;
+  resp[1] = PC_MEAS_ITEMS;
+  resp[2] = 0;
+  resp[3] = 0;
+  memcpy(resp + 4, m.rank[0], PC_MEAS_ITEMS);
+  memcpy(resp + 4 + PC_MEAS_ITEMS, m.rank[1], PC_MEAS_ITEMS);
+  return PC_MEASURES_LEN;
+}
+
+static int h_get_measures(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  (void)s; (void)req; (void)len;
+  *rl = pc_measures_body(resp);
+  return PC_OK;
+}
+
+static int h_set_measures(pc_session *s, const uint8_t *req, uint32_t len, uint8_t *resp, uint32_t *rl)
+{
+  pc_hw_measures m;
+  uint32_t i;
+
+  if(len != PC_MEASURES_LEN)
+    return pc_error(s, PC_E_BAD_LEN, 0, "28 bytes");
+
+  if(req[0] & ~PC_MEAS_F_ALL)
+    return pc_error(s, PC_E_BAD_ARG, 0, "flags bits 0..2");
+
+  if(req[1] != PC_MEAS_ITEMS)
+    return pc_error(s, PC_E_BAD_ARG, 1, "12 items per channel");
+
+  if((req[2] & ~0x07) || req[3])
+    return pc_error(s, PC_E_BAD_ARG, 2, "mask bits 0..2");
+
+  for(i = 0; i < 2 * PC_MEAS_ITEMS; i++)
+    if(req[4 + i] > PC_MEAS_ITEMS)
+      return pc_error(s, PC_E_BAD_ARG, (uint16_t)(4 + i), "rank 0..12");
+
+  m.flags = req[0];
+  memcpy(m.rank[0], req + 4, PC_MEAS_ITEMS);
+  memcpy(m.rank[1], req + 4 + PC_MEAS_ITEMS, PC_MEAS_ITEMS);
+  pc_hal_measures_set(&m, req[2]);
+
+  *rl = pc_measures_body(resp);
+  return PC_OK;
+}
+
 //1.30: GET_CAPTURE_INFO byte 25 for capture c (PC_KEPT_F_*): 0 unless c is the host's kept capture
 static uint8_t pc_kept_flags(const pc_session *s, const pc_capture *c)
 {
@@ -3698,6 +3756,8 @@ static const pc_cmd_entry pc_cmds[] =
   { PC_CMD_SET_TRIGGER,  F_SCOPE,                      0, h_set_trigger },
   { PC_CMD_SET_TRIGGER2, F_SCOPE,                      PC_CAP_TRIG_TYPES, h_set_trigger2 },   //1.26 (fw-c5)
   { PC_CMD_AUTO_SET,     F_SCOPE,                      0, h_auto_set },                       //1.31 (fw 0.3.5)
+  { PC_CMD_GET_MEASURES, F_MODAL,                      0, h_get_measures },                   //1.32 (fw 0.4.1)
+  { PC_CMD_SET_MEASURES, 0,                            0, h_set_measures },                   //1.32: the cards only
   { PC_CMD_GET_COUNTER,  F_MODAL,                      PC_CAP_COUNTER, h_get_counter },       //C7 counter (memory only)
   { PC_CMD_LOG_START,    F_SCOPE,                      PC_CAP_LOGGER, h_log_start },          //D4 logger
   { PC_CMD_LOG_READ,     0,                            PC_CAP_LOGGER, h_log_read },           //D4 logger (MAIN: the drain's ring)

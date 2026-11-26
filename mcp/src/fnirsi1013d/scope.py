@@ -590,6 +590,43 @@ class Scope:
         finally:
             self.invalidate()
 
+    @property
+    def has_measures(self) -> bool:
+        """Protocol 1.32 (fw 0.4.1): GET_MEASURES / SET_MEASURES, the Scope view's measurement cards."""
+        return self.shared and self.info.proto_minor >= P.MEASURES_MINOR
+
+    def get_measures(self) -> P.Measures:
+        """GET_MEASURES (protocol 1.32): the measurement cards the Scope view shows per channel, in display order
+        (``Measures.names(ch)``), Hide per channel and whether the blocks are expanded."""
+        if not self.has_measures:
+            raise ScopeError(f"GET_MEASURES needs protocol 1.{P.MEASURES_MINOR} (this firmware speaks "
+                             f"1.{self.info.proto_minor})")
+        return P.Measures.unpack(self._req(P.Cmd.GET_MEASURES))
+
+    def set_measures(self, *, ch1: Iterable[str] | None = None, ch2: Iterable[str] | None = None,
+                     hide_ch1: bool | None = None, hide_ch2: bool | None = None,
+                     expanded: bool | None = None) -> P.Measures:
+        """SET_MEASURES (protocol 1.32): choose and order the Scope view's measurement cards. ``ch1`` / ``ch2``: the
+        measurement names (``P.MEASURE_NAMES``) in display order, an empty list for none; None leaves a channel as it
+        is. ``hide_*`` and ``expanded`` likewise (the flags are sent together: the ones not given are read first).
+        Only the screen changes, never the acquisition. Returns the state afterwards."""
+        if not self.has_measures:
+            raise ScopeError(f"SET_MEASURES needs protocol 1.{P.MEASURES_MINOR} (this firmware speaks "
+                             f"1.{self.info.proto_minor})")
+        m = P.Measures()
+        if ch1 is not None:
+            m.ch1, m.mask = P.Measures.ranks(ch1), m.mask | P.MEAS_M_CH1
+        if ch2 is not None:
+            m.ch2, m.mask = P.Measures.ranks(ch2), m.mask | P.MEAS_M_CH2
+        if hide_ch1 is not None or hide_ch2 is not None or expanded is not None:
+            flags = self.get_measures().flags
+            for want, bit in ((hide_ch1, P.MEAS_F_HIDE_CH1), (hide_ch2, P.MEAS_F_HIDE_CH2),
+                              (expanded, P.MEAS_F_EXPANDED)):
+                if want is not None:
+                    flags = (flags | bit) if want else (flags & ~bit)
+            m.flags, m.mask = flags, m.mask | P.MEAS_M_FLAGS
+        return P.Measures.unpack(self._req(P.Cmd.SET_MEASURES, m.pack()))
+
     def capture_info(self, kept: bool = False) -> P.CaptureInfo:
         """GET_CAPTURE_INFO: the settings the latest finished capture (any origin) was taken with. ``kept`` (protocol
         1.30): the host's kept single capture instead (DeviceError E_STATE detail ``P.STATE_NO_KEPT`` when none)."""

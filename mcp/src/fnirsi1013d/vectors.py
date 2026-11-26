@@ -146,6 +146,7 @@ def build_host_vectors() -> list[dict[str, Any]]:
     v += build_host_vectors_153f()
     v += build_host_vectors_1_30()
     v += build_host_vectors_1_31()
+    v += build_host_vectors_1_32()
     return v
 
 
@@ -160,6 +161,22 @@ def build_host_vectors_1_30() -> list[dict[str, Any]]:
                                                        bytes([P.CAPINFO_REQ_KEPT, 0, 0, 0])).encode(),
                   "1.30 GET_CAPTURE_INFO of the host's kept single: request byte 0 = 1 (KEPT), 1..3 zero"))
     return v
+
+
+def build_host_vectors_1_32() -> list[dict[str, Any]]:
+    """Protocol 1.32 (fw 0.4.1, row 75): GET_MEASURES / SET_MEASURES, the Scope's measurement cards."""
+    R = P.FLAG_RESPONSE
+    want = P.Measures(mask=P.MEAS_M_CH1 | P.MEAS_M_FLAGS, flags=P.MEAS_F_EXPANDED,
+                      ch1=P.Measures.ranks(["Freq", "+Duty", "Vpp", "Vrms"]))
+    have = P.Measures(flags=P.MEAS_F_EXPANDED, ch1=want.ch1, ch2=P.Measures.ranks(["Freq", "Vpp", "Vavg"]))
+    return [_vec("host_req_get_measures", _f(P.Cmd.GET_MEASURES, 73).encode(),
+                 "1.32 GET_MEASURES 0x0106: no payload; the Scope view's measurement cards"),
+            _vec("host_req_set_measures", _f(P.Cmd.SET_MEASURES, 74, want.pack()).encode(),
+                 "1.32 SET_MEASURES 0x0107: mask 0x05 (the CH1 list and the flags), expanded, CH1 = Freq, +Duty, Vpp, "
+                 "Vrms in that order (ranks by item: Vrms 4, Vpp 3, Freq 1, +Duty 2)"),
+            _vec("host_resp_measures", _f(P.Cmd.SET_MEASURES, 74, have.pack(), flags=R).encode(),
+                 "1.32 the 28-byte body both commands answer: flags 0x04 (expanded), 12 items, mask 0, the CH1 ranks "
+                 "as set and CH2 at its defaults (Freq, Vpp, Vavg)")]
 
 
 def build_host_vectors_1_31() -> list[dict[str, Any]]:

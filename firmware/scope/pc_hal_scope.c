@@ -1483,6 +1483,41 @@ void pc_hal_ui_set_run(int run)
   pc_draw_end(&save);
 }
 
+//1.32: the Scope's measurement cards (ui_meas.h; the MEASURES menu writes the same bytes). The next trace pass draws
+//them; nothing of the acquisition changes
+void pc_hal_measures_get(pc_hw_measures *m)
+{
+  int ch;
+
+  m->flags = (scopesettings.hide_values_CH1 ? PC_MEAS_F_HIDE_CH1 : 0) | (scopesettings.hide_values_CH2 ? PC_MEAS_F_HIDE_CH2 : 0) |
+             (scope_measures_expanded ? PC_MEAS_F_EXPANDED : 0);
+
+  for(ch = 0; ch < 2; ch++)
+  {
+    memcpy(m->rank[ch], scopesettings.measuresstate[ch], PC_MEAS_ITEMS);
+    ui_ms_normalise(m->rank[ch], PC_MEAS_ITEMS);
+  }
+}
+
+void pc_hal_measures_set(const pc_hw_measures *m, uint8_t mask)
+{
+  int ch;
+
+  for(ch = 0; ch < 2; ch++)
+    if(mask & (1 << ch))
+    {
+      memcpy(scopesettings.measuresstate[ch], m->rank[ch], PC_MEAS_ITEMS);
+      ui_ms_normalise(scopesettings.measuresstate[ch], PC_MEAS_ITEMS);
+    }
+
+  if(mask & 0x04)
+  {
+    scopesettings.hide_values_CH1 = (m->flags & PC_MEAS_F_HIDE_CH1) ? 1 : 0;
+    scopesettings.hide_values_CH2 = (m->flags & PC_MEAS_F_HIDE_CH2) ? 1 : 0;
+    scope_measures_expanded       = (m->flags & PC_MEAS_F_EXPANDED) ? 1 : 0;
+  }
+}
+
 int pc_hal_ui_autoset(void)
 {
   DISPLAYDATA save;

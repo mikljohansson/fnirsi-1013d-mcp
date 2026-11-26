@@ -1020,6 +1020,9 @@ class Device:
         #: fw 0.2.28 spectrum view (ui_set_spectrum): display mode, window (0 rect, 1 Hann, 2 flat-top), the view's
         #: FFT length (log2, capped by the record) and channel selection (0 CH1, 1 CH2, 2 both)
         self.display_mode = P.DisplayMode.SCOPE
+        #: protocol 1.32: the Scope's measurement cards (GET_MEASURES / SET_MEASURES); the defaults Freq, Vpp, Vavg
+        self.measures = P.Measures(ch1=P.Measures.ranks(["Freq", "Vpp", "Vavg"]),
+                                   ch2=P.Measures.ranks(["Freq", "Vpp", "Vavg"]))
         #: protocol 1.20: the Bode view and sweep engine; ``_internal`` is set while the engine's own requests run
         self.bode = SimBode(self)
         self._internal = False
@@ -3433,6 +3436,48 @@ class Device:
             self.bode.close()  # fw 0.2.105 (fw-relay): RUN is the scope's acquisition, never a Bode sweep
         self._set_run_state(r.state)
         return self._ok(req, self.status_bytes())
+
+    def _measures_ok(self, req: P.Frame) -> P.Frame:
+        m = self.measures
+        return self._ok(req, P.Measures(flags=m.flags, ch1=list(m.ch1), ch2=list(m.ch2)).pack())
+
+    def _cmd_get_measures(self, req: P.Frame) -> P.Frame:
+        """GET_MEASURES (protocol 1.32, row 75; pc_cmds.c h_get_measures)."""
+        if not self.shared or self.proto_minor < P.MEASURES_MINOR:
+            return self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}")
+        return self._measures_ok(req)
+
+    def _cmd_set_measures(self, req: P.Frame) -> P.Frame:
+        """SET_MEASURES (protocol 1.32; pc_cmds.c h_set_measures): the lists per the mask, renumbered 1..k in rank
+        order (ties by item index); the screen only, no settings_seq step."""
+        if not self.shared or self.proto_minor < P.MEASURES_MINOR:
+            return self._err(req, P.Status.E_UNKNOWN_CMD, 0, f"cmd 0x{req.cmd:04X}")
+        if len(req.payload) != P.Measures.size():
+            raise _DevErr(P.Status.E_BAD_LEN, 0, "28 bytes")
+        r = P.Measures.unpack(req.payload)
+        if r.flags & ~0x07:
+            raise _DevErr(P.Status.E_BAD_ARG, 0, "flags bits 0..2")
+        if r.items != 12:
+            raise _DevErr(P.Status.E_BAD_ARG, 1, "12 items per channel")
+        if r.mask & ~0x07 or req.payload[3]:
+            raise _DevErr(P.Status.E_BAD_ARG, 2, "mask bits 0..2")
+        for i, v in enumerate(list(r.ch1) + list(r.ch2)):
+            if v > 12:
+                raise _DevErr(P.Status.E_BAD_ARG, 4 + i, "rank 0..12")
+
+        def norm(ranks: list[int]) -> list[int]:
+            out = [0] * 12
+            for k, i in enumerate(sorted((i for i in range(12) if ranks[i]), key=lambda i: (ranks[i], i))):
+                out[i] = k + 1
+            return out
+
+        if r.mask & P.MEAS_M_CH1:
+            self.measures.ch1 = norm(list(r.ch1))
+        if r.mask & P.MEAS_M_CH2:
+            self.measures.ch2 = norm(list(r.ch2))
+        if r.mask & P.MEAS_M_FLAGS:
+            self.measures.flags = r.flags
+        return self._measures_ok(req)
 
     def _cmd_auto_set(self, req: P.Frame) -> P.Frame:
         """AUTO_SET (protocol 1.31, row 74; pc_cmds.c h_auto_set). The model sets only the time base: from the
