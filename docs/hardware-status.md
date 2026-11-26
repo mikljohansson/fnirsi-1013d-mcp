@@ -2394,7 +2394,7 @@ Newest entries at the bottom. Format: date, who, what, result.
   (zoom by hand, CH2, both channels, Dots / Bars, phosphor, stopped zoom, pass time at 10 ns/div), the hardware battery
   on the release image (docs/releasing.md 4.6), a power cycle from the card.
 - 2026-11-26 07:20-09:05 (lead, owner at the scope for the taps): **GitHub issues #3 and #4 on the unit, v0.4.1
-  released; not yet on the card.** RAM loads only (`fnirsi1013d-flash`), CH1 x10 AC 500 mV/div on the calibration
+  released and on the card.** RAM loads only (`fnirsi1013d-flash`), CH1 x10 AC 500 mV/div on the calibration
   post, CH2 off, generator 1 MHz 50 % (the MCP server's limit; the reporter used 12 MHz), trigger CH1 Normal.
   - **#3, trigger crossing against the H pointer's tip**, measured in READ_SCREEN pictures after STOP (the level row
     from the T pointer, the crossing from the trace columns), level codes 105 / 118 / 128, both edges. On the card's
@@ -2419,8 +2419,10 @@ Newest entries at the bottom. Format: date, who, what, result.
     same. Dry run `v0.4.1-rc1`: release.yml run 45778726855 green, 8 assets, SHA256SUMS 7 of 7; rc removed. Tag
     `v0.4.1`: release.yml run 45779449477 green, https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.4.1.
     Issues #3 and #4 answered and closed.
-  - **Not done**: the image is **not on the card** (`--persist-only` at 09:00 found no COM10: the scope had left USB;
-    the card still boots 0.4.0). CH2 as the trigger source, the Dots style and the phosphor view with the new
-    window; the cards' tap bands (`scope_tap_bottom`) by hand; the hardware battery. Left on the unit by this
-    session: CH1's cards Freq, Vpp, Vavg, Vmax, Vmin, +Duty, Period (the owner's were Freq, Vpp, Vavg), saved with
-    the settings at the power-off.
+  - **On the card** (09:23, owner present): `--persist-only` at 09:00 found no COM10 (the owner had switched the scope
+    off). After power-on, `fnirsi1013d-flash --sha256 0308699b... --persist`: FEL load, backup
+    `backups/sdcard/sd_750-2381_20261126-092354.bin` (the 0.4.0 image), 1631 sectors compared identical, eGON checksum
+    0x1B9BC23E. GET_INFO build 10416d1b, proto 1.32. Both channels' cards set back to Freq, Vpp, Vavg over
+    SET_MEASURES; the generator is as the card had it (1 kHz, 50 %, on).
+  - **Not done**: a power cycle from the card on 0.4.1. CH2 as the trigger source, the Dots style and the phosphor view with the new
+    window; the cards' tap bands (`scope_tap_bottom`) by hand; the hardware battery.
