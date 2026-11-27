@@ -1299,7 +1299,7 @@ The model is pure C in `ui_meas.c` (host-tested in `host_tests/test_ui.c`); `sco
 - **Fit.** The cards keep to one row and no longer stack upward over the trace: the Scope's at y 426, six places
   shared by the blocks (fw 0.4.1, issue #4: CH1 three from x 5 and CH2 three from x 366; a block alone on the row has
   all six from x 5; with both shown a block over three takes the places the other leaves unused; a tap on "+N more"
-  expands the blocks into rows stacked upward, "Show less" folds them; `ui_ms_scope_layout`, `ui_ms_scope_block`);
+  expands the blocks into rows stacked upward, "Show less" folds them, and fw 0.4.2 keeps that state in settings word 218; `ui_ms_scope_layout`, `ui_ms_scope_block`);
   the spectrum's six from x 5 at y 426 (446 before fw 0.2.71). With more chosen than fit, the last place reads "+N more" (N the cards not shown)
   in the block's colour, so nothing is dropped silently.
 - **Spectrum values.** Peak, Level and RBW as before. THD: the power in the three bins around each harmonic 2..10 (each

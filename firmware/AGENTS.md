@@ -7977,7 +7977,7 @@ cards and "Show less" at index n), `ui_ms_scope_place` (rows upward, 24 px pitch
 above it, never below y 450). `scope_measures_expanded` (RAM only) is toggled by `scope_measures_toggle_touch`, called
 first in the plot branch of `scan_for_touch` (the cards lie over the slider's upper hit area and the tap bands); it
 takes every touch on a card (bench 2026-11-26: a tap beside "Show less" changed V/div and the time base) and toggles on
-any card of an overflowing block. It folds by itself when no block overflows. `scope_tap_bottom` takes the tap bands' lower edge from the same layout. The spectrum's and the
+any card of an overflowing block. fw 0.4.1 folded by itself when no block overflowed; fw 0.4.2 keeps the state (section 106). `scope_tap_bottom` takes the tap bands' lower edge from the same layout. The spectrum's and the
 Bode view's "+N more" are still counts only (queued).
 
 Host tests: test_tb_view `test_window_sub` (the crossing within 1/16 px of the tip at 10, 20, 50 ns/div and slower,
@@ -7990,3 +7990,21 @@ pc_cmds.c (`pc_measures_body`, `h_get_measures`, `h_set_measures`; the layout is
 `ui_ms_normalise`, `hide_values_CH1/2` and `scope_measures_expanded`; nothing is drawn there, the next trace pass shows
 it. Only the Scope's lists: the spectrum's words 221..223 and the Bode list are not on the wire. test_session
 `test_measures`.
+
+## 106. Issue #3 and #4 follow-ups: the trigger level with a DC offset at 50 mV/div, the expanded cards kept (fw 0.4.2, protocol 1.32 unchanged)
+
+**Trigger level (issue #3, the reporter: "still 2 ns behind", 2026-11-26).** `scope_code_to_y` moves a trace by
+`dcoffset x 100 / dc_shift_size` rows, and by twice that when `displayvoltperdiv == 6` (50 mV/div, a 2x zoom of the
+100 mV range). `fpga_set_trigger_level` and the host-side marker placement (`pc_level_from_marker`,
+`pc_set_trigger_marker`) subtracted the single shift on every range, so at 50 mV/div with a DC offset the level sent to
+the FPGA and searched for by `scope_process_trigger` lay that many rows off the T pointer: the hardware triggered at
+another voltage than the pointer showed, and the drawn crossing stood off the H pointer by the rows / the slope of the
+edge (half a sample on the reporter's 12 MHz edge). `fpga_trigger_dcshift(settings)` (fpga_control.c) is the one place
+that knows the drawn shift now. Bench in docs/hardware-status.md 2026-11-27. Not found: why the display doubles the
+shift on that range (1.00o5 code; the readout adds the single shift in codes, fpga_control.c "For dc shift in DC mode").
+
+**Expanded cards kept (issue #4, owner 2026-11-27).** Settings word 218: `UI_MS_CARDS_WORD`, marker 0xCE00, bit 0
+(`ui_ms_cards_word` / `ui_ms_cards_restore`, saved and restored beside the spectrum card words in
+scope_functions.c; a sector without the marker reads folded). `scope_display_measurements` no longer folds when
+nothing overflows: the state is the person's setting. Restore default settings folds. Words 202..223 are all taken
+now (pc_hooks.h lists them); the next setting needs a packed word.

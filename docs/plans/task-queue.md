@@ -318,7 +318,7 @@ Dates are 2026 unless stated. Bench facts behind each item: `docs/hardware-statu
 - [ ] **Spectrum and Frequency response: "+N more" is still a count only** (11-26, from GitHub issue #4). The Scope
   expands its cards on a tap since fw 0.4.1 (`firmware/AGENTS.md` section 105); the spectrum row (`spec_draw_cards`)
   and the Bode cards (`bode_view.c`) show the same place and do nothing on a tap. Same behaviour there: rows upward,
-  "Show less" after the last card.
+  "Show less" after the last card, the state kept as the Scope view keeps it since fw 0.4.2 (word 218).
 
 ## MCP / host
 
