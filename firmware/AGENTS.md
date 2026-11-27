@@ -7978,7 +7978,7 @@ above it, never below y 450). `scope_measures_expanded` (RAM only) is toggled by
 first in the plot branch of `scan_for_touch` (the cards lie over the slider's upper hit area and the tap bands); it
 takes every touch on a card (bench 2026-11-26: a tap beside "Show less" changed V/div and the time base) and toggles on
 any card of an overflowing block. fw 0.4.1 folded by itself when no block overflowed; fw 0.4.2 keeps the state (section 106). `scope_tap_bottom` takes the tap bands' lower edge from the same layout. The spectrum's and the
-Bode view's "+N more" are still counts only (queued).
+Bode view's "+N more" follow in fw 0.4.3 (section 107).
 
 Host tests: test_tb_view `test_window_sub` (the crossing within 1/16 px of the tip at 10, 20, 50 ns/div and slower,
 every eighth of a sample), test_ui `test_ms_scope_row` (all 13 x 13 x 4 combinations).
@@ -8008,3 +8008,23 @@ shift on that range (1.00o5 code; the readout adds the single shift in codes, fp
 scope_functions.c; a sector without the marker reads folded). `scope_display_measurements` no longer folds when
 nothing overflows: the state is the person's setting. Restore default settings folds. Words 202..223 are all taken
 now (pc_hooks.h lists them); the next setting needs a packed word.
+
+## 107. The Spectrum and Frequency response cards expand as the Scope view's (fw 0.4.3, protocol 1.32 unchanged)
+
+Owner 2026-11-27, after asking why the two views were left behind ("consistency over muscle memory").
+- **Model** (ui_meas.c): `ui_ms_spec_row(s, shown, time_ok, expanded, out, &toggle)` builds the Spectrum row through
+  `ui_ms_scope_block` on six places: folded as before (`ui_ms_spec_cards` is now its folded form), expanded every card
+  and a `UI_MS_SP_LESS` place after the last; `out` holds `UI_MS_SP_CARDS_MAX` (16). `ui_ms_row_place(i, &x, &y)` is
+  `ui_ms_scope_place` for a whole-row view: x 5, 125, 245, 366, 486, 606 (the second half one pixel on, as the Scope's
+  CH2 block; the two views' cards 4..6 moved by that pixel), rows upward at 24 px.
+- **Spectrum** (spectrum.c): `spec_draw_cards` draws the places and notes `spec_card_places` / `spec_card_over`;
+  `spec_cards_touch` runs in `spectrum_touch` after the slider branch (a touch from y 450 down) and before the "cards
+  row does nothing" rule: a touch on any drawn card is taken, and toggles when the row overflows. Thirteen cards and
+  "Show less" take three rows.
+- **Frequency response** (bode_view.c): `draw_cards` the same with `ui_ms_scope_block` on its own list (`card` got a y);
+  `cards_touch` in `bode_view_touch` after the slider branch. `bode_view_cards_refresh` (the MEASURES menu open) now
+  copies two rows.
+- **One state**: `scope_measures_expanded` (settings word 218, SET_MEASURES flag bit 2) for all three views. Not on
+  the wire: the two views' lists themselves.
+- Host test: test_ui, the Spectrum row folded and expanded with all thirteen cards. Tried by the owner on the unit in
+  both views (RAM load); no pictures taken.
