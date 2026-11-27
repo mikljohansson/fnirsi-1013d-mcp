@@ -11,6 +11,18 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-27
+
+A patch release on the same FPGA bitstream, 0x153F (protocol 1.32 unchanged): the Spectrum and Frequency response
+cards behave as the Scope view's. User-facing notes: `docs/release-notes/0.4.3.md`.
+
+### Firmware
+
+- Spectrum and Frequency response: a tap on a card of a row with more cards than places expands it into rows stacked
+  upward with "Show less" after the last, and a tap folds it again, as in the Scope view since 0.4.1; "+N more" was
+  only a count there. The expanded state is the one setting of all three views (settings word 218). A tap on a card
+  in the expanded rows does not zoom or pan the spectrum or move a Frequency response cursor (a72a915).
+
 ## [0.4.2] - 2026-11-27
 
 A patch release on the same FPGA bitstream, 0x153F (protocol 1.32 unchanged): the follow-ups to GitHub issues #3 and
