@@ -2449,3 +2449,14 @@ Newest entries at the bottom. Format: date, who, what, result.
     closed). Left on the unit: CH1 2 V/div AC, offset 0, CH2 on, trigger Auto, generator 1 kHz, both channels' cards
     Freq, Vpp, Vavg, folded.
   - **Not done**: the hardware battery on the release image; the gaps between the cards still pass a tap to the plot.
+- 2026-11-27 12:20-13:15 (lead, owner at the scope): **the Spectrum and Frequency response cards expand as the
+  Scope view's; v0.4.3 released and on the card.** a72a915 FEL-loaded (RAM) at about 12:25; the owner selected all
+  measurements in the Spectrum and in Frequency response, tapped the cards to expand and fold them and went back to
+  the Scope view: "looks good". Nothing was measured or pictured by the lead: the views and their lists are
+  touch-only. Release commit 8e88010, local `make gcc10` image 754b467e3efe037a... (835,072 bytes) = CI run
+  45994421092's. Dry run `v0.4.3-rc1`: release.yml run 45995112051 green, 8 assets, SHA256SUMS 7 of 7; rc removed.
+  Tag `v0.4.3`: run 45995942231 green, https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.4.3.
+  `fnirsi1013d-flash --sha256 754b467e... --persist` at 13:07: backup `backups/sdcard/sd_750-2381_20261127-130724.bin`
+  (the 0.4.2 image), 1631 sectors compared identical, eGON checksum 0x0B10869A. **Not done**: a power cycle from the
+  card on 0.4.3; the expanded rows with the MEASURES menu open in Frequency response (`bode_view_cards_refresh` copies
+  two rows now); the hardware battery.
