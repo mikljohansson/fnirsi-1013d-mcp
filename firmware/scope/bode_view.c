@@ -1257,24 +1257,30 @@ static int thru_card_state(void)
 }
 
 //A card (scope_draw_card's shape) with its value in a colour
-static void card(uint32 x, uint32 block, const char *name, uint32 vcolor, const char *value)
+static void card(uint32 x, uint32 y, uint32 block, const char *name, uint32 vcolor, const char *value)
 {
   uint32 cw = ui_card_chip_w(&font_2, name);
 
   display_set_fg_color(GREY_COLOR);
-  display_fill_rounded_rect(x, BU_CARDS_Y, UI_CARD_W, UI_CARD_H, 2);
+  display_fill_rounded_rect(x, y, UI_CARD_W, UI_CARD_H, 2);
 
   display_set_fg_color(block);
-  display_fill_rounded_rect(x, BU_CARDS_Y, cw, UI_CARD_H, 2);
-  display_fill_rect(x + cw - 2, BU_CARDS_Y, 2, UI_CARD_H);
+  display_fill_rounded_rect(x, y, cw, UI_CARD_H, 2);
+  display_fill_rect(x + cw - 2, y, 2, UI_CARD_H);
 
   display_set_font(&font_2);
   display_set_fg_color(BLACK_COLOR);
-  display_text(x + UI_CARD_PAD, BU_CARDS_Y + 4, (int8 *)name);
+  display_text(x + UI_CARD_PAD, y + 4, (int8 *)name);
 
   display_set_fg_color(vcolor);
-  display_text(x + cw + UI_CARD_GAP, BU_CARDS_Y + 4, (int8 *)value);
+  display_text(x + cw + UI_CARD_GAP, y + 4, (int8 *)value);
 }
+
+//The row as it was last drawn, for the touch: its places and whether it has more cards than places
+static uint8 bv_card_places;
+static uint8 bv_card_over;
+
+int bode_view_display(void);
 
 static void draw_cards(int table)
 {
@@ -1284,7 +1290,8 @@ static void draw_cards(int table)
   uint8 order[UI_MS_LIST_MAX];
   bu_card_in in;
   char t[24], more[4];
-  int  n, fit, extra, i;
+  int  n, fit, extra, i, k, places, toggle;
+  uint32 x, y;
 
   in.table   = (uint8)table;
   in.autoset = bv.autoset;
@@ -1293,18 +1300,57 @@ static void draw_cards(int table)
   in.count   = bode_count(e);
   in.mk      = &mk;
 
-  n   = ui_ms_order(bv_ms, BU_MS_COUNT, order);
-  fit = ui_ms_fit(n, UI_MS_ROW_CARDS, &extra);
+  //fw 0.4.3 (issue #4, as the Scope's cards): folded the last place counts the rest; expanded (the one state of all
+  //three views, settings word 218) every card in rows above and "Show less" after the last
+  n      = ui_ms_order(bv_ms, BU_MS_COUNT, order);
+  places = ui_ms_scope_block(n, UI_MS_ROW_CARDS, scope_measures_expanded, &toggle, &extra);
+  bv_card_places = (uint8)places;
+  bv_card_over   = (uint8)(toggle >= 0);
 
-  for(i = 0; i < fit; i++)
+  for(i = 0, k = 0; i < places; i++)
   {
-    int v = bu_card_text(order[i], &in, t);
+    ui_ms_row_place(i, &x, &y);
 
-    card(ui_ms_card_x(0, i), blocks[bu_ms_block(order[i])], bu_ms_names[order[i]], values[v & 3], t);
+    if(i == toggle)
+    {
+      if(extra)
+        card(x, y, NOTE_COLOR, ui_ms_more_text(more, extra), WHITE_COLOR, "more");
+      else
+        card(x, y, NOTE_COLOR, "Show", WHITE_COLOR, "less");
+
+      continue;
+    }
+
+    fit = bu_card_text(order[k], &in, t);
+    card(x, y, blocks[bu_ms_block(order[k])], bu_ms_names[order[k]], values[fit & 3], t);
+    k++;
+  }
+}
+
+//A touch-down on a card: 1 when it was on one; on a row with more cards than places it expands or folds them
+static int cards_touch(void)
+{
+  uint32 x, y;
+  int    i;
+
+  for(i = 0; i < bv_card_places; i++)
+  {
+    ui_ms_row_place(i, &x, &y);
+
+    if(ui_ms_card_hit(x, y, (int32)xtouch, (int32)ytouch))
+    {
+      if(bv_card_over)
+      {
+        scope_measures_expanded ^= 1;
+        bode_view_display();
+      }
+
+      tp_i2c_wait_for_touch_release();
+      return 1;
+    }
   }
 
-  if(extra)
-    card(ui_ms_card_x(0, fit), NOTE_COLOR, ui_ms_more_text(more, extra), WHITE_COLOR, "more");
+  return 0;
 }
 
 //fw 0.2.73: an overview in the track (slider-overview.md section 5), each curve fitted to the track's rows (only the shape
@@ -1520,7 +1566,8 @@ void bode_view_cards_refresh(void)
     return;
 
   save = displaydata;
-  draw_all_rect(2, BU_CARDS_Y, UI_MSM_X - 2, UI_CARD_H);
+  //(the second row too: ten cards and "Show less" expanded)
+  draw_all_rect(2, BU_CARDS_Y - UI_MS_ROW_PITCH, UI_MSM_X - 2, UI_MS_ROW_PITCH + UI_CARD_H);
   displaydata = save;
   bv.dirty = 1;
 }
@@ -1626,6 +1673,10 @@ int bode_view_touch(void)
     slider_drag();
     return 1;
   }
+
+  //fw 0.4.3: the cards, expanded rows above BU_CARDS_Y included
+  if(cards_touch())
+    return 1;
 
   if((ytouch >= BU_CARDS_Y) || !bv.cursor_on)
   {

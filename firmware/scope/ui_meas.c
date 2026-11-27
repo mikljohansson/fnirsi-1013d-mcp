@@ -335,11 +335,11 @@ int ui_ms_spec_kind(int group, int index)
   return (group == UI_MS_SP_VIEW) ? UI_MS_SP_RBW + index : index;
 }
 
-int ui_ms_spec_cards(const ui_ms_spec *s, const uint8 shown[2], int time_ok, ui_ms_card *out)
+int ui_ms_spec_row(const ui_ms_spec *s, const uint8 shown[2], int time_ok, int expanded, ui_ms_card *out, int *toggle)
 {
   ui_ms_card all[UI_MS_SP_GROUPS * UI_MS_SP_PER_GROUP];
   uint8      order[UI_MS_SP_PER_GROUP];
-  int        n = 0, g, i, k, more, fit;
+  int        n = 0, g, i, k, more, places, c = 0;
 
   for(g = 0; g < UI_MS_SP_GROUPS; g++)
   {
@@ -361,19 +361,37 @@ int ui_ms_spec_cards(const ui_ms_spec *s, const uint8 shown[2], int time_ok, ui_
     }
   }
 
-  fit = ui_ms_fit(n, UI_MS_ROW_CARDS, &more);
+  //The Scope's block rule on the whole row: the value cards first, the toggle place where the block puts it
+  places = ui_ms_scope_block(n, UI_MS_ROW_CARDS, expanded, toggle, &more);
 
-  for(i = 0; i < fit; i++)
-    out[i] = all[i];
-
-  if(more)
+  for(i = 0; i < places; i++)
   {
-    out[fit].kind = UI_MS_SP_MORE;
-    out[fit].ch   = (uint8)more;
-    fit++;
+    if(i == *toggle)
+    {
+      out[i].kind = (uint8)(more ? UI_MS_SP_MORE : UI_MS_SP_LESS);
+      out[i].ch   = (uint8)more;
+    }
+    else
+      out[i] = all[c++];
   }
 
-  return fit;
+  return places;
+}
+
+int ui_ms_spec_cards(const ui_ms_spec *s, const uint8 shown[2], int time_ok, ui_ms_card *out)
+{
+  ui_ms_card all[UI_MS_SP_CARDS_MAX];
+  int        toggle, n = ui_ms_spec_row(s, shown, time_ok, 0, all, &toggle), i;
+
+  for(i = 0; i < n; i++)
+    out[i] = all[i];
+
+  return n;
+}
+
+void ui_ms_row_place(int i, uint32 *x, uint32 *y)
+{
+  ui_ms_scope_place(i, UI_MS_ROW_CARDS, 0, x, y);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------------

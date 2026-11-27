@@ -809,19 +809,29 @@ ui_ms_spec *spectrum_cards(void)
   return &spec_cards;
 }
 
+//fw 0.4.3 (issue #4, as the Scope's cards): the row as it was last drawn, for the touch: its places and whether it has
+//more cards than places (a tap on a card then expands or folds it; scope_measures_expanded, settings word 218, is the
+//one state of all three views)
+static uint8 spec_card_places;
+static uint8 spec_card_over;
+
 static void spec_draw_cards(const SPECVIEW *v, const uint32 *peak, int hch, uint64 bin_mhz)
 {
-  ui_ms_card  c[UI_MS_ROW_CARDS];
+  ui_ms_card  c[UI_MS_SP_CARDS_MAX];
   uint8       shown[2];
   char        t[24], more[4];
   const char *name;
-  int         n, i, ch;
+  int         n, i, ch, toggle;
   int32       r;
+  uint32      x, y;
 
   for(ch = 0; ch < 2; ch++)
     shown[ch] = spec.have[ch] && peak[ch] && ((spec.view == VIEW_SPECTRUM) || (ch == hch));
 
-  n = ui_ms_spec_cards(&spec_cards, shown, (spec.view == VIEW_WATERFALL) && (wf_count > 1), c);
+  n = ui_ms_spec_row(&spec_cards, shown, (spec.view == VIEW_WATERFALL) && (wf_count > 1), scope_measures_expanded, c,
+                     &toggle);
+  spec_card_places = (uint8)n;
+  spec_card_over   = (uint8)(toggle >= 0);
 
   for(i = 0; i < n; i++)
   {
@@ -894,14 +904,47 @@ static void spec_draw_cards(const SPECVIEW *v, const uint32 *peak, int hch, uint
         break;
       }
 
+      case UI_MS_SP_LESS:
+        name = "Show";
+        strcpy(t, "less");
+        break;
+
       default:
         name = ui_ms_more_text(more, ch);
         strcpy(t, "more");
         break;
     }
 
-    scope_draw_card(ui_ms_card_x(0, i), UI_MS_SPEC_Y, color, name, t);
+    ui_ms_row_place(i, &x, &y);
+    scope_draw_card(x, y, color, name, t);
   }
+}
+
+//A touch-down on a card: 1 when it was on one. The touch is the cards' (never a zoom or a pan); on a row with more
+//cards than places it expands or folds them
+static int spec_cards_touch(void)
+{
+  uint32 x, y;
+  int    i;
+
+  for(i = 0; i < spec_card_places; i++)
+  {
+    ui_ms_row_place(i, &x, &y);
+
+    if(ui_ms_card_hit(x, y, (int32)xtouch, (int32)ytouch))
+    {
+      if(spec_card_over)
+      {
+        scope_measures_expanded ^= 1;
+        spectrum_display();
+      }
+
+      tp_i2c_wait_for_touch_release();
+      return 1;
+    }
+  }
+
+  return 0;
 }
 
 //fw 0.2.51: choosing the Spectrum analyser row in roll mode switched Roll off; the warning line says so for a while
@@ -2254,6 +2297,10 @@ int spectrum_touch(void)
 
     return 1;
   }
+
+  //fw 0.4.3: the cards, expanded rows above CARDS_Y included
+  if(spec_cards_touch())
+    return 1;
 
   if(ytouch >= CARDS_Y)
   {

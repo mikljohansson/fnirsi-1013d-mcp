@@ -896,6 +896,41 @@ static void test_ms_scope_row(void)
             }
         }
 
+  //fw 0.4.3: the Spectrum's row folded and expanded. Everything chosen on both channels and the view: 4 + 4 + 5 = 13
+  {
+    ui_ms_spec sp;
+    ui_ms_card rc[UI_MS_SP_CARDS_MAX], fc[UI_MS_ROW_CARDS];
+    uint8      sh[2] = { 1, 1 };
+    int        g, j, tg, np;
+
+    for(g = 0; g < UI_MS_SP_GROUPS; g++)
+      for(j = 0; j < UI_MS_SP_PER_GROUP; j++)
+        sp.rank[g][j] = (uint8)((j < ui_ms_sp_len(g)) ? j + 1 : 0);
+
+    np = ui_ms_spec_row(&sp, sh, 1, 0, rc, &tg);
+    T_EQ(np, 6); T_EQ(tg, 5); T_EQ(rc[5].kind, UI_MS_SP_MORE); T_EQ(rc[5].ch, 8);
+    T_EQ(ui_ms_spec_cards(&sp, sh, 1, fc), 6); T_EQ(fc[5].kind, UI_MS_SP_MORE); T_EQ(fc[4].kind, rc[4].kind);
+
+    np = ui_ms_spec_row(&sp, sh, 1, 1, rc, &tg);
+    T_EQ(np, 14); T_EQ(tg, 13); T_EQ(rc[13].kind, UI_MS_SP_LESS);
+    T_EQ(rc[0].kind, UI_MS_SP_PEAK); T_EQ(rc[4].kind, UI_MS_SP_PEAK); T_EQ(rc[4].ch, 1); T_EQ(rc[12].kind, UI_MS_SP_CAPTURE);
+
+    //Three rows: place 13 is the second of the third row, inside the plot
+    ui_ms_row_place(13, &x, &y);
+    T_EQ(x, 125); T_EQ(y, UI_MS_SCOPE_Y - 2 * UI_MS_ROW_PITCH);
+    ui_ms_row_place(5, &x, &y);
+    T_EQ(x, 606); T_EQ(y, UI_MS_SCOPE_Y);
+
+    //Few cards: the same folded and expanded, no toggle place
+    sh[1] = 0;
+    for(j = 0; j < UI_MS_SP_PER_GROUP; j++)
+      sp.rank[UI_MS_SP_VIEW][j] = 0;
+    np = ui_ms_spec_row(&sp, sh, 1, 1, rc, &tg);
+    T_EQ(np, 4); T_EQ(tg, -1);
+    np = ui_ms_spec_row(&sp, sh, 1, 0, rc, &tg);
+    T_EQ(np, 4); T_EQ(tg, -1);
+  }
+
   //Settings word 218: the expanded state behind its marker; any other word reads folded
   T_EQ(ui_ms_cards_word(0), 0xCE00); T_EQ(ui_ms_cards_word(1), 0xCE01); T_EQ(ui_ms_cards_word(7), 0xCE01);
   T_EQ(ui_ms_cards_restore(0xCE01), 1); T_EQ(ui_ms_cards_restore(0xCE00), 0);

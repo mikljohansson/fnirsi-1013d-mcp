@@ -91,6 +91,7 @@ const char *ui_ms_more_text(char *t, int more);     //"+N"
 #define UI_MS_SP_TIME         7
 #define UI_MS_SP_CAPTURE      8                     //fw 0.2.84
 #define UI_MS_SP_MORE         9                     //the "+N" place
+#define UI_MS_SP_LESS         10                    //the "Show less" place of the expanded row (fw 0.4.3)
 #define UI_MS_SP_KINDS        9
 
 #define UI_MS_SP_GROUPS       3                     //CH1, CH2, the view
@@ -133,6 +134,15 @@ int    ui_ms_spec_kind(int group, int index);       //UI_MS_SP_* of a list place
 //The spectrum's row: the shown channels' cards in their order, then the view's; Time only with time_ok. Fitted to
 //UI_MS_ROW_CARDS (the last place "+N" when over). Returns the number of places used.
 int    ui_ms_spec_cards(const ui_ms_spec *s, const uint8 shown[2], int time_ok, ui_ms_card *out);
+
+//fw 0.4.3: the same row folded or expanded, as the Scope's blocks (issue #4): folded as ui_ms_spec_cards; expanded
+//every card and a UI_MS_SP_LESS place after the last when they do not fit one row. out holds UI_MS_SP_CARDS_MAX.
+//*toggle: the "+N more" / "Show less" place, -1 when all fit. Returns the places; place i stands at ui_ms_row_place
+#define UI_MS_SP_CARDS_MAX    (UI_MS_SP_GROUPS * UI_MS_SP_PER_GROUP + 1)
+int    ui_ms_spec_row(const ui_ms_spec *s, const uint8 shown[2], int time_ok, int expanded, ui_ms_card *out, int *toggle);
+
+//A whole-row view (the Spectrum, Frequency response): place i of its six-place row, further rows above
+void   ui_ms_row_place(int i, uint32 *x, uint32 *y);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 //Spectrum maths on levels in centi-dB (spectrum.c spec_db / spec_raw, bins 0..last), integer only.
