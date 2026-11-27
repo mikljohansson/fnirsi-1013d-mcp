@@ -11,6 +11,23 @@ share one version from the first tag on. A release tag `vX.Y.Z` requires both to
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-27
+
+A patch release on the same FPGA bitstream, 0x153F (protocol 1.32 unchanged): the follow-ups to GitHub issues #3 and
+#4. User-facing notes: `docs/release-notes/0.4.2.md`.
+
+### Firmware
+
+- The trigger level at 50 mV/div with a DC offset set (issue #3 follow-up). The trace is drawn shifted by twice the
+  offset's rows on that range and the trigger level was derived with the single shift, so the level sent to the FPGA
+  and searched for in the record lay off the T pointer by the offset's rows: the scope triggered at another voltage
+  than the pointer showed, and at 10 ns/div the crossing stood up to a sample off the H pointer (the reporter's 2 ns).
+  `fpga_trigger_dcshift` gives the level the drawn shift, for the UI and the host's SET_TRIGGER. Bench, DC offset
+  -60 at 500 mV/div 10X: 10 to 28 px off at 10 ns/div before, within 5 px on the steep part of the edge after
+  (4727a05).
+- The expanded measurement cards are remembered (issue #4 follow-up): settings word 218, also across power-off, and
+  the cards no longer fold by themselves when nothing overflows. Restore default settings folds them (0153528).
+
 ## [0.4.1] - 2026-11-26
 
 A patch release on the same FPGA bitstream, 0x153F: GitHub issues #3 (trigger position) and #4 (measurement cards),
