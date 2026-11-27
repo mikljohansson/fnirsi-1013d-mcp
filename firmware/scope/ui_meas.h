@@ -63,6 +63,12 @@ uint32 ui_ms_row_x(int slot);                       //x of a place 0..5 of the S
 int    ui_ms_scope_block(int n, int cap, int expanded, int *toggle, int *more);
 //Place i of a block (cap places from slot0): row 0 at UI_MS_SCOPE_Y, further rows above
 void   ui_ms_scope_place(int i, int cap, int slot0, uint32 *x, uint32 *y);
+//Issue #4 follow-up: the expanded state is kept in settings word 218 (0xCE00 marker, bit 0), so whoever wants every
+//chosen card on the screen taps once and keeps it; a sector without the marker (older firmware) reads folded
+#define UI_MS_CARDS_WORD      218
+#define UI_MS_CARDS_MARKER    0xCE00
+uint16 ui_ms_cards_word(int expanded);
+int    ui_ms_cards_restore(uint16 w);               //the expanded state of a settings word (0 without the marker)
 int    ui_ms_card_hit(uint32 cx, uint32 cy, int32 x, int32 y);   //1 when x, y is in the tap area of the card at cx, cy
 uint32 ui_ms_card_x(int ch, int slot);              //Scope: x of a channel block's slot; ch 0 is also the spectrum's row
 const char *ui_ms_more_text(char *t, int more);     //"+N"

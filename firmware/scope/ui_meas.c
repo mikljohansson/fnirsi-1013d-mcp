@@ -187,6 +187,16 @@ void ui_ms_scope_place(int i, int cap, int slot0, uint32 *x, uint32 *y)
   *y = UI_MS_SCOPE_Y - UI_MS_ROW_PITCH * (uint32)(i / cap);
 }
 
+uint16 ui_ms_cards_word(int expanded)
+{
+  return (uint16)(UI_MS_CARDS_MARKER | (expanded ? 1 : 0));
+}
+
+int ui_ms_cards_restore(uint16 w)
+{
+  return ((w & 0xFFFE) == UI_MS_CARDS_MARKER) ? (w & 1) : 0;
+}
+
 int ui_ms_card_hit(uint32 cx, uint32 cy, int32 x, int32 y)
 {
   int32 y1 = (int32)cy + UI_CARD_H + UI_MS_HIT_UP;

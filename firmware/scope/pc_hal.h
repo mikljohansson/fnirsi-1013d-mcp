@@ -267,7 +267,7 @@ int      pc_hal_ui_autoset(void);
 #define PC_MEAS_ITEMS        12
 #define PC_MEAS_F_HIDE_CH1   0x01
 #define PC_MEAS_F_HIDE_CH2   0x02
-#define PC_MEAS_F_EXPANDED   0x04        //every chosen card in rows (the "+N more" tap); folds when nothing overflows
+#define PC_MEAS_F_EXPANDED   0x04        //every chosen card in rows (a tap on a card); kept with the settings (word 218)
 #define PC_MEAS_F_ALL        0x07
 typedef struct
 {

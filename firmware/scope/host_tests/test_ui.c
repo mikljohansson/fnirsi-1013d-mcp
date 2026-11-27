@@ -896,6 +896,11 @@ static void test_ms_scope_row(void)
             }
         }
 
+  //Settings word 218: the expanded state behind its marker; any other word reads folded
+  T_EQ(ui_ms_cards_word(0), 0xCE00); T_EQ(ui_ms_cards_word(1), 0xCE01); T_EQ(ui_ms_cards_word(7), 0xCE01);
+  T_EQ(ui_ms_cards_restore(0xCE01), 1); T_EQ(ui_ms_cards_restore(0xCE00), 0);
+  T_EQ(ui_ms_cards_restore(0x0001), 0); T_EQ(ui_ms_cards_restore(0xFFFF), 0); T_EQ(ui_ms_cards_restore(0xCE03), 0);
+
   //The places: 5, 125, 245, 366, 486, 606
   T_EQ(ui_ms_row_x(0), 5);
   T_EQ(ui_ms_row_x(2), 245);

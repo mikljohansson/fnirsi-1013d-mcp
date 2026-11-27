@@ -3526,9 +3526,9 @@ void scope_display_measurements(void)
 {
   int shown[2], n[2], cap[2], slot0[2], ch;
 
-  //Nothing left to expand (a card taken off the list, a block switched off): folded again
-  if(!scope_measures_layout(shown, n, cap, slot0))
-    scope_measures_expanded = 0;
+  //The expanded state is the person's setting (word 218): it stays while nothing overflows, a block with all its cards
+  //on its places draws the same either way
+  scope_measures_layout(shown, n, cap, slot0);
 
   for(ch = 0; ch < 2; ch++)
     if(shown[ch])
@@ -6529,6 +6529,7 @@ void scope_reset_config_data(void)
   scopesettings.confirmationmode = 0;
   scopesettings.long_mode        = 0;   //Set the sort time base display mode 
   scopesettings.average_mode     = 0;   //No average displayed data
+  scope_measures_expanded        = 0;   //The measurement cards in one row (settings word 218)
   scopesettings.ACQ_trace        = 0;   //Linear trace
   scopesettings.new_autosetup    = 1;   //New auto setup
   scopesettings.brightback       = UI_BRIGHT_DEFAULT;   //the sun returns to 20 % (fw 0.2.68)
@@ -6777,6 +6778,8 @@ void scope_save_config_data(void)
   settingsworkbuffer[UI_MS_SPEC_WORD_CH2]  = ui_ms_spec_word(spectrum_cards(), 1);
   settingsworkbuffer[UI_MS_SPEC_WORD_VIEW] = ui_ms_spec_word(spectrum_cards(), UI_MS_SP_VIEW);
   settingsworkbuffer[UI_MS_SPEC_WORD_CAPTURE] = ui_ms_spec_capture_word(spectrum_cards());     //fw 0.2.84, word 217
+  //The Scope's cards expanded (issue #4 follow-up, word 218)
+  settingsworkbuffer[UI_MS_CARDS_WORD] = ui_ms_cards_word(scope_measures_expanded);
   //Bode plot sweep settings (fw 0.2.66)
   settingsworkbuffer[PC_SETTING_WORD_BODE0] = pc_glue_bode_setting_word(0);
   settingsworkbuffer[PC_SETTING_WORD_BODE1] = pc_glue_bode_setting_word(1);
@@ -6944,6 +6947,7 @@ void scope_restore_config_data(void)
     ui_ms_spec_restore(spectrum_cards(), 1, settingsworkbuffer[UI_MS_SPEC_WORD_CH2]);
     ui_ms_spec_restore(spectrum_cards(), UI_MS_SP_VIEW, settingsworkbuffer[UI_MS_SPEC_WORD_VIEW]);
     ui_ms_spec_capture_restore(spectrum_cards(), settingsworkbuffer[UI_MS_SPEC_WORD_CAPTURE]);    //fw 0.2.84, word 217
+    scope_measures_expanded = (uint8)ui_ms_cards_restore(settingsworkbuffer[UI_MS_CARDS_WORD]);  //word 218
 
     //Load reference waveforms
     scope_load_ALLREF_file();

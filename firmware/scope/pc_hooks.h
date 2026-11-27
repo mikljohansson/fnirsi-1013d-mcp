@@ -28,6 +28,7 @@
 #define PC_SETTING_WORD_BODE_MS 213 //fw 0.2.69: Frequency response MEASURES list, words 213..215 (bode_ui.h)
 #define PC_SETTING_WORD_BODE2 216   //fw 0.2.71: Frequency response Trace style (0xB200 marker, bit 0)
 //217: fw 0.2.84, the Spectrum MEASURES Capture card's rank (ui_meas.h UI_MS_SPEC_WORD_CAPTURE, 0xCA00 marker)
+//218: fw 0.4.2, the Scope's measurement cards expanded (ui_meas.h UI_MS_CARDS_WORD, 0xCE00 marker)
 
 //PC_UI_MASK(m) items. Menus are compact (fw 0.2.8, owner: no gaps): what the 1013D lacks is not laid out at all.
 #define PC_MASK_ACQ_FILTER    4     //acquisition menu: the Filter box

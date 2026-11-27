@@ -76,7 +76,8 @@ MEASURES_MINOR = 32
 MEASURE_NAMES = ("Vmax", "Vmin", "Vavg", "Vrms", "Vpp", "Vp", "Freq", "Period", "+Width", "-Width", "+Duty", "-Duty")
 MEAS_F_HIDE_CH1 = 0x01
 MEAS_F_HIDE_CH2 = 0x02
-#: every chosen card in rows over the trace (the "+N more" tap); the scope folds it when nothing overflows
+#: every chosen card in rows over the trace (a tap on a card); from fw 0.4.2 kept with the settings (0.4.1 folded it
+#: when nothing overflowed and forgot it at power-off)
 MEAS_F_EXPANDED = 0x04
 MEAS_M_CH1 = 0x01
 MEAS_M_CH2 = 0x02
