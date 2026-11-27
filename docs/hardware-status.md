@@ -2426,3 +2426,26 @@ Newest entries at the bottom. Format: date, who, what, result.
     SET_MEASURES; the generator is as the card had it (1 kHz, 50 %, on).
   - **Not done**: a power cycle from the card on 0.4.1. CH2 as the trigger source, the Dots style and the phosphor view with the new
     window; the cards' tap bands (`scope_tap_bottom`) by hand; the hardware battery.
+- 2026-11-27 10:00-12:00 (lead, owner at the scope for the power cycle): **follow-ups to issues #3 and #4, v0.4.2
+  released and on the card.** CH1 x10 on the calibration post, generator 1 MHz 50 %, CH2 off, trigger CH1 Normal.
+  - **#3, the level with a DC offset at 50 mV/div** (the reporter saw the crossing about 2 ns left of the H pointer on
+    0.4.1, on both channels). Reproduced: CH1 DC, 500 mV/div 10X (range 6), dcoffset -60 over SET_CHANNEL, level
+    codes 125 / 150, both edges, the crossing against the pointer's tip from READ_SCREEN pictures. On the card's 0.4.1
+    (build 10416d1b): 10 ns/div +10.2 / +28.2 px rising, -28.0 / -25.7 px falling; 50 ns/div +3.0 / +4.6 and -8.0 /
+    -5.3 px. On 4727a05 (RAM load, two shots each): 10 ns/div -2.0 / +5.0 px rising, -3.0 / -1.7 px falling at code
+    150; falling at code 125, on the shallow foot of the edge, +29 and +11 px in the two shots; 50 ns/div -0.5 to
+    +3.5 px. The T pointer moved by 27 rows for the same level code (189.5 to 216.5), the doubled shift. Not checked:
+    the reporter's own setup (12 MHz, averaging on, CH2 as the source), and whether their unit has a DC offset set.
+  - **#4, the expanded cards kept (0153528).** ENTER_FEL does not save the settings (a RAM reload came back folded
+    with the card's lists), so the check needed the card: the release commit's image written first (below), CH1 five
+    cards expanded over SET_MEASURES, then the owner's power-off and power-on: "the expanded state is remembered".
+  - **Release**: commit 7cc5133, local `make gcc10` image 0a5a3ba3f1c82806... (834,560 bytes) = CI run 45972757054's.
+    `fnirsi1013d-flash --sha256 0a5a3ba3... --persist` at 10:25: backup
+    `backups/sdcard/sd_750-2381_20261127-102507.bin` (the 0.4.1 image), 1630 sectors compared identical, eGON checksum
+    0xD42438CB; after the owner's power cycle GET_INFO fw 0.4.2, build 7cc51339, proto 1.32: the first boot of a
+    release from the card seen since 0.3.2. Dry run `v0.4.2-rc1`: release.yml run 45984957716 green, 8 assets,
+    SHA256SUMS 7 of 7; rc removed. Tag `v0.4.2`: run 45985779368 green,
+    https://github.com/mikljohansson/fnirsi-1013d-mcp/releases/tag/v0.4.2. Issues #3 and #4 answered (they stay
+    closed). Left on the unit: CH1 2 V/div AC, offset 0, CH2 on, trigger Auto, generator 1 kHz, both channels' cards
+    Freq, Vpp, Vavg, folded.
+  - **Not done**: the hardware battery on the release image; the gaps between the cards still pass a tap to the plot.
