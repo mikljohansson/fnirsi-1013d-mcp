@@ -77,6 +77,7 @@ void   fpga_set_trigger_channel(void);
 void   fpga_set_trigger_edge(void);
 void   fpga_swap_trigger_channel(void);
 void   fpga_set_trigger_level(void);
+int32  fpga_trigger_dcshift(PCHANNELSETTINGS settings);   //issue #3: the rows a DC offset moves the trace by, as drawn
 void   fpga_set_trigger_mode(void);
 
 void   fpga_do_conversion(void);

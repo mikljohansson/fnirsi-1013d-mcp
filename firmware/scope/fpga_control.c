@@ -477,6 +477,17 @@ void fpga_swap_trigger_channel(void)
 
 //----------------------------------------------------------------------------------------------------------------------------------
 
+//The screen rows a channel's DC offset moves its trace by, as scope_code_to_y draws it: dcoffset x 100 /
+//dc_shift_size, twice that on the 50 mV/div display range. Issue #3 follow-up: the level was derived with the single
+//shift on every range, so at 50 mV/div with a DC offset set the level sent to the FPGA, and searched for in the
+//record, lay that many rows off the trigger pointer (the reporter's 2 ns at 10 ns/div)
+int32 fpga_trigger_dcshift(PCHANNELSETTINGS settings)
+{
+  int32 shift = settings->dc_shift_size ? (settings->dcoffset * 100) / settings->dc_shift_size : 0;
+
+  return (settings->displayvoltperdiv == 6) ? 2 * shift : shift;
+}
+
 void fpga_set_trigger_level(void)
 {
   uint32 voltperdiv;
@@ -496,7 +507,7 @@ void fpga_set_trigger_level(void)
     traceposition = scopesettings.channel1.traceposition;
     //dcoffset = scopesettings.channel1.dcoffset/2;
     //dcoffset = (scopesettings.channel1.dcoffset*100)/220;//195
-    dcoffset = (scopesettings.channel1.dcoffset*100)/scopesettings.channel1.dc_shift_size;
+    dcoffset = fpga_trigger_dcshift(&scopesettings.channel1);
     scopesettings.channel1.triggerverticalposition=scopesettings.triggerverticalposition;
   }
   else
@@ -506,7 +517,7 @@ void fpga_set_trigger_level(void)
     traceposition = scopesettings.channel2.traceposition;
     //dcoffset = scopesettings.channel2.dcoffset/2;
     //dcoffset = (scopesettings.channel2.dcoffset*100)/220;//230
-    dcoffset = (scopesettings.channel2.dcoffset*100)/scopesettings.channel2.dc_shift_size;
+    dcoffset = fpga_trigger_dcshift(&scopesettings.channel2);
     scopesettings.channel2.triggerverticalposition=scopesettings.triggerverticalposition;
   }
   

@@ -309,7 +309,7 @@ void pc_hal_trigger_read(pc_hw_trigger *t)
 //marker where the derivation gives the requested level, or the nearest reachable one (marker 0..401).
 static int32 pc_level_from_marker(PCHANNELSETTINGS c, int32 marker)
 {
-  int32 dcoffset = c->dc_shift_size ? (c->dcoffset * 100) / c->dc_shift_size : 0;
+  int32 dcoffset = fpga_trigger_dcshift(c);
 
   return ((((int32)(marker - dcoffset) - (int32)c->traceposition) * 2097152) / signal_adjusters[c->samplevoltperdiv]) + 128;
 }
@@ -322,7 +322,7 @@ static void pc_set_trigger_marker(uint8_t level)
   if(c->samplevoltperdiv > 6)
     return;
 
-  dcoffset = c->dc_shift_size ? (c->dcoffset * 100) / c->dc_shift_size : 0;
+  dcoffset = fpga_trigger_dcshift(c);
   est      = (int32)(((int64)((int32)level - 128) * signal_adjusters[c->samplevoltperdiv]) / 2097152) + (int32)c->traceposition + dcoffset;
   best     = (est < 0) ? 0 : ((est > 401) ? 401 : est);
 
